@@ -1,0 +1,108 @@
+{
+  "name": "depssmuggler",
+  "version": "1.0.0",
+  "description": "폐쇄망 환경을 위한 패키지 의존성 다운로드 및 전달 애플리케이션",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "tsc -p tsconfig.electron.json && electron .",
+    "build": "npm run build:vite && npm run build:electron",
+    "build:vite": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "start": "electron .",
+    "watch": "tsc -w",
+    "package:win": "npm run build && electron-builder --win",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:linux": "npm run build && electron-builder --linux",
+    "cli": "ts-node src/cli/index.ts"
+  },
+  "bin": {
+    "depssmuggler": "./dist/cli/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonggeun2001/DepsSmuggler.git"
+  },
+  "keywords": [
+    "offline",
+    "airgap",
+    "dependency",
+    "download",
+    "pip",
+    "maven",
+    "docker",
+    "electron"
+  ],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jonggeun2001/DepsSmuggler/issues"
+  },
+  "homepage": "https://github.com/jonggeun2001/DepsSmuggler#readme",
+  "devDependencies": {
+    "@types/cli-progress": "^3.11.6",
+    "@types/fs-extra": "^11.0.4",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.10.1",
+    "@types/nodemailer": "^7.0.4",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^9.2.1",
+    "electron": "^39.2.4",
+    "electron-builder": "^26.0.12",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6"
+  },
+  "build": {
+    "appId": "com.depssmuggler.app",
+    "productName": "DepsSmuggler",
+    "directories": {
+      "output": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.1.0",
+    "@types/archiver": "^7.0.0",
+    "antd": "^6.0.1",
+    "archiver": "^7.0.1",
+    "axios": "^1.13.2",
+    "chalk": "^5.6.2",
+    "cli-progress": "^3.12.0",
+    "cli-table3": "^0.6.5",
+    "commander": "^14.0.2",
+    "eventemitter3": "^5.0.1",
+    "fast-xml-parser": "^5.3.2",
+    "fs-extra": "^11.3.2",
+    "html-to-image": "^1.11.13",
+    "js-yaml": "^4.1.1",
+    "nodemailer": "^7.0.11",
+    "ora": "^9.0.0",
+    "p-queue": "^9.0.1",
+    "react": "^19.2.0",
+    "react-d3-tree": "^3.6.6",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.10.0",
+    "tar": "^7.5.2",
+    "winston": "^3.18.3",
+    "winston-daily-rotate-file": "^5.0.0",
+    "zustand": "^5.0.9"
+  }
+}

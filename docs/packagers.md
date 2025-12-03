@@ -1,0 +1,387 @@
+# Packagers
+
+## 개요
+- 목적: 다운로드된 패키지를 다양한 출력 형태로 패키징
+- 위치: `src/core/packager/`
+
+---
+
+## ArchivePackager
+
+### 개요
+- 목적: ZIP/tar.gz 압축 파일 생성
+- 위치: `src/core/packager/archivePackager.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `createArchive` | options: ArchiveOptions | Promise<PackagingResult> | 압축 파일 생성 |
+| `getArchiveInfo` | archivePath: string | Promise<ArchiveInfo> | 압축 파일 정보 조회 |
+| `verifyArchive` | archivePath: string | Promise<boolean> | 압축 파일 무결성 검증 |
+
+### 내부 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `createZip` | ZIP 파일 생성 |
+| `createTarGz` | tar.gz 파일 생성 |
+| `createManifest` | manifest.json 생성 |
+| `createReadme` | README.txt 생성 |
+
+### 타입 정의
+
+```typescript
+const ArchiveFormat = {
+  ZIP: 'zip',
+  TAR_GZ: 'tar.gz'
+} as const;
+
+interface ArchiveOptions {
+  sourceDir: string;           // 소스 디렉토리
+  outputPath: string;          // 출력 파일 경로
+  format: ArchiveFormat;       // 압축 형식
+  packages: PackageInfo[];     // 포함된 패키지 목록
+  includeReadme?: boolean;     // README 포함 여부
+  includeManifest?: boolean;   // manifest.json 포함 여부
+  onProgress?: (progress: ArchiveProgress) => void;
+}
+
+interface ArchiveProgress {
+  phase: 'preparing' | 'compressing' | 'finalizing';
+  current: number;
+  total: number;
+  currentFile?: string;
+}
+
+interface PackageManifest {
+  version: string;
+  createdAt: string;
+  packages: PackageInfo[];
+  totalSize: number;
+  fileCount: number;
+}
+```
+
+### 사용 예시
+```typescript
+import { getArchivePackager } from './core/packager/archivePackager';
+
+const packager = getArchivePackager();
+const result = await packager.createArchive({
+  sourceDir: '/tmp/downloads',
+  outputPath: '/tmp/output/packages.zip',
+  format: 'zip',
+  packages: downloadedPackages,
+  includeReadme: true,
+  includeManifest: true
+});
+```
+
+---
+
+## MirrorPackager
+
+### 개요
+- 목적: 오프라인 미러 저장소 구조 생성
+- 위치: `src/core/packager/mirrorPackager.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `createMirror` | options: MirrorOptions | Promise<MirrorResult> | 미러 저장소 생성 |
+
+### 내부 메서드 (패키지 타입별)
+
+| 메서드 | 설명 |
+|--------|------|
+| `createPipMirror` | PyPI 미러 구조 생성 (simple/ 형식) |
+| `createMavenMirror` | Maven 미러 구조 생성 (repository/ 형식) |
+| `createYumMirror` | YUM 미러 구조 생성 (repodata/ 포함) |
+| `createDockerMirror` | Docker 이미지 저장 구조 생성 |
+| `updateMavenMetadata` | maven-metadata.xml 업데이트 |
+| `createRepodata` | YUM repodata 생성 |
+| `createReadme` | 사용 가이드 README 생성 |
+
+### 헬퍼 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `groupPackagesByType` | 패키지를 타입별로 그룹화 |
+| `mapFilesToPackages` | 파일을 패키지에 매핑 |
+| `normalizePipPackageName` | PyPI 패키지명 정규화 |
+| `parseMavenCoordinates` | GAV 좌표 파싱 |
+| `parseDockerImage` | Docker 이미지명 파싱 |
+
+### 타입 정의
+
+```typescript
+interface MirrorOptions {
+  sourceDir: string;           // 다운로드된 파일 디렉토리
+  outputDir: string;           // 미러 출력 디렉토리
+  packages: PackageInfo[];     // 패키지 목록
+  onProgress?: (progress: MirrorProgress) => void;
+}
+
+interface MirrorProgress {
+  phase: 'organizing' | 'indexing' | 'finalizing';
+  current: number;
+  total: number;
+  currentPackage?: string;
+}
+
+interface MirrorResult {
+  success: boolean;
+  outputDir: string;
+  structure: MirrorStructure;
+  totalSize: number;
+  fileCount: number;
+}
+
+interface MirrorStructure {
+  pip?: string;      // simple/ 디렉토리 경로
+  maven?: string;    // repository/ 디렉토리 경로
+  yum?: string;      // packages/ 및 repodata/ 경로
+  docker?: string;   // docker-images/ 경로
+}
+```
+
+### 생성되는 미러 구조
+
+```
+mirror/
+├── pip/
+│   └── simple/
+│       ├── index.html
+│       └── requests/
+│           ├── index.html
+│           └── requests-2.31.0-py3-none-any.whl
+├── maven/
+│   └── repository/
+│       └── org/springframework/spring-core/5.3.0/
+│           ├── spring-core-5.3.0.pom
+│           ├── spring-core-5.3.0.jar
+│           └── maven-metadata.xml
+├── yum/
+│   ├── packages/
+│   │   └── nginx-1.20.0.el7.x86_64.rpm
+│   └── repodata/
+│       ├── repomd.xml
+│       └── primary.xml.gz
+├── docker/
+│   └── nginx_latest.tar
+└── README.txt
+```
+
+### 사용 예시
+```typescript
+import { getMirrorPackager } from './core/packager/mirrorPackager';
+
+const packager = getMirrorPackager();
+const result = await packager.createMirror({
+  sourceDir: '/tmp/downloads',
+  outputDir: '/tmp/mirror',
+  packages: downloadedPackages
+});
+```
+
+---
+
+## ScriptGenerator
+
+### 개요
+- 목적: 설치 스크립트 생성 (Bash/PowerShell)
+- 위치: `src/core/packager/scriptGenerator.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `generateBashScript` | options: ScriptOptions | Promise<GeneratedScript> | Bash 스크립트 생성 |
+| `generatePowerShellScript` | options: ScriptOptions | Promise<GeneratedScript> | PowerShell 스크립트 생성 |
+| `generateAllScripts` | options: ScriptOptions | Promise<GeneratedScript[]> | 모든 형식 스크립트 생성 |
+
+### 내부 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `groupPackagesByType` | 패키지를 타입별로 그룹화하여 설치 순서 결정 |
+
+### 타입 정의
+
+```typescript
+interface ScriptOptions {
+  packages: PackageInfo[];     // 설치할 패키지 목록
+  outputDir: string;           // 스크립트 출력 디렉토리
+  mirrorPath?: string;         // 미러 경로 (옵션)
+  includeVerification?: boolean; // 체크섬 검증 포함
+}
+
+interface GeneratedScript {
+  type: 'bash' | 'powershell';
+  filename: string;
+  content: string;
+  path: string;
+}
+```
+
+### 생성되는 스크립트
+
+**Bash (install.sh)**
+```bash
+#!/bin/bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MIRROR_DIR="${SCRIPT_DIR}/mirror"
+
+echo "Installing Python packages..."
+pip install --no-index --find-links "${MIRROR_DIR}/pip/simple" requests flask
+
+echo "Installing Maven artifacts..."
+# Maven 설치 명령어...
+
+echo "Installation completed!"
+```
+
+**PowerShell (install.ps1)**
+```powershell
+#Requires -Version 5.1
+$ErrorActionPreference = "Stop"
+
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$MirrorDir = Join-Path $ScriptDir "mirror"
+
+Write-Host "Installing Python packages..."
+pip install --no-index --find-links "$MirrorDir\pip\simple" requests flask
+
+Write-Host "Installation completed!"
+```
+
+### 사용 예시
+```typescript
+import { getScriptGenerator } from './core/packager/scriptGenerator';
+
+const generator = getScriptGenerator();
+const scripts = await generator.generateAllScripts({
+  packages: downloadedPackages,
+  outputDir: '/tmp/output',
+  mirrorPath: './mirror',
+  includeVerification: true
+});
+```
+
+---
+
+## FileSplitter
+
+### 개요
+- 목적: 대용량 파일 분할 및 병합
+- 위치: `src/core/packager/fileSplitter.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `splitFile` | options: SplitOptions | Promise<SplitResult> | 파일 분할 |
+| `joinFiles` | metadataPath: string, outputPath: string, onProgress? | Promise<string> | 분할된 파일 병합 |
+| `needsSplit` | filePath: string, maxSize: number | Promise<boolean> | 분할 필요 여부 확인 |
+| `estimatePartCount` | filePath: string, chunkSize: number | Promise<number> | 예상 파트 수 계산 |
+
+### 내부 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `calculateChecksum` | SHA256 체크섬 계산 |
+| `generateBashMergeScript` | Bash 병합 스크립트 생성 |
+| `generatePowerShellMergeScript` | PowerShell 병합 스크립트 생성 |
+
+### 상수
+
+| 상수 | 값 | 설명 |
+|------|-----|------|
+| `DEFAULT_CHUNK_SIZE` | 25MB | 기본 분할 크기 |
+| `BUFFER_SIZE` | 64KB | 읽기/쓰기 버퍼 크기 |
+
+### 타입 정의
+
+```typescript
+interface SplitOptions {
+  inputPath: string;           // 원본 파일 경로
+  outputDir: string;           // 분할 파일 출력 디렉토리
+  chunkSize?: number;          // 분할 크기 (바이트)
+  onProgress?: (progress: SplitProgress) => void;
+}
+
+interface SplitProgress {
+  current: number;             // 현재 파트 번호
+  total: number;               // 총 파트 수
+  bytesWritten: number;        // 기록된 바이트
+  totalBytes: number;          // 총 바이트
+}
+
+interface SplitResult {
+  success: boolean;
+  parts: string[];             // 분할된 파일 경로 목록
+  metadata: SplitMetadata;
+  metadataPath: string;
+  mergeScriptBash: string;     // Bash 병합 스크립트 경로
+  mergeScriptPowerShell: string; // PowerShell 병합 스크립트 경로
+}
+
+interface SplitMetadata {
+  originalName: string;
+  originalSize: number;
+  checksum: string;
+  chunkSize: number;
+  partCount: number;
+  parts: Array<{
+    index: number;
+    filename: string;
+    size: number;
+    checksum: string;
+  }>;
+  createdAt: string;
+}
+```
+
+### 생성되는 파일 구조
+
+```
+split/
+├── packages.zip.part.001
+├── packages.zip.part.002
+├── packages.zip.part.003
+├── packages.zip.metadata.json
+├── merge.sh
+└── merge.ps1
+```
+
+### 사용 예시
+```typescript
+import { getFileSplitter } from './core/packager/fileSplitter';
+
+const splitter = getFileSplitter();
+
+// 분할
+const result = await splitter.splitFile({
+  inputPath: '/tmp/large-file.zip',
+  outputDir: '/tmp/split',
+  chunkSize: 10 * 1024 * 1024, // 10MB
+  onProgress: (p) => console.log(`Part ${p.current}/${p.total}`)
+});
+
+// 병합
+const joinedPath = await splitter.joinFiles(
+  result.metadataPath,
+  '/tmp/restored-file.zip'
+);
+```
+
+---
+
+## 관련 문서
+- [아키텍처 개요](./architecture-overview.md)
+- [Downloaders 문서](./downloaders.md)
+- [DownloadManager 문서](./download-manager.md)

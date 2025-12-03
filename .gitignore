@@ -1,0 +1,52 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-debug.log
+
+# Dependency directories
+node_modules/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# TypeScript build output
+dist/
+
+# Electron builder output
+build/
+*.dmg
+*.exe
+*.AppImage
+
+# Package lock (optional - uncomment if using yarn)
+# package-lock.json
+
+# Test coverage
+coverage/
+
+# DepsSmuggler cache and config (for development)
+# .depssmuggler/
+
+# Development tool configs
+.claude/
+.cursor/
+.serena/
+.taskmaster/
