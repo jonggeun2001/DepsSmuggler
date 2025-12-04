@@ -1,12 +1,26 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+// 언어 버전 타입 정의
+export interface LanguageVersions {
+  python: string;  // 예: '3.11', '3.10', '3.9'
+  java: string;    // 예: '21', '17', '11', '8'
+  node: string;    // 예: '20', '18', '16'
+}
+
+// 대상 OS 타입 정의 (라이브러리 패키지용)
+export type TargetOS = 'windows' | 'macos' | 'linux' | 'any';
+
+// 기본 아키텍처 타입 정의
+export type DefaultArchitecture = 'x86_64' | 'amd64' | 'arm64' | 'aarch64' | 'noarch';
+
 // 설정 상태
 interface SettingsState {
   // 다운로드 설정
   concurrentDownloads: number;
   enableCache: boolean;
   cachePath: string;
+  includeDependencies: boolean; // 의존성 자동 포함 다운로드
 
   // 출력 설정
   defaultOutputFormat: 'zip' | 'tar.gz' | 'mirror';
@@ -23,6 +37,13 @@ interface SettingsState {
   smtpPassword: string;
   smtpFrom: string;
 
+  // 언어 버전 설정
+  languageVersions: LanguageVersions;
+
+  // 기본 OS/아키텍처 설정 (라이브러리 패키지용)
+  defaultTargetOS: TargetOS;
+  defaultArchitecture: DefaultArchitecture;
+
   // 액션
   updateSettings: (updates: Partial<SettingsState>) => void;
   resetSettings: () => void;
@@ -32,6 +53,7 @@ const defaultSettings = {
   concurrentDownloads: 3,
   enableCache: true,
   cachePath: '',
+  includeDependencies: true, // 기본값: 의존성 포함
 
   defaultOutputFormat: 'zip' as const,
   includeInstallScripts: true,
@@ -44,6 +66,15 @@ const defaultSettings = {
   smtpUser: '',
   smtpPassword: '',
   smtpFrom: '',
+
+  languageVersions: {
+    python: '3.11',
+    java: '17',
+    node: '20',
+  },
+
+  defaultTargetOS: 'any' as const,
+  defaultArchitecture: 'x86_64' as const,
 };
 
 export const useSettingsStore = create<SettingsState>()(

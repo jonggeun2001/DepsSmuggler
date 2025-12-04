@@ -185,12 +185,62 @@ const DownloadPage: React.FC = () => {
       }
     });
 
+    // 의존성 해결 상태 리스너
+    const unsubStatus = window.electronAPI.download.onStatus?.((status) => {
+      if (status.phase === 'resolving') {
+        addLog('info', '의존성 분석 중...');
+      } else if (status.phase === 'downloading') {
+        addLog('info', '다운로드 시작...');
+      }
+    });
+
+    // 의존성 해결 완료 리스너
+    const unsubDepsResolved = window.electronAPI.download.onDepsResolved?.((data) => {
+      const originalCount = data.originalPackages.length;
+      const totalCount = data.allPackages.length;
+
+      addLog(
+        'info',
+        `의존성 해결 완료: ${originalCount}개 → ${totalCount}개 패키지`
+      );
+
+      // 의존성 포함된 새로운 아이템 목록으로 업데이트
+      if (totalCount > originalCount) {
+        const newItems: DownloadItem[] = (data.allPackages as Array<{
+          id: string;
+          name: string;
+          version: string;
+          type: string;
+        }>).map((pkg) => ({
+          id: pkg.id,
+          name: pkg.name,
+          version: pkg.version,
+          type: pkg.type,
+          status: 'pending' as DownloadStatus,
+          progress: 0,
+          downloadedBytes: 0,
+          totalBytes: 0,
+          speed: 0,
+        }));
+        setItems(newItems);
+      }
+
+      // 실패한 의존성 해결 경고 표시
+      if (data.failedPackages && data.failedPackages.length > 0) {
+        data.failedPackages.forEach((failed) => {
+          addLog('warn', `의존성 해결 실패: ${failed.name}@${failed.version}`, failed.error);
+        });
+      }
+    });
+
     return () => {
       unsubProgress();
       unsubComplete();
       unsubError();
+      unsubStatus?.();
+      unsubDepsResolved?.();
     };
-  }, [downloadItems, updateItem, addLog]);
+  }, [downloadItems, updateItem, addLog, setItems]);
 
   // 폴더 선택
   const handleSelectFolder = async () => {
@@ -202,11 +252,12 @@ const DownloadPage: React.FC = () => {
         addLog('info', `출력 폴더 선택: ${result}`);
       }
     } else {
-      // 브라우저 환경에서는 임시 경로 설정
-      const mockPath = '/tmp/depssmuggler-output';
-      setOutputDir(mockPath);
-      setOutputPath(mockPath);
-      message.info('Electron 환경에서 폴더 선택이 가능합니다');
+      // 브라우저 개발 환경에서는 기본 다운로드 경로 사용
+      const devOutputPath = './depssmuggler-downloads';
+      setOutputDir(devOutputPath);
+      setOutputPath(devOutputPath);
+      message.warning('브라우저 환경에서는 폴더 선택이 불가능합니다. 개발 서버의 기본 경로를 사용합니다.');
+      addLog('info', `개발 환경 출력 경로: ${devOutputPath}`);
     }
   };
 
@@ -244,102 +295,174 @@ const DownloadPage: React.FC = () => {
 
     addLog('info', '다운로드 시작', `총 ${downloadItems.length}개 패키지`);
 
-    // Mock 다운로드 또는 실제 IPC 호출
+    // 실제 Electron IPC 호출 또는 Mock 다운로드
     if (window.electronAPI?.download?.start) {
       try {
-        await window.electronAPI.download.start(cartItems);
+        // 패키지 데이터와 옵션을 전달
+        const packages = cartItems.map(item => ({
+          id: item.id,
+          type: item.type,
+          name: item.name,
+          version: item.version,
+          architecture: item.arch,
+        }));
+
+        const options = {
+          outputDir,
+          outputFormat,
+          includeScripts,
+        };
+
+        // 진행률 이벤트 리스너 설정
+        const unsubProgress = window.electronAPI.download.onProgress((data: {
+          packageId: string;
+          status: string;
+          progress: number;
+          downloadedBytes?: number;
+          totalBytes?: number;
+          speed?: number;
+          error?: string;
+        }) => {
+          const item = downloadItems.find(i => i.id === data.packageId);
+          if (item) {
+            updateItem(data.packageId, {
+              status: data.status as DownloadStatus,
+              progress: data.progress,
+              downloadedBytes: data.downloadedBytes || 0,
+              totalBytes: data.totalBytes || 0,
+              speed: data.speed || 0,
+              error: data.error,
+              endTime: data.status === 'completed' || data.status === 'failed' ? Date.now() : undefined,
+            });
+
+            if (data.status === 'downloading' && data.progress === 0) {
+              addLog('info', `다운로드 시작: ${item.name}@${item.version}`);
+            } else if (data.status === 'completed') {
+              addLog('success', `다운로드 완료: ${item.name}@${item.version}`);
+            } else if (data.status === 'failed') {
+              addLog('error', `다운로드 실패: ${item.name}@${item.version}`, data.error);
+            }
+          }
+        });
+
+        // 완료 이벤트 리스너 설정
+        const unsubComplete = window.electronAPI.download.onComplete((result: {
+          success: boolean;
+          outputPath: string;
+        }) => {
+          setIsDownloading(false);
+          setPackagingStatus('completed');
+          setPackagingProgress(100);
+          addLog('success', '다운로드 및 패키징 완료', `출력 경로: ${result.outputPath}`);
+          message.success('다운로드 및 패키징이 완료되었습니다');
+        });
+
+        // 에러 이벤트 리스너 설정
+        const unsubError = window.electronAPI.download.onError((error: { message: string }) => {
+          addLog('error', '다운로드 오류', error.message);
+        });
+
+        await window.electronAPI.download.start({ packages, options });
+
+        // 리스너 정리는 컴포넌트 언마운트 시 처리
       } catch (error) {
         addLog('error', '다운로드 시작 실패', String(error));
         setIsDownloading(false);
       }
     } else {
-      // Mock 다운로드
-      await mockDownload();
+      // 브라우저 환경: Vite 서버 API 호출
+      await browserDownload();
     }
   };
 
-  // Mock 다운로드 시뮬레이션
-  const mockDownload = async () => {
-    for (let i = 0; i < downloadItems.length; i++) {
-      if (downloadCancelledRef.current) break;
+  // 브라우저 환경에서 실제 다운로드 (Vite 서버 API 사용)
+  const browserDownload = async () => {
+    const clientId = `download-${Date.now()}`;
 
-      const item = downloadItems[i];
-      if (item.status === 'skipped' || item.status === 'completed') continue;
+    // SSE 연결로 진행률 수신
+    const eventSource = new EventSource(`/api/download/events?clientId=${clientId}`);
 
-      // 일시정지 대기
-      while (downloadPausedRef.current && !downloadCancelledRef.current) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
+    eventSource.addEventListener('progress', (event) => {
+      const data = JSON.parse(event.data) as {
+        packageId: string;
+        status: string;
+        progress: number;
+        downloadedBytes?: number;
+        totalBytes?: number;
+        speed?: number;
+        error?: string;
+      };
 
-      if (downloadCancelledRef.current) break;
-
-      updateItem(item.id, { status: 'downloading', startTime: Date.now() });
-      addLog('info', `다운로드 시작: ${item.name}@${item.version}`);
-
-      // 랜덤 실패 시뮬레이션 (10% 확률)
-      const willFail = Math.random() < 0.1;
-      const failAt = willFail ? Math.floor(Math.random() * 80) + 10 : 101;
-
-      for (let progress = 0; progress <= 100; progress += 5) {
-        if (downloadCancelledRef.current) break;
-
-        while (downloadPausedRef.current && !downloadCancelledRef.current) {
-          updateItem(item.id, { status: 'paused' });
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-
-        if (downloadCancelledRef.current) break;
-
-        if (progress >= failAt) {
-          const error = '네트워크 연결 오류';
-          updateItem(item.id, { status: 'failed', error, endTime: Date.now() });
-          setErrorItem({ ...item, status: 'failed', error });
-          setErrorModalOpen(true);
-          addLog('error', `다운로드 실패: ${item.name}`, error);
-          break;
-        }
-
-        updateItem(item.id, {
-          status: 'downloading',
-          progress,
-          downloadedBytes: progress * 1024 * 10,
-          totalBytes: 1024 * 1000,
-          speed: 1024 * (50 + Math.random() * 50),
+      const item = downloadItems.find((i) => i.id === data.packageId);
+      if (item) {
+        updateItem(data.packageId, {
+          status: data.status as DownloadStatus,
+          progress: data.progress,
+          downloadedBytes: data.downloadedBytes || 0,
+          totalBytes: data.totalBytes || 0,
+          speed: data.speed || 0,
+          error: data.error,
+          endTime: data.status === 'completed' || data.status === 'failed' ? Date.now() : undefined,
         });
 
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (data.status === 'downloading' && data.progress === 0) {
+          addLog('info', `다운로드 시작: ${item.name}@${item.version}`);
+        } else if (data.status === 'completed') {
+          addLog('success', `다운로드 완료: ${item.name}@${item.version}`);
+        } else if (data.status === 'failed') {
+          addLog('error', `다운로드 실패: ${item.name}@${item.version}`, data.error);
+        }
       }
+    });
 
-      if (!downloadCancelledRef.current && downloadItems[i].status !== 'failed') {
-        updateItem(item.id, { status: 'completed', progress: 100, endTime: Date.now() });
-        addLog('success', `다운로드 완료: ${item.name}@${item.version}`);
-      }
-    }
+    eventSource.addEventListener('complete', (event) => {
+      const data = JSON.parse(event.data) as {
+        success: boolean;
+        outputPath: string;
+      };
 
-    if (!downloadCancelledRef.current) {
-      // 패키징 시작
-      await mockPackaging();
-    }
-
-    setIsDownloading(false);
-  };
-
-  // Mock 패키징 시뮬레이션
-  const mockPackaging = async () => {
-    setPackagingStatus('packaging');
-    addLog('info', `패키징 시작 (${outputFormat})`);
-
-    for (let progress = 0; progress <= 100; progress += 10) {
-      if (downloadCancelledRef.current) break;
-      setPackagingProgress(progress);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-
-    if (!downloadCancelledRef.current) {
+      setIsDownloading(false);
       setPackagingStatus('completed');
       setPackagingProgress(100);
-      addLog('success', '패키징 완료', `출력 경로: ${outputDir}`);
+      addLog('success', '다운로드 및 패키징 완료', `출력 경로: ${data.outputPath}`);
       message.success('다운로드 및 패키징이 완료되었습니다');
+      eventSource.close();
+    });
+
+    eventSource.onerror = () => {
+      addLog('error', 'SSE 연결 오류');
+      eventSource.close();
+    };
+
+    // 다운로드 시작 요청
+    try {
+      const packages = cartItems.map((item) => ({
+        id: item.id,
+        type: item.type,
+        name: item.name,
+        version: item.version,
+        architecture: item.arch,
+      }));
+
+      const options = {
+        outputDir,
+        outputFormat,
+        includeScripts,
+      };
+
+      const response = await fetch('/api/download/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packages, options, clientId }),
+      });
+
+      if (!response.ok) {
+        throw new Error('다운로드 시작 실패');
+      }
+    } catch (error) {
+      addLog('error', '다운로드 시작 실패', String(error));
+      setIsDownloading(false);
+      eventSource.close();
     }
   };
 

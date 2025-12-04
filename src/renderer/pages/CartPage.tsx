@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Table,
@@ -21,6 +21,7 @@ import {
   Col,
   Tabs,
   Alert,
+  Spin,
 } from 'antd';
 import type { UploadProps } from 'antd';
 import {
@@ -99,6 +100,8 @@ const CartPage: React.FC = () => {
 
   // 의존성 트리 모달
   const [dependencyTreeModalOpen, setDependencyTreeModalOpen] = useState(false);
+  const [dependencyData, setDependencyData] = useState<DependencyResolutionResult | null>(null);
+  const [loadingDeps, setLoadingDeps] = useState(false);
 
   // 예상 다운로드 크기 계산
   const estimatedSize = useMemo(() => {
@@ -107,44 +110,131 @@ const CartPage: React.FC = () => {
     }, 0);
   }, [items]);
 
-  // Mock 의존성 트리 데이터 생성
-  const mockDependencyTree = useMemo((): DependencyResolutionResult | null => {
-    if (items.length === 0) return null;
+  // 의존성 트리 로드 함수
+  const loadDependencyTree = useCallback(async () => {
+    if (items.length === 0) {
+      setDependencyData(null);
+      return;
+    }
 
-    // 카트 아이템들을 DependencyNode 구조로 변환
-    const createNode = (item: CartItem, mockDeps: DependencyNode[] = []): DependencyNode => ({
-      package: {
-        type: item.type as CorePackageType,
+    setLoadingDeps(true);
+    try {
+      // 장바구니 아이템을 DownloadPackage 형식으로 변환
+      const packages = items.map((item, index) => ({
+        id: item.id || `pkg-${index}`,
+        type: item.type,
         name: item.name,
         version: item.version,
-        arch: item.arch as any,
-        metadata: {
-          size: Math.floor((estimatedSizePerPackage[item.type] || 2) * 1024 * 1024),
-          description: `${item.name} 패키지`,
-        },
-      },
-      dependencies: mockDeps,
-      optional: false,
-    });
+        architecture: item.arch,
+      }));
 
-    // 첫 번째 아이템을 루트로, 나머지를 의존성으로 구성
-    const rootItem = items[0];
-    const childNodes = items.slice(1).map((item) => createNode(item));
+      let result: {
+        originalPackages: unknown[];
+        allPackages: unknown[];
+        dependencyTrees?: unknown[];
+        failedPackages?: unknown[];
+      };
 
-    const root: DependencyNode = createNode(rootItem, childNodes);
+      // Electron 환경 또는 Vite dev 서버 환경에 따라 API 호출
+      if (window.electronAPI?.dependency?.resolve) {
+        // Electron 환경
+        result = await window.electronAPI.dependency.resolve(packages);
+      } else {
+        // Vite dev 서버 환경
+        const response = await fetch('/api/dependency/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(packages),
+        });
+        if (!response.ok) {
+          throw new Error(`의존성 해결 실패: ${response.statusText}`);
+        }
+        result = await response.json();
+      }
 
-    return {
-      root,
-      flatList: items.map((item) => ({
-        type: item.type as CorePackageType,
-        name: item.name,
-        version: item.version,
-        arch: item.arch as any,
-      })),
-      conflicts: [],
-      totalSize: estimatedSize * 1024 * 1024,
-    };
+      // 의존성 트리 결과 처리
+      const dependencyTrees = result.dependencyTrees as DependencyResolutionResult[] | undefined;
+
+      if (dependencyTrees && dependencyTrees.length > 0) {
+        if (dependencyTrees.length === 1) {
+          // 단일 패키지인 경우 그대로 사용
+          setDependencyData(dependencyTrees[0]);
+        } else {
+          // 여러 패키지인 경우 가상 루트 아래에 병합
+          const mergedRoot: DependencyNode = {
+            package: {
+              type: 'pip' as CorePackageType,
+              name: '선택된 패키지',
+              version: '',
+            },
+            dependencies: dependencyTrees.map((tree) => tree.root),
+            optional: false,
+          };
+
+          // 모든 패키지의 flatList 병합 (중복 제거)
+          const allFlatList = dependencyTrees.flatMap((tree) => tree.flatList);
+          const uniqueFlatList = allFlatList.filter(
+            (pkg, index, self) =>
+              self.findIndex((p) => p.type === pkg.type && p.name === pkg.name && p.version === pkg.version) === index
+          );
+
+          setDependencyData({
+            root: mergedRoot,
+            flatList: uniqueFlatList,
+            conflicts: [],
+            totalSize: undefined,
+          });
+        }
+      } else {
+        // 의존성 트리가 없는 경우 기본 구조 생성 (장바구니 아이템만)
+        const createNode = (item: CartItem): DependencyNode => ({
+          package: {
+            type: item.type as CorePackageType,
+            name: item.name,
+            version: item.version,
+            arch: item.arch as 'x86_64' | 'arm64' | 'i386' | 'noarch' | undefined,
+          },
+          dependencies: [],
+          optional: false,
+        });
+
+        const rootNode: DependencyNode = items.length === 1
+          ? createNode(items[0])
+          : {
+              package: {
+                type: 'pip' as CorePackageType,
+                name: '선택된 패키지',
+                version: '',
+              },
+              dependencies: items.map(createNode),
+              optional: false,
+            };
+
+        setDependencyData({
+          root: rootNode,
+          flatList: items.map((item) => ({
+            type: item.type as CorePackageType,
+            name: item.name,
+            version: item.version,
+          })),
+          conflicts: [],
+          totalSize: estimatedSize * 1024 * 1024,
+        });
+      }
+    } catch (error) {
+      console.error('의존성 트리 로드 실패:', error);
+      message.error('의존성 트리를 불러오는데 실패했습니다');
+      setDependencyData(null);
+    } finally {
+      setLoadingDeps(false);
+    }
   }, [items, estimatedSize]);
+
+  // 의존성 트리 보기 핸들러
+  const handleShowDependencyTree = useCallback(async () => {
+    setDependencyTreeModalOpen(true);
+    await loadDependencyTree();
+  }, [loadDependencyTree]);
 
   // 크기 포맷팅
   const formatSize = (sizeMB: number): string => {
@@ -487,7 +577,8 @@ flask~=2.0.0`}
             <>
               <Button
                 icon={<NodeIndexOutlined />}
-                onClick={() => setDependencyTreeModalOpen(true)}
+                onClick={handleShowDependencyTree}
+                loading={loadingDeps}
               >
                 의존성 트리 보기
               </Button>
@@ -705,16 +796,28 @@ flask~=2.0.0`}
       <Modal
         title="의존성 트리 미리보기"
         open={dependencyTreeModalOpen}
-        onCancel={() => setDependencyTreeModalOpen(false)}
+        onCancel={() => {
+          setDependencyTreeModalOpen(false);
+          setDependencyData(null);
+        }}
         footer={[
-          <Button key="close" onClick={() => setDependencyTreeModalOpen(false)}>
+          <Button key="close" onClick={() => {
+            setDependencyTreeModalOpen(false);
+            setDependencyData(null);
+          }}>
             닫기
           </Button>,
         ]}
         width={900}
         centered
       >
-        <DependencyTree data={mockDependencyTree} />
+        {loadingDeps ? (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+            <Spin size="large" tip="의존성 분석 중..." />
+          </div>
+        ) : (
+          <DependencyTree data={dependencyData} />
+        )}
       </Modal>
     </div>
   );

@@ -41,6 +41,7 @@
   },
   "homepage": "https://github.com/jonggeun2001/DepsSmuggler#readme",
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@types/cli-progress": "^3.11.6",
     "@types/fs-extra": "^11.0.4",
     "@types/js-yaml": "^4.0.9",
@@ -53,6 +54,7 @@
     "electron": "^39.2.4",
     "electron-builder": "^26.0.12",
     "nodemon": "^3.1.11",
+    "playwright": "^1.57.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vite": "^7.2.6"

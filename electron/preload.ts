@@ -11,11 +11,12 @@ const electronAPI = {
   saveFile: (defaultPath: string): Promise<string | null> =>
     ipcRenderer.invoke('save-file', defaultPath),
 
-  // 다운로드 관련 (향후 구현)
+  // 다운로드 관련
   download: {
-    start: (packages: unknown[]): Promise<void> =>
-      ipcRenderer.invoke('download:start', packages),
+    start: (data: { packages: unknown[]; options: unknown }): Promise<void> =>
+      ipcRenderer.invoke('download:start', data),
     pause: (): Promise<void> => ipcRenderer.invoke('download:pause'),
+    resume: (): Promise<void> => ipcRenderer.invoke('download:resume'),
     cancel: (): Promise<void> => ipcRenderer.invoke('download:cancel'),
     onProgress: (callback: (progress: unknown) => void): () => void => {
       const handler = (_event: Electron.IpcRendererEvent, progress: unknown) =>
@@ -34,6 +35,25 @@ const electronAPI = {
         callback(error);
       ipcRenderer.on('download:error', handler);
       return () => ipcRenderer.removeListener('download:error', handler);
+    },
+    // 의존성 해결 상태 이벤트
+    onStatus: (callback: (status: { phase: string; message: string }) => void): () => void => {
+      const handler = (_event: Electron.IpcRendererEvent, status: { phase: string; message: string }) =>
+        callback(status);
+      ipcRenderer.on('download:status', handler);
+      return () => ipcRenderer.removeListener('download:status', handler);
+    },
+    // 의존성 해결 완료 이벤트
+    onDepsResolved: (callback: (data: {
+      originalPackages: unknown[];
+      allPackages: unknown[];
+      dependencyTrees?: unknown[];
+      failedPackages?: unknown[];
+    }) => void): () => void => {
+      const handler = (_event: Electron.IpcRendererEvent, data: unknown) =>
+        callback(data as { originalPackages: unknown[]; allPackages: unknown[]; dependencyTrees?: unknown[]; failedPackages?: unknown[] });
+      ipcRenderer.on('download:deps-resolved', handler);
+      return () => ipcRenderer.removeListener('download:deps-resolved', handler);
     },
   },
 
@@ -70,11 +90,25 @@ const electronAPI = {
         name: string;
         version: string;
         description?: string;
-        versions?: string[];
       }>;
     }> => ipcRenderer.invoke('search:packages', type, query),
     suggest: (type: string, query: string): Promise<string[]> =>
       ipcRenderer.invoke('search:suggest', type, query),
+    versions: (
+      type: string,
+      packageName: string
+    ): Promise<{ versions: string[] }> =>
+      ipcRenderer.invoke('search:versions', type, packageName),
+  },
+
+  // 의존성 해결 관련
+  dependency: {
+    resolve: (packages: unknown[]): Promise<{
+      originalPackages: unknown[];
+      allPackages: unknown[];
+      dependencyTrees?: unknown[];
+      failedPackages?: unknown[];
+    }> => ipcRenderer.invoke('dependency:resolve', packages),
   },
 };
 

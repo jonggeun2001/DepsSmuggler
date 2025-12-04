@@ -14,6 +14,7 @@ export interface CartItem {
   name: string;
   version: string;
   arch?: Architecture;
+  languageVersion?: string;  // 언어/런타임 버전 (예: Python 3.11, Java 17)
   metadata?: Record<string, unknown>;
   addedAt: number;
 }

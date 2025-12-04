@@ -15,6 +15,7 @@ import {
   Col,
   Popconfirm,
   Spin,
+  Alert,
 } from 'antd';
 import {
   SaveOutlined,
@@ -34,6 +35,7 @@ const SettingsPage: React.FC = () => {
     concurrentDownloads,
     enableCache,
     cachePath,
+    includeDependencies,
     defaultOutputFormat,
     includeInstallScripts,
     enableFileSplit,
@@ -43,6 +45,9 @@ const SettingsPage: React.FC = () => {
     smtpUser,
     smtpPassword,
     smtpFrom,
+    languageVersions,
+    defaultTargetOS,
+    defaultArchitecture,
     updateSettings,
     resetSettings,
   } = useSettingsStore();
@@ -155,6 +160,7 @@ const SettingsPage: React.FC = () => {
       concurrentDownloads,
       enableCache,
       cachePath,
+      includeDependencies,
       defaultOutputFormat,
       includeInstallScripts,
       enableFileSplit,
@@ -164,12 +170,16 @@ const SettingsPage: React.FC = () => {
       smtpUser,
       smtpPassword,
       smtpFrom,
+      languageVersions,
+      defaultTargetOS,
+      defaultArchitecture,
     });
   }, [
     form,
     concurrentDownloads,
     enableCache,
     cachePath,
+    includeDependencies,
     defaultOutputFormat,
     includeInstallScripts,
     enableFileSplit,
@@ -179,6 +189,9 @@ const SettingsPage: React.FC = () => {
     smtpUser,
     smtpPassword,
     smtpFrom,
+    languageVersions,
+    defaultTargetOS,
+    defaultArchitecture,
   ]);
 
   // 저장
@@ -242,6 +255,111 @@ const SettingsPage: React.FC = () => {
           >
             <InputNumber min={1} max={10} style={{ width: '100%' }} />
           </Form.Item>
+        </Card>
+
+        {/* 기본 언어 버전 설정 */}
+        <Card title="기본 언어 버전" style={{ marginBottom: 24 }}>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+            패키지 검색 시 기본으로 선택될 언어/런타임 버전입니다.
+          </Text>
+
+          <Form.Item
+            name={['languageVersions', 'python']}
+            label="Python 버전"
+            tooltip="pip/conda 패키지 검색 시 기본 Python 버전"
+          >
+            <Select>
+              <Select.Option value="3.13">Python 3.13</Select.Option>
+              <Select.Option value="3.12">Python 3.12</Select.Option>
+              <Select.Option value="3.11">Python 3.11</Select.Option>
+              <Select.Option value="3.10">Python 3.10</Select.Option>
+              <Select.Option value="3.9">Python 3.9</Select.Option>
+              <Select.Option value="3.8">Python 3.8 (EOL)</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name={['languageVersions', 'java']}
+            label="Java 버전"
+            tooltip="Maven/Gradle 패키지 검색 시 기본 Java 버전"
+          >
+            <Select>
+              <Select.Option value="21">Java 21 (LTS)</Select.Option>
+              <Select.Option value="17">Java 17 (LTS)</Select.Option>
+              <Select.Option value="11">Java 11 (LTS)</Select.Option>
+              <Select.Option value="8">Java 8 (LTS)</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name={['languageVersions', 'node']}
+            label="Node.js 버전"
+            tooltip="npm 패키지 검색 시 기본 Node.js 버전"
+          >
+            <Select>
+              <Select.Option value="22">Node.js 22 (Current)</Select.Option>
+              <Select.Option value="20">Node.js 20 (LTS)</Select.Option>
+              <Select.Option value="18">Node.js 18 (LTS)</Select.Option>
+              <Select.Option value="16">Node.js 16 (EOL)</Select.Option>
+            </Select>
+          </Form.Item>
+        </Card>
+
+        {/* 기본 OS/아키텍처 설정 */}
+        <Card title="기본 OS/아키텍처" style={{ marginBottom: 24 }}>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+            라이브러리 패키지 다운로드 시 기본으로 선택될 대상 환경입니다.
+          </Text>
+
+          <Form.Item
+            name="defaultTargetOS"
+            label="대상 운영체제"
+            tooltip="pip/conda 휠 파일 등 OS별 바이너리 패키지에 적용됩니다"
+          >
+            <Select>
+              <Select.Option value="any">모든 OS (any)</Select.Option>
+              <Select.Option value="windows">Windows</Select.Option>
+              <Select.Option value="macos">macOS</Select.Option>
+              <Select.Option value="linux">Linux</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="defaultArchitecture"
+            label="대상 아키텍처"
+            tooltip="패키지 검색 시 기본 선택되는 CPU 아키텍처"
+          >
+            <Select>
+              <Select.Option value="x86_64">x86_64 (64비트 Intel/AMD)</Select.Option>
+              <Select.Option value="amd64">amd64 (x86_64와 동일)</Select.Option>
+              <Select.Option value="arm64">ARM64 (Apple Silicon, AWS Graviton)</Select.Option>
+              <Select.Option value="aarch64">aarch64 (arm64와 동일)</Select.Option>
+              <Select.Option value="noarch">noarch (아키텍처 무관)</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Alert
+            message="적용 범위"
+            description="이 설정은 라이브러리 패키지(pip, conda, Maven, Gradle, npm)에만 적용됩니다. OS 패키지(YUM, APT, APK)와 컨테이너 이미지(Docker)는 위자드에서 직접 선택해야 합니다."
+            type="info"
+            showIcon
+          />
+        </Card>
+
+        {/* 의존성 설정 */}
+        <Card title="의존성 설정" style={{ marginBottom: 24 }}>
+          <Form.Item
+            name="includeDependencies"
+            label="의존성 자동 포함 다운로드"
+            valuePropName="checked"
+            tooltip="패키지 다운로드 시 전이적 의존성을 자동으로 해결하여 함께 다운로드합니다"
+          >
+            <Switch />
+          </Form.Item>
+          <Text type="secondary">
+            활성화 시 패키지의 모든 의존성을 자동으로 분석하여 함께 다운로드합니다.
+            폐쇄망 환경에서 설치 시 필요한 모든 파일을 한 번에 준비할 수 있습니다.
+          </Text>
         </Card>
 
         {/* 캐시 설정 */}

@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import * as path from 'path';
+import { downloadApiPlugin } from './vite-plugin-download-api';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), downloadApiPlugin()],
   root: 'src/renderer',
   base: './',
   build: {
