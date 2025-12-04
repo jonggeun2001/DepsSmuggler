@@ -29,8 +29,30 @@
 | `get-app-path` | 앱 경로 조회 |
 | `select-folder` | 폴더 선택 다이얼로그 |
 | `save-file` | 파일 저장 다이얼로그 |
-| `search:packages` | 패키지 검색 |
+| `search:packages` | 패키지 검색 (PyPI, Maven 실제 API 연동) |
 | `search:suggest` | 자동완성 제안 |
+| `search:versions` | 패키지 버전 목록 조회 |
+| `dependency:resolve` | 의존성 해결 |
+| `download:start` | 다운로드 시작 |
+| `download:pause` | 다운로드 일시정지 |
+| `download:resume` | 다운로드 재개 |
+| `download:cancel` | 다운로드 취소 |
+
+### 다운로더 타입 매핑
+
+```typescript
+const downloaderMap = {
+  pip: getPipDownloader,
+  conda: getCondaDownloader,
+  maven: getMavenDownloader,
+  docker: getDockerDownloader,
+  yum: getYumDownloader,
+};
+```
+
+### PyPI 패키지 캐시
+
+앱 시작 시 PyPI Simple API에서 전체 패키지 목록을 백그라운드로 로드하여 검색 성능 향상
 
 ---
 
@@ -54,12 +76,20 @@ interface ElectronAPI {
 
   // 다운로드 관련
   download: {
-    start(packages: unknown[]): Promise<void>;
+    start(data: { packages: unknown[]; options: unknown }): Promise<void>;
     pause(): Promise<void>;
+    resume(): Promise<void>;
     cancel(): Promise<void>;
     onProgress(callback: (progress: unknown) => void): () => void;
     onComplete(callback: (result: unknown) => void): () => void;
     onError(callback: (error: unknown) => void): () => void;
+    onStatus(callback: (status: { phase: string; message: string }) => void): () => void;
+    onDepsResolved(callback: (data: {
+      originalPackages: unknown[];
+      allPackages: unknown[];
+      dependencyTrees?: unknown[];
+      failedPackages?: unknown[];
+    }) => void): () => void;
   };
 
   // 설정 관련
@@ -84,8 +114,21 @@ interface ElectronAPI {
 
   // 패키지 검색
   search: {
-    packages(type: string, query: string): Promise<SearchResult>;
+    packages(type: string, query: string): Promise<{
+      packages: Array<{ name: string; version: string; description?: string }>;
+    }>;
     suggest(type: string, query: string): Promise<string[]>;
+    versions(type: string, packageName: string): Promise<{ versions: string[] }>;
+  };
+
+  // 의존성 해결
+  dependency: {
+    resolve(packages: unknown[]): Promise<{
+      originalPackages: unknown[];
+      allPackages: unknown[];
+      dependencyTrees?: unknown[];
+      failedPackages?: unknown[];
+    }>;
   };
 }
 ```
@@ -388,4 +431,5 @@ function FolderSelector() {
 
 ## 관련 문서
 - [아키텍처 개요](./architecture-overview.md)
+- [Shared Utilities](./shared-utilities.md)
 - [타입 정의](./types.md)

@@ -22,6 +22,13 @@ depssmuggler/
 │   │   ├── layouts/       # 레이아웃 컴포넌트
 │   │   └── stores/        # Zustand 상태 관리
 │   ├── core/              # 핵심 비즈니스 로직
+│   │   ├── index.ts       # Core 모듈 통합 내보내기
+│   │   ├── shared/        # 공통 유틸리티 모듈
+│   │   │   ├── types.ts           # 공통 타입 정의
+│   │   │   ├── dependency-resolver.ts # 의존성 해결
+│   │   │   ├── pypi-utils.ts      # PyPI 유틸리티
+│   │   │   ├── file-utils.ts      # 파일 다운로드/압축
+│   │   │   └── script-utils.ts    # 스크립트 생성
 │   │   ├── downloaders/   # 패키지 관리자별 다운로더
 │   │   ├── resolver/      # 의존성 해결기
 │   │   ├── packager/      # 출력물 패키징
@@ -187,4 +194,6 @@ export function getPipDownloader(): PipDownloader {
 - [Downloaders 문서](./downloaders.md)
 - [Resolver 문서](./resolvers.md)
 - [Packagers 문서](./packagers.md)
+- [Shared Utilities 문서](./shared-utilities.md)
+- [Electron & Renderer 문서](./electron-renderer.md)
 - [CLI 문서](./cli.md)
