@@ -175,7 +175,18 @@ src/renderer/
 ### WizardPage
 - 경로: `/wizard`
 - 역할: 패키지 검색 및 선택 위자드
-- 단계: 패키지 타입 → 패키지 검색 → 버전 선택 → 아키텍처 선택
+- 단계:
+  1. 카테고리 선택 (라이브러리, OS 패키지, 컨테이너)
+  2. 패키지 타입 선택 (pip, conda, maven, yum, docker)
+  3. 언어/런타임 버전 선택 (Python, Java, Node.js - 타입에 따라)
+  4. 패키지 검색 및 선택
+  5. 버전 선택
+  6. 타겟 OS/아키텍처 선택
+
+#### 언어 버전 선택
+
+pip/conda 선택 시 Python 버전 선택 UI 표시:
+- 지원 버전: 3.8 ~ 3.13
 
 ### CartPage
 - 경로: `/cart`
@@ -183,11 +194,26 @@ src/renderer/
 
 ### DownloadPage
 - 경로: `/download`
-- 역할: 다운로드 진행 상황, 의존성 트리 표시
+- 역할: 다운로드 진행 상황, 의존성 트리 표시, 로그 뷰어
+
+#### 주요 기능
+- 실시간 진행률 표시 (패키지별, 전체)
+- 다운로드 속도 및 남은 시간 표시
+- 패키지별 상태 (대기/다운로드 중/완료/실패)
+- 에러 발생 시 재시도/건너뛰기/취소 선택
+- 완료 후 폴더 열기
 
 ### SettingsPage
 - 경로: `/settings`
 - 역할: 앱 설정 관리
+
+#### 설정 항목
+- **다운로드 설정**: 동시 다운로드 수, 저장 디렉토리
+- **언어 버전 설정**: Python, Java, Node.js 기본 버전
+- **캐시 설정**: 캐시 사용 여부, 디렉토리, 최대 크기
+- **출력 설정**: 기본 출력 형식, 설치 스크립트 포함 여부
+- **파일 분할 설정**: 자동 분할, 분할 크기
+- **SMTP 설정**: 메일 발송 설정
 
 ---
 
@@ -248,11 +274,12 @@ interface DownloadItem {
   name: string;
   version: string;
   type: PackageType;
-  status: 'pending' | 'downloading' | 'completed' | 'error';
+  status: 'pending' | 'downloading' | 'completed' | 'error' | 'skipped';
   progress: number;
   size?: number;
   downloadedSize?: number;
   error?: string;
+  parentPackage?: string;  // 의존성인 경우 부모 패키지명
 }
 
 interface LogEntry {
@@ -272,6 +299,7 @@ interface DownloadState {
   logs: LogEntry[];
   outputPath?: string;
   error?: string;
+  originalPackages: DownloadItem[];  // 원본 패키지 목록
 
   // Actions
   setStatus(status: DownloadStatus): void;
@@ -291,10 +319,19 @@ const useDownloadStore = create<DownloadState>(...);
 앱 설정 상태 관리
 
 ```typescript
+interface LanguageVersions {
+  python: string;   // 예: '3.11'
+  java: string;     // 예: '17'
+  node: string;     // 예: '20'
+}
+
 interface SettingsState {
   // 다운로드 설정
   concurrentDownloads: number;
   downloadDir: string;
+
+  // 언어 버전 설정
+  languageVersions: LanguageVersions;
 
   // 캐시 설정
   cacheEnabled: boolean;
@@ -401,13 +438,18 @@ function PackageSearchResult({ pkg }) {
 import { useDownloadStore } from '../stores/downloadStore';
 
 function DownloadProgress() {
-  const { status, overallProgress, currentSpeed } = useDownloadStore();
+  const { status, overallProgress, currentSpeed, items } = useDownloadStore();
+
+  const completedCount = items.filter(i => i.status === 'completed').length;
+  const failedCount = items.filter(i => i.status === 'error').length;
 
   return (
     <div>
       <p>상태: {status}</p>
       <progress value={overallProgress} max={100} />
       <p>속도: {currentSpeed} MB/s</p>
+      <p>완료: {completedCount} / {items.length}</p>
+      {failedCount > 0 && <p>실패: {failedCount}개</p>}
     </div>
   );
 }
@@ -427,9 +469,36 @@ function FolderSelector() {
 }
 ```
 
+### 언어 버전 설정 사용
+```tsx
+import { useSettingsStore } from '../stores/settingsStore';
+
+function LanguageVersionSelector() {
+  const { languageVersions, setSetting } = useSettingsStore();
+
+  return (
+    <select
+      value={languageVersions.python}
+      onChange={(e) => setSetting('languageVersions', {
+        ...languageVersions,
+        python: e.target.value
+      })}
+    >
+      <option value="3.8">Python 3.8</option>
+      <option value="3.9">Python 3.9</option>
+      <option value="3.10">Python 3.10</option>
+      <option value="3.11">Python 3.11</option>
+      <option value="3.12">Python 3.12</option>
+      <option value="3.13">Python 3.13</option>
+    </select>
+  );
+}
+```
+
 ---
 
 ## 관련 문서
 - [아키텍처 개요](./architecture-overview.md)
 - [Shared Utilities](./shared-utilities.md)
-- [타입 정의](./types.md)
+- [Downloaders](./downloaders.md)
+- [Resolvers](./resolvers.md)

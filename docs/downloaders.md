@@ -27,8 +27,26 @@
 
 | 메서드 | 설명 |
 |--------|------|
-| `selectBestRelease` | 아키텍처에 가장 적합한 릴리즈 선택 |
-| `compareVersions` | 버전 문자열 비교 (내림차순 정렬용) |
+| `selectBestRelease` | Python 버전, OS, 아키텍처에 맞는 최적 릴리즈 선택 |
+
+### 속성
+
+| 속성 | 타입 | 설명 |
+|------|------|------|
+| `type` | PackageType | 'pip' |
+| `baseUrl` | string | PyPI API URL |
+| `client` | AxiosInstance | HTTP 클라이언트 |
+
+### 다운로드 옵션
+
+```typescript
+interface PipDownloadOptions {
+  pythonVersion?: string;   // 타겟 Python 버전 (예: '3.11')
+  targetOS?: string;        // 타겟 OS (예: 'linux', 'macos', 'windows')
+  architecture?: string;    // 타겟 아키텍처 (예: 'x86_64', 'arm64')
+  preferWheel?: boolean;    // wheel 파일 우선 선택 (기본: true)
+}
+```
 
 ### 사용 예시
 ```typescript
@@ -37,7 +55,112 @@ import { getPipDownloader } from './core/downloaders/pip';
 const downloader = getPipDownloader();
 const results = await downloader.searchPackages('requests');
 const versions = await downloader.getVersions('requests');
-const result = await downloader.downloadPackage('requests', '2.31.0', '/tmp/downloads');
+
+// 특정 Python/OS/아키텍처용 패키지 다운로드
+const result = await downloader.downloadPackage('numpy', '1.26.0', '/tmp/downloads', {
+  pythonVersion: '3.11',
+  targetOS: 'linux',
+  architecture: 'x86_64',
+});
+```
+
+---
+
+## CondaDownloader
+
+### 개요
+- 목적: Anaconda/Conda-forge 패키지 검색 및 다운로드
+- 위치: `src/core/downloaders/conda.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `searchPackages` | query: string, channel?: string | Promise<PackageInfo[]> | Anaconda에서 패키지 검색 |
+| `getVersions` | packageName: string, channel?: string | Promise<string[]> | 패키지 버전 목록 조회 |
+| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
+| `downloadPackage` | name: string, version: string, destDir: string, options? | Promise<DownloadResult> | 패키지 다운로드 |
+| `getPackageFiles` | name: string, version: string, channel?: string | Promise<CondaPackageFile[]> | 패키지 파일 목록 조회 |
+| `verifyChecksum` | filePath: string, expectedHash: string | Promise<boolean> | SHA256/MD5 체크섬 검증 |
+| `clearCache` | - | void | repodata 캐시 초기화 |
+
+### 내부 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `getRepoData` | repodata.json 가져오기 (zstd 압축 지원, 캐싱) |
+| `findPackageInRepoData` | repodata에서 패키지 검색 |
+| `selectBestFile` | Python 버전, OS, 아키텍처에 맞는 최적 파일 선택 |
+| `getPackageMetadataFallback` | Anaconda API fallback 조회 |
+| `mapArch` | 아키텍처 매핑 (x86_64 → linux-64 등) |
+
+### 속성
+
+| 속성 | 타입 | 설명 |
+|------|------|------|
+| `type` | PackageType | 'conda' |
+| `apiUrl` | string | Anaconda API URL |
+| `condaUrl` | string | Conda 패키지 저장소 URL |
+| `repodataCache` | Map<string, RepoData> | repodata 캐시 |
+| `client` | AxiosInstance | HTTP 클라이언트 |
+
+### 다운로드 옵션
+
+```typescript
+interface CondaDownloadOptions {
+  channel?: string;        // 채널 (기본: 'conda-forge')
+  pythonVersion?: string;  // 타겟 Python 버전 (예: '3.12')
+  targetOS?: string;       // 타겟 OS (예: 'linux', 'macos', 'windows')
+  architecture?: string;   // 타겟 아키텍처 (예: 'x86_64', 'arm64')
+}
+```
+
+### 채널 설정
+```typescript
+const CondaChannel = {
+  CONDA_FORGE: 'conda-forge',
+  MAIN: 'main',
+  R: 'r',
+  BIOCONDA: 'bioconda'
+} as const;
+```
+
+### Subdir 매핑
+
+| OS + 아키텍처 | Subdir |
+|---------------|--------|
+| linux + x86_64 | linux-64 |
+| linux + arm64/aarch64 | linux-aarch64 |
+| macos + x86_64 | osx-64 |
+| macos + arm64 | osx-arm64 |
+| windows + x86_64 | win-64 |
+| windows + arm64 | win-arm64 |
+
+### 특징
+
+- **repodata.json.zst 지원**: zstd 압축 파일 우선 사용 (대역폭 절약)
+- **캐싱**: repodata 캐싱으로 중복 요청 방지
+- **Python 버전 필터링**: py312, py311 등 build 태그로 Python 버전에 맞는 패키지 선택
+- **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
+- **Anaconda API fallback**: RC 버전 등 특수 라벨 패키지 지원
+
+### 사용 예시
+```typescript
+import { getCondaDownloader, CondaChannel } from './core/downloaders/conda';
+
+const downloader = getCondaDownloader();
+const results = await downloader.searchPackages('numpy', CondaChannel.CONDA_FORGE);
+
+// Python 3.12, Linux x86_64용 패키지 다운로드
+const result = await downloader.downloadPackage('numpy', '1.26.0', '/tmp/downloads', {
+  channel: 'conda-forge',
+  pythonVersion: '3.12',
+  targetOS: 'linux',
+  architecture: 'x86_64',
+});
+
+// 다운로드 후 체크섬 검증
+const valid = await downloader.verifyChecksum(result.filePath, result.sha256);
 ```
 
 ---
@@ -94,33 +217,6 @@ const result = await downloader.downloadArtifact({
   artifactId: 'spring-core',
   version: '5.3.0'
 }, '/tmp/downloads');
-```
-
----
-
-## CondaDownloader
-
-### 개요
-- 목적: Anaconda 패키지 검색 및 다운로드
-- 위치: `src/core/downloaders/conda.ts`
-
-### 클래스 구조
-
-| 메서드 | 파라미터 | 반환값 | 설명 |
-|--------|----------|--------|------|
-| `searchPackages` | query: string, channel?: string | Promise<PackageInfo[]> | Anaconda에서 패키지 검색 |
-| `getVersions` | packageName: string, channel?: string | Promise<string[]> | 패키지 버전 목록 조회 |
-| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
-| `downloadPackage` | name: string, version: string, destDir: string | Promise<DownloadResult> | 패키지 다운로드 |
-
-### 채널 설정
-```typescript
-const CondaChannel = {
-  CONDA_FORGE: 'conda-forge',
-  MAIN: 'main',
-  R: 'r',
-  BIOCONDA: 'bioconda'
-} as const;
 ```
 
 ---
@@ -218,4 +314,4 @@ interface IDownloader {
 ## 관련 문서
 - [아키텍처 개요](./architecture-overview.md)
 - [Resolver 문서](./resolvers.md)
-- [타입 정의](./types.md)
+- [Shared Utilities 문서](./shared-utilities.md)
