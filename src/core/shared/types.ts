@@ -8,10 +8,17 @@ export interface DownloadPackage {
   architecture?: string;
 }
 
+export type TargetOS = 'windows' | 'macos' | 'linux' | 'any';
+export type Architecture = 'x86_64' | 'amd64' | 'arm64' | 'aarch64' | 'noarch';
+
 export interface DownloadOptions {
   outputDir: string;
   outputFormat: 'zip' | 'tar.gz' | 'mirror';
   includeScripts: boolean;
+  targetOS?: TargetOS;
+  architecture?: Architecture;
+  includeDependencies?: boolean;
+  pythonVersion?: string;
 }
 
 export interface DownloadUrlResult {

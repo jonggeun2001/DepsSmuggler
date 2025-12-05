@@ -2,9 +2,23 @@
 
 // 타입
 export * from './types';
+export * from './conda-types';
+export * from './pip-types';
+
+// 버전 비교 유틸리티
+export {
+  compareVersions,
+  isVersionCompatible,
+  sortVersionsDescending,
+  sortVersionsAscending,
+  findLatestCompatibleVersion,
+} from './version-utils';
 
 // PyPI 유틸리티
 export { getPyPIDownloadUrl } from './pypi-utils';
+
+// Conda 유틸리티
+export { getCondaDownloadUrl, getCondaSubdir } from './conda-utils';
 
 // 파일 유틸리티
 export { downloadFile, createZipArchive, createTarGzArchive } from './file-utils';

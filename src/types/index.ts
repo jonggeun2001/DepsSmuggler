@@ -238,6 +238,13 @@ export interface ResolverOptions {
   includeOptionalDependencies?: boolean;
   maxDepth?: number;
   architecture?: Architecture;
+  /** 타겟 플랫폼 (환경 마커 평가용) */
+  targetPlatform?: {
+    system?: 'Linux' | 'Windows' | 'Darwin';
+    machine?: 'x86_64' | 'aarch64' | 'arm64';
+  };
+  /** Python 버전 (pip 휠 필터링용, 예: '3.11', '3.12') */
+  pythonVersion?: string;
 }
 
 /** 패키저 인터페이스 */

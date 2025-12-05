@@ -12,6 +12,11 @@ export interface DepsResolvedData {
   failedPackages?: Array<{ name: string; version: string; error: string }>;
 }
 
+export interface AllCompleteData {
+  success: boolean;
+  outputPath: string;
+}
+
 export interface DownloadAPI {
   start: (data: { packages: unknown[]; options: unknown }) => Promise<void>;
   pause: () => Promise<void>;
@@ -22,6 +27,7 @@ export interface DownloadAPI {
   onError: (callback: (error: unknown) => void) => () => void;
   onStatus?: (callback: (status: DownloadStatusData) => void) => () => void;
   onDepsResolved?: (callback: (data: DepsResolvedData) => void) => () => void;
+  onAllComplete?: (callback: (data: AllCompleteData) => void) => () => void;
 }
 
 export interface ConfigAPI {
@@ -41,10 +47,15 @@ export interface CacheAPI {
   clear: () => Promise<void>;
 }
 
+export interface SearchOptions {
+  channel?: string;
+}
+
 export interface SearchAPI {
   packages: (
     type: string,
-    query: string
+    query: string,
+    options?: SearchOptions
   ) => Promise<{
     results: Array<{
       name: string;
@@ -52,8 +63,8 @@ export interface SearchAPI {
       description?: string;
     }>;
   }>;
-  suggest: (type: string, query: string) => Promise<string[]>;
-  versions: (type: string, packageName: string) => Promise<{ versions: string[] }>;
+  suggest: (type: string, query: string, options?: SearchOptions) => Promise<string[]>;
+  versions: (type: string, packageName: string, options?: SearchOptions) => Promise<{ versions: string[] }>;
 }
 
 export interface DependencyResolveResult {
