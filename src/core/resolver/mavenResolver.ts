@@ -1,4 +1,11 @@
-import axios from 'axios';
+/**
+ * Maven Dependency Resolver
+ *
+ * BF(Breadth-First) + Skipper 알고리즘 기반 의존성 해결
+ * 문서 참고: docs/maven-dependency-resolution.md
+ */
+
+import axios, { AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
 import {
   IResolver,
@@ -10,93 +17,121 @@ import {
   ResolverOptions,
 } from '../../types';
 import logger from '../../utils/logger';
+import {
+  PomProject,
+  PomDependency,
+  PomExclusion,
+  MavenCoordinate,
+  DependencyProcessingContext,
+  NodeCoordinate,
+  coordinateToString,
+  coordinateToKey,
+  exclusionKey,
+  matchesExclusion,
+  transitScope,
+  PomCacheEntry,
+} from '../shared/maven-types';
+import { DependencyResolutionSkipper } from '../shared/maven-skipper';
 
-// POM 구조 타입
-interface PomProject {
-  parent?: {
-    groupId?: string;
-    artifactId?: string;
-    version?: string;
-  };
-  groupId?: string;
-  artifactId?: string;
-  version?: string;
-  packaging?: string;
-  properties?: Record<string, string>;
-  dependencyManagement?: {
-    dependencies?: {
-      dependency?: PomDependency | PomDependency[];
-    };
-  };
-  dependencies?: {
-    dependency?: PomDependency | PomDependency[];
-  };
-  build?: {
-    plugins?: {
-      plugin?: PomPlugin | PomPlugin[];
-    };
-  };
-}
-
-interface PomDependency {
-  groupId: string;
-  artifactId: string;
-  version?: string;
-  scope?: string;
-  type?: string;
-  optional?: string | boolean;
-  exclusions?: {
-    exclusion?: { groupId: string; artifactId: string } | { groupId: string; artifactId: string }[];
-  };
-}
-
-interface PomPlugin {
-  groupId?: string;
-  artifactId: string;
-  version?: string;
+/** Maven Resolver 옵션 */
+export interface MavenResolverOptions extends ResolverOptions {
+  /** 알고리즘 선택 ('bf' | 'df', 기본값: 'bf') */
+  algorithm?: 'bf' | 'df';
+  /** 병렬 POM 다운로드 스레드 수 (기본값: 5) */
+  parallelThreads?: number;
+  /** POM 캐시 TTL (ms, 기본값: 5분) */
+  pomCacheTtl?: number;
 }
 
 export class MavenResolver implements IResolver {
   readonly type = 'maven' as const;
   private readonly repoUrl = 'https://repo1.maven.org/maven2';
   private parser: XMLParser;
-  private visited: Map<string, DependencyNode> = new Map();
-  private conflicts: DependencyConflict[] = [];
+  private axiosInstance: AxiosInstance;
+
+  /** POM 캐시 (G:A:V -> PomCacheEntry) */
+  private pomCache: Map<string, PomCacheEntry> = new Map();
+
+  /** dependencyManagement 버전 관리 */
   private dependencyManagement: Map<string, string> = new Map();
+
+  /** 충돌 목록 */
+  private conflicts: DependencyConflict[] = [];
+
+  /** Skipper 인스턴스 */
+  private skipper: DependencyResolutionSkipper;
+
+  /** 병렬 POM 다운로드 중인 Promise들 */
+  private pendingPomFetches: Map<string, Promise<PomProject>> = new Map();
+
+  /** 기본 옵션 */
+  private defaultOptions: MavenResolverOptions = {
+    algorithm: 'bf',
+    parallelThreads: 5,
+    pomCacheTtl: 5 * 60 * 1000, // 5분
+    maxDepth: 20,
+    includeOptionalDependencies: false,
+  };
 
   constructor() {
     this.parser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
     });
+
+    this.axiosInstance = axios.create({
+      timeout: 30000,
+      headers: {
+        'User-Agent': 'DepsSmuggler/1.0',
+      },
+    });
+
+    this.skipper = new DependencyResolutionSkipper();
   }
 
   /**
-   * 의존성 해결
+   * 의존성 해결 (진입점)
    */
   async resolveDependencies(
     packageName: string,
     version: string,
-    options?: ResolverOptions
+    options?: MavenResolverOptions
   ): Promise<DependencyResolutionResult> {
-    this.visited.clear();
+    const opts = { ...this.defaultOptions, ...options };
+    const [groupId, artifactId] = packageName.split(':');
+
+    if (!groupId || !artifactId) {
+      throw new Error(`잘못된 패키지명 형식: ${packageName} (groupId:artifactId 형식 필요)`);
+    }
+
+    // 상태 초기화
     this.conflicts = [];
     this.dependencyManagement.clear();
+    this.skipper.clear();
 
-    const [groupId, artifactId] = packageName.split(':');
-    const maxDepth = options?.maxDepth ?? 10;
-    const includeOptional = options?.includeOptionalDependencies ?? false;
+    const rootCoordinate: MavenCoordinate = {
+      groupId,
+      artifactId,
+      version,
+    };
 
     try {
-      const root = await this.resolvePackage(
-        groupId,
-        artifactId,
+      logger.info('Maven 의존성 해결 시작', {
+        package: packageName,
         version,
-        0,
-        maxDepth,
-        includeOptional
-      );
+        algorithm: opts.algorithm,
+      });
+
+      const root = await this.resolveBF(rootCoordinate, opts);
       const flatList = this.flattenDependencies(root);
+
+      const stats = this.skipper.getStats();
+      logger.info('Maven 의존성 해결 완료', {
+        package: packageName,
+        totalDependencies: flatList.length,
+        conflicts: this.conflicts.length,
+        skipperStats: stats,
+      });
 
       return {
         root,
@@ -110,150 +145,353 @@ export class MavenResolver implements IResolver {
   }
 
   /**
-   * 단일 패키지 의존성 해결 (재귀)
+   * BF(너비 우선) 알고리즘으로 의존성 해결
    */
-  private async resolvePackage(
-    groupId: string,
-    artifactId: string,
-    version: string,
-    depth: number,
-    maxDepth: number,
-    includeOptional: boolean
+  private async resolveBF(
+    rootCoordinate: MavenCoordinate,
+    options: MavenResolverOptions
   ): Promise<DependencyNode> {
-    const cacheKey = `${groupId}:${artifactId}@${version}`;
+    const maxDepth = options.maxDepth ?? 20;
+    const includeOptional = options.includeOptionalDependencies ?? false;
 
-    // 순환 의존성 방지
-    if (this.visited.has(cacheKey)) {
-      return this.visited.get(cacheKey)!;
+    // 노드 저장소 (G:A:V -> DependencyNode)
+    const nodeMap: Map<string, DependencyNode> = new Map();
+
+    // 루트 노드 생성
+    const rootNode = this.createDependencyNode(rootCoordinate, 'compile');
+    const rootKey = coordinateToString(rootCoordinate);
+    nodeMap.set(rootKey, rootNode);
+
+    // BF 큐 초기화
+    const queue: DependencyProcessingContext[] = [];
+
+    // 루트 POM 로드 및 초기 의존성 큐에 추가
+    const rootPom = await this.fetchPomWithCache(rootCoordinate);
+
+    // Parent POM 처리
+    await this.processParentPom(rootPom, rootCoordinate);
+
+    // 현재 POM의 dependencyManagement 처리
+    this.processDependencyManagement(rootPom, rootPom.properties);
+
+    // 루트의 직접 의존성을 큐에 추가
+    const rootDependencies = this.extractDependencies(rootPom, rootCoordinate);
+
+    // 좌표 할당 (루트)
+    this.skipper.getCoordinateManager().createCoordinate(rootCoordinate, 0);
+    this.skipper.recordResolved(rootCoordinate);
+
+    let sequence = 0;
+    for (const dep of rootDependencies) {
+      if (!this.shouldIncludeDependency(dep, includeOptional)) continue;
+
+      const depCoordinate = this.resolveDependencyCoordinate(dep, rootPom.properties);
+      if (!depCoordinate) continue;
+
+      sequence++;
+      const context: DependencyProcessingContext = {
+        coordinate: depCoordinate,
+        parentPath: [rootKey],
+        depth: 1,
+        nodeCoordinate: { depth: 1, sequence },
+        scope: (dep.scope as DependencyScope) || 'compile',
+        originalScope: (dep.scope as DependencyScope) || 'compile',
+        exclusions: this.extractExclusions(dep),
+        managedVersion: !!this.dependencyManagement.get(coordinateToKey(depCoordinate)),
+      };
+
+      // 비동기로 POM 프리페치 시작
+      this.prefetchPom(depCoordinate);
+      queue.push(context);
     }
 
-    // 최대 깊이 도달
-    if (depth >= maxDepth) {
-      return {
-        package: {
-          type: 'maven',
-          name: `${groupId}:${artifactId}`,
-          version,
-          metadata: { groupId, artifactId },
-        },
-        dependencies: [],
-      };
-    }
+    // BF 탐색
+    while (queue.length > 0) {
+      const context = queue.shift()!;
+      const { coordinate, parentPath, depth, scope, exclusions } = context;
 
-    try {
-      // POM 파일 조회
-      const pom = await this.fetchPom(groupId, artifactId, version);
+      // 최대 깊이 체크
+      if (depth > maxDepth) continue;
 
-      const packageInfo: PackageInfo = {
-        type: 'maven',
-        name: `${groupId}:${artifactId}`,
-        version,
-        metadata: { groupId, artifactId },
-      };
-
-      const node: DependencyNode = {
-        package: packageInfo,
-        dependencies: [],
-      };
-
-      // 캐시에 먼저 저장
-      this.visited.set(cacheKey, node);
-
-      // Parent POM 처리
-      if (pom.parent) {
-        const parentGroupId = pom.parent.groupId || groupId;
-        const parentArtifactId = pom.parent.artifactId;
-        const parentVersion = this.resolveProperty(pom.parent.version || '', pom.properties);
-
-        if (parentArtifactId && parentVersion) {
-          try {
-            const parentPom = await this.fetchPom(parentGroupId, parentArtifactId, parentVersion);
-            // Parent의 dependencyManagement 상속
-            this.processDependencyManagement(parentPom, pom.properties);
-          } catch {
-            // Parent POM을 찾을 수 없어도 계속 진행
-          }
-        }
+      // Exclusion 체크
+      if (matchesExclusion(coordinate, exclusions)) {
+        logger.debug('의존성 제외됨 (exclusion)', { coordinate: coordinateToString(coordinate) });
+        continue;
       }
 
-      // 현재 POM의 dependencyManagement 처리
-      this.processDependencyManagement(pom, pom.properties);
+      // Skipper로 건너뛰기 여부 결정
+      const skipResult = this.skipper.skipResolution(coordinate, depth, parentPath);
 
-      // Dependencies 처리
-      const dependencies = this.normalizeDependencies(pom.dependencies?.dependency);
+      if (skipResult.skip) {
+        // 충돌 기록
+        if (skipResult.reason === 'version_conflict') {
+          const winnerVersion = this.skipper.getResolvedVersion(
+            coordinate.groupId,
+            coordinate.artifactId
+          );
+          this.recordConflict(coordinate, winnerVersion || '', parentPath);
+        }
+        continue;
+      }
+
+      // 노드 생성 또는 가져오기
+      const nodeKey = coordinateToString(coordinate);
+      let node = nodeMap.get(nodeKey);
+
+      if (!node) {
+        node = this.createDependencyNode(coordinate, scope);
+        nodeMap.set(nodeKey, node);
+      }
+
+      // 부모 노드에 자식 추가
+      const parentKey = parentPath[parentPath.length - 1];
+      const parentNode = nodeMap.get(parentKey);
+      if (parentNode && !parentNode.dependencies.some((d) => coordinateToString({
+        groupId: d.package.metadata?.groupId as string,
+        artifactId: d.package.metadata?.artifactId as string,
+        version: d.package.version,
+      }) === nodeKey)) {
+        parentNode.dependencies.push(node);
+      }
+
+      // 이미 처리된 노드이고 강제 해결이 아니면 자식 탐색 건너뛰기
+      if (skipResult.forceResolution) {
+        continue;
+      }
+
+      // 해결됨으로 기록
+      this.skipper.recordResolved(coordinate);
+
+      // POM 로드
+      let pom: PomProject;
+      try {
+        pom = await this.fetchPomWithCache(coordinate);
+      } catch (error) {
+        logger.warn('POM 로드 실패', {
+          coordinate: coordinateToString(coordinate),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+
+      // 하위 의존성 처리
+      const dependencies = this.extractDependencies(pom, coordinate);
+      const newPath = [...parentPath, nodeKey];
+      let childSequence = 0;
 
       for (const dep of dependencies) {
-        // scope가 test, provided, system이면 건너뛰기
-        const scope = dep.scope as DependencyScope;
-        if (scope === 'test' || scope === 'provided' || scope === 'system') {
-          continue;
-        }
+        if (!this.shouldIncludeDependency(dep, includeOptional)) continue;
 
-        // optional 의존성 처리
-        if (dep.optional === 'true' || dep.optional === true) {
-          if (!includeOptional) continue;
-        }
+        const depCoordinate = this.resolveDependencyCoordinate(dep, pom.properties);
+        if (!depCoordinate) continue;
 
-        // 버전 해결
-        let depVersion = this.resolveProperty(dep.version || '', pom.properties);
-        if (!depVersion) {
-          // dependencyManagement에서 버전 찾기
-          const managedKey = `${dep.groupId}:${dep.artifactId}`;
-          depVersion = this.dependencyManagement.get(managedKey) || '';
-        }
+        // Scope 전이 계산
+        const depOriginalScope = (dep.scope as DependencyScope) || 'compile';
+        const transitedScope = transitScope(scope, depOriginalScope);
 
-        if (!depVersion) {
-          // 버전이 없으면 최신 버전 조회 시도
-          try {
-            depVersion = await this.getLatestVersion(dep.groupId, dep.artifactId);
-          } catch {
-            continue;
-          }
-        }
+        if (!transitedScope) continue; // 전이되지 않는 scope
 
-        if (depVersion) {
-          try {
-            const childNode = await this.resolvePackage(
-              dep.groupId,
-              dep.artifactId,
-              depVersion,
-              depth + 1,
-              maxDepth,
-              includeOptional
-            );
-            childNode.scope = scope || 'compile';
-            node.dependencies.push(childNode);
-          } catch {
-            logger.warn('Maven 의존성 패키지 조회 실패', {
-              parent: `${groupId}:${artifactId}`,
-              dependency: `${dep.groupId}:${dep.artifactId}`,
-            });
-          }
-        }
+        // Exclusion 병합
+        const mergedExclusions = new Set([...exclusions, ...this.extractExclusions(dep)]);
+
+        childSequence++;
+        const childContext: DependencyProcessingContext = {
+          coordinate: depCoordinate,
+          parentPath: newPath,
+          depth: depth + 1,
+          nodeCoordinate: { depth: depth + 1, sequence: childSequence },
+          scope: transitedScope,
+          originalScope: depOriginalScope,
+          exclusions: mergedExclusions,
+          managedVersion: !!this.dependencyManagement.get(coordinateToKey(depCoordinate)),
+        };
+
+        // 비동기로 POM 프리페치
+        this.prefetchPom(depCoordinate);
+        queue.push(childContext);
       }
+    }
 
-      return node;
-    } catch (error) {
-      logger.error('Maven POM 조회 실패', { groupId, artifactId, version, error });
-      throw error;
+    return rootNode;
+  }
+
+  /**
+   * DependencyNode 생성
+   */
+  private createDependencyNode(
+    coordinate: MavenCoordinate,
+    scope: DependencyScope
+  ): DependencyNode {
+    return {
+      package: {
+        type: 'maven',
+        name: `${coordinate.groupId}:${coordinate.artifactId}`,
+        version: coordinate.version,
+        metadata: {
+          groupId: coordinate.groupId,
+          artifactId: coordinate.artifactId,
+          classifier: coordinate.classifier,
+          type: coordinate.type,
+        },
+      },
+      dependencies: [],
+      scope,
+    };
+  }
+
+  /**
+   * 의존성 포함 여부 결정
+   */
+  private shouldIncludeDependency(dep: PomDependency, includeOptional: boolean): boolean {
+    const scope = dep.scope as DependencyScope;
+
+    // test, provided, system scope는 전이적 의존성에서 제외
+    if (scope === 'test' || scope === 'provided' || scope === 'system') {
+      return false;
+    }
+
+    // optional 처리
+    if (dep.optional === 'true' || dep.optional === true) {
+      return includeOptional;
+    }
+
+    return true;
+  }
+
+  /**
+   * POM에서 의존성 좌표 해결
+   */
+  private resolveDependencyCoordinate(
+    dep: PomDependency,
+    properties?: Record<string, string>
+  ): MavenCoordinate | null {
+    let version = this.resolveProperty(dep.version || '', properties);
+
+    // dependencyManagement에서 버전 찾기
+    if (!version) {
+      const managedKey = `${dep.groupId}:${dep.artifactId}`;
+      version = this.dependencyManagement.get(managedKey) || '';
+    }
+
+    if (!version) {
+      logger.debug('버전 정보 없음', { groupId: dep.groupId, artifactId: dep.artifactId });
+      return null;
+    }
+
+    // 버전 범위 처리 (단순화: 범위의 첫 번째 버전 사용)
+    version = this.resolveVersionRange(version);
+
+    return {
+      groupId: dep.groupId,
+      artifactId: dep.artifactId,
+      version,
+      classifier: dep.classifier,
+      type: dep.type,
+    };
+  }
+
+  /**
+   * 버전 범위 해결 (단순화된 구현)
+   */
+  private resolveVersionRange(version: string): string {
+    // [1.0,2.0) 같은 범위 표기 처리
+    if (version.startsWith('[') || version.startsWith('(')) {
+      const match = version.match(/[\[(]([^,\])]+)/);
+      if (match) {
+        return match[1];
+      }
+    }
+    return version;
+  }
+
+  /**
+   * Exclusions 추출
+   */
+  private extractExclusions(dep: PomDependency): Set<string> {
+    const exclusions = new Set<string>();
+
+    if (dep.exclusions?.exclusion) {
+      const excls = Array.isArray(dep.exclusions.exclusion)
+        ? dep.exclusions.exclusion
+        : [dep.exclusions.exclusion];
+
+      for (const excl of excls) {
+        exclusions.add(exclusionKey(excl.groupId, excl.artifactId));
+      }
+    }
+
+    return exclusions;
+  }
+
+  /**
+   * POM에서 의존성 목록 추출
+   */
+  private extractDependencies(pom: PomProject, coordinate: MavenCoordinate): PomDependency[] {
+    const deps = pom.dependencies?.dependency;
+    if (!deps) return [];
+    return Array.isArray(deps) ? deps : [deps];
+  }
+
+  /**
+   * 충돌 기록
+   */
+  private recordConflict(
+    coordinate: MavenCoordinate,
+    winnerVersion: string,
+    path: string[]
+  ): void {
+    const packageName = coordinateToKey(coordinate);
+
+    // 이미 기록된 충돌인지 확인
+    const existing = this.conflicts.find(
+      (c) => c.packageName === packageName && c.versions.includes(coordinate.version)
+    );
+
+    if (existing) {
+      if (!existing.versions.includes(coordinate.version)) {
+        existing.versions.push(coordinate.version);
+      }
+    } else {
+      this.conflicts.push({
+        type: 'version',
+        packageName,
+        versions: [coordinate.version, winnerVersion].filter((v) => v),
+        resolvedVersion: winnerVersion,
+      });
     }
   }
 
   /**
-   * POM 파일 조회
+   * Parent POM 처리
    */
-  private async fetchPom(
-    groupId: string,
-    artifactId: string,
-    version: string
-  ): Promise<PomProject> {
-    const groupPath = groupId.replace(/\./g, '/');
-    const url = `${this.repoUrl}/${groupPath}/${artifactId}/${version}/${artifactId}-${version}.pom`;
+  private async processParentPom(pom: PomProject, coordinate: MavenCoordinate): Promise<void> {
+    if (!pom.parent) return;
 
-    const response = await axios.get<string>(url);
-    const parsed = this.parser.parse(response.data);
+    const parentGroupId = pom.parent.groupId || coordinate.groupId;
+    const parentArtifactId = pom.parent.artifactId;
+    const parentVersion = this.resolveProperty(pom.parent.version || '', pom.properties);
 
-    return parsed.project as PomProject;
+    if (!parentArtifactId || !parentVersion) return;
+
+    try {
+      const parentCoordinate: MavenCoordinate = {
+        groupId: parentGroupId,
+        artifactId: parentArtifactId,
+        version: parentVersion,
+      };
+
+      const parentPom = await this.fetchPomWithCache(parentCoordinate);
+
+      // Parent의 parent도 재귀적으로 처리
+      await this.processParentPom(parentPom, parentCoordinate);
+
+      // Parent의 dependencyManagement 상속
+      this.processDependencyManagement(parentPom, pom.properties);
+    } catch (error) {
+      logger.debug('Parent POM 로드 실패 (계속 진행)', {
+        parent: `${parentGroupId}:${parentArtifactId}:${parentVersion}`,
+      });
+    }
   }
 
   /**
@@ -263,18 +501,51 @@ export class MavenResolver implements IResolver {
     pom: PomProject,
     properties?: Record<string, string>
   ): void {
-    const managed = this.normalizeDependencies(
-      pom.dependencyManagement?.dependencies?.dependency
-    );
+    const managed = pom.dependencyManagement?.dependencies?.dependency;
+    if (!managed) return;
 
-    for (const dep of managed) {
+    const deps = Array.isArray(managed) ? managed : [managed];
+
+    for (const dep of deps) {
       const version = this.resolveProperty(dep.version || '', properties);
       if (version) {
         const key = `${dep.groupId}:${dep.artifactId}`;
+        // 먼저 정의된 것이 우선 (Nearest Definition)
         if (!this.dependencyManagement.has(key)) {
           this.dependencyManagement.set(key, version);
         }
       }
+
+      // BOM import 처리
+      if (dep.scope === 'import' && dep.type === 'pom') {
+        this.importBom(dep, properties).catch((err) => {
+          logger.debug('BOM import 실패', { dep: `${dep.groupId}:${dep.artifactId}`, err });
+        });
+      }
+    }
+  }
+
+  /**
+   * BOM import 처리
+   */
+  private async importBom(
+    dep: PomDependency,
+    properties?: Record<string, string>
+  ): Promise<void> {
+    const version = this.resolveProperty(dep.version || '', properties);
+    if (!version) return;
+
+    try {
+      const bomCoordinate: MavenCoordinate = {
+        groupId: dep.groupId,
+        artifactId: dep.artifactId,
+        version,
+      };
+
+      const bomPom = await this.fetchPomWithCache(bomCoordinate);
+      this.processDependencyManagement(bomPom, bomPom.properties);
+    } catch (error) {
+      logger.debug('BOM import 실패', { bom: `${dep.groupId}:${dep.artifactId}:${version}` });
     }
   }
 
@@ -282,41 +553,127 @@ export class MavenResolver implements IResolver {
    * Properties 치환 (${...} 형식)
    */
   private resolveProperty(value: string, properties?: Record<string, string>): string {
-    if (!value || !properties) return value;
+    if (!value) return value;
 
-    return value.replace(/\$\{([^}]+)\}/g, (_, key) => {
-      // project.version 등 특수 키 처리
-      if (key === 'project.version' || key === 'pom.version') {
-        return properties['version'] || value;
-      }
-      return properties[key] || value;
+    let resolved = value;
+    let iterations = 0;
+    const maxIterations = 10; // 무한 루프 방지
+
+    while (resolved.includes('${') && iterations < maxIterations) {
+      const before = resolved;
+      resolved = resolved.replace(/\$\{([^}]+)\}/g, (_, key) => {
+        // 특수 키 처리
+        if (key === 'project.version' || key === 'pom.version') {
+          return properties?.['version'] || _;
+        }
+        if (key === 'project.groupId' || key === 'pom.groupId') {
+          return properties?.['groupId'] || _;
+        }
+        if (key === 'project.artifactId' || key === 'pom.artifactId') {
+          return properties?.['artifactId'] || _;
+        }
+        return properties?.[key] || _;
+      });
+
+      if (resolved === before) break; // 더 이상 치환할 것이 없음
+      iterations++;
+    }
+
+    return resolved;
+  }
+
+  /**
+   * POM 캐시와 함께 조회
+   */
+  private async fetchPomWithCache(coordinate: MavenCoordinate): Promise<PomProject> {
+    const cacheKey = coordinateToString(coordinate);
+    const cached = this.pomCache.get(cacheKey);
+
+    if (cached && Date.now() - cached.fetchedAt < this.defaultOptions.pomCacheTtl!) {
+      return cached.pom;
+    }
+
+    // 이미 진행 중인 요청이 있으면 재사용
+    const pending = this.pendingPomFetches.get(cacheKey);
+    if (pending) {
+      return pending;
+    }
+
+    const fetchPromise = this.fetchPom(coordinate);
+    this.pendingPomFetches.set(cacheKey, fetchPromise);
+
+    try {
+      const pom = await fetchPromise;
+
+      // 캐시에 저장
+      this.pomCache.set(cacheKey, {
+        pom,
+        fetchedAt: Date.now(),
+        effectiveGroupId: pom.groupId || coordinate.groupId,
+        effectiveVersion: pom.version || coordinate.version,
+      });
+
+      return pom;
+    } finally {
+      this.pendingPomFetches.delete(cacheKey);
+    }
+  }
+
+  /**
+   * POM 프리페치 (비동기)
+   */
+  private prefetchPom(coordinate: MavenCoordinate): void {
+    const cacheKey = coordinateToString(coordinate);
+
+    if (this.pomCache.has(cacheKey) || this.pendingPomFetches.has(cacheKey)) {
+      return;
+    }
+
+    // 백그라운드에서 프리페치
+    this.fetchPomWithCache(coordinate).catch((err) => {
+      // 프리페치 실패는 무시 (나중에 실제 요청 시 처리)
+      logger.debug('POM 프리페치 실패', { coordinate: cacheKey });
     });
   }
 
   /**
-   * 의존성 배열 정규화
+   * POM 파일 조회
    */
-  private normalizeDependencies(
-    deps: PomDependency | PomDependency[] | undefined
-  ): PomDependency[] {
-    if (!deps) return [];
-    return Array.isArray(deps) ? deps : [deps];
+  private async fetchPom(coordinate: MavenCoordinate): Promise<PomProject> {
+    const { groupId, artifactId, version } = coordinate;
+    const groupPath = groupId.replace(/\./g, '/');
+    const url = `${this.repoUrl}/${groupPath}/${artifactId}/${version}/${artifactId}-${version}.pom`;
+
+    try {
+      const response = await this.axiosInstance.get<string>(url, {
+        responseType: 'text',
+      });
+
+      const parsed = this.parser.parse(response.data);
+      return parsed.project as PomProject;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        throw new Error(`POM not found: ${coordinateToString(coordinate)}`);
+      }
+      throw error;
+    }
   }
 
   /**
    * 최신 버전 조회
    */
-  private async getLatestVersion(
-    groupId: string,
-    artifactId: string
-  ): Promise<string> {
+  async getLatestVersion(groupId: string, artifactId: string): Promise<string> {
     const groupPath = groupId.replace(/\./g, '/');
     const url = `${this.repoUrl}/${groupPath}/${artifactId}/maven-metadata.xml`;
 
     try {
-      const response = await axios.get<string>(url);
+      const response = await this.axiosInstance.get<string>(url);
       const parsed = this.parser.parse(response.data);
-      return parsed.metadata?.versioning?.latest || parsed.metadata?.versioning?.release;
+      return (
+        parsed.metadata?.versioning?.latest ||
+        parsed.metadata?.versioning?.release ||
+        ''
+      );
     } catch {
       throw new Error(`버전 조회 실패: ${groupId}:${artifactId}`);
     }
@@ -327,16 +684,27 @@ export class MavenResolver implements IResolver {
    */
   private flattenDependencies(node: DependencyNode): PackageInfo[] {
     const result: Map<string, PackageInfo> = new Map();
+    const visited = new Set<string>();
 
-    const traverse = (n: DependencyNode) => {
+    const traverse = (n: DependencyNode, path: string[]) => {
       const key = `${n.package.name}@${n.package.version}`;
+
+      // 순환 참조 방지
+      if (path.includes(key)) {
+        return;
+      }
+
       if (!result.has(key)) {
         result.set(key, n.package);
-        n.dependencies.forEach(traverse);
+      }
+
+      const newPath = [...path, key];
+      for (const child of n.dependencies) {
+        traverse(child, newPath);
       }
     };
 
-    traverse(node);
+    traverse(node, []);
     return Array.from(result.values());
   }
 
@@ -349,42 +717,52 @@ export class MavenResolver implements IResolver {
       const pom = parsed.project as PomProject;
       const packages: PackageInfo[] = [];
 
+      // dependencyManagement 처리
+      this.dependencyManagement.clear();
+      this.processDependencyManagement(pom, pom.properties);
+
       // 프로젝트 자체
-      if (pom.groupId && pom.artifactId && pom.version) {
+      const projectGroupId = pom.groupId || pom.parent?.groupId;
+      const projectVersion = pom.version || pom.parent?.version;
+
+      if (projectGroupId && pom.artifactId && projectVersion) {
         packages.push({
           type: 'maven',
-          name: `${pom.groupId}:${pom.artifactId}`,
-          version: pom.version,
+          name: `${projectGroupId}:${pom.artifactId}`,
+          version: projectVersion,
           metadata: {
-            groupId: pom.groupId,
+            groupId: projectGroupId,
             artifactId: pom.artifactId,
           },
         });
       }
 
       // Dependencies
-      const dependencies = this.normalizeDependencies(pom.dependencies?.dependency);
+      const deps = pom.dependencies?.dependency;
+      if (deps) {
+        const dependencies = Array.isArray(deps) ? deps : [deps];
 
-      for (const dep of dependencies) {
-        const scope = dep.scope as DependencyScope;
-        if (scope === 'test') continue;
+        for (const dep of dependencies) {
+          const scope = dep.scope as DependencyScope;
+          if (scope === 'test') continue;
 
-        let version = this.resolveProperty(dep.version || '', pom.properties);
-        if (!version) {
-          // dependencyManagement에서 찾기
-          this.processDependencyManagement(pom, pom.properties);
-          version = this.dependencyManagement.get(`${dep.groupId}:${dep.artifactId}`) || 'latest';
+          let version = this.resolveProperty(dep.version || '', pom.properties);
+          if (!version) {
+            version =
+              this.dependencyManagement.get(`${dep.groupId}:${dep.artifactId}`) || 'LATEST';
+          }
+
+          packages.push({
+            type: 'maven',
+            name: `${dep.groupId}:${dep.artifactId}`,
+            version,
+            metadata: {
+              groupId: dep.groupId,
+              artifactId: dep.artifactId,
+              scope: dep.scope,
+            },
+          });
         }
-
-        packages.push({
-          type: 'maven',
-          name: `${dep.groupId}:${dep.artifactId}`,
-          version,
-          metadata: {
-            groupId: dep.groupId,
-            artifactId: dep.artifactId,
-          },
-        });
       }
 
       return packages;
@@ -392,6 +770,21 @@ export class MavenResolver implements IResolver {
       logger.error('pom.xml 파싱 실패', { error });
       throw error;
     }
+  }
+
+  /**
+   * POM 캐시 클리어
+   */
+  clearCache(): void {
+    this.pomCache.clear();
+    this.pendingPomFetches.clear();
+  }
+
+  /**
+   * Skipper 통계 가져오기
+   */
+  getSkipperStats(): ReturnType<DependencyResolutionSkipper['getStats']> {
+    return this.skipper.getStats();
   }
 }
 
