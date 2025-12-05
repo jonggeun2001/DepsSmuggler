@@ -300,6 +300,135 @@ const deps = resolver.parseFromText(`
 
 ---
 
+## NpmResolver
+
+### 개요
+- 목적: npm 패키지 의존성 해결 (node_modules 트리 구축)
+- 위치: `src/core/resolver/npmResolver.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `resolveDependencies` | name: string, version?: string, options?: NpmResolverOptions | Promise<NpmResolutionResult> | 메인 진입점: 패키지 의존성 트리 해결 |
+| `parseFromPackageJson` | packageJsonContent: string | ParsedDependency[] | package.json 파싱 |
+| `getVersions` | packageName: string | Promise<string[]> | 패키지 버전 목록 조회 |
+| `getPackageInfo` | name: string, version: string | Promise<NpmPackageVersion> | 특정 버전 패키지 정보 조회 |
+
+### 내부 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `buildDeps` | 의존성 목록에서 큐 아이템 생성 |
+| `processDepItem` | 단일 의존성 아이템 처리 |
+| `findPlacement` | node_modules 배치 위치 결정 (호이스팅) |
+| `addNodeToTree` | 트리에 노드 추가 |
+| `enqueueDependencies` | 하위 의존성 큐에 추가 |
+| `fetchPackument` | registry에서 packument 조회 |
+| `resolveVersion` | semver 범위를 실제 버전으로 해결 |
+| `flattenTree` | 트리를 플랫 리스트로 변환 |
+| `isVersionCompatibleWithExisting` | 기존 버전과 호환성 검사 |
+
+### 속성
+
+| 속성 | 타입 | 설명 |
+|------|------|------|
+| `type` | PackageType | 'npm' |
+| `registryUrl` | string | npm Registry URL |
+| `packumentCache` | Map<string, NpmPackument> | packument 캐시 |
+| `resolvedCache` | Map<string, string> | 해결된 버전 캐시 |
+| `tree` | NpmNode | 의존성 트리 루트 |
+| `conflicts` | NpmConflict[] | 감지된 충돌 목록 |
+| `depsQueue` | DepsQueueItem[] | 처리 대기 큐 |
+| `depsSeen` | Set<string> | 처리된 의존성 추적 |
+
+### NpmResolverOptions
+
+```typescript
+interface NpmResolverOptions {
+  maxDepth?: number;             // 최대 탐색 깊이 (기본: 10)
+  includeDevDependencies?: boolean;  // devDependencies 포함
+  includePeerDependencies?: boolean; // peerDependencies 포함
+  includeOptionalDependencies?: boolean; // optionalDependencies 포함
+}
+```
+
+### NpmResolutionResult
+
+```typescript
+interface NpmResolutionResult {
+  packages: NpmFlatPackage[];  // 플랫 패키지 목록
+  conflicts: NpmConflict[];    // 충돌 목록
+  tree: NpmNode;               // 의존성 트리 (node_modules 구조)
+}
+```
+
+### 의존성 호이스팅
+
+npm의 node_modules 호이스팅 알고리즘 구현:
+
+```
+project/
+└── node_modules/
+    ├── A@1.0.0              # 호이스팅됨
+    ├── B@2.0.0              # 호이스팅됨
+    └── C@1.0.0/
+        └── node_modules/
+            └── A@2.0.0      # 충돌로 중첩됨
+```
+
+- **호이스팅 시도**: 최상위 node_modules에 배치 시도
+- **충돌 감지**: 동일 이름의 다른 버전 존재 시 중첩 배치
+- **버전 호환성**: 기존 버전이 요청 범위를 만족하면 재사용
+
+### 사용 예시
+
+```typescript
+import { getNpmResolver } from './core/resolver/npmResolver';
+
+const resolver = getNpmResolver();
+
+// 패키지 의존성 해결
+const result = await resolver.resolveDependencies('express', '4.18.2', {
+  maxDepth: 5,
+  includeDevDependencies: false,
+});
+
+console.log(result.packages.length); // 플랫 패키지 수
+console.log(result.conflicts);        // 충돌 목록
+console.log(result.tree);             // node_modules 트리 구조
+```
+
+### package.json 파싱
+
+```typescript
+const deps = resolver.parseFromPackageJson(`{
+  "name": "my-app",
+  "dependencies": {
+    "express": "^4.18.0",
+    "lodash": "~4.17.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}`);
+// [
+//   { name: 'express', versionConstraint: '^4.18.0', type: 'dependency' },
+//   { name: 'lodash', versionConstraint: '~4.17.0', type: 'dependency' },
+//   { name: 'typescript', versionConstraint: '^5.0.0', type: 'devDependency' }
+// ]
+```
+
+### 특징
+
+- **호이스팅 알고리즘**: npm의 node_modules 구조 재현
+- **semver 지원**: ^, ~, >=, < 등 모든 범위 문법 지원
+- **충돌 감지**: 동일 패키지의 다른 버전 요청 추적
+- **Packument 캐싱**: 중복 요청 방지
+- **peerDependencies**: 선택적으로 처리 가능
+
+---
+
 ## 공통 인터페이스
 
 모든 Resolver는 `IResolver` 인터페이스를 구현:
@@ -384,3 +513,7 @@ interface DependencyConflict {
 - [아키텍처 개요](./architecture-overview.md)
 - [Downloaders 문서](./downloaders.md)
 - [Shared Utilities 문서](./shared-utilities.md)
+- [pip 의존성 해결 알고리즘](./pip-dependency-resolution.md)
+- [conda 의존성 해결 알고리즘](./conda-dependency-resolution.md)
+- [Maven 의존성 해결 알고리즘](./maven-dependency-resolution.md)
+- [npm 의존성 해결 알고리즘](./npm-dependency-resolution.md)

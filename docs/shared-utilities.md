@@ -10,16 +10,32 @@
 
 ```
 src/core/shared/
-├── index.ts              # 모듈 진입점
-├── types.ts              # 공통 타입 정의
-├── pip-types.ts          # PyPI 관련 타입 정의
-├── conda-types.ts        # Conda 관련 타입 정의
-├── version-utils.ts      # 버전 비교/호환성 유틸리티
-├── pypi-utils.ts         # PyPI 다운로드 URL 조회
-├── conda-utils.ts        # Conda 패키지 URL 조회
-├── dependency-resolver.ts # 의존성 해결 유틸리티
-├── file-utils.ts         # 파일 다운로드/압축 유틸리티
-└── script-utils.ts       # 설치 스크립트 생성
+├── index.ts                      # 모듈 진입점
+├── types.ts                      # 공통 타입 정의
+├── pip-types.ts                  # PyPI 관련 타입 정의
+├── conda-types.ts                # Conda 관련 타입 정의
+├── npm-types.ts                  # npm 관련 타입 정의
+├── maven-types.ts                # Maven 관련 타입 정의
+├── version-utils.ts              # 버전 비교/호환성 유틸리티
+├── pypi-utils.ts                 # PyPI 다운로드 URL 조회
+├── conda-utils.ts                # Conda 패키지 URL 조회
+├── dependency-resolver.ts        # 의존성 해결 유틸리티
+├── file-utils.ts                 # 파일 다운로드/압축 유틸리티
+├── script-utils.ts               # 설치 스크립트 생성
+│
+│   # pip 고급 의존성 해결 모듈
+├── pip-backtracking-resolver.ts  # pip 백트래킹 Resolver
+├── pip-candidate.ts              # 후보 평가기
+├── pip-provider.ts               # resolvelib Provider 구현
+├── pip-tags.ts                   # PEP 425 태그 생성/매칭
+├── pip-wheel.ts                  # Wheel 파일 파싱/선택
+│
+│   # conda 고급 모듈
+├── conda-cache.ts                # repodata 캐싱 시스템
+├── conda-matchspec.ts            # MatchSpec 파싱/매칭
+│
+│   # maven 고급 모듈
+└── maven-skipper.ts              # 의존성 스킵/캐시 관리
 ```
 
 ---
@@ -576,7 +592,629 @@ export type {
 
 ---
 
+## npm 타입 (`npm-types.ts`)
+
+### NpmPackument
+
+npm 패키지 전체 메타데이터 (registry에서 조회)
+
+```typescript
+interface NpmPackument {
+  name: string;
+  'dist-tags': Record<string, string>;  // 예: { latest: '1.0.0' }
+  versions: Record<string, NpmPackageVersion>;
+  time?: Record<string, string>;        // 버전별 발행 시간
+}
+```
+
+### NpmPackageVersion
+
+특정 버전의 패키지 정보
+
+```typescript
+interface NpmPackageVersion {
+  name: string;
+  version: string;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, PeerDependencyMeta>;
+  dist: NpmDist;
+}
+```
+
+### NpmDist
+
+배포 파일 정보
+
+```typescript
+interface NpmDist {
+  tarball: string;      // 다운로드 URL
+  shasum: string;       // SHA1 해시
+  integrity?: string;   // SHA512 SRI 해시
+  fileCount?: number;
+  unpackedSize?: number;
+}
+```
+
+### NpmResolutionResult
+
+의존성 해결 결과
+
+```typescript
+interface NpmResolutionResult {
+  packages: NpmFlatPackage[];  // 플랫 패키지 목록
+  conflicts: NpmConflict[];    // 충돌 목록
+  tree: NpmNode;               // 의존성 트리
+}
+```
+
+### NpmNode
+
+의존성 트리 노드
+
+```typescript
+interface NpmNode {
+  name: string;
+  version: string;
+  path: string;                      // node_modules 경로
+  dependencies?: Record<string, NpmNode>;
+  depth: number;
+}
+```
+
+---
+
+## Maven 타입 (`maven-types.ts`)
+
+### MavenCoordinate
+
+Maven GAV 좌표
+
+```typescript
+interface MavenCoordinate {
+  groupId: string;
+  artifactId: string;
+  version: string;
+  classifier?: string;
+  packaging?: string;
+}
+```
+
+### PomProject
+
+POM 프로젝트 정보
+
+```typescript
+interface PomProject {
+  groupId?: string;
+  artifactId: string;
+  version?: string;
+  packaging?: string;
+  parent?: PomParent;
+  properties?: Record<string, string>;
+  dependencyManagement?: { dependencies: PomDependency[] };
+  dependencies?: PomDependency[];
+  build?: { plugins?: PomPlugin[] };
+}
+```
+
+### PomDependency
+
+POM 의존성 정보
+
+```typescript
+interface PomDependency {
+  groupId: string;
+  artifactId: string;
+  version?: string;
+  scope?: 'compile' | 'provided' | 'runtime' | 'test' | 'system';
+  optional?: boolean;
+  exclusions?: PomExclusion[];
+  classifier?: string;
+  type?: string;
+}
+```
+
+### ResolvedDependencyNode
+
+해결된 의존성 노드
+
+```typescript
+interface ResolvedDependencyNode {
+  coordinate: MavenCoordinate;
+  scope: string;
+  depth: number;
+  children: ResolvedDependencyNode[];
+  downloadUrl?: string;
+  parentPath: string[];
+}
+```
+
+### Scope 전이 행렬
+
+```typescript
+const SCOPE_TRANSITION_MATRIX: Record<ScopeTransitionKey, ScopeTransitionResult> = {
+  'compile:compile': 'compile',
+  'compile:runtime': 'runtime',
+  'compile:provided': null,      // 전이 안됨
+  'compile:test': null,
+  'runtime:compile': 'runtime',
+  'runtime:runtime': 'runtime',
+  'provided:compile': 'provided',
+  'test:compile': 'test',
+  // ...
+};
+```
+
+---
+
+## pip 백트래킹 Resolver (`pip-backtracking-resolver.ts`)
+
+resolvelib 스타일의 백트래킹 의존성 해결 알고리즘 구현
+
+### BacktrackingResolver
+
+```typescript
+class BacktrackingResolver {
+  constructor(provider: PipProvider);
+
+  // 메인 해결 메서드
+  async resolve(requirements: Requirement[]): Promise<ResolutionResult>;
+
+  // 내부 메서드
+  private addRequirement(state: ResolutionState, requirement: Requirement): void;
+  private backtrack(state: ResolutionState): boolean;
+  private selectNextIdentifier(state: ResolutionState): string | null;
+  private async findCandidates(identifier: string, state: ResolutionState): Promise<Candidate[]>;
+}
+```
+
+### ResolutionResult
+
+```typescript
+interface ResolutionResult {
+  success: boolean;
+  resolutions: Map<string, Candidate>;  // 해결된 패키지들
+  conflicts?: ConflictInfo[];           // 충돌 정보
+  backtrackCount: number;               // 백트래킹 횟수
+}
+```
+
+### ResolverConfig
+
+```typescript
+interface ResolverConfig {
+  maxBacktracks?: number;  // 최대 백트래킹 횟수 (기본: 100)
+  maxRounds?: number;      // 최대 라운드 수 (기본: 2000000)
+}
+```
+
+### 사용 예시
+
+```typescript
+import { BacktrackingResolver, resolveDependencies } from './pip-backtracking-resolver';
+
+// 간편 함수 사용
+const result = await resolveDependencies(
+  ['flask>=2.0', 'requests', 'numpy>=1.20'],
+  {
+    pythonVersion: '3.11',
+    targetOS: 'linux',
+    architecture: 'x86_64',
+  }
+);
+
+if (result.success) {
+  console.log('해결된 패키지:', [...result.resolutions.entries()]);
+} else {
+  console.log('충돌:', result.conflicts);
+}
+```
+
+---
+
+## pip 후보 평가기 (`pip-candidate.ts`)
+
+### CandidateEvaluator
+
+wheel/sdist 후보를 평가하고 최적 파일을 선택하는 클래스
+
+```typescript
+class CandidateEvaluator {
+  constructor(config: CandidateEvaluatorConfig);
+
+  // 후보 적용 가능 여부 검사
+  isApplicable(candidate: InstallationCandidate): boolean;
+
+  // 정렬 키 계산
+  getSortingKey(candidate: InstallationCandidate): CandidateSortingKey;
+
+  // 적용 가능한 후보 필터링
+  getApplicableCandidates(candidates: InstallationCandidate[]): InstallationCandidate[];
+
+  // 최적 후보 계산
+  computeBestCandidate(candidates: InstallationCandidate[]): BestCandidateResult;
+}
+```
+
+### CandidateSortingKey
+
+정렬 우선순위 (pip 공식 구현과 동일)
+
+```typescript
+interface CandidateSortingKey {
+  hasAllowedHash: boolean;  // 1. 해시 일치
+  isYanked: boolean;        // 2. 철회 여부 (false가 좋음)
+  binaryPreference: number; // 3. wheel > sdist
+  version: string;          // 4. 버전 (높을수록 좋음)
+  tagPriority?: number;     // 5. 태그 우선순위 (낮을수록 좋음)
+  buildTag?: number;        // 6. 빌드 번호
+}
+```
+
+### InstallationCandidate
+
+```typescript
+interface InstallationCandidate {
+  name: string;
+  version: string;
+  url: string;
+  filename: string;
+  isWheel: boolean;
+  requiresPython?: string;
+  yanked?: boolean;
+  digests?: { sha256?: string };
+}
+```
+
+---
+
+## pip Provider (`pip-provider.ts`)
+
+resolvelib 스타일 Provider 인터페이스 구현
+
+### PipProvider
+
+```typescript
+class PipProvider {
+  constructor(config: ProviderConfig);
+
+  // 패키지 식별자 반환
+  identify(requirement: Requirement): string;
+
+  // 요구사항 선택 축소 (백트래킹 최적화)
+  narrowRequirementSelection(
+    identifiers: Iterable<string>,
+    resolutions: Map<string, Candidate>,
+    candidates: Map<string, Iterable<Candidate>>,
+    information: Map<string, Iterable<RequirementInformation>>,
+    backtrackCauses: Iterable<RequirementInformation>
+  ): Iterable<string>;
+
+  // 우선순위 계산
+  getPreference(
+    identifier: string,
+    resolutions: Map<string, Candidate>,
+    candidates: Map<string, Iterable<Candidate>>,
+    information: Map<string, Iterable<RequirementInformation>>,
+    backtrackCauses: Iterable<RequirementInformation>
+  ): Preference;
+
+  // 후보 검색
+  async findMatches(
+    identifier: string,
+    requirements: Map<string, Iterable<Requirement>>,
+    incompatibilities: Map<string, Iterable<Candidate>>
+  ): Promise<Iterable<Candidate>>;
+
+  // 후보가 요구사항을 만족하는지 검사
+  isSatisfiedBy(requirement: Requirement, candidate: Candidate): boolean;
+
+  // 의존성 조회
+  async getDependencies(candidate: Candidate): Promise<Requirement[]>;
+}
+```
+
+### ProviderConfig
+
+```typescript
+interface ProviderConfig {
+  pythonVersion: string;        // 예: '3.11'
+  targetOS: string;             // 예: 'linux'
+  architecture: string;         // 예: 'x86_64'
+  allowPrereleases?: boolean;   // 사전 릴리스 허용
+}
+```
+
+---
+
+## pip 태그 (`pip-tags.ts`)
+
+PEP 425 호환 태그 생성 및 매칭
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `getSupportedTags` | pythonVersion, os, arch | PlatformTag[] | 지원 태그 목록 생성 |
+| `generateCompatibleTags` | config: TargetPythonConfig | PlatformTag[] | 호환 태그 생성 |
+| `isTagCompatible` | tag: PlatformTag, supportedTags: PlatformTag[] | boolean | 태그 호환성 검사 |
+| `getTagPriority` | tag: PlatformTag, supportedTags: PlatformTag[] | number | 태그 우선순위 반환 |
+| `parseTag` | tagString: string | PlatformTag | 태그 문자열 파싱 |
+
+### PlatformTag
+
+```typescript
+interface PlatformTag {
+  python: string;    // 예: 'cp311', 'py3'
+  abi: string;       // 예: 'cp311', 'abi3', 'none'
+  platform: string;  // 예: 'manylinux_2_17_x86_64', 'win_amd64'
+}
+```
+
+### 태그 우선순위 (CPython 3.11, Linux x86_64 예시)
+
+```
+1. cp311-cp311-linux_x86_64          (현재 버전 + ABI + 플랫폼)
+2. cp311-cp311-manylinux_2_17_x86_64 (manylinux)
+3. cp311-abi3-manylinux_2_17_x86_64  (stable ABI)
+4. cp311-none-manylinux_2_17_x86_64  (ABI 무관)
+5. cp310-cp310-manylinux_2_17_x86_64 (이전 버전)
+...
+N. py3-none-any                       (순수 Python)
+```
+
+### 사용 예시
+
+```typescript
+import { getSupportedTags, isTagCompatible, parseTag } from './pip-tags';
+
+// 지원 태그 생성
+const tags = getSupportedTags('3.11', 'linux', 'x86_64');
+
+// 태그 호환성 검사
+const wheelTag = parseTag('cp311-cp311-manylinux_2_17_x86_64');
+const compatible = isTagCompatible(wheelTag, tags); // true
+```
+
+---
+
+## pip Wheel 유틸리티 (`pip-wheel.ts`)
+
+Wheel 파일명 파싱 및 선택
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `parseWheelFilename` | filename: string | WheelInfo \| null | wheel 파일명 파싱 |
+| `isWheelFile` | filename: string | boolean | wheel 파일 여부 확인 |
+| `isSourceDist` | filename: string | boolean | sdist 여부 확인 |
+| `isWheelSupported` | wheelInfo: WheelInfo, supportedTags: PlatformTag[] | boolean | wheel 호환성 검사 |
+| `selectBestWheel` | wheels: WheelInfo[], supportedTags: PlatformTag[] | WheelInfo \| null | 최적 wheel 선택 |
+| `filterCompatibleWheels` | wheels: WheelInfo[], supportedTags: PlatformTag[] | WheelInfo[] | 호환 wheel 필터링 |
+| `getWheelSupportIndex` | wheel: WheelInfo, supportedTags: PlatformTag[] | number | wheel 우선순위 인덱스 |
+
+### WheelInfo
+
+```typescript
+interface WheelInfo {
+  name: string;           // 패키지명 (정규화됨)
+  version: string;        // 버전
+  buildTag?: string;      // 빌드 태그
+  pythonTags: string[];   // Python 태그들
+  abiTags: string[];      // ABI 태그들
+  platformTags: string[]; // 플랫폼 태그들
+  filename: string;       // 원본 파일명
+}
+```
+
+### Wheel 파일명 형식
+
+```
+{distribution}-{version}(-{build tag})?-{python tag}-{abi tag}-{platform tag}.whl
+
+예시:
+- numpy-1.26.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+- requests-2.31.0-py3-none-any.whl
+```
+
+### 사용 예시
+
+```typescript
+import { parseWheelFilename, selectBestWheel, getSupportedTags } from './pip-wheel';
+
+const wheelInfo = parseWheelFilename('numpy-1.26.0-cp311-cp311-manylinux_2_17_x86_64.whl');
+// {
+//   name: 'numpy',
+//   version: '1.26.0',
+//   pythonTags: ['cp311'],
+//   abiTags: ['cp311'],
+//   platformTags: ['manylinux_2_17_x86_64'],
+//   filename: 'numpy-1.26.0-cp311-cp311-manylinux_2_17_x86_64.whl'
+// }
+
+// 여러 wheel 중 최적 선택
+const wheels = [...];
+const supportedTags = getSupportedTags('3.11', 'linux', 'x86_64');
+const best = selectBestWheel(wheels, supportedTags);
+```
+
+---
+
+## Conda 캐시 (`conda-cache.ts`)
+
+repodata.json 캐싱 및 조회 시스템
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `fetchRepodata` | channel, subdir, options? | Promise<CacheResult> | repodata 가져오기 (캐시 지원) |
+| `isCacheValid` | cachePath: string, maxAge: number | Promise<boolean> | 캐시 유효성 검사 |
+| `clearCache` | channel?, subdir? | Promise<void> | 캐시 삭제 |
+| `getCacheStats` | - | Promise<CacheStats> | 캐시 통계 조회 |
+| `pruneExpiredCache` | maxAge: number | Promise<number> | 만료 캐시 정리 |
+
+### CacheResult
+
+```typescript
+interface CacheResult {
+  data: RepoData;        // repodata 내용
+  fromCache: boolean;    // 캐시에서 로드 여부
+  etag?: string;         // HTTP ETag
+  lastModified?: string; // 마지막 수정 시간
+}
+```
+
+### FetchRepodataOptions
+
+```typescript
+interface FetchRepodataOptions {
+  maxAge?: number;           // 캐시 최대 수명 (ms)
+  forceRefresh?: boolean;    // 강제 새로고침
+  preferZstd?: boolean;      // zstd 압축 우선 사용
+}
+```
+
+### 캐시 위치
+
+```
+~/.depssmuggler/cache/conda/
+├── conda-forge/
+│   ├── linux-64/
+│   │   ├── repodata.json
+│   │   └── repodata.meta.json
+│   └── osx-arm64/
+│       └── ...
+└── main/
+    └── ...
+```
+
+---
+
+## Conda MatchSpec (`conda-matchspec.ts`)
+
+Conda 패키지 스펙 파싱 및 매칭
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `parseMatchSpec` | spec: string | MatchSpec | MatchSpec 문자열 파싱 |
+| `matchesSpec` | package: RepoDataPackage, spec: MatchSpec | boolean | 패키지가 스펙에 일치하는지 검사 |
+| `matchesVersionSpec` | version: string, versionSpec: string | boolean | 버전 스펙 일치 검사 |
+| `matchesBuildSpec` | build: string, buildSpec: string | boolean | 빌드 스펙 일치 검사 |
+| `compareCondaVersions` | a: string, b: string | number | Conda 버전 비교 |
+
+### MatchSpec
+
+```typescript
+interface MatchSpec {
+  name: string;
+  version?: string;      // 버전 제약 (예: '>=1.0,<2.0')
+  build?: string;        // 빌드 패턴 (예: 'py312*')
+  channel?: string;      // 채널 (예: 'conda-forge')
+  subdir?: string;       // subdir (예: 'linux-64')
+  namespace?: string;    // 네임스페이스
+}
+```
+
+### 버전 스펙 문법
+
+```
+>=1.0          # 1.0 이상
+<2.0           # 2.0 미만
+>=1.0,<2.0     # 1.0 이상 2.0 미만
+1.0.*          # 1.0.x 와일드카드
+1.0|2.0        # 1.0 또는 2.0
+!=1.5          # 1.5 제외
+```
+
+### 사용 예시
+
+```typescript
+import { parseMatchSpec, matchesSpec } from './conda-matchspec';
+
+const spec = parseMatchSpec('numpy>=1.20,<2.0 py312*');
+// { name: 'numpy', version: '>=1.20,<2.0', build: 'py312*' }
+
+const pkg = { name: 'numpy', version: '1.26.0', build: 'py312h8753938_0', ... };
+const matches = matchesSpec(pkg, spec); // true
+```
+
+---
+
+## Maven 스킵/캐시 관리 (`maven-skipper.ts`)
+
+Maven 의존성 해결 최적화를 위한 스킵 로직 및 캐시
+
+### DependencyResolutionSkipper
+
+```typescript
+class DependencyResolutionSkipper {
+  // 의존성 스킵 여부 결정
+  shouldSkip(coordinate: MavenCoordinate, context: DependencyProcessingContext): SkipResult;
+
+  // 스킵 이유 조회
+  getSkipReason(coordinate: MavenCoordinate): string | null;
+}
+```
+
+### SkipResult
+
+```typescript
+interface SkipResult {
+  skip: boolean;
+  reason?: 'already_resolved' | 'excluded' | 'optional' | 'test_scope' | 'system_scope';
+  resolvedVersion?: string;  // 이미 해결된 버전
+}
+```
+
+### CoordinateManager
+
+좌표 관리 및 버전 충돌 처리
+
+```typescript
+class CoordinateManager {
+  // 좌표 등록
+  register(coordinate: MavenCoordinate, depth: number): void;
+
+  // 충돌 확인
+  hasConflict(coordinate: MavenCoordinate): boolean;
+
+  // 선택된 버전 조회 (Nearest wins)
+  getSelectedVersion(groupId: string, artifactId: string): string | null;
+}
+```
+
+### CacheManager
+
+POM 캐시 관리
+
+```typescript
+class CacheManager {
+  // POM 캐시 조회
+  getPom(coordinate: MavenCoordinate): PomCacheEntry | null;
+
+  // POM 캐시 저장
+  setPom(coordinate: MavenCoordinate, pom: PomProject): void;
+
+  // 해결된 의존성 캐시
+  getResolved(coordinate: MavenCoordinate): ResolvedDependencyNode[] | null;
+  setResolved(coordinate: MavenCoordinate, deps: ResolvedDependencyNode[]): void;
+}
+```
+
+---
+
 ## 관련 문서
 - [아키텍처 개요](./architecture-overview.md)
 - [Downloaders 문서](./downloaders.md)
 - [Resolvers 문서](./resolvers.md)
+- [pip 의존성 해결 알고리즘](./pip-dependency-resolution.md)
+- [conda 의존성 해결 알고리즘](./conda-dependency-resolution.md)
+- [Maven 의존성 해결 알고리즘](./maven-dependency-resolution.md)
+- [npm 의존성 해결 알고리즘](./npm-dependency-resolution.md)

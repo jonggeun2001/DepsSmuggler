@@ -256,6 +256,94 @@ const DEFAULT_REPOS = [
 
 ---
 
+## NpmDownloader
+
+### 개요
+- 목적: npm 패키지 검색 및 다운로드
+- 위치: `src/core/downloaders/npm.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `searchPackages` | query: string | Promise<PackageInfo[]> | npm Registry에서 패키지 검색 |
+| `getVersions` | packageName: string | Promise<string[]> | 패키지 버전 목록 조회 |
+| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
+| `downloadPackage` | name: string, version: string, destDir: string | Promise<DownloadResult> | tarball 다운로드 |
+| `downloadTarball` | url: string, destDir: string, filename: string | Promise<string> | tarball 직접 다운로드 |
+| `getDistTags` | packageName: string | Promise<Record<string, string>> | dist-tags 조회 (latest 등) |
+| `getPackageVersion` | name: string, version: string | Promise<NpmPackageVersion \| null> | 특정 버전 정보 조회 |
+| `verifyIntegrity` | filePath: string, integrity: string | Promise<boolean> | SRI 무결성 검증 |
+| `verifyShasum` | filePath: string, shasum: string | Promise<boolean> | SHA1 체크섬 검증 |
+| `clearCache` | - | void | packument 캐시 초기화 |
+
+### 내부 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `fetchPackument` | registry에서 전체 패키지 메타데이터(packument) 조회 |
+| `resolveVersion` | 버전 범위를 실제 버전으로 해결 |
+| `satisfies` | semver 범위 매칭 (^, ~, >=, <, = 등) |
+| `satisfiesCaret` | ^ 범위 매칭 |
+| `satisfiesTilde` | ~ 범위 매칭 |
+| `compareVersions` | semver 버전 비교 |
+
+### 속성
+
+| 속성 | 타입 | 설명 |
+|------|------|------|
+| `type` | PackageType | 'npm' |
+| `registryUrl` | string | npm Registry URL (기본: https://registry.npmjs.org) |
+| `searchUrl` | string | npm 검색 API URL |
+| `packumentCache` | Map<string, NpmPackument> | packument 캐시 |
+| `client` | AxiosInstance | HTTP 클라이언트 |
+
+### 버전 범위 지원
+
+```typescript
+// 지원되는 버전 범위 형식
+'^1.2.3'    // ^: 호환되는 변경 (1.x.x)
+'~1.2.3'    // ~: 패치 수준 변경 (1.2.x)
+'>=1.0.0'   // 이상
+'<2.0.0'    // 미만
+'>=1.0 <2.0' // 범위
+'1.2.3'     // 정확히 일치
+'*'         // 모든 버전
+'latest'    // 최신 버전
+```
+
+### 사용 예시
+
+```typescript
+import { getNpmDownloader } from './core/downloaders/npm';
+
+const downloader = getNpmDownloader();
+
+// 패키지 검색
+const results = await downloader.searchPackages('express');
+
+// 버전 목록 조회
+const versions = await downloader.getVersions('lodash');
+
+// 패키지 다운로드
+const result = await downloader.downloadPackage('lodash', '4.17.21', '/tmp/downloads');
+
+console.log(result.filePath);  // '/tmp/downloads/lodash-4.17.21.tgz'
+console.log(result.integrity); // 'sha512-...'
+
+// 무결성 검증
+const valid = await downloader.verifyIntegrity(result.filePath, result.integrity);
+```
+
+### 특징
+
+- **Packument 캐싱**: 전체 패키지 메타데이터 캐싱으로 중복 요청 방지
+- **SRI 검증**: Subresource Integrity 해시 검증 지원
+- **semver 호환**: npm의 버전 범위 문법 지원 (^, ~, >=, < 등)
+- **dist-tags**: latest, next, beta 등 태그 지원
+
+---
+
 ## DockerDownloader
 
 ### 개요
@@ -315,3 +403,4 @@ interface IDownloader {
 - [아키텍처 개요](./architecture-overview.md)
 - [Resolver 문서](./resolvers.md)
 - [Shared Utilities 문서](./shared-utilities.md)
+- [npm 의존성 해결 알고리즘](./npm-dependency-resolution.md)
