@@ -16,6 +16,8 @@ import {
   Popconfirm,
   Spin,
   Alert,
+  Tag,
+  Divider,
 } from 'antd';
 import {
   SaveOutlined,
@@ -48,6 +50,7 @@ const SettingsPage: React.FC = () => {
     languageVersions,
     defaultTargetOS,
     defaultArchitecture,
+    condaChannel,
     updateSettings,
     resetSettings,
   } = useSettingsStore();
@@ -173,6 +176,7 @@ const SettingsPage: React.FC = () => {
       languageVersions,
       defaultTargetOS,
       defaultArchitecture,
+      condaChannel,
     });
   }, [
     form,
@@ -192,6 +196,7 @@ const SettingsPage: React.FC = () => {
     languageVersions,
     defaultTargetOS,
     defaultArchitecture,
+    condaChannel,
   ]);
 
   // 저장
@@ -303,34 +308,92 @@ const SettingsPage: React.FC = () => {
               <Select.Option value="16">Node.js 16 (EOL)</Select.Option>
             </Select>
           </Form.Item>
+
+          <Divider />
+
+          <Form.Item
+            name="condaChannel"
+            label="Conda 채널"
+            tooltip="Conda 패키지 검색 시 사용할 채널"
+          >
+            <Select>
+              <Select.Option value="conda-forge">
+                <Space>
+                  <span>conda-forge</span>
+                  <Tag color="green">가장 많은 패키지, 커뮤니티 관리</Tag>
+                </Space>
+              </Select.Option>
+              <Select.Option value="anaconda">
+                <Space>
+                  <span>anaconda</span>
+                  <Tag color="blue">Anaconda 공식 채널</Tag>
+                </Space>
+              </Select.Option>
+              <Select.Option value="bioconda">
+                <Space>
+                  <span>bioconda</span>
+                  <Tag color="purple">생명과학/바이오인포매틱스</Tag>
+                </Space>
+              </Select.Option>
+              <Select.Option value="pytorch">
+                <Space>
+                  <span>pytorch</span>
+                  <Tag color="orange">PyTorch 공식 채널</Tag>
+                </Space>
+              </Select.Option>
+            </Select>
+          </Form.Item>
         </Card>
 
-        {/* 기본 OS/아키텍처 설정 */}
-        <Card title="기본 OS/아키텍처" style={{ marginBottom: 24 }}>
-          <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-            라이브러리 패키지 다운로드 시 기본으로 선택될 대상 환경입니다.
-          </Text>
+        {/* 라이브러리 대상 환경 설정 */}
+        <Card
+          title="라이브러리 대상 환경 (폐쇄망 OS)"
+          style={{ marginBottom: 24 }}
+          extra={<Tag color="blue">pip/conda/Maven/npm</Tag>}
+        >
+          <Alert
+            message="폐쇄망의 운영체제에 맞게 설정하세요"
+            description="이 설정은 라이브러리 패키지(pip 휠, conda, Maven JAR, npm)에 적용됩니다.
+            폐쇄망에 설치된 OS와 CPU 아키텍처에 맞는 바이너리를 다운로드합니다."
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
 
           <Form.Item
             name="defaultTargetOS"
-            label="대상 운영체제"
-            tooltip="pip/conda 휠 파일 등 OS별 바이너리 패키지에 적용됩니다"
+            label="폐쇄망 운영체제"
+            tooltip="폐쇄망에 설치된 운영체제를 선택하세요. pip/conda 휠 파일의 플랫폼 태그에 적용됩니다."
           >
             <Select>
-              <Select.Option value="any">모든 OS (any)</Select.Option>
-              <Select.Option value="windows">Windows</Select.Option>
-              <Select.Option value="macos">macOS</Select.Option>
-              <Select.Option value="linux">Linux</Select.Option>
+              <Select.Option value="windows">
+                <Space>
+                  <span>Windows</span>
+                  <Tag color="cyan">win_amd64, win32</Tag>
+                </Space>
+              </Select.Option>
+              <Select.Option value="macos">
+                <Space>
+                  <span>macOS (Darwin)</span>
+                  <Tag color="purple">macosx</Tag>
+                </Space>
+              </Select.Option>
+              <Select.Option value="linux">
+                <Space>
+                  <span>Linux</span>
+                  <Tag color="green">manylinux</Tag>
+                </Space>
+              </Select.Option>
             </Select>
           </Form.Item>
 
           <Form.Item
             name="defaultArchitecture"
-            label="대상 아키텍처"
-            tooltip="패키지 검색 시 기본 선택되는 CPU 아키텍처"
+            label="폐쇄망 CPU 아키텍처"
+            tooltip="폐쇄망 시스템의 CPU 아키텍처를 선택하세요"
           >
             <Select>
-              <Select.Option value="x86_64">x86_64 (64비트 Intel/AMD)</Select.Option>
+              <Select.Option value="x86_64">x86_64 (64비트 Intel/AMD - 가장 일반적)</Select.Option>
               <Select.Option value="amd64">amd64 (x86_64와 동일)</Select.Option>
               <Select.Option value="arm64">ARM64 (Apple Silicon, AWS Graviton)</Select.Option>
               <Select.Option value="aarch64">aarch64 (arm64와 동일)</Select.Option>
@@ -338,12 +401,17 @@ const SettingsPage: React.FC = () => {
             </Select>
           </Form.Item>
 
-          <Alert
-            message="적용 범위"
-            description="이 설정은 라이브러리 패키지(pip, conda, Maven, Gradle, npm)에만 적용됩니다. OS 패키지(YUM, APT, APK)와 컨테이너 이미지(Docker)는 위자드에서 직접 선택해야 합니다."
-            type="info"
-            showIcon
-          />
+          <Divider style={{ margin: '16px 0' }} />
+
+          <Text type="secondary" style={{ display: 'block' }}>
+            <strong>참고:</strong> OS 패키지(YUM, APT, APK)는 위자드에서 패키지 타입으로 직접 선택합니다.
+            <br />
+            • YUM → RHEL/CentOS/Fedora
+            <br />
+            • APT → Ubuntu/Debian
+            <br />
+            • APK → Alpine Linux
+          </Text>
         </Card>
 
         {/* 의존성 설정 */}

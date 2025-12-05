@@ -294,16 +294,26 @@ async function getMavenVersions(packageName: string): Promise<string[]> {
 }
 
 // 패키지 검색 핸들러 (실제 API 호출)
-ipcMain.handle('search:packages', async (_, type: string, query: string) => {
-  console.log(`Searching ${type} packages: ${query}`);
+ipcMain.handle('search:packages', async (_, type: string, query: string, options?: { channel?: string }) => {
+  console.log(`Searching ${type} packages: ${query}`, options);
 
   try {
     let results: Array<{ name: string; version: string; description: string }> = [];
 
     switch (type) {
       case 'pip':
-      case 'conda':
         results = await searchPyPI(query);
+        break;
+      case 'conda':
+        // conda는 실제 Anaconda API 사용
+        const condaDownloader = getCondaDownloader();
+        const channel = (options?.channel || 'conda-forge') as 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch' | 'all';
+        const condaResults = await condaDownloader.searchPackages(query, channel);
+        results = condaResults.map(pkg => ({
+          name: pkg.name,
+          version: pkg.version,
+          description: pkg.metadata?.description || '',
+        }));
         break;
       case 'maven':
         results = await searchMaven(query);
@@ -321,16 +331,21 @@ ipcMain.handle('search:packages', async (_, type: string, query: string) => {
 });
 
 // 패키지 버전 목록 조회 핸들러
-ipcMain.handle('search:versions', async (_, type: string, packageName: string) => {
-  console.log(`Getting versions for ${type} package: ${packageName}`);
+ipcMain.handle('search:versions', async (_, type: string, packageName: string, options?: { channel?: string }) => {
+  console.log(`Getting versions for ${type} package: ${packageName}`, options);
 
   try {
     let versions: string[] = [];
 
     switch (type) {
       case 'pip':
-      case 'conda':
         versions = await getPyPIVersions(packageName);
+        break;
+      case 'conda':
+        // conda는 실제 Anaconda API 사용
+        const condaDownloaderForVersions = getCondaDownloader();
+        const channel = (options?.channel || 'conda-forge') as 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch' | 'all';
+        versions = await condaDownloaderForVersions.getVersions(packageName, channel);
         break;
       case 'maven':
         versions = await getMavenVersions(packageName);
@@ -354,14 +369,15 @@ const suggestionCache = new Map<string, { results: string[]; timestamp: number }
 const CACHE_TTL = 60000; // 1분
 
 // 패키지 자동완성 제안
-ipcMain.handle('search:suggest', async (_, type: string, query: string) => {
+ipcMain.handle('search:suggest', async (_, type: string, query: string, options?: { channel?: string }) => {
   // 빈 쿼리면 빈 배열 반환 (2자 미만)
   if (!query || query.trim().length < 2) {
     return [];
   }
 
-  // 캐시 키 생성
-  const cacheKey = `${type}:${query.toLowerCase()}`;
+  // 캐시 키 생성 (conda의 경우 채널도 포함)
+  const channelKey = type === 'conda' ? `:${options?.channel || 'conda-forge'}` : '';
+  const cacheKey = `${type}${channelKey}:${query.toLowerCase()}`;
 
   // 캐시 확인
   const cached = suggestionCache.get(cacheKey);
@@ -389,7 +405,8 @@ ipcMain.handle('search:suggest', async (_, type: string, query: string) => {
         searchPromise = (downloader as PipDownloader).searchPackages(query);
         break;
       case 'conda':
-        searchPromise = (downloader as CondaDownloader).searchPackages(query, 'conda-forge');
+        const condaChannel = (options?.channel || 'conda-forge') as 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch' | 'all';
+        searchPromise = (downloader as CondaDownloader).searchPackages(query, condaChannel);
         break;
       case 'maven':
         searchPromise = (downloader as MavenDownloader).searchPackages(query);
@@ -447,7 +464,7 @@ let downloadPaused = false;
 // 다운로드 시작 핸들러
 ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage[]; options: DownloadOptions }) => {
   const { packages, options } = data;
-  const { outputDir, outputFormat, includeScripts } = options;
+  const { outputDir, outputFormat, includeScripts, targetOS, architecture, includeDependencies, pythonVersion } = options;
 
   console.log(`Starting download: ${packages.length} packages to ${outputDir}`);
 
@@ -462,22 +479,32 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
 
   // 의존성 해결
   let allPackages: DownloadPackage[] = packages;
-  try {
-    const resolved = await resolveAllDependencies(packages);
-    allPackages = resolved.allPackages;
 
-    console.log(`의존성 해결 완료: ${packages.length}개 → ${allPackages.length}개 패키지`);
+  // includeDependencies가 false면 의존성 해결 건너뛰기
+  if (includeDependencies === false) {
+    console.log('의존성 해결 건너뛰기 (설정에서 비활성화됨)');
+  } else {
+    try {
+      const resolved = await resolveAllDependencies(packages, {
+        targetOS: targetOS || 'any',
+        architecture: architecture || 'x86_64',
+        pythonVersion,
+      });
+      allPackages = resolved.allPackages;
 
-    // 의존성 해결 완료 이벤트 전송
-    mainWindow?.webContents.send('download:deps-resolved', {
-      originalPackages: packages,
-      allPackages: allPackages,
-      dependencyTrees: resolved.dependencyTrees,
-      failedPackages: resolved.failedPackages,
-    });
-  } catch (error) {
-    console.warn('의존성 해결 실패, 원본 패키지만 다운로드합니다:', error);
-    // 실패 시 원본 패키지만 사용
+      console.log(`의존성 해결 완료: ${packages.length}개 → ${allPackages.length}개 패키지`);
+
+      // 의존성 해결 완료 이벤트 전송
+      mainWindow?.webContents.send('download:deps-resolved', {
+        originalPackages: packages,
+        allPackages: allPackages,
+        dependencyTrees: resolved.dependencyTrees,
+        failedPackages: resolved.failedPackages,
+      });
+    } catch (error) {
+      console.warn('의존성 해결 실패, 원본 패키지만 다운로드합니다:', error);
+      // 실패 시 원본 패키지만 사용
+    }
   }
 
   // 다운로드 시작 상태 전송
@@ -521,7 +548,13 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
 
       // 패키지 타입에 따라 다운로드 URL 가져오기
       if (pkg.type === 'pip' || pkg.type === 'conda') {
-        downloadUrl = await getPyPIDownloadUrl(pkg.name, pkg.version, pkg.architecture);
+        downloadUrl = await getPyPIDownloadUrl(
+          pkg.name,
+          pkg.version,
+          architecture || pkg.architecture,
+          targetOS,
+          pythonVersion
+        );
       }
       // TODO: Maven, npm 등 다른 타입 지원
 
@@ -594,10 +627,9 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
       }
     }
 
-    // 완료 이벤트 전송
-    mainWindow?.webContents.send('download:complete', {
+    // 전체 완료 이벤트 전송
+    mainWindow?.webContents.send('download:all-complete', {
       success: true,
-      results,
       outputPath: outputDir,
     });
   }

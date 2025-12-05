@@ -37,6 +37,7 @@ import {
   NodeIndexOutlined,
 } from '@ant-design/icons';
 import { useCartStore, CartItem, PackageType } from '../stores/cartStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { DependencyTree } from '../components';
 import { DependencyResolutionResult, DependencyNode, PackageType as CorePackageType } from '../../types';
 
@@ -57,7 +58,9 @@ const typeColors: Record<PackageType, string> = {
   docker: 'geekblue',
 };
 
-// 패키지 타입별 예상 크기 (MB) - Mock
+// 패키지 타입별 예상 크기 (MB)
+// 참고: 실제 패키지 크기가 아닌 타입별 평균 추정치입니다.
+// 실제 크기는 다운로드 시 메타데이터에서 확인됩니다.
 const estimatedSizePerPackage: Record<PackageType, number> = {
   pip: 2.5,
   conda: 5.0,
@@ -86,6 +89,7 @@ const deliveryMethodOptions = [
 const CartPage: React.FC = () => {
   const navigate = useNavigate();
   const { items, removeItem, clearCart, addItem } = useCartStore();
+  const settings = useSettingsStore();
 
   // 모달 상태
   const [textInputModalOpen, setTextInputModalOpen] = useState(false);
@@ -136,15 +140,19 @@ const CartPage: React.FC = () => {
       };
 
       // Electron 환경 또는 Vite dev 서버 환경에 따라 API 호출
+      const resolverOptions = {
+        targetOS: settings.defaultTargetOS || 'any',
+      };
+
       if (window.electronAPI?.dependency?.resolve) {
         // Electron 환경
-        result = await window.electronAPI.dependency.resolve(packages);
+        result = await window.electronAPI.dependency.resolve(packages, resolverOptions);
       } else {
         // Vite dev 서버 환경
         const response = await fetch('/api/dependency/resolve', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(packages),
+          body: JSON.stringify({ packages, options: resolverOptions }),
         });
         if (!response.ok) {
           throw new Error(`의존성 해결 실패: ${response.statusText}`);
@@ -228,7 +236,7 @@ const CartPage: React.FC = () => {
     } finally {
       setLoadingDeps(false);
     }
-  }, [items, estimatedSize]);
+  }, [items, estimatedSize, settings.defaultTargetOS]);
 
   // 의존성 트리 보기 핸들러
   const handleShowDependencyTree = useCallback(async () => {

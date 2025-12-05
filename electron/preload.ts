@@ -55,6 +55,13 @@ const electronAPI = {
       ipcRenderer.on('download:deps-resolved', handler);
       return () => ipcRenderer.removeListener('download:deps-resolved', handler);
     },
+    // 전체 다운로드 완료 이벤트
+    onAllComplete: (callback: (data: { success: boolean; outputPath: string }) => void): () => void => {
+      const handler = (_event: Electron.IpcRendererEvent, data: unknown) =>
+        callback(data as { success: boolean; outputPath: string });
+      ipcRenderer.on('download:all-complete', handler);
+      return () => ipcRenderer.removeListener('download:all-complete', handler);
+    },
   },
 
   // 설정 관련 (향후 구현)
@@ -84,21 +91,23 @@ const electronAPI = {
   search: {
     packages: (
       type: string,
-      query: string
+      query: string,
+      options?: { channel?: string }
     ): Promise<{
       results: Array<{
         name: string;
         version: string;
         description?: string;
       }>;
-    }> => ipcRenderer.invoke('search:packages', type, query),
-    suggest: (type: string, query: string): Promise<string[]> =>
-      ipcRenderer.invoke('search:suggest', type, query),
+    }> => ipcRenderer.invoke('search:packages', type, query, options),
+    suggest: (type: string, query: string, options?: { channel?: string }): Promise<string[]> =>
+      ipcRenderer.invoke('search:suggest', type, query, options),
     versions: (
       type: string,
-      packageName: string
+      packageName: string,
+      options?: { channel?: string }
     ): Promise<{ versions: string[] }> =>
-      ipcRenderer.invoke('search:versions', type, packageName),
+      ipcRenderer.invoke('search:versions', type, packageName, options),
   },
 
   // 의존성 해결 관련

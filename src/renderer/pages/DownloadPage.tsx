@@ -40,6 +40,8 @@ import {
   ClockCircleOutlined,
   InfoCircleOutlined,
   WarningOutlined,
+  BranchesOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import { useCartStore } from '../stores/cartStore';
 import {
@@ -98,6 +100,7 @@ const DownloadPage: React.FC = () => {
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
+  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions } = useSettingsStore();
   const {
     items: downloadItems,
     isDownloading,
@@ -130,6 +133,8 @@ const DownloadPage: React.FC = () => {
   const [errorItem, setErrorItem] = useState<DownloadItem | null>(null);
   const downloadCancelledRef = useRef(false);
   const downloadPausedRef = useRef(false);
+  // 다운로드 아이템 목록을 ref로 유지 (SSE 이벤트 핸들러에서 최신 상태 참조용)
+  const downloadItemsRef = useRef<DownloadItem[]>([]);
 
   // 초기화
   useEffect(() => {
@@ -154,9 +159,11 @@ const DownloadPage: React.FC = () => {
     }
   }, [cartItems, downloadItems.length, setItems, outputFormat, setOutputFormat, defaultOutputFormat, clearLogs]);
 
-  // IPC 이벤트 리스너 설정
+  // IPC 이벤트 리스너 설정 (프로덕션 Electron 환경에서만)
   useEffect(() => {
-    if (!window.electronAPI?.download) return;
+    // 개발 환경에서는 HTTP/SSE를 사용하므로 IPC 리스너 불필요
+    const isDevelopment = import.meta.env.DEV;
+    if (isDevelopment || !window.electronAPI?.download) return;
 
     const unsubProgress = window.electronAPI.download.onProgress((progress: unknown) => {
       const p = progress as { id: string; percent: number; downloaded: number; total: number; speed: number };
@@ -171,17 +178,24 @@ const DownloadPage: React.FC = () => {
     const unsubComplete = window.electronAPI.download.onComplete((result: unknown) => {
       const r = result as { id: string };
       updateItem(r.id, { status: 'completed', progress: 100 });
-      addLog('success', `다운로드 완료: ${downloadItems.find(i => i.id === r.id)?.name}`);
+      // ref를 사용하여 최신 아이템 목록에서 조회 (클로저 문제 방지)
+      const completedItem = downloadItemsRef.current.find(i => i.id === r.id);
+      const displayName = completedItem
+        ? `${completedItem.name} (v${completedItem.version})`
+        : r.id;
+      addLog('success', `다운로드 완료: ${displayName}`);
     });
 
     const unsubError = window.electronAPI.download.onError((error: unknown) => {
       const e = error as { id: string; message: string };
-      const item = downloadItems.find(i => i.id === e.id);
+      // ref를 사용하여 최신 아이템 목록에서 조회 (클로저 문제 방지)
+      const item = downloadItemsRef.current.find(i => i.id === e.id);
       if (item) {
         updateItem(e.id, { status: 'failed', error: e.message });
         setErrorItem({ ...item, error: e.message });
         setErrorModalOpen(true);
-        addLog('error', `다운로드 실패: ${item.name}`, e.message);
+        const displayName = `${item.name} (v${item.version})`;
+        addLog('error', `다운로드 실패: ${displayName}`, e.message);
       }
     });
 
@@ -196,22 +210,64 @@ const DownloadPage: React.FC = () => {
 
     // 의존성 해결 완료 리스너
     const unsubDepsResolved = window.electronAPI.download.onDepsResolved?.((data) => {
-      const originalCount = data.originalPackages.length;
-      const totalCount = data.allPackages.length;
+      interface DependencyNodeData {
+        package: { name: string; version: string; type?: string };
+        dependencies: DependencyNodeData[];
+      }
+      interface DependencyTreeData {
+        root: DependencyNodeData;
+      }
+
+      const originalPackages = data.originalPackages as Array<{ id: string; name: string; version: string; type: string }>;
+      const allPackages = data.allPackages as Array<{ id: string; name: string; version: string; type: string }>;
+      const dependencyTrees = data.dependencyTrees as DependencyTreeData[] | undefined;
+      const failedPackages = data.failedPackages as Array<{ name: string; version: string; error: string }> | undefined;
+
+      const originalCount = originalPackages.length;
+      const totalCount = allPackages.length;
 
       addLog(
         'info',
         `의존성 해결 완료: ${originalCount}개 → ${totalCount}개 패키지`
       );
 
+      // 의존성 관계 맵 생성: packageId -> { parentId, parentName }
+      const dependencyMap = new Map<string, { parentId: string; parentName: string }>();
+      const originalIds = new Set(originalPackages.map(p => p.id));
+
+      // 의존성 트리에서 관계 추출
+      if (dependencyTrees) {
+        dependencyTrees.forEach((tree) => {
+          const rootPkg = tree.root.package;
+          const rootId = `${rootPkg.type || 'pip'}-${rootPkg.name}-${rootPkg.version}`;
+          const rootName = rootPkg.name;
+
+          // 재귀적으로 의존성 노드 탐색
+          const extractDeps = (node: DependencyNodeData, parentId: string, parentName: string) => {
+            node.dependencies.forEach((dep) => {
+              const depPkg = dep.package;
+              const depId = `${depPkg.type || 'pip'}-${depPkg.name}-${depPkg.version}`;
+
+              // 원본 패키지가 아닌 경우에만 의존성으로 표시
+              if (!originalIds.has(depId)) {
+                dependencyMap.set(depId, { parentId, parentName });
+              }
+
+              // 재귀 호출 (이 의존성의 하위 의존성들)
+              extractDeps(dep, rootId, rootName);
+            });
+          };
+
+          extractDeps(tree.root, rootId, rootName);
+        });
+      }
+
       // 의존성 포함된 새로운 아이템 목록으로 업데이트
-      if (totalCount > originalCount) {
-        const newItems: DownloadItem[] = (data.allPackages as Array<{
-          id: string;
-          name: string;
-          version: string;
-          type: string;
-        }>).map((pkg) => ({
+      const newItems: DownloadItem[] = allPackages.map((pkg) => {
+        const depInfo = dependencyMap.get(pkg.id);
+        const isOriginal = originalIds.has(pkg.id);
+
+        return {
           id: pkg.id,
           name: pkg.name,
           version: pkg.version,
@@ -221,16 +277,42 @@ const DownloadPage: React.FC = () => {
           downloadedBytes: 0,
           totalBytes: 0,
           speed: 0,
-        }));
-        setItems(newItems);
-      }
+          isDependency: !isOriginal,
+          parentId: depInfo?.parentId,
+          dependencyOf: depInfo?.parentName,
+        };
+      });
+      setItems(newItems);
+      // ref도 업데이트하여 이벤트 핸들러에서 최신 아이템 참조 가능
+      downloadItemsRef.current = newItems;
 
       // 실패한 의존성 해결 경고 표시
-      if (data.failedPackages && data.failedPackages.length > 0) {
-        data.failedPackages.forEach((failed) => {
-          addLog('warn', `의존성 해결 실패: ${failed.name}@${failed.version}`, failed.error);
+      if (failedPackages && failedPackages.length > 0) {
+        failedPackages.forEach((failed) => {
+          addLog('warn', `의존성 해결 실패: ${failed.name} (v${failed.version})`, failed.error);
         });
       }
+    });
+
+    // 전체 다운로드 완료 리스너
+    const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
+      // 전체 완료 시 모든 pending/downloading 아이템 상태를 completed로 확정
+      // (타이밍 이슈로 개별 complete 이벤트가 늦게 도착해 allCompleted 조건이 충족되지 않는 문제 방지)
+      // ref를 사용하여 최신 아이템 목록 참조 (클로저 문제 방지)
+      downloadItemsRef.current.forEach((item) => {
+        if (item.status === 'downloading' || item.status === 'pending') {
+          updateItem(item.id, { status: 'completed', progress: 100 });
+        }
+      });
+
+      setIsDownloading(false);
+      setPackagingStatus('completed');
+      setPackagingProgress(100);
+      addLog('success', '다운로드 및 패키징 완료', `출력 경로: ${data.outputPath}`);
+      message.success('다운로드 및 패키징이 완료되었습니다');
+
+      // 다운로드 완료 시 장바구니 비우기
+      clearCart();
     });
 
     return () => {
@@ -239,8 +321,10 @@ const DownloadPage: React.FC = () => {
       unsubError();
       unsubStatus?.();
       unsubDepsResolved?.();
+      unsubAllComplete?.();
     };
-  }, [downloadItems, updateItem, addLog, setItems]);
+    // downloadItems 대신 downloadItemsRef를 사용하므로 dependency에서 제거
+  }, [updateItem, addLog, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, clearCart]);
 
   // 폴더 선택
   const handleSelectFolder = async () => {
@@ -280,10 +364,90 @@ const DownloadPage: React.FC = () => {
     }
   }, [startTime, isDownloading, downloadItems]);
 
+  // 출력 폴더 검사 및 삭제
+  const checkOutputPath = async (): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/download/check-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ outputDir }),
+      });
+
+      const data = await response.json();
+
+      if (!data.exists || data.fileCount === 0) {
+        return true; // 폴더가 없거나 비어있으면 바로 진행
+      }
+
+      // 기존 데이터가 있으면 사용자에게 확인
+      const formatBytes = (bytes: number) => {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+      };
+
+      return new Promise((resolve) => {
+        Modal.confirm({
+          title: '기존 데이터 발견',
+          icon: <ExclamationCircleOutlined />,
+          content: (
+            <div>
+              <p>출력 폴더에 기존 데이터가 있습니다:</p>
+              <ul style={{ margin: '8px 0', paddingLeft: 20 }}>
+                <li>파일 수: <strong>{data.fileCount}개</strong></li>
+                <li>총 크기: <strong>{formatBytes(data.totalSize)}</strong></li>
+              </ul>
+              <p style={{ marginTop: 12, color: '#ff4d4f' }}>
+                기존 데이터를 삭제하고 새로 다운로드하시겠습니까?
+              </p>
+            </div>
+          ),
+          okText: '삭제 후 진행',
+          okType: 'danger',
+          cancelText: '취소',
+          onOk: async () => {
+            try {
+              const clearResponse = await fetch('/api/download/clear-path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ outputDir }),
+              });
+
+              if (clearResponse.ok) {
+                message.success('기존 데이터 삭제 완료');
+                addLog('info', '기존 데이터 삭제', outputDir);
+                resolve(true);
+              } else {
+                message.error('데이터 삭제 실패');
+                resolve(false);
+              }
+            } catch (error) {
+              message.error('데이터 삭제 중 오류 발생');
+              resolve(false);
+            }
+          },
+          onCancel: () => {
+            resolve(false);
+          },
+        });
+      });
+    } catch (error) {
+      console.error('폴더 검사 실패:', error);
+      return true; // 검사 실패 시 그냥 진행
+    }
+  };
+
   // 다운로드 시작
   const handleStartDownload = async () => {
     if (!outputDir) {
       message.warning('출력 폴더를 선택하세요');
+      return;
+    }
+
+    // 출력 폴더 검사
+    const canProceed = await checkOutputPath();
+    if (!canProceed) {
       return;
     }
 
@@ -295,10 +459,16 @@ const DownloadPage: React.FC = () => {
 
     addLog('info', '다운로드 시작', `총 ${downloadItems.length}개 패키지`);
 
-    // 실제 Electron IPC 호출 또는 Mock 다운로드
-    if (window.electronAPI?.download?.start) {
+    // 개발 환경 감지: Vite 개발 서버가 실행 중이면 HTTP/SSE API 사용
+    const isDevelopment = import.meta.env.DEV;
+
+    // 개발 환경에서는 HTTP/SSE API 사용 (Electron, 브라우저 모두)
+    // 프로덕션에서만 Electron IPC 사용
+    if (isDevelopment || !window.electronAPI?.download?.start) {
+      await browserDownload();
+    } else {
+      // 프로덕션 Electron 환경: IPC 사용
       try {
-        // 패키지 데이터와 옵션을 전달
         const packages = cartItems.map(item => ({
           id: item.id,
           type: item.type,
@@ -310,68 +480,18 @@ const DownloadPage: React.FC = () => {
         const options = {
           outputDir,
           outputFormat,
-          includeScripts,
+          includeScripts: includeInstallScripts,
+          targetOS: defaultTargetOS,
+          architecture: defaultArchitecture,
+          includeDependencies,
+          pythonVersion: languageVersions.python,
         };
 
-        // 진행률 이벤트 리스너 설정
-        const unsubProgress = window.electronAPI.download.onProgress((data: {
-          packageId: string;
-          status: string;
-          progress: number;
-          downloadedBytes?: number;
-          totalBytes?: number;
-          speed?: number;
-          error?: string;
-        }) => {
-          const item = downloadItems.find(i => i.id === data.packageId);
-          if (item) {
-            updateItem(data.packageId, {
-              status: data.status as DownloadStatus,
-              progress: data.progress,
-              downloadedBytes: data.downloadedBytes || 0,
-              totalBytes: data.totalBytes || 0,
-              speed: data.speed || 0,
-              error: data.error,
-              endTime: data.status === 'completed' || data.status === 'failed' ? Date.now() : undefined,
-            });
-
-            if (data.status === 'downloading' && data.progress === 0) {
-              addLog('info', `다운로드 시작: ${item.name}@${item.version}`);
-            } else if (data.status === 'completed') {
-              addLog('success', `다운로드 완료: ${item.name}@${item.version}`);
-            } else if (data.status === 'failed') {
-              addLog('error', `다운로드 실패: ${item.name}@${item.version}`, data.error);
-            }
-          }
-        });
-
-        // 완료 이벤트 리스너 설정
-        const unsubComplete = window.electronAPI.download.onComplete((result: {
-          success: boolean;
-          outputPath: string;
-        }) => {
-          setIsDownloading(false);
-          setPackagingStatus('completed');
-          setPackagingProgress(100);
-          addLog('success', '다운로드 및 패키징 완료', `출력 경로: ${result.outputPath}`);
-          message.success('다운로드 및 패키징이 완료되었습니다');
-        });
-
-        // 에러 이벤트 리스너 설정
-        const unsubError = window.electronAPI.download.onError((error: { message: string }) => {
-          addLog('error', '다운로드 오류', error.message);
-        });
-
         await window.electronAPI.download.start({ packages, options });
-
-        // 리스너 정리는 컴포넌트 언마운트 시 처리
       } catch (error) {
         addLog('error', '다운로드 시작 실패', String(error));
         setIsDownloading(false);
       }
-    } else {
-      // 브라우저 환경: Vite 서버 API 호출
-      await browserDownload();
     }
   };
 
@@ -381,6 +501,118 @@ const DownloadPage: React.FC = () => {
 
     // SSE 연결로 진행률 수신
     const eventSource = new EventSource(`/api/download/events?clientId=${clientId}`);
+
+    // SSE 연결이 열릴 때까지 대기
+    await new Promise<void>((resolve, reject) => {
+      eventSource.onopen = () => {
+        addLog('info', 'SSE 연결 성공');
+        resolve();
+      };
+      eventSource.onerror = (e) => {
+        reject(new Error('SSE 연결 실패'));
+      };
+      // 타임아웃 (5초)
+      setTimeout(() => reject(new Error('SSE 연결 타임아웃')), 5000);
+    });
+
+    // 상태 이벤트 핸들러 (resolving, downloading)
+    eventSource.addEventListener('status', (event) => {
+      const data = JSON.parse(event.data) as {
+        phase: string;
+        message: string;
+      };
+
+      if (data.phase === 'resolving') {
+        addLog('info', '의존성 분석 중...');
+      } else if (data.phase === 'downloading') {
+        addLog('info', '다운로드 시작...');
+      }
+    });
+
+    // 의존성 해결 완료 이벤트 핸들러
+    eventSource.addEventListener('deps-resolved', (event) => {
+      interface DependencyNodeData {
+        package: { name: string; version: string; type?: string };
+        dependencies: DependencyNodeData[];
+      }
+      interface DependencyTreeData {
+        root: DependencyNodeData;
+      }
+
+      const data = JSON.parse(event.data) as {
+        originalPackages: Array<{ id: string; name: string; version: string; type: string }>;
+        allPackages: Array<{ id: string; name: string; version: string; type: string }>;
+        dependencyTrees: DependencyTreeData[];
+        failedPackages: Array<{ name: string; version: string; error: string }>;
+      };
+
+      const originalCount = data.originalPackages.length;
+      const totalCount = data.allPackages.length;
+
+      addLog('info', `의존성 해결 완료: ${originalCount}개 → ${totalCount}개 패키지`);
+
+      // 의존성 관계 맵 생성: packageId -> { parentId, parentName }
+      const dependencyMap = new Map<string, { parentId: string; parentName: string }>();
+      const originalIds = new Set(data.originalPackages.map(p => p.id));
+
+      // 의존성 트리에서 관계 추출
+      if (data.dependencyTrees) {
+        data.dependencyTrees.forEach((tree) => {
+          const rootPkg = tree.root.package;
+          const rootId = `${rootPkg.type || 'pip'}-${rootPkg.name}-${rootPkg.version}`;
+          const rootName = rootPkg.name;
+
+          // 재귀적으로 의존성 노드 탐색
+          const extractDeps = (node: DependencyNodeData, parentId: string, parentName: string) => {
+            node.dependencies.forEach((dep) => {
+              const depPkg = dep.package;
+              const depId = `${depPkg.type || 'pip'}-${depPkg.name}-${depPkg.version}`;
+
+              // 원본 패키지가 아닌 경우에만 의존성으로 표시
+              if (!originalIds.has(depId)) {
+                dependencyMap.set(depId, { parentId, parentName });
+              }
+
+              // 재귀 호출 (이 의존성의 하위 의존성들)
+              extractDeps(dep, rootId, rootName);
+            });
+          };
+
+          extractDeps(tree.root, rootId, rootName);
+        });
+      }
+
+      // 의존성 포함된 새로운 아이템 목록으로 업데이트
+      const newItems: DownloadItem[] = data.allPackages.map((pkg) => {
+        const depInfo = dependencyMap.get(pkg.id);
+        const isOriginal = originalIds.has(pkg.id);
+
+        return {
+          id: pkg.id,
+          name: pkg.name,
+          version: pkg.version,
+          type: pkg.type,
+          status: 'pending' as DownloadStatus,
+          progress: 0,
+          downloadedBytes: 0,
+          totalBytes: 0,
+          speed: 0,
+          isDependency: !isOriginal,
+          parentId: depInfo?.parentId,
+          dependencyOf: depInfo?.parentName,
+        };
+      });
+      setItems(newItems);
+      // ref도 업데이트하여 progress 이벤트에서 최신 아이템 참조 가능
+      downloadItemsRef.current = newItems;
+
+      // 실패한 의존성 해결 경고 표시
+      if (data.failedPackages && data.failedPackages.length > 0) {
+        data.failedPackages.forEach((failed) => {
+          addLog('warn', `의존성 해결 실패: ${failed.name} (v${failed.version})`, failed.error);
+        });
+      }
+    });
 
     eventSource.addEventListener('progress', (event) => {
       const data = JSON.parse(event.data) as {
@@ -393,25 +625,29 @@ const DownloadPage: React.FC = () => {
         error?: string;
       };
 
-      const item = downloadItems.find((i) => i.id === data.packageId);
-      if (item) {
-        updateItem(data.packageId, {
-          status: data.status as DownloadStatus,
-          progress: data.progress,
-          downloadedBytes: data.downloadedBytes || 0,
-          totalBytes: data.totalBytes || 0,
-          speed: data.speed || 0,
-          error: data.error,
-          endTime: data.status === 'completed' || data.status === 'failed' ? Date.now() : undefined,
-        });
+      updateItem(data.packageId, {
+        status: data.status as DownloadStatus,
+        progress: data.progress,
+        downloadedBytes: data.downloadedBytes || 0,
+        totalBytes: data.totalBytes || 0,
+        speed: data.speed || 0,
+        error: data.error,
+        endTime: data.status === 'completed' || data.status === 'failed' ? Date.now() : undefined,
+      });
 
-        if (data.status === 'downloading' && data.progress === 0) {
-          addLog('info', `다운로드 시작: ${item.name}@${item.version}`);
-        } else if (data.status === 'completed') {
-          addLog('success', `다운로드 완료: ${item.name}@${item.version}`);
-        } else if (data.status === 'failed') {
-          addLog('error', `다운로드 실패: ${item.name}@${item.version}`, data.error);
-        }
+      // downloadItemsRef에서 현재 패키지 정보 조회하여 사용자 친화적인 이름 표시
+      // (클로저 문제로 downloadItems 대신 ref 사용)
+      const currentItem = downloadItemsRef.current.find(item => item.id === data.packageId);
+      const displayName = currentItem
+        ? `${currentItem.name} (v${currentItem.version})`
+        : data.packageId;
+
+      if (data.status === 'downloading' && data.progress === 0) {
+        addLog('info', `다운로드 시작: ${displayName}`);
+      } else if (data.status === 'completed') {
+        addLog('success', `다운로드 완료: ${displayName}`);
+      } else if (data.status === 'failed') {
+        addLog('error', `다운로드 실패: ${displayName}`, data.error);
       }
     });
 
@@ -421,16 +657,31 @@ const DownloadPage: React.FC = () => {
         outputPath: string;
       };
 
+      // 전체 완료 시 모든 pending/downloading 아이템 상태를 completed로 확정
+      // (타이밍 이슈로 progress 이벤트가 늦게 도착해 allCompleted 조건이 충족되지 않는 문제 방지)
+      // ref를 사용하여 최신 아이템 목록 참조 (클로저 문제 방지)
+      downloadItemsRef.current.forEach((item) => {
+        if (item.status === 'downloading' || item.status === 'pending') {
+          updateItem(item.id, { status: 'completed', progress: 100 });
+        }
+      });
+
       setIsDownloading(false);
       setPackagingStatus('completed');
       setPackagingProgress(100);
       addLog('success', '다운로드 및 패키징 완료', `출력 경로: ${data.outputPath}`);
       message.success('다운로드 및 패키징이 완료되었습니다');
+
+      // 다운로드 완료 시 장바구니 비우기
+      clearCart();
+
       eventSource.close();
     });
 
+    // 에러 핸들러 재설정 (연결 후 에러용)
     eventSource.onerror = () => {
       addLog('error', 'SSE 연결 오류');
+      setIsDownloading(false);
       eventSource.close();
     };
 
@@ -447,7 +698,11 @@ const DownloadPage: React.FC = () => {
       const options = {
         outputDir,
         outputFormat,
-        includeScripts,
+        includeScripts: includeInstallScripts,
+        targetOS: defaultTargetOS,
+        architecture: defaultArchitecture,
+        includeDependencies,
+        pythonVersion: languageVersions.python,
       };
 
       const response = await fetch('/api/download/start', {
@@ -464,7 +719,7 @@ const DownloadPage: React.FC = () => {
       setIsDownloading(false);
       eventSource.close();
     }
-  };
+  };;;
 
   // 일시정지/재개
   const handlePauseResume = () => {
@@ -652,6 +907,41 @@ const DownloadPage: React.FC = () => {
     .filter((item) => item.status === 'downloading')
     .reduce((sum, item) => sum + item.speed, 0);
 
+  // 원본 패키지와 의존성 패키지 분류
+  const originalPackages = downloadItems.filter((item) => !item.isDependency);
+  const dependencyPackages = downloadItems.filter((item) => item.isDependency);
+
+  // 원본 패키지별로 의존성 그룹화
+  const getPackageDependencies = (parentId: string) => {
+    return dependencyPackages.filter((item) => item.parentId === parentId);
+  };
+
+  // 패키지별 진행률 계산 (자신 + 의존성 포함)
+  const getPackageGroupProgress = (parentItem: DownloadItem) => {
+    const deps = getPackageDependencies(parentItem.id);
+    const allItems = [parentItem, ...deps];
+    const totalProgress = allItems.reduce((sum, item) => sum + item.progress, 0);
+    return allItems.length > 0 ? totalProgress / allItems.length : 0;
+  };
+
+  // 패키지별 완료 상태 계산
+  const getPackageGroupStatus = (parentItem: DownloadItem) => {
+    const deps = getPackageDependencies(parentItem.id);
+    const allItems = [parentItem, ...deps];
+    const completedCount = allItems.filter((i) => i.status === 'completed').length;
+    const failedCount = allItems.filter((i) => i.status === 'failed').length;
+    const downloadingCount = allItems.filter((i) => i.status === 'downloading').length;
+
+    return {
+      total: allItems.length,
+      completed: completedCount,
+      failed: failedCount,
+      downloading: downloadingCount,
+      isAllCompleted: allItems.every((i) => ['completed', 'skipped'].includes(i.status)),
+      hasFailures: failedCount > 0,
+    };
+  };
+
   // 빈 장바구니 상태
   if (cartItems.length === 0 && downloadItems.length === 0) {
     return (
@@ -741,28 +1031,45 @@ const DownloadPage: React.FC = () => {
         </Card>
 
         {/* 로그 */}
-        <Collapse style={{ marginTop: 24 }}>
-          <Panel header={`로그 (${logs.length}개)`} key="logs">
-            <List
-              size="small"
-              dataSource={logs}
-              renderItem={(log) => (
-                <List.Item>
-                  <Space>
-                    {logIcons[log.level]}
-                    <Text type="secondary">
-                      {new Date(log.timestamp).toLocaleTimeString()}
-                    </Text>
-                    <Text>{log.message}</Text>
-                    {log.details && (
-                      <Text type="secondary">- {log.details}</Text>
-                    )}
-                  </Space>
-                </List.Item>
-              )}
-            />
-          </Panel>
-        </Collapse>
+        <Card
+          size="small"
+          title={
+            <Space>
+              <span>로그</span>
+              <Tag>{logs.length}개</Tag>
+            </Space>
+          }
+          style={{ marginTop: 24 }}
+          styles={{ body: { padding: 0 } }}
+        >
+          <div
+            style={{
+              height: 200,
+              overflow: 'auto',
+              backgroundColor: '#1a1a1a',
+              padding: '8px 12px',
+              fontFamily: 'monospace',
+              fontSize: 12,
+            }}
+          >
+            {logs.length === 0 ? (
+              <Text type="secondary" style={{ color: '#666' }}>로그가 없습니다</Text>
+            ) : (
+              logs.map((log, index) => (
+                <div key={index} style={{ marginBottom: 4, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ flexShrink: 0 }}>{logIcons[log.level]}</span>
+                  <Text style={{ color: '#888', flexShrink: 0, minWidth: 70 }}>
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </Text>
+                  <Text style={{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warning' ? '#faad14' : '#d9d9d9' }}>
+                    {log.message}
+                    {log.details && <span style={{ color: '#888' }}> - {log.details}</span>}
+                  </Text>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
       </div>
     );
   }
@@ -881,13 +1188,134 @@ const DownloadPage: React.FC = () => {
           </div>
         )}
 
-        <Table
-          columns={columns}
-          dataSource={downloadItems}
-          rowKey="id"
-          pagination={downloadItems.length > 10 ? { pageSize: 10 } : false}
-          size="small"
-        />
+        {/* 의존성이 있는 경우 Collapse 구조로, 없는 경우 기존 Table로 표시 */}
+        {dependencyPackages.length > 0 ? (
+          <Collapse
+            bordered={false}
+            expandIcon={({ isActive }) => (
+              <RightOutlined rotate={isActive ? 90 : 0} style={{ fontSize: 12 }} />
+            )}
+            style={{ background: 'transparent' }}
+          >
+            {originalPackages.map((pkg) => {
+              const deps = getPackageDependencies(pkg.id);
+              const groupProgress = getPackageGroupProgress(pkg);
+              const groupStatus = getPackageGroupStatus(pkg);
+
+              return (
+                <Panel
+                  key={pkg.id}
+                  header={
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                      <Space>
+                        {statusIcons[pkg.status]}
+                        <Text strong>{pkg.name}</Text>
+                        <Text type="secondary">{pkg.version}</Text>
+                        {pkg.type && <Tag>{pkg.type}</Tag>}
+                        {deps.length > 0 && (
+                          <Tag icon={<BranchesOutlined />} color="blue">
+                            +{deps.length} 의존성
+                          </Tag>
+                        )}
+                      </Space>
+                      <Space style={{ marginRight: 24 }}>
+                        {groupStatus.hasFailures && (
+                          <Tag color="error">{groupStatus.failed} 실패</Tag>
+                        )}
+                        <Tag color={groupStatus.isAllCompleted ? 'success' : 'processing'}>
+                          {groupStatus.completed}/{groupStatus.total} 완료
+                        </Tag>
+                        <Progress
+                          percent={Math.round(groupProgress)}
+                          size="small"
+                          style={{ width: 100, marginBottom: 0 }}
+                          status={
+                            groupStatus.hasFailures
+                              ? 'exception'
+                              : groupStatus.isAllCompleted
+                              ? 'success'
+                              : 'active'
+                          }
+                        />
+                      </Space>
+                    </div>
+                  }
+                >
+                  {/* 자신의 다운로드 상태 */}
+                  <div style={{ marginBottom: 16, padding: '12px', background: '#fafafa', borderRadius: 6 }}>
+                    <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                      <Space>
+                        {statusIcons[pkg.status]}
+                        <Text strong>{pkg.name}</Text>
+                        <Text type="secondary">{pkg.version}</Text>
+                        <Tag color={statusColors[pkg.status]}>{statusLabels[pkg.status]}</Tag>
+                      </Space>
+                      <Space>
+                        <Progress
+                          percent={Math.round(pkg.progress)}
+                          size="small"
+                          style={{ width: 150, marginBottom: 0 }}
+                          status={
+                            pkg.status === 'failed'
+                              ? 'exception'
+                              : pkg.status === 'completed'
+                              ? 'success'
+                              : 'active'
+                          }
+                        />
+                        {pkg.status === 'downloading' && pkg.speed > 0 && (
+                          <Text type="secondary" style={{ minWidth: 80 }}>
+                            {pkg.speed > 1024 * 1024
+                              ? `${(pkg.speed / 1024 / 1024).toFixed(1)} MB/s`
+                              : `${(pkg.speed / 1024).toFixed(1)} KB/s`}
+                          </Text>
+                        )}
+                        {pkg.status === 'failed' && (
+                          <Button
+                            type="link"
+                            size="small"
+                            icon={<ReloadOutlined />}
+                            onClick={() => {
+                              retryItem(pkg.id);
+                              addLog('info', `재시도 예약: ${pkg.name}`);
+                            }}
+                          >
+                            재시도
+                          </Button>
+                        )}
+                      </Space>
+                    </Space>
+                  </div>
+
+                  {/* 의존성 목록 */}
+                  {deps.length > 0 && (
+                    <div>
+                      <Text type="secondary" style={{ marginBottom: 8, display: 'block' }}>
+                        <BranchesOutlined /> 의존성 패키지 ({deps.length}개)
+                      </Text>
+                      <Table
+                        columns={columns}
+                        dataSource={deps}
+                        rowKey="id"
+                        pagination={deps.length > 5 ? { pageSize: 5, size: 'small' } : false}
+                        size="small"
+                        style={{ marginTop: 8 }}
+                      />
+                    </div>
+                  )}
+                </Panel>
+              );
+            })}
+          </Collapse>
+        ) : (
+          <Table
+            columns={columns}
+            dataSource={downloadItems}
+            rowKey="id"
+            pagination={downloadItems.length > 10 ? { pageSize: 10 } : false}
+            size="small"
+          />
+        )}
       </Card>
 
       {/* 액션 버튼 */}
@@ -923,7 +1351,7 @@ const DownloadPage: React.FC = () => {
               </Button>
             </>
           )}
-          {allCompleted && (
+          {(allCompleted || packagingStatus === 'completed') && (
             <Button
               type="primary"
               icon={<CheckCircleOutlined />}
@@ -937,37 +1365,45 @@ const DownloadPage: React.FC = () => {
       </Card>
 
       {/* 로그 섹션 */}
-      <Collapse>
-        <Panel
-          header={
-            <Space>
-              <span>로그</span>
-              <Tag>{logs.length}개</Tag>
-            </Space>
-          }
-          key="logs"
+      <Card
+        size="small"
+        title={
+          <Space>
+            <span>로그</span>
+            <Tag>{logs.length}개</Tag>
+          </Space>
+        }
+        style={{ marginTop: 16 }}
+        styles={{ body: { padding: 0 } }}
+      >
+        <div
+          style={{
+            height: 200,
+            overflow: 'auto',
+            backgroundColor: '#1a1a1a',
+            padding: '8px 12px',
+            fontFamily: 'monospace',
+            fontSize: 12,
+          }}
         >
-          <List
-            size="small"
-            dataSource={logs.slice(-50).reverse()}
-            locale={{ emptyText: '로그가 없습니다' }}
-            renderItem={(log) => (
-              <List.Item>
-                <Space>
-                  {logIcons[log.level]}
-                  <Text type="secondary" style={{ minWidth: 80 }}>
-                    {new Date(log.timestamp).toLocaleTimeString()}
-                  </Text>
-                  <Text>{log.message}</Text>
-                  {log.details && (
-                    <Text type="secondary">- {log.details}</Text>
-                  )}
-                </Space>
-              </List.Item>
-            )}
-          />
-        </Panel>
-      </Collapse>
+          {logs.length === 0 ? (
+            <Text type="secondary" style={{ color: '#666' }}>로그가 없습니다</Text>
+          ) : (
+            logs.map((log, index) => (
+              <div key={index} style={{ marginBottom: 4, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <span style={{ flexShrink: 0 }}>{logIcons[log.level]}</span>
+                <Text style={{ color: '#888', flexShrink: 0, minWidth: 70 }}>
+                  {new Date(log.timestamp).toLocaleTimeString()}
+                </Text>
+                <Text style={{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warning' ? '#faad14' : '#d9d9d9' }}>
+                  {log.message}
+                  {log.details && <span style={{ color: '#888' }}> - {log.details}</span>}
+                </Text>
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
 
       {/* 에러 처리 모달 */}
       <Modal

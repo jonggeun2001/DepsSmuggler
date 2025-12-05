@@ -9,10 +9,13 @@ export interface LanguageVersions {
 }
 
 // 대상 OS 타입 정의 (라이브러리 패키지용)
-export type TargetOS = 'windows' | 'macos' | 'linux' | 'any';
+export type TargetOS = 'windows' | 'macos' | 'linux';
 
 // 기본 아키텍처 타입 정의
 export type DefaultArchitecture = 'x86_64' | 'amd64' | 'arm64' | 'aarch64' | 'noarch';
+
+// Conda 채널 타입 정의
+export type CondaChannel = 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch';
 
 // 설정 상태
 interface SettingsState {
@@ -44,6 +47,9 @@ interface SettingsState {
   defaultTargetOS: TargetOS;
   defaultArchitecture: DefaultArchitecture;
 
+  // Conda 채널 설정
+  condaChannel: CondaChannel;
+
   // 액션
   updateSettings: (updates: Partial<SettingsState>) => void;
   resetSettings: () => void;
@@ -73,8 +79,10 @@ const defaultSettings = {
     node: '20',
   },
 
-  defaultTargetOS: 'any' as const,
+  defaultTargetOS: 'linux' as const,
   defaultArchitecture: 'x86_64' as const,
+
+  condaChannel: 'conda-forge' as const,
 };
 
 export const useSettingsStore = create<SettingsState>()(

@@ -182,7 +182,7 @@ const WizardPage: React.FC = () => {
   const [architecture, setArchitecture] = useState<Architecture>('x86_64');
 
   const { addItem, hasItem } = useCartStore();
-  const { languageVersions, defaultArchitecture } = useSettingsStore();
+  const { languageVersions, defaultArchitecture, defaultTargetOS, condaChannel } = useSettingsStore();
 
   // 라이브러리 패키지 타입 (설정 기본값 적용 대상)
   const libraryPackageTypes: PackageType[] = ['pip', 'conda', 'maven', 'gradle', 'npm'];
@@ -252,7 +252,9 @@ const WizardPage: React.FC = () => {
     try {
       let results: SearchResult[];
       if (window.electronAPI?.search?.packages) {
-        const response = await window.electronAPI.search.packages(packageType, query);
+        // conda일 때 채널 옵션 전달
+        const searchOptions = packageType === 'conda' ? { channel: condaChannel } : undefined;
+        const response = await window.electronAPI.search.packages(packageType, query, searchOptions);
         results = response.results;
       } else {
         // 브라우저 환경: 패키지 타입별 API 직접 호출
@@ -266,7 +268,7 @@ const WizardPage: React.FC = () => {
     } finally {
       setSearching(false);
     }
-  }, [packageType]);
+  }, [packageType, condaChannel]);
 
   // 입력 변경 핸들러 (디바운스 적용)
   const handleInputChange = useCallback((value: string) => {
@@ -408,7 +410,9 @@ const WizardPage: React.FC = () => {
       let results: SearchResult[];
 
       if (window.electronAPI?.search?.packages) {
-        const response = await window.electronAPI.search.packages(packageType, query);
+        // conda일 때 채널 옵션 전달
+        const searchOptions = packageType === 'conda' ? { channel: condaChannel } : undefined;
+        const response = await window.electronAPI.search.packages(packageType, query, searchOptions);
         results = response.results;
       } else {
         // 브라우저 환경: 패키지 타입별 API 직접 호출
@@ -460,7 +464,9 @@ const WizardPage: React.FC = () => {
 
     try {
       if (window.electronAPI?.search?.versions) {
-        const response = await window.electronAPI.search.versions(packageType, record.name);
+        // conda일 때 채널 옵션 전달
+        const searchOptions = packageType === 'conda' ? { channel: condaChannel } : undefined;
+        const response = await window.electronAPI.search.versions(packageType, record.name, searchOptions);
         if (response.versions && response.versions.length > 0) {
           setAvailableVersions(response.versions);
           setSelectedVersion(response.versions[0]);
@@ -496,15 +502,22 @@ const WizardPage: React.FC = () => {
       return;
     }
 
+    // 라이브러리 패키지는 설정값 자동 적용
+    const effectiveArch = libraryPackageTypes.includes(packageType)
+      ? (defaultArchitecture as Architecture)
+      : architecture;
+
     addItem({
       type: packageType,
       name: selectedPackage.name,
       version: selectedVersion,
-      arch: architecture,
+      arch: effectiveArch,
       languageVersion: languageVersion || undefined,
       metadata: {
         description: selectedPackage.description,
         category,
+        // 라이브러리 패키지는 targetOS도 저장
+        ...(libraryPackageTypes.includes(packageType) && { targetOS: defaultTargetOS }),
       },
     });
 
@@ -559,28 +572,35 @@ const WizardPage: React.FC = () => {
     ];
 
     if (!shouldSkipLanguageVersion(packageType)) {
-      baseSteps.push({ title: '언어 버전', icon: <CodeOutlined /> });
+      // 라이브러리 패키지: "환경 확인" 단계 (읽기 전용)
+      baseSteps.push({ title: '환경 확인', icon: <CloudServerOutlined /> });
     }
 
     baseSteps.push(
       { title: '검색', icon: <SearchOutlined /> },
-      { title: '버전', icon: <Tag /> },
-      { title: '아키텍처', icon: <CloudServerOutlined /> }
+      { title: '버전', icon: <Tag /> }
     );
+
+    // OS/컨테이너 패키지만 아키텍처 선택 단계 표시
+    if (!libraryPackageTypes.includes(packageType)) {
+      baseSteps.push({ title: '아키텍처', icon: <CloudServerOutlined /> });
+    }
 
     return baseSteps;
   };
 
   const stepItems = getStepItems();
 
-  // 현재 표시할 단계 인덱스 계산 (언어 버전 스킵 시 조정)
+  // 현재 표시할 단계 인덱스 계산
   const getDisplayStep = () => {
-    if (shouldSkipLanguageVersion(packageType)) {
-      // 언어 버전 단계 스킵 시: 0,1 -> 0,1 / 3,4,5 -> 2,3,4
+    if (libraryPackageTypes.includes(packageType)) {
+      // 라이브러리 패키지: 0,1,2,3,4 -> 0,1,2,3,4 (아키텍처 단계 없음)
+      return currentStep;
+    } else {
+      // OS/컨테이너 패키지: 0,1 -> 0,1 / 3,4,5 -> 2,3,4 (환경 확인 단계 없음)
       if (currentStep <= 1) return currentStep;
       return currentStep - 1;
     }
-    return currentStep;
   };
 
   // 아키텍처 경고 표시 여부
@@ -667,82 +687,72 @@ const WizardPage: React.FC = () => {
         );
 
       case 2: {
-        // 언어 버전 선택 단계
+        // 환경 설정 확인 단계 (읽기 전용)
         const langKey = getLanguageKey(packageType);
-        const versions = languageVersionOptions[packageType] || [];
-        const defaultVersion = langKey ? languageVersions[langKey] : '';
+        const selectedVersion = langKey ? languageVersions[langKey] : '';
+        const versionLabel = languageVersionOptions[packageType]?.find(
+          v => v.value === selectedVersion
+        )?.label || selectedVersion;
         const isPython = packageType === 'pip' || packageType === 'conda';
+
+        // OS 레이블 매핑
+        const osLabels: Record<string, string> = {
+          any: '모든 OS',
+          windows: 'Windows',
+          macos: 'macOS',
+          linux: 'Linux',
+        };
 
         return (
           <Card>
-            <Title level={5}>
-              {isPython ? '언어 버전 및 아키텍처를 선택하세요' : '언어/런타임 버전을 선택하세요'}
-            </Title>
+            <Title level={5}>환경 설정 확인</Title>
             <Text type="secondary">
-              패키지 호환성을 위해 대상 환경의 버전을 선택합니다
+              설정 페이지에서 지정한 기본값이 적용됩니다.
             </Text>
             <Divider />
 
             <Alert
-              message="설정에서 기본값 변경 가능"
-              description="설정 페이지에서 기본 언어 버전을 변경할 수 있습니다."
+              message="설정에서 변경 가능"
+              description={
+                <span>
+                  아래 값을 변경하려면 <a href="/settings" onClick={(e) => { e.preventDefault(); window.location.href = '/settings'; }}>설정 페이지</a>로 이동하세요.
+                </span>
+              }
               type="info"
               showIcon
               style={{ marginBottom: 16 }}
             />
 
-            <div style={{ marginBottom: 24 }}>
+            {/* 언어 버전 - 읽기 전용 */}
+            <div style={{ marginBottom: 16, padding: 16, background: '#fafafa', borderRadius: 8 }}>
               <Text strong style={{ display: 'block', marginBottom: 8 }}>
                 {isPython ? 'Python 버전' : packageType === 'npm' ? 'Node.js 버전' : 'Java 버전'}
               </Text>
-              <Radio.Group
-                value={languageVersion}
-                onChange={(e) => setLanguageVersion(e.target.value)}
-                style={{ width: '100%' }}
-              >
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  {versions.map((ver) => (
-                    <Radio key={ver.value} value={ver.value} style={{ display: 'block', padding: '8px 0' }}>
-                      <span style={{ fontWeight: 'bold' }}>{ver.label}</span>
-                      {ver.eol && <Tag color="red" style={{ marginLeft: 8 }}>EOL</Tag>}
-                      {ver.value === defaultVersion && <Tag color="blue" style={{ marginLeft: 8 }}>기본값</Tag>}
-                    </Radio>
-                  ))}
-                </Space>
-              </Radio.Group>
+              <Tag color="blue" style={{ fontSize: 14, padding: '4px 12px' }}>
+                {versionLabel || '미설정'}
+              </Tag>
             </div>
 
-            {isPython && (
-              <>
-                <Divider />
-                <div style={{ marginBottom: 16 }}>
-                  <Text strong style={{ display: 'block', marginBottom: 8 }}>대상 아키텍처</Text>
-                  <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-                    휠(wheel) 파일 다운로드 시 사용할 아키텍처를 선택합니다
-                  </Text>
-                  <Radio.Group
-                    value={architecture}
-                    onChange={(e) => setArchitecture(e.target.value)}
-                    style={{ width: '100%' }}
-                  >
-                    <Space direction="vertical" style={{ width: '100%' }}>
-                      {archOptions.map((opt) => (
-                        <Radio key={opt.value} value={opt.value} style={{ display: 'block', padding: '6px 0' }}>
-                          <span style={{ fontWeight: 'bold' }}>{opt.label}</span>
-                          <span style={{ marginLeft: 8, fontSize: 12, color: '#666' }}>- {opt.description}</span>
-                          {opt.value === defaultArchitecture && <Tag color="blue" style={{ marginLeft: 8 }}>기본값</Tag>}
-                        </Radio>
-                      ))}
-                    </Space>
-                  </Radio.Group>
-                </div>
-              </>
-            )}
+            {/* 대상 OS - 읽기 전용 */}
+            <div style={{ marginBottom: 16, padding: 16, background: '#fafafa', borderRadius: 8 }}>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>대상 운영체제</Text>
+              <Tag color="green" style={{ fontSize: 14, padding: '4px 12px' }}>
+                {osLabels[defaultTargetOS] || defaultTargetOS}
+              </Tag>
+            </div>
+
+            {/* 아키텍처 - 읽기 전용 */}
+            <div style={{ marginBottom: 16, padding: 16, background: '#fafafa', borderRadius: 8 }}>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>대상 아키텍처</Text>
+              <Tag color="purple" style={{ fontSize: 14, padding: '4px 12px' }}>
+                {defaultArchitecture}
+              </Tag>
+            </div>
 
             <div style={{ marginTop: 24 }}>
               <Space>
                 <Button onClick={() => setCurrentStep(1)}>이전</Button>
-                <Button type="primary" onClick={() => setCurrentStep(3)} disabled={!languageVersion}>
+                <Button type="primary" onClick={() => setCurrentStep(3)}>
                   다음
                 </Button>
               </Space>
@@ -880,9 +890,23 @@ const WizardPage: React.FC = () => {
             <div style={{ marginTop: 24 }}>
               <Space>
                 <Button onClick={() => setCurrentStep(3)}>이전</Button>
-                <Button type="primary" onClick={() => setCurrentStep(5)} disabled={!selectedVersion || loadingVersions}>
-                  다음
-                </Button>
+                {libraryPackageTypes.includes(packageType) ? (
+                  // 라이브러리 패키지: 바로 장바구니 추가
+                  <Button
+                    type="primary"
+                    icon={<ShoppingCartOutlined />}
+                    onClick={handleAddToCart}
+                    disabled={!selectedVersion || loadingVersions}
+                    size="large"
+                  >
+                    장바구니에 추가
+                  </Button>
+                ) : (
+                  // OS/컨테이너 패키지: 아키텍처 선택 단계로 이동
+                  <Button type="primary" onClick={() => setCurrentStep(5)} disabled={!selectedVersion || loadingVersions}>
+                    다음
+                  </Button>
+                )}
               </Space>
             </div>
           </Card>
