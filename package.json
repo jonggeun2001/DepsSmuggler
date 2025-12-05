@@ -15,7 +15,12 @@
     "package:win": "npm run build && electron-builder --win",
     "package:mac": "npm run build && electron-builder --mac",
     "package:linux": "npm run build && electron-builder --linux",
-    "cli": "ts-node src/cli/index.ts"
+    "cli": "ts-node src/cli/index.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report"
   },
   "bin": {
     "depssmuggler": "./dist/cli/index.js"
@@ -55,6 +60,7 @@
     "electron-builder": "^26.0.12",
     "nodemon": "^3.1.11",
     "playwright": "^1.57.0",
+    "swagger-ui-dist": "^5.30.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vite": "^7.2.6"
@@ -93,6 +99,7 @@
     "eventemitter3": "^5.0.1",
     "fast-xml-parser": "^5.3.2",
     "fs-extra": "^11.3.2",
+    "fzstd": "^0.1.1",
     "html-to-image": "^1.11.13",
     "js-yaml": "^4.1.1",
     "nodemailer": "^7.0.11",

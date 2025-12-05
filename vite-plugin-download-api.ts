@@ -7,6 +7,7 @@ import {
   DownloadPackage,
   DownloadOptions,
   getPyPIDownloadUrl,
+  getCondaDownloadUrl,
   downloadFile,
   createZipArchive,
   generateInstallScripts,
@@ -41,10 +42,125 @@ export function downloadApiPlugin(): Plugin {
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('Access-Control-Allow-Origin', '*');
 
+        // SSE 연결 즉시 응답하여 클라이언트가 연결 성공을 인식하도록 함
+        res.write(':connected\n\n');
+
         sseClients.set(clientId, res);
 
         req.on('close', () => {
           sseClients.delete(clientId);
+        });
+      });
+
+      // 출력 폴더 검사 엔드포인트
+      server.middlewares.use('/api/download/check-path', async (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+
+        let body = '';
+        req.on('data', (chunk) => (body += chunk));
+        req.on('end', async () => {
+          try {
+            const { outputDir } = JSON.parse(body) as { outputDir: string };
+
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+
+            if (!outputDir) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'outputDir required' }));
+              return;
+            }
+
+            // 폴더 존재 여부 확인
+            if (!fs.existsSync(outputDir)) {
+              res.end(JSON.stringify({ exists: false, files: [], totalSize: 0 }));
+              return;
+            }
+
+            // 폴더 내용 검사
+            const files: string[] = [];
+            let totalSize = 0;
+
+            const scanDir = (dir: string) => {
+              const entries = fs.readdirSync(dir, { withFileTypes: true });
+              for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                  scanDir(fullPath);
+                } else {
+                  files.push(path.relative(outputDir, fullPath));
+                  totalSize += fs.statSync(fullPath).size;
+                }
+              }
+            };
+
+            scanDir(outputDir);
+
+            res.end(JSON.stringify({
+              exists: true,
+              files,
+              fileCount: files.length,
+              totalSize,
+            }));
+          } catch (error) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(error) }));
+          }
+        });
+      });
+
+      // 출력 폴더 삭제 엔드포인트
+      server.middlewares.use('/api/download/clear-path', async (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+
+        let body = '';
+        req.on('data', (chunk) => (body += chunk));
+        req.on('end', async () => {
+          try {
+            const { outputDir } = JSON.parse(body) as { outputDir: string };
+
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+
+            if (!outputDir) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'outputDir required' }));
+              return;
+            }
+
+            // 폴더가 없으면 성공으로 처리
+            if (!fs.existsSync(outputDir)) {
+              res.end(JSON.stringify({ success: true, deleted: false }));
+              return;
+            }
+
+            // 폴더 내용 삭제 (폴더 자체는 유지)
+            const deleteContents = (dir: string) => {
+              const entries = fs.readdirSync(dir, { withFileTypes: true });
+              for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                  deleteContents(fullPath);
+                  fs.rmdirSync(fullPath);
+                } else {
+                  fs.unlinkSync(fullPath);
+                }
+              }
+            };
+
+            deleteContents(outputDir);
+
+            res.end(JSON.stringify({ success: true, deleted: true }));
+          } catch (error) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(error) }));
+          }
         });
       });
 
@@ -72,7 +188,7 @@ export function downloadApiPlugin(): Plugin {
               }
             };
 
-            const { outputDir, outputFormat, includeScripts } = options;
+            const { outputDir, outputFormat, includeScripts, targetOS, architecture, includeDependencies, pythonVersion } = options;
 
             // 의존성 해결 상태 전송
             sendEvent('status', {
@@ -82,21 +198,31 @@ export function downloadApiPlugin(): Plugin {
 
             // 의존성 해결
             let allPackages: DownloadPackage[] = packages;
-            try {
-              const resolved = await resolveAllDependencies(packages);
-              allPackages = resolved.allPackages;
 
-              console.log(`의존성 해결 완료: ${packages.length}개 → ${allPackages.length}개 패키지`);
+            // includeDependencies가 false면 의존성 해결 건너뛰기
+            if (includeDependencies === false) {
+              console.log('의존성 해결 건너뛰기 (설정에서 비활성화됨)');
+            } else {
+              try {
+                const resolved = await resolveAllDependencies(packages, {
+                  targetOS: (targetOS as 'any' | 'windows' | 'macos' | 'linux') || 'any',
+                  architecture: architecture || 'x86_64',
+                  pythonVersion: pythonVersion,
+                });
+                allPackages = resolved.allPackages;
 
-              // 의존성 해결 완료 이벤트 전송
-              sendEvent('deps-resolved', {
-                originalPackages: packages,
-                allPackages: allPackages,
-                dependencyTrees: resolved.dependencyTrees,
-                failedPackages: resolved.failedPackages,
-              });
-            } catch (error) {
-              console.warn('의존성 해결 실패, 원본 패키지만 다운로드합니다:', error);
+                console.log(`의존성 해결 완료: ${packages.length}개 → ${allPackages.length}개 패키지`);
+
+                // 의존성 해결 완료 이벤트 전송
+                sendEvent('deps-resolved', {
+                  originalPackages: packages,
+                  allPackages: allPackages,
+                  dependencyTrees: resolved.dependencyTrees,
+                  failedPackages: resolved.failedPackages,
+                });
+              } catch (error) {
+                console.warn('의존성 해결 실패, 원본 패키지만 다운로드합니다:', error);
+              }
             }
 
             // 다운로드 시작 상태 전송
@@ -126,8 +252,25 @@ export function downloadApiPlugin(): Plugin {
 
                 let downloadInfo: { url: string; filename: string; size: number } | null = null;
 
-                if (pkg.type === 'pip' || pkg.type === 'conda') {
-                  downloadInfo = await getPyPIDownloadUrl(pkg.name, pkg.version, pkg.architecture);
+                if (pkg.type === 'conda') {
+                  // conda 패키지는 conda repodata에서 URL 조회
+                  downloadInfo = await getCondaDownloadUrl(
+                    pkg.name,
+                    pkg.version,
+                    architecture || pkg.architecture,
+                    targetOS,
+                    'conda-forge',
+                    pythonVersion
+                  );
+                } else if (pkg.type === 'pip') {
+                  // pip 패키지는 PyPI에서 URL 조회
+                  downloadInfo = await getPyPIDownloadUrl(
+                    pkg.name,
+                    pkg.version,
+                    architecture || pkg.architecture,
+                    targetOS,
+                    pythonVersion
+                  );
                 }
 
                 if (!downloadInfo) {
@@ -221,10 +364,25 @@ export function downloadApiPlugin(): Plugin {
         req.on('data', (chunk) => (body += chunk));
         req.on('end', async () => {
           try {
-            const packages = JSON.parse(body) as DownloadPackage[];
-            console.log(`Resolving dependencies for ${packages.length} packages`);
+            const requestBody = JSON.parse(body);
+            // 하위 호환성: 배열인 경우 기존 방식, 객체인 경우 새 방식
+            let packages: DownloadPackage[];
+            let resolverOptions: { targetOS?: string; architecture?: string; pythonVersion?: string } = {};
 
-            const resolved = await resolveAllDependencies(packages);
+            if (Array.isArray(requestBody)) {
+              packages = requestBody as DownloadPackage[];
+            } else {
+              packages = requestBody.packages as DownloadPackage[];
+              resolverOptions = requestBody.options || {};
+            }
+
+            console.log(`Resolving dependencies for ${packages.length} packages (targetOS: ${resolverOptions.targetOS || 'any'}, python: ${resolverOptions.pythonVersion || 'any'})`);
+
+            const resolved = await resolveAllDependencies(packages, {
+              targetOS: resolverOptions.targetOS as 'any' | 'windows' | 'macos' | 'linux' | undefined,
+              architecture: resolverOptions.architecture,
+              pythonVersion: resolverOptions.pythonVersion,
+            });
             console.log(`Dependencies resolved: ${packages.length} → ${resolved.allPackages.length} packages`);
 
             res.setHeader('Content-Type', 'application/json');
