@@ -2,7 +2,6 @@ import axios, { AxiosInstance } from 'axios';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import * as fzstd from 'fzstd';
 import {
   IDownloader,
   PackageInfo,
@@ -18,6 +17,7 @@ import {
   CondaPackageFile,
 } from '../shared/conda-types';
 import { compareVersions, getCondaSubdir } from '../shared';
+import { fetchRepodata } from '../shared/conda-cache';
 
 // CondaPackageInfo는 downloader 전용 (files, versions 등 추가 필드 포함)
 interface CondaPackageInfo {
@@ -60,63 +60,29 @@ export class CondaDownloader implements IDownloader {
   private async getRepoData(channel: string, subdir: string): Promise<RepoData | null> {
     const cacheKey = `${channel}/${subdir}`;
 
+    // 메모리 캐시 확인 (세션 내 재사용)
     if (this.repodataCache.has(cacheKey)) {
       return this.repodataCache.get(cacheKey)!;
     }
 
-    const urls = [
-      { url: `${this.condaUrl}/${channel}/${subdir}/repodata.json.zst`, compressed: true },
-      { url: `${this.condaUrl}/${channel}/${subdir}/current_repodata.json`, compressed: false },
-      { url: `${this.condaUrl}/${channel}/${subdir}/repodata.json`, compressed: false },
-    ];
+    // 파일 시스템 캐시 + HTTP 조건부 요청 사용
+    const result = await fetchRepodata(channel, subdir, {
+      baseUrl: this.condaUrl,
+      useCache: true,
+    });
 
-    for (const { url, compressed } of urls) {
-      try {
-        logger.info('repodata 가져오기 (downloader)', { url, compressed });
-
-        if (compressed) {
-          const response = await axios.get(url, {
-            responseType: 'arraybuffer',
-            headers: { 'User-Agent': 'DepsSmuggler/1.0' },
-            timeout: 120000,
-          });
-
-          const compressedData = new Uint8Array(response.data);
-          const decompressedData = fzstd.decompress(compressedData);
-          const jsonString = new TextDecoder().decode(decompressedData);
-          const repodata = JSON.parse(jsonString) as RepoData;
-
-          this.repodataCache.set(cacheKey, repodata);
-          logger.info('repodata 가져오기 성공 (zstd)', {
-            url,
-            packages: Object.keys(repodata.packages || {}).length,
-          });
-
-          return repodata;
-        } else {
-          const response = await axios.get<RepoData>(url, {
-            headers: {
-              'Accept-Encoding': 'gzip',
-              'User-Agent': 'DepsSmuggler/1.0',
-            },
-            timeout: 120000,
-          });
-
-          const repodata = response.data;
-          this.repodataCache.set(cacheKey, repodata);
-          logger.info('repodata 가져오기 성공', {
-            url,
-            packages: Object.keys(repodata.packages || {}).length,
-          });
-
-          return repodata;
-        }
-      } catch (error) {
-        logger.warn('repodata 가져오기 실패, 다음 URL 시도', { url, error });
-        continue;
-      }
+    if (result) {
+      this.repodataCache.set(cacheKey, result.data);
+      logger.info('repodata 로드 완료 (downloader)', {
+        channel,
+        subdir,
+        fromCache: result.fromCache,
+        packages: result.meta.packageCount,
+      });
+      return result.data;
     }
 
+    logger.error('repodata 가져오기 실패', { channel, subdir });
     return null;
   }
 
@@ -165,7 +131,7 @@ export class CondaDownloader implements IDownloader {
       const response = await this.client.get<CondaSearchResult[]>(
         `${this.apiUrl}/search`,
         {
-          params: { q: query },
+          params: { name: query },
         }
       );
 

@@ -1,6 +1,5 @@
 import axios from 'axios';
 import * as yaml from 'js-yaml';
-import * as fzstd from 'fzstd';
 import {
   IResolver,
   PackageInfo,
@@ -16,10 +15,13 @@ import {
   CondaPackageFile,
 } from '../shared/conda-types';
 import {
-  compareVersions,
-  isVersionCompatible,
+  compareCondaVersions,
+  matchesVersionSpec,
+  parseMatchSpec as parseMatchSpecFn,
   getCondaSubdir,
+  MatchSpec,
 } from '../shared';
+import { fetchRepodata } from '../shared/conda-cache';
 
 // Resolver 전용 CondaPackageInfo (files, versions 추가 필드)
 interface CondaPackageInfo {
@@ -76,75 +78,32 @@ export class CondaResolver implements IResolver {
   private async getRepoData(channel: string, subdir: string): Promise<RepoData | null> {
     const cacheKey = `${channel}/${subdir}`;
 
-    // 캐시 확인
+    // 메모리 캐시 확인 (세션 내 재사용)
     if (this.repodataCache.has(cacheKey)) {
       return this.repodataCache.get(cacheKey)!;
     }
 
-    // 우선순위: zstd 압축 > current_repodata.json > repodata.json
-    const urls = [
-      { url: `${this.condaUrl}/${channel}/${subdir}/repodata.json.zst`, compressed: true },
-      { url: `${this.condaUrl}/${channel}/${subdir}/current_repodata.json`, compressed: false },
-      { url: `${this.condaUrl}/${channel}/${subdir}/repodata.json`, compressed: false },
-    ];
+    // 파일 시스템 캐시 + HTTP 조건부 요청 사용
+    const result = await fetchRepodata(channel, subdir, {
+      baseUrl: this.condaUrl,
+      useCache: true,
+    });
 
-    for (const { url, compressed } of urls) {
-      try {
-        logger.info('repodata 가져오기', { url, compressed });
+    if (result) {
+      // 메모리 캐시에도 저장 (세션 내 빠른 접근)
+      this.repodataCache.set(cacheKey, result.data);
 
-        if (compressed) {
-          // zstd 압축 파일 다운로드 및 해제
-          const response = await axios.get(url, {
-            responseType: 'arraybuffer',
-            headers: {
-              'User-Agent': 'DepsSmuggler/1.0',
-            },
-            timeout: 120000,
-          });
+      logger.info('repodata 로드 완료', {
+        channel,
+        subdir,
+        fromCache: result.fromCache,
+        packages: result.meta.packageCount,
+      });
 
-          const compressedData = new Uint8Array(response.data);
-          const decompressedData = fzstd.decompress(compressedData);
-          const jsonString = new TextDecoder().decode(decompressedData);
-          const repodata = JSON.parse(jsonString) as RepoData;
-
-          // 캐시에 저장
-          this.repodataCache.set(cacheKey, repodata);
-
-          logger.info('repodata 가져오기 성공 (zstd)', {
-            url,
-            packages: Object.keys(repodata.packages || {}).length,
-            compressedSize: compressedData.length,
-            decompressedSize: decompressedData.length,
-          });
-
-          return repodata;
-        } else {
-          // 일반 JSON
-          const response = await axios.get<RepoData>(url, {
-            headers: {
-              'Accept-Encoding': 'gzip',
-              'User-Agent': 'DepsSmuggler/1.0',
-            },
-            timeout: 120000,
-          });
-
-          const repodata = response.data;
-          this.repodataCache.set(cacheKey, repodata);
-
-          logger.info('repodata 가져오기 성공', {
-            url,
-            packages: Object.keys(repodata.packages || {}).length,
-          });
-
-          return repodata;
-        }
-      } catch (error) {
-        logger.warn('repodata 가져오기 실패, 다음 URL 시도', { url, error });
-        continue;
-      }
+      return result.data;
     }
 
-    logger.error('모든 repodata URL 실패', { channel, subdir });
+    logger.error('repodata 가져오기 실패', { channel, subdir });
     return null;
   }
 
@@ -178,14 +137,14 @@ export class CondaResolver implements IResolver {
   }
 
   /**
-   * repodata에서 패키지 후보 찾기
+   * repodata에서 패키지 후보 찾기 (Conda MatchSpec 문법 지원)
    */
   private findPackageCandidates(
     repodata: RepoData,
     packageName: string,
     versionSpec?: string
   ): PackageCandidate[] {
-    const candidates: Array<PackageCandidate & { isPythonMatch: boolean }> = [];
+    const candidates: Array<PackageCandidate & { isPythonMatch: boolean; timestamp: number }> = [];
     const normalizedName = packageName.toLowerCase();
 
     // packages와 packages.conda 모두 검색
@@ -197,8 +156,8 @@ export class CondaResolver implements IResolver {
     for (const [filename, pkg] of Object.entries(allPackages)) {
       if (pkg.name.toLowerCase() !== normalizedName) continue;
 
-      // 버전 스펙 체크
-      if (versionSpec && !isVersionCompatible(pkg.version, versionSpec)) {
+      // 버전 스펙 체크 (새로운 MatchSpec 파서 사용)
+      if (versionSpec && !matchesVersionSpec(pkg.version, versionSpec)) {
         continue;
       }
 
@@ -213,18 +172,31 @@ export class CondaResolver implements IResolver {
         depends: pkg.depends || [],
         subdir: pkg.subdir || repodata.info?.subdir || 'noarch',
         isPythonMatch,
+        timestamp: pkg.timestamp || 0,
       });
     }
 
-    // Python 버전 매칭 우선, 그 다음 버전과 빌드 번호로 정렬 (최신 우선)
+    // 정렬 우선순위 (Conda SAT solver 최적화 순서 참고):
+    // 1. Python 버전 매칭
+    // 2. 버전 (내림차순 - 최신 우선)
+    // 3. 빌드 번호 (내림차순)
+    // 4. 타임스탬프 (내림차순 - 최신 우선)
     candidates.sort((a, b) => {
       // Python 매칭이 있는 것 우선
       if (a.isPythonMatch !== b.isPythonMatch) {
         return a.isPythonMatch ? -1 : 1;
       }
-      const versionCmp = compareVersions(b.version, a.version);
+
+      // 버전 비교 (Conda 스타일)
+      const versionCmp = compareCondaVersions(b.version, a.version);
       if (versionCmp !== 0) return versionCmp;
-      return b.buildNumber - a.buildNumber;
+
+      // 빌드 번호
+      const buildCmp = b.buildNumber - a.buildNumber;
+      if (buildCmp !== 0) return buildCmp;
+
+      // 타임스탬프
+      return b.timestamp - a.timestamp;
     });
 
     return candidates;
@@ -442,16 +414,22 @@ export class CondaResolver implements IResolver {
   }
 
   /**
-   * 의존성 문자열 파싱
-   * conda 형식: "python >=3.6", "numpy 1.19.*", "libgcc-ng >=7.5.0,<8.0a0"
+   * 의존성 문자열 파싱 (Conda MatchSpec 문법)
+   * 지원 형식:
+   * - "python >=3.6"
+   * - "numpy 1.19.*"
+   * - "libgcc-ng >=7.5.0,<8.0a0"
+   * - "pytorch=1.8.*=*cuda*"
+   * - "conda-forge::numpy"
    */
   private parseDependencyString(depStr: string): ParsedDependency | null {
     try {
-      const parts = depStr.trim().split(/\s+/);
-      const name = parts[0];
-      const versionSpec = parts.slice(1).join(' ') || undefined;
-
-      return { name, versionSpec };
+      const matchSpec = parseMatchSpecFn(depStr);
+      return {
+        name: matchSpec.name,
+        versionSpec: matchSpec.version,
+        build: matchSpec.build,
+      };
     } catch {
       return null;
     }
@@ -510,28 +488,33 @@ export class CondaResolver implements IResolver {
 
       if (versions.length === 0) return null;
 
+      // 버전 정렬 (Conda 스타일, 내림차순)
+      const sortedVersions = [...versions].sort((a, b) =>
+        compareCondaVersions(b, a)
+      );
+
       if (!versionSpec) {
-        return versions[versions.length - 1]; // 최신 버전
+        return sortedVersions[0]; // 최신 버전
       }
 
-      // 버전 스펙 필터링
-      const compatible = versions.filter((v) =>
-        isVersionCompatible(v, versionSpec)
+      // 버전 스펙 필터링 (새로운 MatchSpec 파서 사용)
+      const compatible = sortedVersions.filter((v) =>
+        matchesVersionSpec(v, versionSpec)
       );
 
       if (compatible.length > 0) {
-        return compatible[compatible.length - 1];
+        return compatible[0]; // 정렬된 목록에서 첫 번째 (최신)
       }
 
       // 호환 버전 없으면 최신 버전 사용
       this.conflicts.push({
         type: 'version',
         packageName: name,
-        versions: [versionSpec, versions[versions.length - 1]],
-        resolvedVersion: versions[versions.length - 1],
+        versions: [versionSpec, sortedVersions[0]],
+        resolvedVersion: sortedVersions[0],
       });
 
-      return versions[versions.length - 1];
+      return sortedVersions[0];
     } catch {
       return null;
     }
