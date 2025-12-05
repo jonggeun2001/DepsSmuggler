@@ -54,6 +54,8 @@
     "@types/nodemailer": "^7.0.4",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@types/semver": "^7.7.1",
+    "@types/ssri": "^7.1.5",
     "@vitejs/plugin-react": "^5.1.1",
     "concurrently": "^9.2.1",
     "electron": "^39.2.4",

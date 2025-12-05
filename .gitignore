@@ -50,3 +50,7 @@ coverage/
 .cursor/
 .serena/
 .taskmaster/
+.playwright-mcp/
+
+# download test
+depssmuggler-downloads/

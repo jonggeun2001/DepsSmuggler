@@ -6,6 +6,7 @@ export { MavenDownloader, getMavenDownloader } from './downloaders/maven';
 export { CondaDownloader, getCondaDownloader } from './downloaders/conda';
 export { YumDownloader, getYumDownloader } from './downloaders/yum';
 export { DockerDownloader, getDockerDownloader } from './downloaders/docker';
+export { NpmDownloader, getNpmDownloader } from './downloaders/npm';
 
 // Packager
 export { ArchivePackager, getArchivePackager } from './packager/archivePackager';
@@ -26,6 +27,7 @@ export { PipResolver, getPipResolver } from './resolver/pipResolver';
 export { MavenResolver, getMavenResolver } from './resolver/mavenResolver';
 export { CondaResolver, getCondaResolver } from './resolver/condaResolver';
 export { YumResolver, getYumResolver } from './resolver/yumResolver';
+export { NpmResolver, getNpmResolver } from './resolver/npmResolver';
 
 // Cache Manager
 export { CacheManager, getCacheManager } from './cacheManager';

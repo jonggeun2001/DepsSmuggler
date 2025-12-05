@@ -16,6 +16,7 @@ import { getCondaDownloader } from './downloaders/conda';
 import { getMavenDownloader } from './downloaders/maven';
 import { getYumDownloader } from './downloaders/yum';
 import { getDockerDownloader } from './downloaders/docker';
+import { getNpmDownloader } from './downloaders/npm';
 
 // 다운로드 아이템 상태
 export type DownloadItemStatus =
@@ -115,6 +116,7 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
     this.downloaders.set('maven', getMavenDownloader());
     this.downloaders.set('yum', getYumDownloader());
     this.downloaders.set('docker', getDockerDownloader());
+    this.downloaders.set('npm', getNpmDownloader());
   }
 
   /**

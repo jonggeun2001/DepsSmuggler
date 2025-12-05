@@ -19,11 +19,13 @@ import {
   getCondaDownloader,
   getDockerDownloader,
   getYumDownloader,
+  getNpmDownloader,
   PipDownloader,
   MavenDownloader,
   CondaDownloader,
   DockerDownloader,
   YumDownloader,
+  NpmDownloader,
 } from '../src/core';
 
 // 다운로더 타입 매핑
@@ -33,6 +35,7 @@ const downloaderMap = {
   maven: getMavenDownloader,
   docker: getDockerDownloader,
   yum: getYumDownloader,
+  npm: getNpmDownloader,
 } as const;
 
 type SupportedPackageType = keyof typeof downloaderMap;
@@ -555,8 +558,17 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
           targetOS,
           pythonVersion
         );
+      } else if (pkg.type === 'npm') {
+        // npm 패키지: npm downloader를 통해 메타데이터 조회
+        const npmDownloader = getNpmDownloader();
+        const metadata = await npmDownloader.getPackageMetadata(pkg.name, pkg.version);
+        const tarballUrl = metadata.metadata?.downloadUrl;
+        if (tarballUrl) {
+          const filename = path.basename(new URL(tarballUrl).pathname);
+          downloadUrl = { url: tarballUrl, filename };
+        }
       }
-      // TODO: Maven, npm 등 다른 타입 지원
+      // TODO: Maven 등 다른 타입 지원
 
       if (!downloadUrl) {
         throw new Error(`다운로드 URL을 찾을 수 없습니다: ${pkg.name}@${pkg.version}`);

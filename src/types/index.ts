@@ -46,6 +46,7 @@ export interface PackageMetadata {
     md5?: string;
     sha1?: string;
     sha256?: string;
+    sha512?: string;  // npm integrity
   };
   downloadUrl?: string;
   // Maven 전용
