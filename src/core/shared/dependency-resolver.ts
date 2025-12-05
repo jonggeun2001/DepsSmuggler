@@ -41,6 +41,10 @@ export interface DependencyResolverOptions {
   yumRepoUrl?: string;
   /** 아키텍처 (기본값: 'x86_64') */
   architecture?: string;
+  /** 타겟 OS (pip/conda 휠 필터링용, 폐쇄망 OS) */
+  targetOS?: 'any' | 'windows' | 'macos' | 'linux';
+  /** Python 버전 (pip 휠 필터링용, 예: '3.11', '3.12') */
+  pythonVersion?: string;
 }
 
 /**
@@ -80,6 +84,16 @@ export async function resolveAllDependencies(
   const includeOptional = options?.includeOptional ?? false;
   const condaChannel = options?.condaChannel ?? 'conda-forge';
   const architecture = options?.architecture ?? 'x86_64';
+  const targetOS = options?.targetOS ?? 'any';
+
+  // targetOS를 targetPlatform으로 변환 (pip/conda 환경 마커 평가용)
+  const targetPlatformMap: Record<string, { system?: 'Linux' | 'Windows' | 'Darwin' }> = {
+    any: {},
+    windows: { system: 'Windows' },
+    macos: { system: 'Darwin' },
+    linux: { system: 'Linux' },
+  };
+  const targetPlatform = targetPlatformMap[targetOS] || {};
 
   for (const pkg of packages) {
     // 원본 패키지 추가
@@ -100,8 +114,24 @@ export async function resolveAllDependencies(
         includeOptionalDependencies: includeOptional,
       };
 
-      if (pkg.type === 'conda') {
-        resolverOptions = { ...resolverOptions, channel: condaChannel };
+      if (pkg.type === 'pip') {
+        // pip: 환경 마커 평가를 위한 타겟 플랫폼 및 Python 버전 전달
+        resolverOptions = {
+          ...resolverOptions,
+          targetPlatform,
+          pythonVersion: options?.pythonVersion,
+        };
+      } else if (pkg.type === 'conda') {
+        // conda: 채널, 타겟 플랫폼 및 Python 버전 전달
+        resolverOptions = {
+          ...resolverOptions,
+          channel: condaChannel,
+          targetPlatform: {
+            ...targetPlatform,
+            machine: architecture,
+          },
+          pythonVersion: options?.pythonVersion,
+        };
       } else if (pkg.type === 'yum') {
         resolverOptions = {
           ...resolverOptions,

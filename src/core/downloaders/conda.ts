@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import * as fzstd from 'fzstd';
 import {
   IDownloader,
   PackageInfo,
@@ -10,32 +11,15 @@ import {
   Architecture,
 } from '../../types';
 import logger from '../../utils/logger';
+import {
+  RepoData,
+  RepoDataPackage,
+  CondaSearchResult,
+  CondaPackageFile,
+} from '../shared/conda-types';
+import { compareVersions, getCondaSubdir } from '../shared';
 
-// Anaconda API 응답 타입
-interface CondaSearchResult {
-  name: string;
-  summary: string;
-  owner: string;
-  full_name: string;
-}
-
-interface CondaPackageFile {
-  version: string;
-  basename: string;
-  size: number;
-  md5: string;
-  sha256?: string;
-  upload_time: string;
-  ndownloads: number;
-  attrs: {
-    arch?: string;
-    platform?: string;
-    subdir?: string;
-    build?: string;
-    depends?: string[];
-  };
-}
-
+// CondaPackageInfo는 downloader 전용 (files, versions 등 추가 필드 포함)
 interface CondaPackageInfo {
   name: string;
   summary: string;
@@ -58,6 +42,9 @@ export class CondaDownloader implements IDownloader {
   private readonly apiUrl = 'https://api.anaconda.org';
   private readonly condaUrl = 'https://conda.anaconda.org';
 
+  // repodata 캐시 (channel/subdir -> RepoData)
+  private repodataCache: Map<string, RepoData> = new Map();
+
   constructor() {
     this.client = axios.create({
       timeout: 30000,
@@ -65,6 +52,106 @@ export class CondaDownloader implements IDownloader {
         Accept: 'application/json',
       },
     });
+  }
+
+  /**
+   * repodata.json 가져오기 (zstd 압축 우선)
+   */
+  private async getRepoData(channel: string, subdir: string): Promise<RepoData | null> {
+    const cacheKey = `${channel}/${subdir}`;
+
+    if (this.repodataCache.has(cacheKey)) {
+      return this.repodataCache.get(cacheKey)!;
+    }
+
+    const urls = [
+      { url: `${this.condaUrl}/${channel}/${subdir}/repodata.json.zst`, compressed: true },
+      { url: `${this.condaUrl}/${channel}/${subdir}/current_repodata.json`, compressed: false },
+      { url: `${this.condaUrl}/${channel}/${subdir}/repodata.json`, compressed: false },
+    ];
+
+    for (const { url, compressed } of urls) {
+      try {
+        logger.info('repodata 가져오기 (downloader)', { url, compressed });
+
+        if (compressed) {
+          const response = await axios.get(url, {
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': 'DepsSmuggler/1.0' },
+            timeout: 120000,
+          });
+
+          const compressedData = new Uint8Array(response.data);
+          const decompressedData = fzstd.decompress(compressedData);
+          const jsonString = new TextDecoder().decode(decompressedData);
+          const repodata = JSON.parse(jsonString) as RepoData;
+
+          this.repodataCache.set(cacheKey, repodata);
+          logger.info('repodata 가져오기 성공 (zstd)', {
+            url,
+            packages: Object.keys(repodata.packages || {}).length,
+          });
+
+          return repodata;
+        } else {
+          const response = await axios.get<RepoData>(url, {
+            headers: {
+              'Accept-Encoding': 'gzip',
+              'User-Agent': 'DepsSmuggler/1.0',
+            },
+            timeout: 120000,
+          });
+
+          const repodata = response.data;
+          this.repodataCache.set(cacheKey, repodata);
+          logger.info('repodata 가져오기 성공', {
+            url,
+            packages: Object.keys(repodata.packages || {}).length,
+          });
+
+          return repodata;
+        }
+      } catch (error) {
+        logger.warn('repodata 가져오기 실패, 다음 URL 시도', { url, error });
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * repodata에서 패키지 찾기
+   */
+  private findPackageInRepoData(
+    repodata: RepoData,
+    name: string,
+    version: string,
+    subdir: string
+  ): { filename: string; pkg: RepoDataPackage } | null {
+    const normalizedName = name.toLowerCase();
+
+    // packages.conda 우선 (더 최신 형식)
+    const allPackages = {
+      ...(repodata['packages.conda'] || {}),
+      ...repodata.packages,
+    };
+
+    const candidates: Array<{ filename: string; pkg: RepoDataPackage }> = [];
+
+    for (const [filename, pkg] of Object.entries(allPackages)) {
+      if (pkg.name.toLowerCase() !== normalizedName) continue;
+      if (pkg.version !== version) continue;
+
+      candidates.push({ filename, pkg });
+    }
+
+    if (candidates.length === 0) return null;
+
+    // 빌드 번호가 가장 높은 것 선택
+    candidates.sort((a, b) => b.pkg.build_number - a.pkg.build_number);
+
+    return candidates[0];
   }
 
   /**
@@ -116,7 +203,7 @@ export class CondaDownloader implements IDownloader {
 
       // 버전 정렬 (최신순)
       return response.data.versions.sort((a, b) =>
-        this.compareVersions(b, a)
+        compareVersions(b, a)
       );
     } catch (error) {
       logger.error('Conda 버전 목록 조회 실패', { packageName, channel, error });
@@ -125,12 +212,94 @@ export class CondaDownloader implements IDownloader {
   }
 
   /**
-   * 패키지 메타데이터 조회
+   * 패키지 메타데이터 조회 (repodata.json 기반)
    */
   async getPackageMetadata(
     name: string,
     version: string,
     channel: CondaChannel = 'conda-forge',
+    arch?: Architecture
+  ): Promise<PackageInfo> {
+    // subdir 결정 (noarch, all은 그대로 'noarch' 사용)
+    const subdir = (!arch || arch === 'noarch' || arch === 'all')
+      ? 'noarch'
+      : getCondaSubdir(undefined, arch as string);
+
+    try {
+      // repodata에서 먼저 시도
+      const repodata = await this.getRepoData(channel, subdir);
+      if (repodata) {
+        const found = this.findPackageInRepoData(repodata, name, version, subdir);
+        if (found) {
+          const { filename, pkg } = found;
+          const downloadUrl = `${this.condaUrl}/${channel}/${subdir}/${filename}`;
+
+          return {
+            type: 'conda',
+            name: pkg.name,
+            version: pkg.version,
+            arch: this.mapArch(subdir),
+            metadata: {
+              repository: `${channel}/${name}`,
+              size: pkg.size,
+              checksum: {
+                md5: pkg.md5,
+                sha256: pkg.sha256,
+              },
+              downloadUrl,
+              // 추가 메타데이터
+              build: pkg.build,
+              subdir: subdir,
+              filename: filename,
+            },
+          };
+        }
+      }
+
+      // noarch도 확인
+      const noarchRepodata = await this.getRepoData(channel, 'noarch');
+      if (noarchRepodata) {
+        const found = this.findPackageInRepoData(noarchRepodata, name, version, 'noarch');
+        if (found) {
+          const { filename, pkg } = found;
+          const downloadUrl = `${this.condaUrl}/${channel}/noarch/${filename}`;
+
+          return {
+            type: 'conda',
+            name: pkg.name,
+            version: pkg.version,
+            arch: 'noarch',
+            metadata: {
+              repository: `${channel}/${name}`,
+              size: pkg.size,
+              checksum: {
+                md5: pkg.md5,
+                sha256: pkg.sha256,
+              },
+              downloadUrl,
+              build: pkg.build,
+              subdir: 'noarch',
+              filename: filename,
+            },
+          };
+        }
+      }
+
+      // 폴백: Anaconda API
+      return this.getPackageMetadataFallback(name, version, channel, arch);
+    } catch (error) {
+      logger.warn('repodata에서 패키지 조회 실패, Anaconda API 폴백', { name, version, channel, error });
+      return this.getPackageMetadataFallback(name, version, channel, arch);
+    }
+  }
+
+  /**
+   * Anaconda API 폴백
+   */
+  private async getPackageMetadataFallback(
+    name: string,
+    version: string,
+    channel: CondaChannel,
     arch?: Architecture
   ): Promise<PackageInfo> {
     try {
@@ -183,7 +352,7 @@ export class CondaDownloader implements IDownloader {
     try {
       const channel = (info.metadata?.repository as string)?.split('/')[0] || 'conda-forge';
 
-      // 메타데이터 조회
+      // 메타데이터 조회 (downloadUrl 포함)
       const packageInfo = await this.getPackageMetadata(
         info.name,
         info.version,
@@ -202,6 +371,13 @@ export class CondaDownloader implements IDownloader {
 
       // 디렉토리 생성
       await fs.ensureDir(destPath);
+
+      logger.info('Conda 패키지 다운로드 시작', {
+        name: info.name,
+        version: info.version,
+        url: downloadUrl,
+        filePath,
+      });
 
       // 파일 다운로드
       const response = await axios({
@@ -288,7 +464,7 @@ export class CondaDownloader implements IDownloader {
   }
 
   /**
-   * 특정 버전/아키텍처에 맞는 최적 파일 선택
+   * 특정 버전/아키텍처에 맞는 최적 파일 선택 (Anaconda API 폴백용)
    */
   private selectBestFile(
     files: CondaPackageFile[],
@@ -354,21 +530,6 @@ export class CondaDownloader implements IDownloader {
   }
 
   /**
-   * 버전 비교
-   */
-  private compareVersions(a: string, b: string): number {
-    const partsA = a.split('.').map((p) => parseInt(p, 10) || 0);
-    const partsB = b.split('.').map((p) => parseInt(p, 10) || 0);
-
-    for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-      const numA = partsA[i] || 0;
-      const numB = partsB[i] || 0;
-      if (numA !== numB) return numA - numB;
-    }
-    return 0;
-  }
-
-  /**
    * 채널별 패키지 파일 목록 조회
    */
   async getPackageFiles(
@@ -379,6 +540,13 @@ export class CondaDownloader implements IDownloader {
       `${this.apiUrl}/package/${channel}/${name}`
     );
     return response.data.files;
+  }
+
+  /**
+   * repodata 캐시 초기화
+   */
+  clearCache(): void {
+    this.repodataCache.clear();
   }
 }
 

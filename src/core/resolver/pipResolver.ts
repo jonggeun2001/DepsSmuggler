@@ -8,18 +8,8 @@ import {
   ResolverOptions,
 } from '../../types';
 import logger from '../../utils/logger';
-
-// PyPI API 응답 타입
-interface PyPIInfo {
-  name: string;
-  version: string;
-  requires_dist?: string[];
-}
-
-interface PyPIResponse {
-  info: PyPIInfo;
-  releases: Record<string, unknown[]>;
-}
+import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
+import { compareVersions, isVersionCompatible } from '../shared';
 
 // 의존성 파싱 결과
 interface ParsedDependency {
@@ -29,11 +19,19 @@ interface ParsedDependency {
   markers?: string;
 }
 
+// 타겟 플랫폼 타입
+interface TargetPlatform {
+  system?: 'Linux' | 'Windows' | 'Darwin';
+  machine?: 'x86_64' | 'aarch64' | 'arm64';
+}
+
 export class PipResolver implements IResolver {
   readonly type = 'pip' as const;
   private readonly baseUrl = 'https://pypi.org/pypi';
   private visited: Map<string, DependencyNode> = new Map();
   private conflicts: DependencyConflict[] = [];
+  private targetPlatform: TargetPlatform | null = null;
+  private pythonVersion: string | null = null;
 
   /**
    * 의존성 해결
@@ -41,11 +39,13 @@ export class PipResolver implements IResolver {
   async resolveDependencies(
     packageName: string,
     version: string,
-    options?: ResolverOptions
+    options?: ResolverOptions & { pythonVersion?: string }
   ): Promise<DependencyResolutionResult> {
     // 상태 초기화
     this.visited.clear();
     this.conflicts = [];
+    this.targetPlatform = options?.targetPlatform ?? null;
+    this.pythonVersion = options?.pythonVersion ?? null;
 
     const maxDepth = options?.maxDepth ?? 10;
 
@@ -121,7 +121,7 @@ export class PipResolver implements IResolver {
       if (info.requires_dist) {
         const parsedDeps = info.requires_dist
           .map((dep) => this.parseDependencyString(dep))
-          .filter((dep) => dep !== null && !dep.markers); // 환경 마커가 없는 것만
+          .filter((dep) => dep !== null && this.evaluateMarker(dep.markers)); // 환경 마커 평가
 
         for (const dep of parsedDeps) {
           if (!dep) continue;
@@ -204,6 +204,69 @@ export class PipResolver implements IResolver {
   }
 
   /**
+   * 환경 마커 평가
+   * targetPlatform이 설정된 경우 해당 플랫폼에 맞는 마커만 통과
+   * targetPlatform이 없으면 마커가 없는 의존성만 통과 (기존 동작)
+   */
+  private evaluateMarker(marker?: string): boolean {
+    // 마커가 없으면 항상 포함
+    if (!marker) return true;
+
+    // 타겟 플랫폼이 설정되지 않으면 마커가 있는 의존성 제외 (기존 동작)
+    if (!this.targetPlatform) return false;
+
+    const { system, machine } = this.targetPlatform;
+
+    // extra 마커는 제외 (예: extra == "dev")
+    if (marker.includes('extra')) return false;
+
+    // platform_system 평가
+    const systemMatch = marker.match(/platform_system\s*==\s*["'](\w+)["']/);
+    if (systemMatch) {
+      const requiredSystem = systemMatch[1];
+      if (system && system !== requiredSystem) return false;
+      if (!system) return false; // 시스템이 지정되지 않으면 제외
+    }
+
+    // platform_machine 평가
+    const machineMatch = marker.match(/platform_machine\s*==\s*["'](\w+)["']/);
+    if (machineMatch) {
+      const requiredMachine = machineMatch[1];
+      if (machine) {
+        // x86_64와 amd64는 동일하게 처리
+        const normalizedRequired = requiredMachine.toLowerCase();
+        const normalizedTarget = machine.toLowerCase();
+        const isX64 = (m: string) => m === 'x86_64' || m === 'amd64';
+
+        if (isX64(normalizedRequired) && isX64(normalizedTarget)) {
+          // 둘 다 x64 계열이면 통과
+        } else if (normalizedRequired !== normalizedTarget) {
+          return false;
+        }
+      } else {
+        return false; // 머신이 지정되지 않으면 제외
+      }
+    }
+
+    // python_version 마커는 무시 (모든 버전 포함)
+    // sys_platform 평가
+    const sysPlatformMatch = marker.match(/sys_platform\s*==\s*["'](\w+)["']/);
+    if (sysPlatformMatch) {
+      const requiredPlatform = sysPlatformMatch[1];
+      const platformMap: Record<string, string> = {
+        'Linux': 'linux',
+        'Windows': 'win32',
+        'Darwin': 'darwin',
+      };
+      if (system && platformMap[system] !== requiredPlatform) return false;
+      if (!system) return false;
+    }
+
+    // 모든 조건을 통과하면 포함
+    return true;
+  }
+
+  /**
    * 버전 스펙에 맞는 최신 버전 조회
    */
   private async getLatestVersion(
@@ -227,7 +290,7 @@ export class PipResolver implements IResolver {
 
       // 버전 스펙 파싱 및 필터링
       const compatibleVersions = versions.filter((v) =>
-        this.isVersionCompatible(v, versionSpec)
+        isVersionCompatible(v, versionSpec)
       );
 
       if (compatibleVersions.length === 0) {
@@ -243,79 +306,11 @@ export class PipResolver implements IResolver {
 
       // 최신 호환 버전 반환
       return compatibleVersions.sort((a, b) =>
-        this.compareVersions(b, a)
+        compareVersions(b, a)
       )[0];
     } catch {
       return null;
     }
-  }
-
-  /**
-   * 버전 호환성 체크
-   */
-  private isVersionCompatible(version: string, spec: string): boolean {
-    // 여러 조건 처리 (,로 구분)
-    const conditions = spec.split(',').map((s) => s.trim());
-
-    return conditions.every((condition) => {
-      if (condition.startsWith('>=')) {
-        return this.compareVersions(version, condition.slice(2)) >= 0;
-      }
-      if (condition.startsWith('<=')) {
-        return this.compareVersions(version, condition.slice(2)) <= 0;
-      }
-      if (condition.startsWith('==')) {
-        const target = condition.slice(2);
-        if (target.includes('*')) {
-          // 와일드카드 처리 (예: ==2.*)
-          const prefix = target.replace('*', '');
-          return version.startsWith(prefix);
-        }
-        return version === target;
-      }
-      if (condition.startsWith('!=')) {
-        return version !== condition.slice(2);
-      }
-      if (condition.startsWith('~=')) {
-        // 호환 릴리스 (예: ~=2.1은 >=2.1, ==2.*)
-        const base = condition.slice(2);
-        const parts = base.split('.');
-        parts.pop();
-        const prefix = parts.join('.');
-        return (
-          this.compareVersions(version, base) >= 0 &&
-          version.startsWith(prefix)
-        );
-      }
-      if (condition.startsWith('>')) {
-        return this.compareVersions(version, condition.slice(1)) > 0;
-      }
-      if (condition.startsWith('<')) {
-        return this.compareVersions(version, condition.slice(1)) < 0;
-      }
-      return true;
-    });
-  }
-
-  /**
-   * 버전 비교
-   */
-  private compareVersions(a: string, b: string): number {
-    const normalize = (v: string) =>
-      v.split('.').map((p) => {
-        const num = parseInt(p, 10);
-        return isNaN(num) ? 0 : num;
-      });
-
-    const partsA = normalize(a);
-    const partsB = normalize(b);
-
-    for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-      const numA = partsA[i] || 0;
-      const numB = partsB[i] || 0;
-      if (numA !== numB) return numA - numB;
-    }
-    return 0;
   }
 
   /**

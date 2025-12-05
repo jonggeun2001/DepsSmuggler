@@ -10,47 +10,13 @@ import {
   Architecture,
 } from '../../types';
 import logger from '../../utils/logger';
-
-// PyPI API 응답 타입
-interface PyPIRelease {
-  filename: string;
-  url: string;
-  size: number;
-  md5_digest: string;
-  digests: {
-    md5: string;
-    sha256: string;
-  };
-  packagetype: 'sdist' | 'bdist_wheel' | 'bdist_egg';
-  python_version: string;
-  requires_python?: string;
-}
-
-interface PyPIInfo {
-  name: string;
-  version: string;
-  summary: string;
-  author: string;
-  author_email: string;
-  license: string;
-  home_page: string;
-  project_url: string;
-  requires_dist?: string[];
-  requires_python?: string;
-}
-
-interface PyPIResponse {
-  info: PyPIInfo;
-  releases: Record<string, PyPIRelease[]>;
-  urls: PyPIRelease[];
-}
-
-// PyPI 검색 API 응답 (warehouse API)
-interface PyPISearchResult {
-  name: string;
-  version: string;
-  summary: string;
-}
+import {
+  PyPIRelease,
+  PyPIInfo,
+  PyPIResponse,
+  PyPISearchResult,
+} from '../shared/pip-types';
+import { compareVersions } from '../shared';
 
 export class PipDownloader implements IDownloader {
   readonly type = 'pip' as const;
@@ -112,7 +78,7 @@ export class PipDownloader implements IDownloader {
 
       // 버전 정렬 (최신순)
       return versions.sort((a, b) => {
-        return this.compareVersions(b, a);
+        return compareVersions(b, a);
       });
     } catch (error) {
       logger.error('PyPI 버전 목록 조회 실패', { packageName, error });
@@ -265,24 +231,44 @@ export class PipDownloader implements IDownloader {
   }
 
   /**
-   * 특정 아키텍처/Python 버전에 맞는 릴리스 조회
+   * 특정 OS/아키텍처/Python 버전에 맞는 릴리스 조회
    */
   async getReleasesForArch(
     name: string,
     version: string,
     arch?: Architecture,
-    pythonVersion?: string
+    pythonVersion?: string,
+    targetOS?: 'any' | 'windows' | 'macos' | 'linux'
   ): Promise<PyPIRelease[]> {
     const response = await this.client.get<PyPIResponse>(
       `/${name}/${version}/json`
     );
     let releases = response.data.urls;
 
+    // OS별 플랫폼 태그 필터링
+    if (targetOS && targetOS !== 'any') {
+      const osPatterns: Record<string, string[]> = {
+        windows: ['win_amd64', 'win32', 'win'],
+        macos: ['macosx', 'darwin'],
+        linux: ['manylinux', 'linux_x86_64', 'linux_aarch64', 'linux'],
+      };
+
+      const patterns = osPatterns[targetOS] || [];
+      releases = releases.filter(
+        (r) =>
+          r.packagetype === 'sdist' ||
+          r.filename.includes('none-any') || // 순수 Python 패키지
+          patterns.some((p) => r.filename.toLowerCase().includes(p))
+      );
+    }
+
     // 아키텍처 필터링
-    if (arch) {
+    if (arch && arch !== 'noarch') {
       const archPatterns: Record<string, string[]> = {
-        x86_64: ['x86_64', 'amd64', 'win_amd64', 'manylinux'],
-        arm64: ['arm64', 'aarch64'],
+        x86_64: ['x86_64', 'amd64', 'win_amd64', 'manylinux_x86_64', 'manylinux1', 'manylinux2010', 'manylinux2014'],
+        amd64: ['x86_64', 'amd64', 'win_amd64'],
+        arm64: ['arm64', 'aarch64', 'macosx_arm64'],
+        aarch64: ['arm64', 'aarch64', 'linux_aarch64'],
         i386: ['i386', 'i686', 'win32'],
       };
 
@@ -290,6 +276,7 @@ export class PipDownloader implements IDownloader {
       releases = releases.filter(
         (r) =>
           r.packagetype === 'sdist' ||
+          r.filename.includes('none-any') || // 순수 Python 패키지
           patterns.some((p) => r.filename.toLowerCase().includes(p))
       );
     }
@@ -333,21 +320,6 @@ export class PipDownloader implements IDownloader {
     if (sdist) return sdist;
 
     return releases[0];
-  }
-
-  /**
-   * 버전 비교 (semver 스타일)
-   */
-  private compareVersions(a: string, b: string): number {
-    const partsA = a.split('.').map((p) => parseInt(p, 10) || 0);
-    const partsB = b.split('.').map((p) => parseInt(p, 10) || 0);
-
-    for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-      const numA = partsA[i] || 0;
-      const numB = partsB[i] || 0;
-      if (numA !== numB) return numA - numB;
-    }
-    return 0;
   }
 }
 
