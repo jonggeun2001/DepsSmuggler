@@ -17,6 +17,12 @@ export type DefaultArchitecture = 'x86_64' | 'amd64' | 'arm64' | 'aarch64' | 'no
 // Conda 채널 타입 정의
 export type CondaChannel = 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch';
 
+// OS 배포판 설정 타입 정의
+export interface OSDistributionSetting {
+  id: string;           // 배포판 ID (예: 'rocky-9', 'ubuntu-22.04')
+  architecture: string; // 아키텍처 (예: 'x86_64', 'amd64')
+}
+
 // 설정 상태
 interface SettingsState {
   // 다운로드 설정
@@ -49,6 +55,11 @@ interface SettingsState {
 
   // Conda 채널 설정
   condaChannel: CondaChannel;
+
+  // OS 패키지 배포판 설정
+  yumDistribution: OSDistributionSetting;  // YUM (RHEL 계열)
+  aptDistribution: OSDistributionSetting;  // APT (Debian/Ubuntu 계열)
+  apkDistribution: OSDistributionSetting;  // APK (Alpine)
 
   // 액션
   updateSettings: (updates: Partial<SettingsState>) => void;
@@ -83,6 +94,11 @@ const defaultSettings = {
   defaultArchitecture: 'x86_64' as const,
 
   condaChannel: 'conda-forge' as const,
+
+  // OS 패키지 배포판 기본값 (LTS 안정 버전)
+  yumDistribution: { id: 'rocky-9', architecture: 'x86_64' },
+  aptDistribution: { id: 'ubuntu-22.04', architecture: 'amd64' },
+  apkDistribution: { id: 'alpine-3.18', architecture: 'x86_64' },
 };
 
 export const useSettingsStore = create<SettingsState>()(

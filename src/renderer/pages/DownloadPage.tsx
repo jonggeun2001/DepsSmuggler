@@ -106,7 +106,6 @@ const DownloadPage: React.FC = () => {
     isDownloading,
     isPaused,
     outputPath,
-    outputFormat,
     packagingStatus,
     packagingProgress,
     logs,
@@ -116,7 +115,6 @@ const DownloadPage: React.FC = () => {
     setIsDownloading,
     setIsPaused,
     setOutputPath,
-    setOutputFormat,
     setPackagingStatus,
     setPackagingProgress,
     addLog,
@@ -127,6 +125,8 @@ const DownloadPage: React.FC = () => {
     reset,
   } = useDownloadStore();
   const { defaultOutputFormat, includeInstallScripts } = useSettingsStore();
+  // 설정 페이지의 outputFormat을 직접 사용
+  const outputFormat = defaultOutputFormat;
 
   const [outputDir, setOutputDir] = useState(outputPath || '');
   const [errorModalOpen, setErrorModalOpen] = useState(false);
@@ -135,6 +135,9 @@ const DownloadPage: React.FC = () => {
   const downloadPausedRef = useRef(false);
   // 다운로드 아이템 목록을 ref로 유지 (SSE 이벤트 핸들러에서 최신 상태 참조용)
   const downloadItemsRef = useRef<DownloadItem[]>([]);
+  // SSE 연결 및 클라이언트 ID 관리 (취소 시 사용)
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const clientIdRef = useRef<string>('');
 
   // 초기화
   useEffect(() => {
@@ -154,10 +157,7 @@ const DownloadPage: React.FC = () => {
       clearLogs();
     }
 
-    if (!outputFormat) {
-      setOutputFormat(defaultOutputFormat);
-    }
-  }, [cartItems, downloadItems.length, setItems, outputFormat, setOutputFormat, defaultOutputFormat, clearLogs]);
+  }, [cartItems, downloadItems.length, setItems, clearLogs]);
 
   // IPC 이벤트 리스너 설정 (프로덕션 Electron 환경에서만)
   useEffect(() => {
@@ -325,6 +325,16 @@ const DownloadPage: React.FC = () => {
     };
     // downloadItems 대신 downloadItemsRef를 사용하므로 dependency에서 제거
   }, [updateItem, addLog, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, clearCart]);
+
+  // 컴포넌트 언마운트 시 SSE 연결 정리
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+  }, []);
 
   // 폴더 선택
   const handleSelectFolder = async () => {
@@ -498,9 +508,11 @@ const DownloadPage: React.FC = () => {
   // 브라우저 환경에서 실제 다운로드 (Vite 서버 API 사용)
   const browserDownload = async () => {
     const clientId = `download-${Date.now()}`;
+    clientIdRef.current = clientId;  // ref에 저장
 
     // SSE 연결로 진행률 수신
     const eventSource = new EventSource(`/api/download/events?clientId=${clientId}`);
+    eventSourceRef.current = eventSource;  // ref에 저장
 
     // SSE 연결이 열릴 때까지 대기
     await new Promise<void>((resolve, reject) => {
@@ -676,6 +688,16 @@ const DownloadPage: React.FC = () => {
       clearCart();
 
       eventSource.close();
+      eventSourceRef.current = null;
+    });
+
+    // 취소 이벤트 핸들러
+    eventSource.addEventListener('cancelled', () => {
+      addLog('warn', '다운로드가 취소되었습니다');
+      setIsDownloading(false);
+      setPackagingStatus('idle');
+      eventSource.close();
+      eventSourceRef.current = null;
     });
 
     // 에러 핸들러 재설정 (연결 후 에러용)
@@ -683,6 +705,7 @@ const DownloadPage: React.FC = () => {
       addLog('error', 'SSE 연결 오류');
       setIsDownloading(false);
       eventSource.close();
+      eventSourceRef.current = null;
     };
 
     // 다운로드 시작 요청
@@ -742,8 +765,39 @@ const DownloadPage: React.FC = () => {
       okText: '취소',
       okType: 'danger',
       cancelText: '계속',
-      onOk: () => {
+      onOk: async () => {
         downloadCancelledRef.current = true;
+
+        // 개발 환경에서 HTTP API로 취소 요청
+        const isDevelopment = import.meta.env.DEV;
+
+        if (isDevelopment || !window.electronAPI?.download?.cancel) {
+          // 백엔드에 취소 요청
+          try {
+            const response = await fetch('/api/download/cancel', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ clientId: clientIdRef.current }),
+            });
+
+            if (response.ok) {
+              addLog('info', '다운로드 취소 요청 전송됨');
+            }
+          } catch (error) {
+            console.error('Failed to cancel download:', error);
+          }
+
+          // SSE 연결 종료
+          if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+          }
+        } else {
+          // 프로덕션 Electron 환경: IPC 사용
+          await window.electronAPI.download.cancel?.();
+        }
+
+        // UI 상태 업데이트
         setIsDownloading(false);
         setIsPaused(false);
         downloadItems.forEach((item) => {
@@ -1099,19 +1153,16 @@ const DownloadPage: React.FC = () => {
           </Space.Compact>
         </div>
 
-        <div style={{ marginBottom: 16 }}>
-          <Text strong>출력 형식</Text>
-          <div style={{ marginTop: 8 }}>
-            <Radio.Group
-              value={outputFormat}
-              onChange={(e) => setOutputFormat(e.target.value)}
-              disabled={isDownloading}
-            >
-              <Radio.Button value="zip">ZIP 압축</Radio.Button>
-              <Radio.Button value="tar.gz">TAR.GZ 압축</Radio.Button>
-              <Radio.Button value="mirror">미러 구조</Radio.Button>
-            </Radio.Group>
-          </div>
+        <div style={{ marginBottom: 16, padding: 16, background: '#fafafa', borderRadius: 8 }}>
+          <Text strong style={{ display: 'block', marginBottom: 8 }}>출력 형식</Text>
+          <Tag color="blue" style={{ fontSize: 14, padding: '4px 12px' }}>
+            {outputFormat === 'zip' ? 'ZIP 압축'
+              : outputFormat === 'tar.gz' ? 'TAR.GZ 압축'
+              : '오프라인 미러 구조'}
+          </Tag>
+          <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+            <a onClick={() => navigate('/settings')}>설정 페이지</a>에서 변경 가능
+          </Text>
         </div>
 
         {includeInstallScripts && (

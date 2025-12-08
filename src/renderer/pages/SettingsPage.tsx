@@ -51,6 +51,9 @@ const SettingsPage: React.FC = () => {
     defaultTargetOS,
     defaultArchitecture,
     condaChannel,
+    yumDistribution,
+    aptDistribution,
+    apkDistribution,
     updateSettings,
     resetSettings,
   } = useSettingsStore();
@@ -177,6 +180,10 @@ const SettingsPage: React.FC = () => {
       defaultTargetOS,
       defaultArchitecture,
       condaChannel,
+      // OS 배포판은 "id|architecture" 문자열 형식으로 저장
+      yumDistribution: `${yumDistribution?.id}|${yumDistribution?.architecture}`,
+      aptDistribution: `${aptDistribution?.id}|${aptDistribution?.architecture}`,
+      apkDistribution: `${apkDistribution?.id}|${apkDistribution?.architecture}`,
     });
   }, [
     form,
@@ -197,11 +204,32 @@ const SettingsPage: React.FC = () => {
     defaultTargetOS,
     defaultArchitecture,
     condaChannel,
+    yumDistribution,
+    aptDistribution,
+    apkDistribution,
   ]);
 
   // 저장
   const handleSave = (values: Record<string, unknown>) => {
-    updateSettings(values);
+    // OS 배포판 문자열("id|architecture")을 객체로 변환
+    const convertedValues = { ...values };
+
+    if (typeof values.yumDistribution === 'string') {
+      const [id, architecture] = (values.yumDistribution as string).split('|');
+      convertedValues.yumDistribution = { id, architecture };
+    }
+
+    if (typeof values.aptDistribution === 'string') {
+      const [id, architecture] = (values.aptDistribution as string).split('|');
+      convertedValues.aptDistribution = { id, architecture };
+    }
+
+    if (typeof values.apkDistribution === 'string') {
+      const [id, architecture] = (values.apkDistribution as string).split('|');
+      convertedValues.apkDistribution = { id, architecture };
+    }
+
+    updateSettings(convertedValues);
     message.success('설정이 저장되었습니다');
   };
 
@@ -401,17 +429,81 @@ const SettingsPage: React.FC = () => {
             </Select>
           </Form.Item>
 
-          <Divider style={{ margin: '16px 0' }} />
+        </Card>
 
-          <Text type="secondary" style={{ display: 'block' }}>
-            <strong>참고:</strong> OS 패키지(YUM, APT, APK)는 위자드에서 패키지 타입으로 직접 선택합니다.
-            <br />
-            • YUM → RHEL/CentOS/Fedora
-            <br />
-            • APT → Ubuntu/Debian
-            <br />
-            • APK → Alpine Linux
-          </Text>
+        {/* OS 패키지 배포판 설정 */}
+        <Card
+          title="OS 패키지 배포판 설정"
+          style={{ marginBottom: 24 }}
+          extra={<Tag color="orange">YUM/APT/APK</Tag>}
+        >
+          <Alert
+            message="OS 패키지 검색 시 사용할 배포판"
+            description="각 패키지 관리자별로 검색할 배포판과 아키텍처를 설정합니다. 폐쇄망의 OS 버전에 맞게 설정하세요."
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+
+          <Form.Item
+            name="yumDistribution"
+            label="YUM 배포판 (RHEL 계열)"
+            tooltip="YUM 패키지 검색 시 사용할 배포판과 아키텍처"
+          >
+            <Select>
+              <Select.OptGroup label="Rocky Linux">
+                <Select.Option value="rocky-9|x86_64">Rocky Linux 9 (x86_64)</Select.Option>
+                <Select.Option value="rocky-9|aarch64">Rocky Linux 9 (aarch64)</Select.Option>
+                <Select.Option value="rocky-8|x86_64">Rocky Linux 8 (x86_64)</Select.Option>
+                <Select.Option value="rocky-8|aarch64">Rocky Linux 8 (aarch64)</Select.Option>
+              </Select.OptGroup>
+              <Select.OptGroup label="AlmaLinux">
+                <Select.Option value="almalinux-9|x86_64">AlmaLinux 9 (x86_64)</Select.Option>
+                <Select.Option value="almalinux-9|aarch64">AlmaLinux 9 (aarch64)</Select.Option>
+                <Select.Option value="almalinux-8|x86_64">AlmaLinux 8 (x86_64)</Select.Option>
+                <Select.Option value="almalinux-8|aarch64">AlmaLinux 8 (aarch64)</Select.Option>
+              </Select.OptGroup>
+              <Select.OptGroup label="CentOS (EOL)">
+                <Select.Option value="centos-7|x86_64">CentOS 7 (x86_64) - EOL</Select.Option>
+              </Select.OptGroup>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="aptDistribution"
+            label="APT 배포판 (Debian/Ubuntu 계열)"
+            tooltip="APT 패키지 검색 시 사용할 배포판과 아키텍처"
+          >
+            <Select>
+              <Select.OptGroup label="Ubuntu LTS">
+                <Select.Option value="ubuntu-24.04|amd64">Ubuntu 24.04 LTS (amd64)</Select.Option>
+                <Select.Option value="ubuntu-24.04|arm64">Ubuntu 24.04 LTS (arm64)</Select.Option>
+                <Select.Option value="ubuntu-22.04|amd64">Ubuntu 22.04 LTS (amd64)</Select.Option>
+                <Select.Option value="ubuntu-22.04|arm64">Ubuntu 22.04 LTS (arm64)</Select.Option>
+                <Select.Option value="ubuntu-20.04|amd64">Ubuntu 20.04 LTS (amd64)</Select.Option>
+                <Select.Option value="ubuntu-20.04|arm64">Ubuntu 20.04 LTS (arm64)</Select.Option>
+              </Select.OptGroup>
+              <Select.OptGroup label="Debian">
+                <Select.Option value="debian-12|amd64">Debian 12 Bookworm (amd64)</Select.Option>
+                <Select.Option value="debian-12|arm64">Debian 12 Bookworm (arm64)</Select.Option>
+                <Select.Option value="debian-11|amd64">Debian 11 Bullseye (amd64)</Select.Option>
+                <Select.Option value="debian-11|arm64">Debian 11 Bullseye (arm64)</Select.Option>
+              </Select.OptGroup>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="apkDistribution"
+            label="APK 배포판 (Alpine Linux)"
+            tooltip="APK 패키지 검색 시 사용할 배포판과 아키텍처"
+          >
+            <Select>
+              <Select.Option value="alpine-3.20|x86_64">Alpine 3.20 (x86_64)</Select.Option>
+              <Select.Option value="alpine-3.20|aarch64">Alpine 3.20 (aarch64)</Select.Option>
+              <Select.Option value="alpine-3.18|x86_64">Alpine 3.18 (x86_64)</Select.Option>
+              <Select.Option value="alpine-3.18|aarch64">Alpine 3.18 (aarch64)</Select.Option>
+            </Select>
+          </Form.Item>
         </Card>
 
         {/* 의존성 설정 */}
@@ -507,15 +599,23 @@ const SettingsPage: React.FC = () => {
 
         {/* 출력 설정 */}
         <Card title="출력 설정" style={{ marginBottom: 24 }}>
+          <Alert
+            message="다운로드 시 자동 적용"
+            description="여기서 설정한 출력 형식과 설치 스크립트 옵션이 모든 다운로드에 자동으로 적용됩니다."
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+
           <Form.Item
             name="defaultOutputFormat"
             label="기본 출력 형식"
             tooltip="다운로드 완료 시 기본 출력 형식"
           >
             <Select>
-              <Select.Option value="zip">ZIP 압축</Select.Option>
-              <Select.Option value="tar.gz">TAR.GZ 압축</Select.Option>
-              <Select.Option value="mirror">오프라인 미러 구조</Select.Option>
+              <Select.Option value="zip">ZIP 압축 (메일 첨부에 적합)</Select.Option>
+              <Select.Option value="tar.gz">TAR.GZ 압축 (Linux 환경에 적합)</Select.Option>
+              <Select.Option value="mirror">오프라인 미러 구조 (로컬 저장소 사용)</Select.Option>
             </Select>
           </Form.Item>
 

@@ -182,7 +182,15 @@ const WizardPage: React.FC = () => {
   const [architecture, setArchitecture] = useState<Architecture>('x86_64');
 
   const { addItem, hasItem } = useCartStore();
-  const { languageVersions, defaultArchitecture, defaultTargetOS, condaChannel } = useSettingsStore();
+  const {
+    languageVersions,
+    defaultArchitecture,
+    defaultTargetOS,
+    condaChannel,
+    yumDistribution,
+    aptDistribution,
+    apkDistribution,
+  } = useSettingsStore();
 
   // 라이브러리 패키지 타입 (설정 기본값 적용 대상)
   const libraryPackageTypes: PackageType[] = ['pip', 'conda', 'maven', 'gradle', 'npm'];
@@ -372,6 +380,83 @@ const WizardPage: React.FC = () => {
     }
   };
 
+  // 브라우저에서 OS 패키지 API로 검색 (YUM, APT, APK)
+  const searchOSPackage = async (type: PackageType, query: string): Promise<SearchResult[]> => {
+    try {
+      // 패키지 타입에 따라 설정에서 배포판 정보 가져오기
+      const getDistributionInfo = (pkgType: string) => {
+        switch (pkgType) {
+          case 'yum':
+            return {
+              id: yumDistribution.id,
+              name: yumDistribution.id, // 서버에서 getDistributionById로 조회
+              osType: 'linux',
+              packageManager: 'yum',
+              architecture: yumDistribution.architecture,
+            };
+          case 'apt':
+            return {
+              id: aptDistribution.id,
+              name: aptDistribution.id,
+              osType: 'linux',
+              packageManager: 'apt',
+              architecture: aptDistribution.architecture,
+            };
+          case 'apk':
+            return {
+              id: apkDistribution.id,
+              name: apkDistribution.id,
+              osType: 'linux',
+              packageManager: 'apk',
+              architecture: apkDistribution.architecture,
+            };
+          default:
+            return null;
+        }
+      };
+
+      const distributionInfo = getDistributionInfo(type);
+      if (!distributionInfo) {
+        console.warn(`Unknown OS package type: ${type}`);
+        return [];
+      }
+
+      const response = await fetch('/api/os/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          distribution: {
+            id: distributionInfo.id,
+            name: distributionInfo.name,
+            osType: distributionInfo.osType,
+            packageManager: distributionInfo.packageManager,
+          },
+          architecture: distributionInfo.architecture,
+          matchType: 'contains',
+          limit: 50,
+        }),
+      });
+
+      if (!response.ok) {
+        console.error(`OS package search failed: ${response.statusText}`);
+        return [];
+      }
+
+      const data = await response.json();
+
+      // OS 패키지 결과를 SearchResult 형식으로 변환
+      return (data.packages || []).map((pkg: { name: string; version: string; description?: string; summary?: string }) => ({
+        name: pkg.name,
+        version: pkg.version,
+        description: pkg.summary || pkg.description || '',
+      }));
+    } catch (error) {
+      console.error(`${type} search error:`, error);
+      return [];
+    }
+  };
+
   // 패키지 타입별 브라우저 검색 함수
   const searchPackageByType = async (type: PackageType, query: string): Promise<SearchResult[]> => {
     switch (type) {
@@ -388,9 +473,7 @@ const WizardPage: React.FC = () => {
       case 'yum':
       case 'apt':
       case 'apk':
-        // OS 패키지는 아직 구현되지 않음 - 빈 결과 반환
-        console.warn(`${type} 패키지 검색은 아직 지원되지 않습니다`);
-        return [];
+        return searchOSPackage(type, query);
       default:
         return [];
     }
@@ -409,8 +492,50 @@ const WizardPage: React.FC = () => {
     try {
       let results: SearchResult[];
 
-      if (window.electronAPI?.search?.packages) {
-        // conda일 때 채널 옵션 전달
+      // OS 패키지 타입인 경우 별도의 OS API 사용
+      const isOSPackage = ['yum', 'apt', 'apk'].includes(packageType);
+
+      if (isOSPackage && window.electronAPI?.os?.search) {
+        // OS 패키지: electronAPI.os.search 사용
+        const getDistributionInfo = () => {
+          switch (packageType) {
+            case 'yum':
+              return { id: yumDistribution.id, architecture: yumDistribution.architecture, packageManager: 'yum' };
+            case 'apt':
+              return { id: aptDistribution.id, architecture: aptDistribution.architecture, packageManager: 'apt' };
+            case 'apk':
+              return { id: apkDistribution.id, architecture: apkDistribution.architecture, packageManager: 'apk' };
+            default:
+              return null;
+          }
+        };
+
+        const distInfo = getDistributionInfo();
+        if (!distInfo) {
+          throw new Error(`지원하지 않는 OS 패키지 타입: ${packageType}`);
+        }
+
+        const response = await window.electronAPI.os.search({
+          query,
+          distribution: {
+            id: distInfo.id,
+            name: distInfo.id,
+            osType: 'linux',
+            packageManager: distInfo.packageManager,
+          },
+          architecture: distInfo.architecture,
+          matchType: 'contains',
+          limit: 50,
+        });
+
+        // OS 패키지 결과를 SearchResult 형식으로 변환
+        results = ((response.packages || []) as Array<{ name: string; version: string; description?: string; summary?: string }>).map(pkg => ({
+          name: pkg.name,
+          version: pkg.version,
+          description: pkg.summary || pkg.description || '',
+        }));
+      } else if (window.electronAPI?.search?.packages) {
+        // 일반 패키지: electronAPI.search.packages 사용
         const searchOptions = packageType === 'conda' ? { channel: condaChannel } : undefined;
         const response = await window.electronAPI.search.packages(packageType, query, searchOptions);
         results = response.results;
@@ -425,7 +550,8 @@ const WizardPage: React.FC = () => {
         message.info('검색 결과가 없습니다');
       }
     } catch (error) {
-      message.error('검색 중 오류가 발생했습니다');
+      const errorMessage = error instanceof Error ? error.message : '검색 중 오류가 발생했습니다';
+      message.error(errorMessage);
       console.error('Search error:', error);
     } finally {
       setSearching(false);
@@ -481,6 +607,25 @@ const WizardPage: React.FC = () => {
           setSelectedVersion(versions[0]);
         } else {
           setAvailableVersions(record.versions || [record.version]);
+        }
+      } else if (packageType === 'maven') {
+        // 브라우저 환경: Maven 버전 API 직접 호출
+        try {
+          const response = await fetch(`/api/maven/versions?package=${encodeURIComponent(record.name)}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.versions && data.versions.length > 0) {
+              setAvailableVersions(data.versions);
+              setSelectedVersion(data.versions[0]);
+            } else {
+              setAvailableVersions([record.version]);
+            }
+          } else {
+            setAvailableVersions([record.version]);
+          }
+        } catch (err) {
+          console.error('Maven version fetch error:', err);
+          setAvailableVersions([record.version]);
         }
       } else {
         setAvailableVersions(record.versions || [record.version]);
