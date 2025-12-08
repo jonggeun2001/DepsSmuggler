@@ -2,6 +2,12 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import axios from 'axios';
+import { getLogger, createScopedLogger } from './utils/logger';
+
+// 스코프별 로거 생성
+const log = createScopedLogger('Main');
+const searchLog = createScopedLogger('Search');
+const downloadLog = createScopedLogger('Download');
 import {
   DownloadPackage,
   DownloadOptions as SharedDownloadOptions,
@@ -10,7 +16,11 @@ import {
   createZipArchive,
   generateInstallScripts,
   resolveAllDependencies,
+  sortByRelevance,
 } from '../src/core/shared';
+
+// OS 패키지 핸들러
+import { registerOSPackageHandlers } from './os-package-handlers';
 
 // 다운로더 모듈 import
 import {
@@ -48,7 +58,29 @@ const VITE_DEV_SERVER_URL = 'http://localhost:3000';
 
 let mainWindow: BrowserWindow | null = null;
 
-function createWindow(): void {
+// Vite 서버가 준비될 때까지 대기하는 함수
+async function waitForViteServer(
+  url: string,
+  maxRetries = 30,
+  retryDelay = 500
+): Promise<boolean> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await axios.get(url, { timeout: 1000 });
+      if (response.status === 200) {
+        log.info(`Vite server is ready after ${i + 1} attempts`);
+        return true;
+      }
+    } catch {
+      log.debug(`Waiting for Vite server... (${i + 1}/${maxRetries})`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, retryDelay));
+  }
+  log.error('Vite server did not become ready in time');
+  return false;
+}
+
+async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -71,10 +103,17 @@ function createWindow(): void {
 
   // 개발 모드: Vite 개발 서버 로드, 프로덕션: 빌드된 파일 로드
   if (isDev) {
-    // Vite 개발 서버에서 로드
-    mainWindow.loadURL(VITE_DEV_SERVER_URL);
-    // DevTools 자동 열기
-    mainWindow.webContents.openDevTools();
+    // Vite 서버가 준비될 때까지 대기
+    const serverReady = await waitForViteServer(VITE_DEV_SERVER_URL);
+    if (serverReady) {
+      // Vite 개발 서버에서 로드
+      mainWindow.loadURL(VITE_DEV_SERVER_URL);
+    } else {
+      // 서버가 준비되지 않았어도 시도 (오류 페이지 표시됨)
+      mainWindow.loadURL(VITE_DEV_SERVER_URL);
+    }
+    // DevTools 자동 열기 (비활성화 - MCP 테스트 시 충돌 방지)
+    // mainWindow.webContents.openDevTools();
   } else {
     // 프로덕션: dist/renderer/index.html (Vite 빌드 출력)
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
@@ -87,7 +126,13 @@ function createWindow(): void {
 
 // Electron 앱이 준비되면 윈도우 생성
 app.whenReady().then(() => {
+  // 로거 초기화
+  getLogger();
+
   createWindow();
+
+  // OS 패키지 IPC 핸들러 등록
+  registerOSPackageHandlers(() => mainWindow);
 
   // macOS: Dock 아이콘 클릭 시 윈도우가 없으면 새로 생성
   app.on('activate', () => {
@@ -178,7 +223,7 @@ async function loadPyPIPackageList(): Promise<void> {
   if (pypiCacheLoaded || pypiCacheLoading) return;
 
   pypiCacheLoading = true;
-  console.log('Loading PyPI package list...');
+  searchLog.info('Loading PyPI package list...');
 
   try {
     const response = await axios.get('https://pypi.org/simple/', {
@@ -198,9 +243,9 @@ async function loadPyPIPackageList(): Promise<void> {
     }
 
     pypiCacheLoaded = true;
-    console.log(`PyPI package list loaded: ${pypiPackageCache.length} packages`);
+    searchLog.info(`PyPI package list loaded: ${pypiPackageCache.length} packages`);
   } catch (error) {
-    console.error('Failed to load PyPI package list:', error);
+    searchLog.error('Failed to load PyPI package list:', error);
   } finally {
     pypiCacheLoading = false;
   }
@@ -280,9 +325,29 @@ async function searchMaven(query: string) {
   }
 }
 
-// Maven 버전 목록 조회
-async function getMavenVersions(packageName: string): Promise<string[]> {
-  const [groupId, artifactId] = packageName.split(':');
+// maven-metadata.xml에서 버전 목록 조회 (정확한 버전 순서)
+async function getMavenVersionsFromMetadata(groupId: string, artifactId: string): Promise<string[]> {
+  const groupPath = groupId.replace(/\./g, '/');
+  const metadataUrl = `https://repo1.maven.org/maven2/${groupPath}/${artifactId}/maven-metadata.xml`;
+
+  const response = await axios.get(metadataUrl, {
+    responseType: 'text',
+    timeout: 10000,
+  });
+
+  const versionRegex = /<version>([^<]+)<\/version>/g;
+  const versions: string[] = [];
+  let match;
+
+  while ((match = versionRegex.exec(response.data)) !== null) {
+    versions.push(match[1]);
+  }
+
+  return versions.sort((a: string, b: string) => compareVersions(b, a));
+}
+
+// Search API에서 버전 목록 조회 (폴백용)
+async function getMavenVersionsFromSearchApi(groupId: string, artifactId: string): Promise<string[]> {
   const response = await axios.get('https://search.maven.org/solrsearch/select', {
     params: {
       q: `g:"${groupId}" AND a:"${artifactId}"`,
@@ -296,9 +361,29 @@ async function getMavenVersions(packageName: string): Promise<string[]> {
   return versions.sort((a: string, b: string) => compareVersions(b, a));
 }
 
+// Maven 버전 목록 조회 (하이브리드 접근)
+async function getMavenVersions(packageName: string): Promise<string[]> {
+  const [groupId, artifactId] = packageName.split(':');
+
+  try {
+    // 1차: maven-metadata.xml에서 정확한 버전 목록 조회
+    return await getMavenVersionsFromMetadata(groupId, artifactId);
+  } catch (metadataError) {
+    searchLog.warn('maven-metadata.xml 조회 실패, 폴백 API 사용:', metadataError);
+
+    try {
+      // 2차: 기존 Search API 폴백
+      return await getMavenVersionsFromSearchApi(groupId, artifactId);
+    } catch (error) {
+      searchLog.error('Maven 버전 목록 조회 실패:', error);
+      throw error;
+    }
+  }
+}
+
 // 패키지 검색 핸들러 (실제 API 호출)
 ipcMain.handle('search:packages', async (_, type: string, query: string, options?: { channel?: string }) => {
-  console.log(`Searching ${type} packages: ${query}`, options);
+  searchLog.debug(`Searching ${type} packages: ${query}`, options);
 
   try {
     let results: Array<{ name: string; version: string; description: string }> = [];
@@ -306,6 +391,7 @@ ipcMain.handle('search:packages', async (_, type: string, query: string, options
     switch (type) {
       case 'pip':
         results = await searchPyPI(query);
+        results = sortByRelevance(results, query, 'pip');
         break;
       case 'conda':
         // conda는 실제 Anaconda API 사용
@@ -317,9 +403,11 @@ ipcMain.handle('search:packages', async (_, type: string, query: string, options
           version: pkg.version,
           description: pkg.metadata?.description || '',
         }));
+        results = sortByRelevance(results, query, 'conda');
         break;
       case 'maven':
         results = await searchMaven(query);
+        results = sortByRelevance(results, query, 'maven');
         break;
       default:
         // 미구현 타입은 빈 배열 반환
@@ -328,14 +416,14 @@ ipcMain.handle('search:packages', async (_, type: string, query: string, options
 
     return { results };
   } catch (error) {
-    console.error(`Search error for ${type}:`, error);
+    searchLog.error(`Search error for ${type}:`, error);
     return { results: [] };
   }
 });
 
 // 패키지 버전 목록 조회 핸들러
 ipcMain.handle('search:versions', async (_, type: string, packageName: string, options?: { channel?: string }) => {
-  console.log(`Getting versions for ${type} package: ${packageName}`, options);
+  searchLog.debug(`Getting versions for ${type} package: ${packageName}`, options);
 
   try {
     let versions: string[] = [];
@@ -359,7 +447,7 @@ ipcMain.handle('search:versions', async (_, type: string, packageName: string, o
 
     return { versions };
   } catch (error) {
-    console.error(`Version fetch error for ${type}/${packageName}:`, error);
+    searchLog.error(`Version fetch error for ${type}/${packageName}:`, error);
     return { versions: [] };
   }
 });
@@ -393,7 +481,7 @@ ipcMain.handle('search:suggest', async (_, type: string, query: string, options?
 
     // 지원하지 않는 패키지 타입 처리
     if (!downloaderMap[packageType]) {
-      console.warn(`Unsupported package type for suggestion: ${type}`);
+      searchLog.warn(`Unsupported package type for suggestion: ${type}`);
       return [];
     }
 
@@ -445,10 +533,10 @@ ipcMain.handle('search:suggest', async (_, type: string, query: string, options?
   } catch (error) {
     // 타임아웃 에러 처리
     if (error instanceof Error && error.message === 'Search timeout') {
-      console.warn(`Search timeout for ${type}: ${query}`);
+      searchLog.warn(`Search timeout for ${type}: ${query}`);
       return [];
     }
-    console.error(`Package suggestion failed for ${type}:`, error);
+    searchLog.error(`Package suggestion failed for ${type}:`, error);
     // 에러 발생 시 빈 배열 반환 (UI에서 graceful 처리)
     return [];
   }
@@ -469,7 +557,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
   const { packages, options } = data;
   const { outputDir, outputFormat, includeScripts, targetOS, architecture, includeDependencies, pythonVersion } = options;
 
-  console.log(`Starting download: ${packages.length} packages to ${outputDir}`);
+  downloadLog.info(`Starting download: ${packages.length} packages to ${outputDir}`);
 
   downloadCancelled = false;
   downloadPaused = false;
@@ -485,7 +573,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
 
   // includeDependencies가 false면 의존성 해결 건너뛰기
   if (includeDependencies === false) {
-    console.log('의존성 해결 건너뛰기 (설정에서 비활성화됨)');
+    downloadLog.info('의존성 해결 건너뛰기 (설정에서 비활성화됨)');
   } else {
     try {
       const resolved = await resolveAllDependencies(packages, {
@@ -495,7 +583,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
       });
       allPackages = resolved.allPackages;
 
-      console.log(`의존성 해결 완료: ${packages.length}개 → ${allPackages.length}개 패키지`);
+      downloadLog.info(`의존성 해결 완료: ${packages.length}개 → ${allPackages.length}개 패키지`);
 
       // 의존성 해결 완료 이벤트 전송
       mainWindow?.webContents.send('download:deps-resolved', {
@@ -505,7 +593,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         failedPackages: resolved.failedPackages,
       });
     } catch (error) {
-      console.warn('의존성 해결 실패, 원본 패키지만 다운로드합니다:', error);
+      downloadLog.warn('의존성 해결 실패, 원본 패키지만 다운로드합니다:', error);
       // 실패 시 원본 패키지만 사용
     }
   }
@@ -610,7 +698,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
       results.push({ id: pkg.id, success: true });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`Download failed for ${pkg.name}:`, errorMessage);
+      downloadLog.error(`Download failed for ${pkg.name}:`, errorMessage);
 
       mainWindow?.webContents.send('download:progress', {
         packageId: pkg.id,
@@ -633,9 +721,9 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
       try {
         const zipPath = `${outputDir}.zip`;
         await createZipArchive(outputDir, zipPath);
-        console.log(`Created ZIP archive: ${zipPath}`);
+        downloadLog.info(`Created ZIP archive: ${zipPath}`);
       } catch (error) {
-        console.error('Failed to create ZIP archive:', error);
+        downloadLog.error('Failed to create ZIP archive:', error);
       }
     }
 
@@ -652,21 +740,21 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
 // 다운로드 일시정지
 ipcMain.handle('download:pause', async () => {
   downloadPaused = true;
-  console.log('Download paused');
+  downloadLog.info('Download paused');
   return { success: true };
 });
 
 // 다운로드 재개
 ipcMain.handle('download:resume', async () => {
   downloadPaused = false;
-  console.log('Download resumed');
+  downloadLog.info('Download resumed');
   return { success: true };
 });
 
 // 다운로드 취소
 ipcMain.handle('download:cancel', async () => {
   downloadCancelled = true;
-  console.log('Download cancelled');
+  downloadLog.info('Download cancelled');
   return { success: true };
 });
 
@@ -676,11 +764,11 @@ ipcMain.handle('download:cancel', async () => {
 
 // 의존성 해결 핸들러 (장바구니에서 의존성 트리 미리보기용)
 ipcMain.handle('dependency:resolve', async (_, packages: DownloadPackage[]) => {
-  console.log(`Resolving dependencies for ${packages.length} packages`);
+  downloadLog.info(`Resolving dependencies for ${packages.length} packages`);
 
   try {
     const resolved = await resolveAllDependencies(packages);
-    console.log(`Dependencies resolved: ${packages.length} → ${resolved.allPackages.length} packages`);
+    downloadLog.info(`Dependencies resolved: ${packages.length} → ${resolved.allPackages.length} packages`);
 
     return {
       originalPackages: packages,
@@ -689,7 +777,7 @@ ipcMain.handle('dependency:resolve', async (_, packages: DownloadPackage[]) => {
       failedPackages: resolved.failedPackages,
     };
   } catch (error) {
-    console.error('Failed to resolve dependencies:', error);
+    downloadLog.error('Failed to resolve dependencies:', error);
     throw error;
   }
 });

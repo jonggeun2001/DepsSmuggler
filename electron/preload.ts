@@ -119,6 +119,77 @@ const electronAPI = {
       failedPackages?: unknown[];
     }> => ipcRenderer.invoke('dependency:resolve', packages),
   },
+
+  // OS 패키지 관련
+  os: {
+    // 배포판 목록 조회
+    getDistributions: (osType?: string): Promise<unknown[]> =>
+      ipcRenderer.invoke(osType ? 'os:getDistributions' : 'os:getAllDistributions', osType),
+
+    getAllDistributions: (): Promise<unknown[]> =>
+      ipcRenderer.invoke('os:getAllDistributions'),
+
+    getDistribution: (distributionId: string): Promise<unknown> =>
+      ipcRenderer.invoke('os:getDistribution', distributionId),
+
+    // OS 패키지 검색
+    search: (options: {
+      query: string;
+      distribution: unknown;
+      architecture: string;
+      matchType?: string;
+      limit?: number;
+    }): Promise<{ packages: unknown[]; totalCount: number }> =>
+      ipcRenderer.invoke('os:search', options),
+
+    // 의존성 해결
+    resolveDependencies: (options: {
+      packages: unknown[];
+      distribution: unknown;
+      architecture: string;
+      includeOptional?: boolean;
+      includeRecommends?: boolean;
+    }): Promise<unknown> =>
+      ipcRenderer.invoke('os:resolveDependencies', options),
+
+    // 의존성 해결 진행 이벤트
+    onResolveDependenciesProgress: (
+      callback: (data: { message: string; current: number; total: number }) => void
+    ): () => void => {
+      const handler = (_event: Electron.IpcRendererEvent, data: unknown) =>
+        callback(data as { message: string; current: number; total: number });
+      ipcRenderer.on('os:resolveDependencies:progress', handler);
+      return () => ipcRenderer.removeListener('os:resolveDependencies:progress', handler);
+    },
+
+    // 다운로드 시작
+    download: {
+      start: (options: {
+        packages: unknown[];
+        outputDir: string;
+        resolveDependencies?: boolean;
+        includeOptionalDeps?: boolean;
+        verifyGPG?: boolean;
+        concurrency?: number;
+      }): Promise<unknown> =>
+        ipcRenderer.invoke('os:download:start', options),
+
+      onProgress: (callback: (progress: unknown) => void): () => void => {
+        const handler = (_event: Electron.IpcRendererEvent, progress: unknown) =>
+          callback(progress);
+        ipcRenderer.on('os:download:progress', handler);
+        return () => ipcRenderer.removeListener('os:download:progress', handler);
+      },
+    },
+
+    // 캐시 관련
+    cache: {
+      getStats: (): Promise<unknown> =>
+        ipcRenderer.invoke('os:cache:stats'),
+      clear: (): Promise<{ success: boolean }> =>
+        ipcRenderer.invoke('os:cache:clear'),
+    },
+  },
 };
 
 // contextBridge를 통해 안전하게 렌더러에 API 노출
