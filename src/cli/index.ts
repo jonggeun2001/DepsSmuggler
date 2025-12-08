@@ -2,6 +2,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { registerOSCommands } from './commands/os';
 
 // 버전 정보
 const VERSION = '1.0.0';
@@ -124,6 +125,9 @@ program.exitOverride((err) => {
   process.exit(1);
 });
 
+// OS 패키지 명령어 등록
+registerOSCommands(program);
+
 // 파싱 및 실행
 program.parse(process.argv);
 
@@ -134,6 +138,7 @@ if (process.argv.length <= 2) {
   console.log('  명령어:');
   console.log('    download    패키지 다운로드');
   console.log('    search      패키지 검색');
+  console.log('    os          OS 패키지 다운로드 (yum, apt, apk)');
   console.log('    config      설정 관리');
   console.log('    cache       캐시 관리');
   console.log('\n  예시:');
@@ -141,5 +146,8 @@ if (process.argv.length <= 2) {
   console.log(chalk.gray('    depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0'));
   console.log(chalk.gray('    depssmuggler download -t docker -p nginx -V latest'));
   console.log(chalk.gray('    depssmuggler search requests -t pip'));
+  console.log(chalk.gray('    depssmuggler os list-distros'));
+  console.log(chalk.gray('    depssmuggler os search nginx --distro rocky-9'));
+  console.log(chalk.gray('    depssmuggler os download httpd --distro rocky-9 --output ./packages'));
   console.log('\n  자세한 내용: depssmuggler --help\n');
 }
