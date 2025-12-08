@@ -80,27 +80,75 @@ export class MavenDownloader implements IDownloader {
    * 아티팩트 버전 목록 조회
    */
   async getVersions(packageName: string): Promise<string[]> {
+    const [groupId, artifactId] = packageName.split(':');
+
     try {
-      // packageName: "groupId:artifactId" 형식
-      const [groupId, artifactId] = packageName.split(':');
+      // 1차: maven-metadata.xml에서 정확한 버전 목록 조회
+      return await this.getVersionsFromMetadata(groupId, artifactId);
+    } catch (metadataError) {
+      logger.warn('maven-metadata.xml 조회 실패, 폴백 API 사용', { packageName, error: metadataError });
 
-      const response = await this.client.get<MavenSearchResponse>(this.searchUrl, {
-        params: {
-          q: `g:"${groupId}" AND a:"${artifactId}"`,
-          core: 'gav',
-          rows: 100,
-          wt: 'json',
-        },
-      });
-
-      const versions = response.data.response.docs.map((doc) => doc.v);
-
-      // 버전 정렬 (최신순)
-      return versions.sort((a, b) => this.compareVersions(b, a));
-    } catch (error) {
-      logger.error('Maven 버전 목록 조회 실패', { packageName, error });
-      throw error;
+      try {
+        // 2차: 기존 Search API 폴백
+        return await this.getVersionsFromSearchApi(groupId, artifactId);
+      } catch (error) {
+        logger.error('Maven 버전 목록 조회 실패', { packageName, error });
+        throw error;
+      }
     }
+  }
+
+
+  /**
+   * maven-metadata.xml에서 버전 목록 조회
+   */
+  private async getVersionsFromMetadata(groupId: string, artifactId: string): Promise<string[]> {
+    const groupPath = groupId.replace(/\./g, '/');
+    const metadataUrl = `${this.repoUrl}/${groupPath}/${artifactId}/maven-metadata.xml`;
+
+    const response = await this.client.get<string>(metadataUrl, {
+      responseType: 'text' as const,
+      timeout: 10000,
+    });
+
+    const versions = this.parseMetadataXml(response.data);
+
+    // 버전 정렬 (최신순)
+    return versions.sort((a, b) => this.compareVersions(b, a));
+  }
+
+  /**
+   * maven-metadata.xml 파싱
+   */
+  private parseMetadataXml(xml: string): string[] {
+    const versionRegex = /<version>([^<]+)<\/version>/g;
+    const versions: string[] = [];
+    let match;
+
+    while ((match = versionRegex.exec(xml)) !== null) {
+      versions.push(match[1]);
+    }
+
+    return versions;
+  }
+
+  /**
+   * Search API에서 버전 목록 조회 (폴백용)
+   */
+  private async getVersionsFromSearchApi(groupId: string, artifactId: string): Promise<string[]> {
+    const response = await this.client.get<MavenSearchResponse>(this.searchUrl, {
+      params: {
+        q: `g:"${groupId}" AND a:"${artifactId}"`,
+        core: 'gav',
+        rows: 100,
+        wt: 'json',
+      },
+    });
+
+    const versions = response.data.response.docs.map((doc) => doc.v);
+
+    // 버전 정렬 (최신순)
+    return versions.sort((a, b) => this.compareVersions(b, a));
   }
 
   /**
@@ -158,15 +206,44 @@ export class MavenDownloader implements IDownloader {
     destPath: string,
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string> {
-    const groupId = info.metadata?.groupId as string;
-    const artifactId = info.metadata?.artifactId as string;
+    const groupId = (info.metadata?.groupId as string) || info.name.split(':')[0];
+    const artifactId = (info.metadata?.artifactId as string) || info.name.split(':')[1];
 
-    if (!groupId || !artifactId) {
-      const [g, a] = info.name.split(':');
-      return this.downloadArtifact(g, a, info.version, destPath, 'jar', onProgress);
+    // 1. 주 아티팩트(jar) 다운로드
+    const jarPath = await this.downloadArtifact(
+      groupId,
+      artifactId,
+      info.version,
+      destPath,
+      'jar',
+      onProgress
+    );
+
+    // 2. jar 체크섬 파일 다운로드 (.sha1)
+    await this.downloadChecksumFile(groupId, artifactId, info.version, destPath, 'jar');
+
+    // 3. pom 파일 다운로드
+    try {
+      await this.downloadArtifact(groupId, artifactId, info.version, destPath, 'pom');
+      // 4. pom 체크섬 파일 다운로드 (.sha1)
+      await this.downloadChecksumFile(groupId, artifactId, info.version, destPath, 'pom');
+    } catch (error) {
+      logger.warn('pom 다운로드 실패 (계속 진행)', {
+        groupId,
+        artifactId,
+        version: info.version,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
-    return this.downloadArtifact(groupId, artifactId, info.version, destPath, 'jar', onProgress);
+    logger.info('Maven 패키지 완전 다운로드 완료', {
+      groupId,
+      artifactId,
+      version: info.version,
+      files: ['jar', 'jar.sha1', 'pom', 'pom.sha1'],
+    });
+
+    return jarPath;
   }
 
   /**
@@ -349,6 +426,46 @@ export class MavenDownloader implements IDownloader {
       case 'jar':
       default:
         return `${artifactId}-${version}.jar`;
+    }
+  }
+
+
+  /**
+   * 체크섬 파일 다운로드 (.sha1)
+   */
+  private async downloadChecksumFile(
+    groupId: string,
+    artifactId: string,
+    version: string,
+    destPath: string,
+    artifactType: ArtifactType
+  ): Promise<void> {
+    const baseUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType);
+    const baseFileName = this.buildFileName(artifactId, version, artifactType);
+
+    try {
+      const checksumUrl = `${baseUrl}.sha1`;
+      const checksumFileName = `${baseFileName}.sha1`;
+      const checksumFilePath = path.join(destPath, checksumFileName);
+
+      const response = await this.client.get<string>(checksumUrl, {
+        responseType: 'text',
+        timeout: 10000,
+      });
+
+      // sha1 파일 내용 정리 (공백이나 파일명이 포함된 경우 처리)
+      const sha1Content = response.data.trim().split(' ')[0].split('\n')[0];
+      await fs.writeFile(checksumFilePath, sha1Content);
+
+      logger.debug('체크섬 파일 다운로드 완료', {
+        file: checksumFileName,
+      });
+    } catch (error) {
+      // 체크섬 파일이 없을 수 있으므로 경고만 로깅
+      logger.debug('sha1 파일 다운로드 실패 (선택적)', {
+        artifactType,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

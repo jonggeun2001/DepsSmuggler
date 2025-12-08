@@ -12,10 +12,96 @@ import {
   createZipArchive,
   generateInstallScripts,
   resolveAllDependencies,
+  sortByRelevance,
 } from './src/core/shared';
+
+// OS 패키지 관련
+import {
+  OSPackageDownloader,
+  OS_DISTRIBUTIONS,
+  getDistributionsByPackageManager,
+  getDistributionById,
+} from './src/core/downloaders/os';
+import type {
+  OSPackageManager,
+  OSDistribution,
+  OSArchitecture,
+  OSPackageInfo,
+  MatchType,
+} from './src/core/downloaders/os/types';
+
+// OS 다운로더 싱글톤
+let osDownloaderInstance: OSPackageDownloader | null = null;
+function getOSDownloader(): OSPackageDownloader {
+  if (!osDownloaderInstance) {
+    osDownloaderInstance = new OSPackageDownloader({ concurrency: 3 });
+  }
+  return osDownloaderInstance;
+}
 
 // 활성 SSE 연결 관리
 const sseClients = new Map<string, http.ServerResponse>();
+
+// 취소 플래그 관리
+const cancelFlags = new Map<string, boolean>();
+
+// Maven 다운로드 URL 생성
+const MAVEN_REPO_URL = 'https://repo1.maven.org/maven2';
+
+function getMavenDownloadUrl(
+  name: string,
+  version: string
+): { url: string; filename: string; size: number } | null {
+  // name은 "groupId:artifactId" 형식
+  const parts = name.split(':');
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const groupId = parts[0];
+  const artifactId = parts[1];
+  const groupPath = groupId.replace(/\./g, '/');
+  const filename = `${artifactId}-${version}.jar`;
+  const url = `${MAVEN_REPO_URL}/${groupPath}/${artifactId}/${version}/${filename}`;
+
+  return { url, filename, size: 0 };
+}
+
+// npm 다운로드 URL 조회 (registry에서 tarball URL 가져오기)
+async function getNpmDownloadUrl(
+  name: string,
+  version: string
+): Promise<{ url: string; filename: string; size: number } | null> {
+  return new Promise((resolve) => {
+    const registryUrl = `https://registry.npmjs.org/${encodeURIComponent(name)}/${version}`;
+
+    https.get(registryUrl, { headers: { 'User-Agent': 'DepsSmuggler/1.0' } }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const tarballUrl = json.dist?.tarball;
+          if (!tarballUrl) {
+            resolve(null);
+            return;
+          }
+
+          const filename = path.basename(new URL(tarballUrl).pathname);
+          resolve({
+            url: tarballUrl,
+            filename,
+            size: json.dist?.unpackedSize || 0,
+          });
+        } catch {
+          resolve(null);
+        }
+      });
+    }).on('error', () => {
+      resolve(null);
+    });
+  });
+}
 
 export function downloadApiPlugin(): Plugin {
   return {
@@ -48,7 +134,10 @@ export function downloadApiPlugin(): Plugin {
         sseClients.set(clientId, res);
 
         req.on('close', () => {
+          // 클라이언트가 연결을 끊으면 취소로 간주
+          cancelFlags.set(clientId, true);
           sseClients.delete(clientId);
+          console.log(`SSE connection closed for client: ${clientId}`);
         });
       });
 
@@ -164,6 +253,50 @@ export function downloadApiPlugin(): Plugin {
         });
       });
 
+      // 다운로드 취소 엔드포인트
+      server.middlewares.use('/api/download/cancel', async (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+
+        let body = '';
+        req.on('data', (chunk) => (body += chunk));
+        req.on('end', () => {
+          try {
+            const { clientId } = JSON.parse(body) as { clientId: string };
+
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+
+            if (!clientId) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'clientId required' }));
+              return;
+            }
+
+            // 취소 플래그 설정
+            cancelFlags.set(clientId, true);
+
+            // SSE 연결 종료
+            const sseClient = sseClients.get(clientId);
+            if (sseClient && !sseClient.writableEnded) {
+              sseClient.write(`event: cancelled\ndata: ${JSON.stringify({ message: '다운로드 취소됨' })}\n\n`);
+              sseClient.end();
+            }
+
+            sseClients.delete(clientId);
+
+            console.log(`Download cancelled for client: ${clientId}`);
+
+            res.end(JSON.stringify({ success: true, cancelled: true }));
+          } catch (error) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(error) }));
+          }
+        });
+      });
+
       // 다운로드 시작 엔드포인트
       server.middlewares.use('/api/download/start', async (req, res, next) => {
         if (req.method !== 'POST') {
@@ -237,9 +370,21 @@ export function downloadApiPlugin(): Plugin {
               fs.mkdirSync(packagesDir, { recursive: true });
             }
 
+            // 다운로드 시작 전 취소 플래그 초기화
+            cancelFlags.set(clientId, false);
+
             const results: Array<{ id: string; success: boolean; error?: string }> = [];
+            let downloadCancelled = false;
 
             for (const pkg of allPackages) {
+              // 취소 체크
+              if (cancelFlags.get(clientId)) {
+                console.log(`Download cancelled, stopping at package: ${pkg.name}`);
+                sendEvent('cancelled', { message: '다운로드가 취소되었습니다' });
+                downloadCancelled = true;
+                break;
+              }
+
               try {
                 sendEvent('progress', {
                   packageId: pkg.id,
@@ -271,6 +416,12 @@ export function downloadApiPlugin(): Plugin {
                     targetOS,
                     pythonVersion
                   );
+                } else if (pkg.type === 'maven') {
+                  // maven 패키지는 Maven Central에서 URL 생성
+                  downloadInfo = getMavenDownloadUrl(pkg.name, pkg.version);
+                } else if (pkg.type === 'npm') {
+                  // npm 패키지는 npm registry에서 tarball URL 조회
+                  downloadInfo = await getNpmDownloadUrl(pkg.name, pkg.version);
                 }
 
                 if (!downloadInfo) {
@@ -323,29 +474,35 @@ export function downloadApiPlugin(): Plugin {
               }
             }
 
-            // 설치 스크립트 생성 (의존성 포함)
-            if (includeScripts) {
-              generateInstallScripts(outputDir, allPackages);
-            }
-
-            // ZIP 압축
-            if (outputFormat === 'zip') {
-              try {
-                const zipPath = `${outputDir}.zip`;
-                await createZipArchive(outputDir, zipPath);
-              } catch (error) {
-                console.error('Failed to create ZIP:', error);
+            // 취소된 경우 스크립트 생성 및 압축 건너뛰기
+            if (!downloadCancelled) {
+              // 설치 스크립트 생성 (의존성 포함)
+              if (includeScripts) {
+                generateInstallScripts(outputDir, allPackages);
               }
+
+              // ZIP 압축
+              if (outputFormat === 'zip') {
+                try {
+                  const zipPath = `${outputDir}.zip`;
+                  await createZipArchive(outputDir, zipPath);
+                } catch (error) {
+                  console.error('Failed to create ZIP:', error);
+                }
+              }
+
+              sendEvent('complete', {
+                success: true,
+                results,
+                outputPath: outputDir,
+              });
             }
 
-            sendEvent('complete', {
-              success: true,
-              results,
-              outputPath: outputDir,
-            });
+            // 다운로드 종료 시 취소 플래그 정리
+            cancelFlags.delete(clientId);
 
             res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ success: true, results }));
+            res.end(JSON.stringify({ success: !downloadCancelled, results, cancelled: downloadCancelled }));
           } catch (error) {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: String(error) }));
@@ -442,17 +599,95 @@ export function downloadApiPlugin(): Plugin {
             mavenRes.on('end', () => {
               try {
                 const json = JSON.parse(data);
-                const results = json.response.docs.map((doc: { g: string; a: string; latestVersion: string }) => ({
+                let results = json.response.docs.map((doc: { g: string; a: string; latestVersion: string }) => ({
                   name: `${doc.g}:${doc.a}`,
                   version: doc.latestVersion,
                   description: `Maven artifact: ${doc.g}:${doc.a}`,
                 }));
+                // Maven 검색 결과 정렬 적용
+                results = sortByRelevance(results, query, 'maven');
                 res.setHeader('Content-Type', 'application/json');
                 res.setHeader('Access-Control-Allow-Origin', '*');
                 res.end(JSON.stringify({ results }));
               } catch (err) {
                 res.statusCode = 500;
                 res.end(JSON.stringify({ error: 'Failed to parse Maven response' }));
+              }
+            });
+          })
+          .on('error', (err) => {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: err.message }));
+          });
+      });
+
+      // Maven 버전 목록 조회 프록시 (CORS 우회용)
+      server.middlewares.use('/api/maven/versions', async (req, res, next) => {
+        if (req.method !== 'GET') {
+          next();
+          return;
+        }
+
+        const url = new URL(req.url!, `http://${req.headers.host}`);
+        const packageName = url.searchParams.get('package') || '';
+
+        if (!packageName || !packageName.includes(':')) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: 'Invalid package name. Format: groupId:artifactId' }));
+          return;
+        }
+
+        const [groupId, artifactId] = packageName.split(':');
+        const groupPath = groupId.replace(/\./g, '/');
+        const metadataUrl = `https://repo1.maven.org/maven2/${groupPath}/${artifactId}/maven-metadata.xml`;
+
+        https
+          .get(metadataUrl, { headers: { 'User-Agent': 'DepsSmuggler/1.0' } }, (mavenRes) => {
+            let data = '';
+            mavenRes.on('data', (chunk) => (data += chunk));
+            mavenRes.on('end', () => {
+              try {
+                // XML에서 버전 목록 추출
+                const versionRegex = /<version>([^<]+)<\/version>/g;
+                const versions: string[] = [];
+                let match;
+
+                while ((match = versionRegex.exec(data)) !== null) {
+                  versions.push(match[1]);
+                }
+
+                // 버전 정렬 (최신순)
+                const sortedVersions = versions.sort((a, b) => {
+                  const normalize = (v: string) =>
+                    v.split(/[.-]/).map((p) => {
+                      const num = parseInt(p, 10);
+                      return isNaN(num) ? p : num;
+                    });
+
+                  const partsA = normalize(a);
+                  const partsB = normalize(b);
+
+                  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+                    const partA = partsA[i] ?? 0;
+                    const partB = partsB[i] ?? 0;
+
+                    if (typeof partA === 'number' && typeof partB === 'number') {
+                      if (partA !== partB) return partB - partA; // 내림차순
+                    } else {
+                      const strA = String(partA);
+                      const strB = String(partB);
+                      if (strA !== strB) return strB.localeCompare(strA); // 내림차순
+                    }
+                  }
+                  return 0;
+                });
+
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.end(JSON.stringify({ versions: sortedVersions }));
+              } catch (err) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: 'Failed to parse Maven metadata' }));
               }
             });
           })
@@ -480,11 +715,13 @@ export function downloadApiPlugin(): Plugin {
             npmRes.on('end', () => {
               try {
                 const json = JSON.parse(data);
-                const results = json.objects.map((obj: { package: { name: string; version: string; description?: string } }) => ({
+                let results = json.objects.map((obj: { package: { name: string; version: string; description?: string } }) => ({
                   name: obj.package.name,
                   version: obj.package.version,
                   description: obj.package.description || '',
                 }));
+                // npm 검색 결과 정렬 적용
+                results = sortByRelevance(results, query, 'npm');
                 res.setHeader('Content-Type', 'application/json');
                 res.setHeader('Access-Control-Allow-Origin', '*');
                 res.end(JSON.stringify({ results }));
@@ -518,11 +755,13 @@ export function downloadApiPlugin(): Plugin {
             dockerRes.on('end', () => {
               try {
                 const json = JSON.parse(data);
-                const results = (json.results || []).map((repo: { repo_name: string; short_description?: string }) => ({
+                let results = (json.results || []).map((repo: { repo_name: string; short_description?: string }) => ({
                   name: repo.repo_name,
                   version: 'latest',
                   description: repo.short_description || '',
                 }));
+                // Docker 검색 결과 정렬 적용
+                results = sortByRelevance(results, query, 'docker');
                 res.setHeader('Content-Type', 'application/json');
                 res.setHeader('Access-Control-Allow-Origin', '*');
                 res.end(JSON.stringify({ results }));
@@ -536,6 +775,207 @@ export function downloadApiPlugin(): Plugin {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: err.message }));
           });
+      });
+
+      // ==================== OS 패키지 API ====================
+
+      // OS 배포판 목록 조회
+      server.middlewares.use('/api/os/distributions', async (req, res, next) => {
+        if (req.method !== 'GET') {
+          next();
+          return;
+        }
+
+        const url = new URL(req.url!, `http://${req.headers.host}`);
+        const osType = url.searchParams.get('type') as OSPackageManager | null;
+
+        try {
+          let distributions: OSDistribution[];
+          if (osType) {
+            distributions = getDistributionsByPackageManager(osType);
+          } else {
+            distributions = OS_DISTRIBUTIONS;
+          }
+
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({ distributions }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: String(error) }));
+        }
+      });
+
+      // OS 패키지 검색
+      server.middlewares.use('/api/os/search', async (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+
+        let body = '';
+        req.on('data', (chunk) => (body += chunk));
+        req.on('end', async () => {
+          try {
+            const options = JSON.parse(body) as {
+              query: string;
+              distribution: OSDistribution | { id: string; packageManager?: string };
+              architecture: OSArchitecture;
+              matchType?: MatchType;
+              limit?: number;
+            };
+
+            // distribution이 ID만 포함하는 간략한 객체일 경우, 전체 정보로 교체
+            let fullDistribution: OSDistribution;
+            if (options.distribution && 'id' in options.distribution) {
+              const dist = getDistributionById(options.distribution.id);
+              if (dist) {
+                fullDistribution = dist;
+              } else {
+                // ID로 찾지 못하면 패키지 관리자로 첫 번째 배포판 사용
+                const pm = (options.distribution as { packageManager?: string }).packageManager as OSPackageManager || 'yum';
+                const distributions = getDistributionsByPackageManager(pm);
+                if (distributions.length === 0) {
+                  throw new Error(`No distribution found for package manager: ${pm}`);
+                }
+                fullDistribution = distributions[0];
+              }
+            } else {
+              fullDistribution = options.distribution as OSDistribution;
+            }
+
+            // matchType 매핑: 'contains'와 'startsWith'는 'partial'로 매핑
+            let resolvedMatchType: MatchType = 'partial';
+            if (options.matchType === 'exact') {
+              resolvedMatchType = 'exact';
+            } else if (options.matchType === 'wildcard') {
+              resolvedMatchType = 'wildcard';
+            }
+
+            const downloader = getOSDownloader();
+            const result = await downloader.search({
+              query: options.query,
+              distribution: fullDistribution,
+              architecture: options.architecture,
+              matchType: resolvedMatchType,
+              limit: options.limit || 50,
+            });
+
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify(result));
+          } catch (error) {
+            console.error('OS search error:', error);
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(error) }));
+          }
+        });
+      });
+
+      // OS 패키지 의존성 해결
+      server.middlewares.use('/api/os/resolve-dependencies', async (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+
+        let body = '';
+        req.on('data', (chunk) => (body += chunk));
+        req.on('end', async () => {
+          try {
+            const options = JSON.parse(body) as {
+              packages: OSPackageInfo[];
+              distribution: OSDistribution;
+              architecture: OSArchitecture;
+              includeOptional?: boolean;
+              includeRecommends?: boolean;
+            };
+
+            const downloader = getOSDownloader();
+            const result = await downloader.resolveDependencies(
+              options.packages,
+              options.distribution,
+              options.architecture,
+              {
+                includeOptional: options.includeOptional,
+                includeRecommends: options.includeRecommends,
+              }
+            );
+
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify(result));
+          } catch (error) {
+            console.error('OS dependency resolution error:', error);
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(error) }));
+          }
+        });
+      });
+
+      // OS 패키지 다운로드 (SSE로 진행 상황 전송)
+      server.middlewares.use('/api/os/download/start', async (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+
+        let body = '';
+        req.on('data', (chunk) => (body += chunk));
+        req.on('end', async () => {
+          try {
+            const options = JSON.parse(body) as {
+              packages: OSPackageInfo[];
+              outputDir: string;
+              clientId: string;
+              resolveDependencies?: boolean;
+              includeOptionalDeps?: boolean;
+              verifyGPG?: boolean;
+              concurrency?: number;
+            };
+
+            const sseClient = sseClients.get(options.clientId);
+            const sendEvent = (event: string, data: any) => {
+              if (sseClient && !sseClient.destroyed) {
+                sseClient.write(`event: os:${event}\ndata: ${JSON.stringify(data)}\n\n`);
+              }
+            };
+
+            const downloader = getOSDownloader();
+            const result = await downloader.download({
+              packages: options.packages,
+              outputDir: options.outputDir,
+              resolveDependencies: options.resolveDependencies ?? true,
+              includeOptionalDeps: options.includeOptionalDeps ?? false,
+              verifyGPG: options.verifyGPG ?? false,
+              concurrency: options.concurrency ?? 3,
+              cacheMode: 'session',
+              onProgress: (progress) => {
+                sendEvent('progress', progress);
+              },
+              onError: async (error) => {
+                const pkgName = error.package?.name || 'unknown';
+                sendEvent('error', { packageName: pkgName, message: error.message });
+                return 'skip'; // 개발 모드에서는 기본적으로 건너뛰기
+              },
+            });
+
+            sendEvent('complete', {
+              success: result.success.length > 0,
+              successCount: result.success.length,
+              failedCount: result.failed.length,
+              totalSize: result.totalSize,
+            });
+
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify(result));
+          } catch (error) {
+            console.error('OS download error:', error);
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(error) }));
+          }
+        });
       });
     },
   };

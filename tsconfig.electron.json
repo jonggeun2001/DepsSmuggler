@@ -26,6 +26,9 @@
     "node_modules",
     "dist",
     "build",
-    "src/renderer/**/*"
+    "src/renderer/**/*",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "vitest.config.ts"
   ]
 }
