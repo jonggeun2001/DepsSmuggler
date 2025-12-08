@@ -30,6 +30,7 @@ depssmuggler/
 │   │   │   ├── file-utils.ts      # 파일 다운로드/압축
 │   │   │   └── script-utils.ts    # 스크립트 생성
 │   │   ├── downloaders/   # 패키지 관리자별 다운로더
+│   │   │   └── os/        # OS 패키지 다운로더 (yum, apt, apk)
 │   │   ├── resolver/      # 의존성 해결기
 │   │   ├── packager/      # 출력물 패키징
 │   │   ├── mailer/        # 메일 발송
@@ -112,6 +113,23 @@ depssmuggler/
 | CondaDownloader | Anaconda 패키지 다운로드 | `conda.ts` |
 | YumDownloader | YUM/RPM 패키지 다운로드 | `yum.ts` |
 | DockerDownloader | Docker 이미지 다운로드 | `docker.ts` |
+| NpmDownloader | npm 패키지 다운로드 | `npm.ts` |
+
+### 1-1. OS 패키지 다운로더 (`src/core/downloaders/os/`)
+
+Linux OS 패키지 다운로드 통합 모듈 (상세: [OS 패키지 다운로더 문서](./os-package-downloader.md))
+
+| 모듈 | 설명 | 위치 |
+|------|------|------|
+| OSPackageDownloader | 통합 다운로더 | `downloader.ts` |
+| BaseOSDownloader | 기본 다운로더 추상 클래스 | `base-downloader.ts` |
+| BaseOSDependencyResolver | 기본 의존성 해결기 추상 클래스 | `base-resolver.ts` |
+| YumDownloader | YUM/RPM 다운로더 | `yum/downloader.ts` |
+| AptDownloader | APT/DEB 다운로더 | `apt/downloader.ts` |
+| ApkDownloader | APK 다운로더 | `apk/downloader.ts` |
+| OSCacheManager | OS 패키지 캐시 관리 | `utils/cache-manager.ts` |
+| GPGVerifier | GPG 서명 검증 | `utils/gpg-verifier.ts` |
+| OSScriptGenerator | 설치 스크립트 생성 | `utils/script-generator.ts` |
 
 ### 2. Resolvers (`src/core/resolver/`)
 의존성 트리 해결
@@ -190,6 +208,52 @@ export function getPipDownloader(): PipDownloader {
 
 ---
 
+## 테스트
+
+### 테스트 설정 (`vitest.config.ts`)
+
+Vitest 기반 단위 테스트 환경
+
+| 설정 | 값 | 설명 |
+|------|-----|------|
+| environment | node | Node.js 환경 |
+| include | `src/**/*.test.ts` | 테스트 파일 패턴 |
+| testTimeout | 30000 | 테스트 타임아웃 (30초) |
+| coverage.provider | v8 | 커버리지 측정 |
+| coverage.include | `src/core/**/*.ts` | 커버리지 대상 |
+
+### 테스트 파일
+
+| 모듈 | 테스트 파일 | 설명 |
+|------|-------------|------|
+| CacheManager | `cacheManager.test.ts` | 캐시 관리자 테스트 |
+| PipDownloader | `pip.test.ts` | PyPI 다운로더 테스트 |
+| CondaDownloader | `conda.test.ts` | Conda 다운로더 테스트 |
+| MavenDownloader | `maven.test.ts` | Maven 다운로더 테스트 |
+| NpmDownloader | `npm.test.ts` | npm 다운로더 테스트 |
+| DockerDownloader | `docker.test.ts` | Docker 다운로더 테스트 |
+| YumDownloader | `yum.test.ts` | YUM 다운로더 테스트 |
+| OS Package | `os/os-package.test.ts` | OS 패키지 통합 테스트 |
+| Packager | `packager/packager.test.ts` | 패키저 테스트 |
+| search-utils | `shared/search-utils.test.ts` | 검색 유틸 테스트 |
+| version-utils | `shared/version-utils.test.ts` | 버전 유틸 테스트 |
+| conda-matchspec | `shared/conda-matchspec.test.ts` | MatchSpec 파서 테스트 |
+
+### 테스트 실행
+
+```bash
+# 전체 테스트 실행
+npm run test
+
+# 커버리지 포함 테스트
+npm run test:coverage
+
+# 특정 파일 테스트
+npx vitest run src/core/downloaders/pip.test.ts
+```
+
+---
+
 ## 관련 문서
 - [Downloaders 문서](./downloaders.md)
 - [Resolver 문서](./resolvers.md)
@@ -197,3 +261,5 @@ export function getPipDownloader(): PipDownloader {
 - [Shared Utilities 문서](./shared-utilities.md)
 - [Electron & Renderer 문서](./electron-renderer.md)
 - [CLI 문서](./cli.md)
+- [OS 패키지 다운로더 문서](./os-package-downloader.md)
+- [OS 패키지 설계 문서](./os-package-downloader-design.md)

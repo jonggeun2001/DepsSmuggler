@@ -12,6 +12,42 @@
 - 위치: `electron/main.ts`
 - 역할: 윈도우 생성, IPC 핸들링, 시스템 API 접근
 
+### 로깅 시스템 (`electron/utils/logger.ts`)
+
+electron-log 기반 파일 로깅 시스템
+
+#### 로그 파일 위치
+- **개발 환경**: `프로젝트루트/logs/depssmuggler-YYYY-MM-DD.log`
+- **프로덕션**: `앱실행경로/logs/depssmuggler-YYYY-MM-DD.log`
+
+#### 설정
+- **파일 로그 레벨**: debug
+- **콘솔 로그 레벨**: debug (개발), warn (프로덕션)
+- **최대 파일 크기**: 10MB
+- **로그 보관 기간**: 7일 (자동 정리)
+
+#### 사용 방법
+
+```typescript
+import { logInfo, logDebug, logWarn, logError, createScopedLogger } from './utils/logger';
+
+// 기본 로깅
+logInfo('다운로드 시작');
+logDebug('패키지 정보:', packageInfo);
+logWarn('캐시 만료');
+logError('다운로드 실패:', error);
+
+// 모듈별 스코프 로거
+const logger = createScopedLogger('MavenDownloader');
+logger.info('Maven 검색 시작');  // [MavenDownloader] Maven 검색 시작
+```
+
+#### 로그 형식
+```
+[2025-01-15 10:30:45.123] [info] 다운로드 시작
+[2025-01-15 10:30:46.456] [debug] [MavenDownloader] 검색 쿼리: spring-core
+```
+
 ### 주요 구성요소
 
 | 구성요소 | 설명 |
@@ -20,6 +56,35 @@
 | `mainWindow` | 메인 윈도우 참조 |
 | `isDev` | 개발 모드 여부 |
 | `VITE_DEV_SERVER_URL` | Vite 개발 서버 URL |
+| `waitForViteServer` | Vite 서버 준비 대기 함수 |
+
+### Vite 서버 대기 로직
+
+개발 모드에서 Electron이 Vite 개발 서버보다 먼저 시작될 경우를 처리:
+
+```typescript
+async function waitForViteServer(
+  url: string,
+  maxRetries = 30,
+  retryDelay = 500
+): Promise<boolean> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await axios.get(url, { timeout: 1000 });
+      if (response.status === 200) {
+        return true;
+      }
+    } catch {
+      // 재시도
+    }
+    await new Promise((resolve) => setTimeout(resolve, retryDelay));
+  }
+  return false;
+}
+```
+
+- 최대 30회 재시도 (500ms 간격, 총 15초)
+- 서버 준비 전 로드 시 발생하는 오류 방지
 
 ### IPC 핸들러
 
@@ -38,6 +103,35 @@
 | `download:resume` | 다운로드 재개 |
 | `download:cancel` | 다운로드 취소 |
 
+### OS 패키지 IPC 핸들러
+
+OS 패키지 관련 핸들러는 `electron/os-package-handlers.ts`에서 별도 관리됩니다.
+
+| 채널 | 파라미터 | 반환값 | 설명 |
+|------|----------|--------|------|
+| `os:getDistributions` | osType: OSPackageManager | OSDistribution[] | 배포판 목록 |
+| `os:getAllDistributions` | - | OSDistribution[] | 전체 배포판 |
+| `os:getDistribution` | distributionId: string | OSDistribution \| undefined | 특정 배포판 |
+| `os:search` | options: OSSearchOptions | OSPackageSearchResult | 패키지 검색 |
+| `os:resolveDependencies` | options | DependencyResolutionResult | 의존성 해결 |
+| `os:download:start` | options: OSDownloadOptions | OSPackageDownloadResult | 다운로드 시작 |
+| `os:cache:stats` | - | CacheStats | 캐시 통계 |
+| `os:cache:clear` | - | { success: boolean } | 캐시 초기화 |
+
+#### 이벤트 채널
+
+| 이벤트 | 데이터 | 설명 |
+|--------|--------|------|
+| `os:resolveDependencies:progress` | { message, current, total } | 의존성 해결 진행 |
+| `os:download:progress` | OSDownloadProgress | 다운로드 진행 |
+
+#### 에러 처리
+
+다운로드 오류 발생 시 다이얼로그 표시:
+- **재시도**: 해당 패키지 재다운로드
+- **건너뛰기**: 해당 패키지 스킵
+- **취소**: 전체 다운로드 취소
+
 ### 다운로더 타입 매핑
 
 ```typescript
@@ -53,6 +147,48 @@ const downloaderMap = {
 ### PyPI 패키지 캐시
 
 앱 시작 시 PyPI Simple API에서 전체 패키지 목록을 백그라운드로 로드하여 검색 성능 향상
+
+### 검색 결과 관련성 정렬
+
+패키지 검색 시 `sortByRelevance` 함수를 사용하여 쿼리와의 관련성에 따라 결과를 정렬:
+
+```typescript
+// search:packages 핸들러 내부
+case 'pip':
+  results = await searchPyPI(query);
+  results = sortByRelevance(results, query, 'pip');
+  break;
+case 'conda':
+  results = await searchConda(query);
+  results = sortByRelevance(results, query, 'conda');
+  break;
+case 'maven':
+  results = await searchMaven(query);
+  results = sortByRelevance(results, query, 'maven');
+  break;
+```
+
+- 정확 일치 > 접두사 일치 > 포함 일치 > 유사도 순으로 정렬
+- 패키지 타입별 핵심명 추출 (Maven: artifactId, npm: scoped name)
+
+### Maven 버전 조회 개선
+
+Maven 버전 목록 조회 시 하이브리드 접근 방식 사용:
+
+1. **1차: maven-metadata.xml** - 정확한 버전 목록 및 순서 제공
+2. **2차: Search API 폴백** - metadata.xml 조회 실패 시 사용
+
+```typescript
+async function getMavenVersions(packageName: string): Promise<string[]> {
+  try {
+    // maven-metadata.xml에서 정확한 버전 목록 조회
+    return await getMavenVersionsFromMetadata(groupId, artifactId);
+  } catch {
+    // Search API 폴백
+    return await getMavenVersionsFromSearchApi(groupId, artifactId);
+  }
+}
+```
 
 ---
 
@@ -188,6 +324,19 @@ src/renderer/
 pip/conda 선택 시 Python 버전 선택 UI 표시:
 - 지원 버전: 3.8 ~ 3.13
 
+#### Maven 버전 조회 (브라우저 환경)
+
+브라우저 환경에서 Maven 패키지 선택 시 Vite 플러그인 API를 통해 버전 목록 조회:
+
+```tsx
+// WizardPage 내 Maven 버전 조회
+if (packageType === 'maven') {
+  const response = await fetch(`/api/maven/versions?package=${encodeURIComponent(record.name)}`);
+  const data = await response.json();
+  setAvailableVersions(data.versions);
+}
+```
+
 ### CartPage
 - 경로: `/cart`
 - 역할: 선택한 패키지 목록 관리 (장바구니)
@@ -203,6 +352,26 @@ pip/conda 선택 시 Python 버전 선택 UI 표시:
 - 에러 발생 시 재시도/건너뛰기/취소 선택
 - 완료 후 폴더 열기
 
+#### 출력 설정 통합
+
+DownloadPage에서 출력 형식은 설정 페이지(SettingsPage)의 값을 직접 사용합니다:
+
+- **출력 형식**: 읽기 전용 Tag로 표시 (선택 불가)
+- **설정 변경**: 설정 페이지로 이동하는 링크 제공
+- **자동 적용**: settingsStore의 `defaultOutputFormat` 값이 모든 다운로드에 자동 적용
+
+```tsx
+// DownloadPage에서의 출력 형식 사용
+const { defaultOutputFormat } = useSettingsStore();
+const outputFormat = defaultOutputFormat;  // 설정 페이지 값 직접 사용
+
+// UI: 읽기 전용 Tag로 표시
+<Tag color="blue">{formatLabel}</Tag>
+<Text type="secondary">
+  <a onClick={() => navigate('/settings')}>설정 페이지</a>에서 변경 가능
+</Text>
+```
+
 ### SettingsPage
 - 경로: `/settings`
 - 역할: 앱 설정 관리
@@ -214,6 +383,24 @@ pip/conda 선택 시 Python 버전 선택 UI 표시:
 - **출력 설정**: 기본 출력 형식, 설치 스크립트 포함 여부
 - **파일 분할 설정**: 자동 분할, 분할 크기
 - **SMTP 설정**: 메일 발송 설정
+
+#### 출력 설정 자동 적용
+
+설정 페이지에서 선택한 출력 옵션은 모든 다운로드에 자동으로 적용됩니다:
+
+- **자동 적용 안내**: Alert 컴포넌트로 사용자에게 자동 적용됨을 알림
+- **출력 형식**: ZIP 압축, TAR.GZ 압축, 오프라인 미러 구조 중 선택
+- **설치 스크립트**: Bash/PowerShell 스크립트 포함 여부
+
+```tsx
+// 설정 페이지 UI
+<Alert
+  message="다운로드 시 자동 적용"
+  description="여기서 설정한 출력 형식과 설치 스크립트 옵션이 모든 다운로드에 자동으로 적용됩니다."
+  type="info"
+  showIcon
+/>
+```
 
 ---
 
@@ -383,6 +570,141 @@ interface DependencyTreeProps {
 
 메인 레이아웃 (사이드바, 헤더, 컨텐츠 영역)
 
+### OS 패키지 컴포넌트 (`components/os/`)
+
+OS 패키지 검색 및 선택을 위한 UI 컴포넌트 모음
+
+#### OSTypeSelector
+
+OS 타입 (패키지 관리자) 선택 컴포넌트
+
+```typescript
+interface OSTypeSelectorProps {
+  selectedType: OSPackageManager | null;
+  onTypeChange: (type: OSPackageManager) => void;
+}
+```
+
+- **RHEL/CentOS 계열 (yum)**: Rocky Linux, AlmaLinux, CentOS 등
+- **Ubuntu/Debian 계열 (apt)**: Ubuntu, Debian
+- **Alpine (apk)**: Alpine Linux
+
+#### OSVersionSelector
+
+배포판 버전 선택 컴포넌트
+
+```typescript
+interface OSVersionSelectorProps {
+  packageManager: OSPackageManager | null;
+  selectedDistribution: OSDistribution | null;
+  onDistributionChange: (distribution: OSDistribution) => void;
+}
+```
+
+- 선택된 패키지 관리자에 맞는 배포판 목록 표시
+- 추천 배포판 배지 표시 (LTS, 안정판)
+
+#### ArchitectureSelector
+
+CPU 아키텍처 선택 컴포넌트
+
+```typescript
+interface ArchitectureSelectorProps {
+  distribution: OSDistribution | null;
+  selectedArchitecture: OSArchitecture;
+  onArchitectureChange: (arch: OSArchitecture) => void;
+}
+```
+
+- 배포판에서 지원하는 아키텍처만 표시
+- 기본값: x86_64/amd64
+
+#### RepositorySelector
+
+저장소 선택 컴포넌트
+
+```typescript
+interface RepositorySelectorProps {
+  distribution: OSDistribution | null;
+  selectedRepos: Repository[];
+  onReposChange: (repos: Repository[]) => void;
+}
+```
+
+- 기본 저장소 (자동 선택)
+- 확장 저장소 (EPEL, Universe 등)
+- 사용자 정의 저장소 추가 지원
+
+#### OSPackageSearch
+
+패키지 검색 및 결과 표시 컴포넌트
+
+```typescript
+interface OSPackageSearchProps {
+  distribution: OSDistribution | null;
+  architecture: OSArchitecture;
+  repositories: Repository[];
+  onAddToCart: (pkg: OSPackageInfo) => void;
+}
+```
+
+- 검색 모드: 부분 일치, 정확 일치, 시작 문자, 와일드카드
+- 검색 결과 테이블 (이름, 버전, 아키텍처, 크기, 설명)
+- 장바구니 추가 버튼
+
+#### OSOutputOptions
+
+다운로드 출력 옵션 설정 컴포넌트
+
+```typescript
+interface OSOutputOptionsProps {
+  outputOptions: OSPackageOutputOptions;
+  onOptionsChange: (options: OSPackageOutputOptions) => void;
+}
+```
+
+- **출력 형식**: 아카이브만, 로컬 저장소만, 둘 다
+- **압축 형식**: zip, tar.gz
+- **스크립트 포함**: 의존성 순서 설치, 로컬 저장소 설정
+
+#### OSPackageCart
+
+선택된 패키지 목록 및 다운로드 시작 컴포넌트
+
+```typescript
+interface OSPackageCartProps {
+  packages: OSPackageInfo[];
+  distribution: OSDistribution | null;
+  onRemove: (pkg: OSPackageInfo) => void;
+  onClearAll: () => void;
+  onStartDownload: (options: OSPackageDownloadOptions) => void;
+}
+```
+
+- 선택된 패키지 목록 표시 (이름, 버전, 크기)
+- 개별/전체 삭제 기능
+- 총 크기 계산 및 표시
+- 출력 옵션 설정 (OSOutputOptions 통합)
+- 다운로드 시작 버튼
+
+#### OSDownloadResult
+
+다운로드 완료 결과 표시 컴포넌트
+
+```typescript
+interface OSDownloadResultProps {
+  result: OSPackageDownloadResult;
+  outputOptions: OSPackageOutputOptions;
+  onClose: () => void;
+  onOpenFolder: (path: string) => void;
+}
+```
+
+- 다운로드 결과 요약 (성공/실패 개수, 총 크기)
+- 생성된 파일 목록 (아카이브, 저장소, 스크립트)
+- 설치 명령어 표시 (패키지 관리자별)
+- 폴더 열기 버튼
+
 ---
 
 ## 데이터 흐름
@@ -502,3 +824,4 @@ function LanguageVersionSelector() {
 - [Shared Utilities](./shared-utilities.md)
 - [Downloaders](./downloaders.md)
 - [Resolvers](./resolvers.md)
+- [OS 패키지 다운로더](./os-package-downloader.md)

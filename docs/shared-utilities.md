@@ -35,7 +35,10 @@ src/core/shared/
 ├── conda-matchspec.ts            # MatchSpec 파싱/매칭
 │
 │   # maven 고급 모듈
-└── maven-skipper.ts              # 의존성 스킵/캐시 관리
+├── maven-skipper.ts              # 의존성 스킵/캐시 관리
+│
+│   # 검색 유틸리티
+└── search-utils.ts               # 검색 결과 정렬/관련성 점수 계산
 ```
 
 ---
@@ -1206,6 +1209,88 @@ class CacheManager {
   getResolved(coordinate: MavenCoordinate): ResolvedDependencyNode[] | null;
   setResolved(coordinate: MavenCoordinate, deps: ResolvedDependencyNode[]): void;
 }
+```
+
+---
+
+## 검색 유틸리티 (`search-utils.ts`)
+
+패키지 검색 결과를 쿼리와의 관련성에 따라 정렬하는 유틸리티
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `levenshteinDistance` | a: string, b: string | number | 두 문자열 간의 편집 거리 계산 |
+| `normalizeForSearch` | str: string | string | 검색용 문자열 정규화 (소문자, 특수문자 제거) |
+| `calculateRelevanceScore` | name: string, query: string | number | 패키지명과 쿼리의 관련성 점수 계산 (0~100) |
+| `sortByRelevance` | results: T[], query: string, type?: PackageType | T[] | 검색 결과를 관련성 순으로 정렬 |
+
+### PackageType
+
+```typescript
+type PackageType = 'pip' | 'conda' | 'maven' | 'npm' | 'docker' | 'yum' | 'default';
+```
+
+### SortableSearchResult
+
+```typescript
+interface SortableSearchResult {
+  name: string;
+  [key: string]: unknown;
+}
+```
+
+### 관련성 점수 계산 기준
+
+1. **정확 일치** (100점): 쿼리와 패키지명이 정확히 일치
+2. **접두사 일치** (90점): 패키지명이 쿼리로 시작
+3. **포함 일치** (70점): 패키지명에 쿼리가 포함됨
+4. **편집 거리 기반** (0~60점): Levenshtein 거리에 따른 유사도
+
+### 패키지 타입별 핵심명 추출
+
+각 패키지 타입별로 관련성 비교 시 핵심 이름을 추출:
+
+| 타입 | 입력 예시 | 핵심명 추출 |
+|------|-----------|-------------|
+| maven | `org.springframework:spring-core` | `spring-core` |
+| docker | `library/nginx` | `nginx` |
+| npm | `@types/node` | `node` |
+| 기타 | `requests` | `requests` |
+
+### 사용 예시
+
+```typescript
+import { sortByRelevance, calculateRelevanceScore } from './search-utils';
+
+// 관련성 점수 계산
+const score = calculateRelevanceScore('requests', 'req');  // 높은 점수 (접두사 일치)
+const score2 = calculateRelevanceScore('flask', 'req');    // 낮은 점수
+
+// 검색 결과 정렬
+const results = [
+  { name: 'requests-mock', version: '1.0.0' },
+  { name: 'requests', version: '2.28.0' },
+  { name: 'urllib3-requests', version: '1.0.0' },
+];
+
+const sorted = sortByRelevance(results, 'requests', 'pip');
+// [
+//   { name: 'requests', version: '2.28.0' },           // 정확 일치
+//   { name: 'requests-mock', version: '1.0.0' },       // 접두사 일치
+//   { name: 'urllib3-requests', version: '1.0.0' },    // 포함 일치
+// ]
+
+// Maven 아티팩트 정렬
+const mavenResults = [
+  { name: 'org.apache:commons-lang3' },
+  { name: 'org.springframework:spring-core' },
+  { name: 'org.springframework:spring-beans' },
+];
+
+const sortedMaven = sortByRelevance(mavenResults, 'spring', 'maven');
+// spring-core, spring-beans가 상위로 정렬됨 (artifactId 기준)
 ```
 
 ---

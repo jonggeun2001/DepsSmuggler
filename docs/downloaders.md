@@ -178,8 +178,9 @@ const valid = await downloader.verifyChecksum(result.filePath, result.sha256);
 | `searchPackages` | query: string | Promise<PackageInfo[]> | Maven Central에서 아티팩트 검색 |
 | `getVersions` | artifactId: string, groupId?: string | Promise<string[]> | 아티팩트 버전 목록 조회 |
 | `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 아티팩트 메타데이터 조회 |
-| `downloadPackage` | name: string, version: string, destDir: string | Promise<DownloadResult> | 아티팩트 다운로드 |
-| `downloadArtifact` | artifact: MavenArtifact, destDir: string, options? | Promise<DownloadResult> | 상세 아티팩트 다운로드 |
+| `downloadPackage` | name: string, version: string, destDir: string | Promise<DownloadResult> | 아티팩트 완전 다운로드 (jar, pom, 체크섬 포함) |
+| `downloadArtifact` | artifact: MavenArtifact, destDir: string, options? | Promise<DownloadResult> | 특정 타입 아티팩트 다운로드 |
+| `downloadChecksumFile` | groupId, artifactId, version, destDir, extension | Promise<void> | 체크섬 파일 (.sha1) 다운로드 |
 | `downloadPom` | artifact: MavenArtifact, destDir: string | Promise<DownloadResult> | POM 파일 다운로드 |
 | `downloadSources` | artifact: MavenArtifact, destDir: string | Promise<DownloadResult> | 소스 JAR 다운로드 |
 | `downloadJavadoc` | artifact: MavenArtifact, destDir: string | Promise<DownloadResult> | Javadoc JAR 다운로드 |
@@ -206,13 +207,39 @@ const ArtifactType = {
 } as const;
 ```
 
+### 완전 다운로드 (downloadPackage)
+
+`downloadPackage` 메서드는 오프라인 Maven 저장소 구성에 필요한 모든 파일을 다운로드합니다:
+
+1. **JAR 파일** (`.jar`) - 컴파일된 바이트코드
+2. **JAR 체크섬** (`.jar.sha1`) - JAR 무결성 검증용
+3. **POM 파일** (`.pom`) - 프로젝트 메타데이터 및 의존성 정보
+4. **POM 체크섬** (`.pom.sha1`) - POM 무결성 검증용
+
+이를 통해 다운로드된 패키지를 폐쇄망의 로컬 Maven 저장소로 직접 사용할 수 있습니다.
+
 ### 사용 예시
 ```typescript
 import { getMavenDownloader } from './core/downloaders/maven';
 
 const downloader = getMavenDownloader();
 const results = await downloader.searchPackages('spring-core');
-const result = await downloader.downloadArtifact({
+
+// 완전 다운로드 (jar, jar.sha1, pom, pom.sha1 모두 다운로드)
+const result = await downloader.downloadPackage(
+  'org.springframework:spring-core',
+  '5.3.0',
+  '/tmp/downloads'
+);
+
+// 다운로드된 파일:
+// /tmp/downloads/spring-core-5.3.0.jar
+// /tmp/downloads/spring-core-5.3.0.jar.sha1
+// /tmp/downloads/spring-core-5.3.0.pom
+// /tmp/downloads/spring-core-5.3.0.pom.sha1
+
+// 특정 아티팩트만 다운로드
+const artifactResult = await downloader.downloadArtifact({
   groupId: 'org.springframework',
   artifactId: 'spring-core',
   version: '5.3.0'
@@ -221,10 +248,81 @@ const result = await downloader.downloadArtifact({
 
 ---
 
-## YumDownloader
+## OS 패키지 다운로더 (OS Package Downloader)
 
 ### 개요
-- 목적: YUM/RPM 패키지 검색 및 다운로드
+- 목적: Linux OS 패키지(rpm, deb, apk) 검색, 의존성 해결, 다운로드 및 패키징
+- 위치: `src/core/downloaders/os/`
+- 지원 패키지 관리자: YUM/RPM, APT/DEB, APK
+- **상세 문서**: [OS 패키지 다운로더 문서](./os-package-downloader.md)
+
+### 통합 클래스: OSPackageDownloader
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `search` | OSPackageSearchOptions | Promise<OSPackageSearchResult> | 패키지 검색 |
+| `resolveDependencies` | packages, distribution, architecture, options? | Promise<DependencyResolutionResult> | 의존성 해결 |
+| `download` | OSPackageDownloadOptions | Promise<OSPackageDownloadResult> | 패키지 다운로드 |
+| `getCacheStats` | - | CacheStats | 캐시 통계 |
+| `clearCache` | - | Promise<void> | 캐시 초기화 |
+
+### 패키지 관리자별 구현
+
+| 클래스 | 패키지 관리자 | 파일 형식 | 메타데이터 |
+|--------|--------------|----------|-----------|
+| `YumDownloader` | yum/dnf | .rpm | repomd.xml, primary.xml.gz |
+| `AptDownloader` | apt | .deb | Packages.gz, Release |
+| `ApkDownloader` | apk | .apk | APKINDEX.tar.gz |
+
+### 지원 배포판
+
+| 패키지 관리자 | 배포판 |
+|--------------|--------|
+| YUM | CentOS 7, Rocky Linux 8/9, AlmaLinux 8/9 |
+| APT | Ubuntu 20.04/22.04/24.04, Debian 11/12 |
+| APK | Alpine Linux 3.18/3.19/3.20 |
+
+### 주요 기능
+
+- **의존성 자동 해결**: 하이브리드 방식 (API + 메타데이터 파싱)
+- **메타데이터 캐싱**: LRU 캐시 + TTL 지원
+- **GPG 서명 검증**: 공식 저장소 패키지 검증
+- **스크립트 생성**: bash/PowerShell 설치 스크립트
+- **출력 패키징**: zip/tar.gz 아카이브, 로컬 저장소 구조
+
+### 사용 예시
+
+```typescript
+import { OSPackageDownloader, getDistributionById } from './core/downloaders/os';
+
+const downloader = new OSPackageDownloader({ concurrency: 5 });
+const distribution = getDistributionById('rocky-9')!;
+
+// 패키지 검색
+const result = await downloader.search({
+  query: 'nginx',
+  distribution,
+  architecture: 'x86_64',
+  matchType: 'contains',
+});
+
+// 의존성 포함 다운로드
+const downloadResult = await downloader.download({
+  packages: result.packages,
+  outputDir: '/tmp/packages',
+  resolveDependencies: true,
+  cacheMode: 'session',
+});
+```
+
+---
+
+## YumDownloader (레거시)
+
+> **참고**: 새로운 OS 패키지 다운로더(`src/core/downloaders/os/`)를 사용하세요.
+
+### 개요
+- 목적: YUM/RPM 패키지 검색 및 다운로드 (단순 구현)
 - 위치: `src/core/downloaders/yum.ts`
 
 ### 클래스 구조
@@ -404,3 +502,4 @@ interface IDownloader {
 - [Resolver 문서](./resolvers.md)
 - [Shared Utilities 문서](./shared-utilities.md)
 - [npm 의존성 해결 알고리즘](./npm-dependency-resolution.md)
+- [OS 패키지 다운로더](./os-package-downloader.md)
