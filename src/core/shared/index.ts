@@ -200,3 +200,12 @@ export type {
   PackumentCacheEntry,
   VersionCacheKey,
 } from './npm-types';
+
+// 검색 유틸리티 (search-utils.ts)
+export {
+  levenshteinDistance,
+  normalizeForSearch,
+  calculateRelevanceScore,
+  sortByRelevance,
+} from './search-utils';
+export type { SortableSearchResult, PackageType } from './search-utils';
