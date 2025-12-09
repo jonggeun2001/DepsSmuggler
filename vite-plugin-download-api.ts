@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
 import * as http from 'http';
+import pLimit from 'p-limit';
 import {
   DownloadPackage,
   DownloadOptions,
@@ -21,6 +22,8 @@ import {
   OS_DISTRIBUTIONS,
   getDistributionsByPackageManager,
   getDistributionById,
+  getSimplifiedDistributions,
+  invalidateDistributionCache,
 } from './src/core/downloaders/os';
 import type {
   OSPackageManager,
@@ -29,6 +32,10 @@ import type {
   OSPackageInfo,
   MatchType,
 } from './src/core/downloaders/os/types';
+
+// Docker 다운로더
+import { getDockerDownloader } from './src/core/downloaders/docker';
+import type { Architecture } from './src/types';
 
 // OS 다운로더 싱글톤
 let osDownloaderInstance: OSPackageDownloader | null = null;
@@ -321,7 +328,7 @@ export function downloadApiPlugin(): Plugin {
               }
             };
 
-            const { outputDir, outputFormat, includeScripts, targetOS, architecture, includeDependencies, pythonVersion } = options;
+            const { outputDir, outputFormat, includeScripts, targetOS, architecture, includeDependencies, pythonVersion, concurrency = 3 } = options;
 
             // 의존성 해결 상태 전송
             sendEvent('status', {
@@ -376,13 +383,15 @@ export function downloadApiPlugin(): Plugin {
             const results: Array<{ id: string; success: boolean; error?: string }> = [];
             let downloadCancelled = false;
 
-            for (const pkg of allPackages) {
+            // p-limit를 사용한 동시 다운로드 제어
+            const limit = pLimit(concurrency);
+            console.log(`다운로드 시작: concurrency=${concurrency}, 총 ${allPackages.length}개 패키지`);
+
+            // 각 패키지 다운로드 작업을 생성
+            const downloadPackage = async (pkg: DownloadPackage): Promise<{ id: string; success: boolean; error?: string }> => {
               // 취소 체크
               if (cancelFlags.get(clientId)) {
-                console.log(`Download cancelled, stopping at package: ${pkg.name}`);
-                sendEvent('cancelled', { message: '다운로드가 취소되었습니다' });
-                downloadCancelled = true;
-                break;
+                return { id: pkg.id, success: false, error: 'cancelled' };
               }
 
               try {
@@ -422,6 +431,61 @@ export function downloadApiPlugin(): Plugin {
                 } else if (pkg.type === 'npm') {
                   // npm 패키지는 npm registry에서 tarball URL 조회
                   downloadInfo = await getNpmDownloadUrl(pkg.name, pkg.version);
+                } else if (pkg.type === 'yum' || pkg.type === 'apt' || pkg.type === 'apk') {
+                  // OS 패키지는 장바구니에 담긴 URL 정보 사용
+                  if (pkg.downloadUrl) {
+                    const ext = pkg.type === 'yum' ? 'rpm' : pkg.type === 'apt' ? 'deb' : 'apk';
+                    const filename = `${pkg.name}-${pkg.version}.${ext}`;
+                    downloadInfo = { url: pkg.downloadUrl, filename, size: 0 };
+                  } else if (pkg.repository?.baseUrl && pkg.location) {
+                    // 저장소 기본 URL과 위치로 URL 생성
+                    // $basearch 변수를 실제 아키텍처로 치환
+                    const arch = pkg.architecture || 'x86_64';
+                    const baseUrl = pkg.repository.baseUrl.replace(/\$basearch/g, arch);
+                    const url = `${baseUrl}${pkg.location}`;
+                    const filename = path.basename(pkg.location);
+                    downloadInfo = { url, filename, size: 0 };
+                  }
+                } else if (pkg.type === 'docker') {
+                  // Docker 이미지는 별도 처리 (레이어별 다운로드 + tar 생성)
+                  const dockerDownloader = getDockerDownloader();
+                  const registry = (pkg.metadata?.registry as string) || 'docker.io';
+                  const arch = (pkg.architecture || 'amd64') as Architecture;
+
+                  sendEvent('progress', {
+                    packageId: pkg.id,
+                    status: 'downloading',
+                    progress: 0,
+                    message: 'Docker 이미지 다운로드 중...',
+                  });
+
+                  const tarPath = await dockerDownloader.downloadImage(
+                    pkg.name,
+                    pkg.version,
+                    arch,
+                    packagesDir,
+                    (progress) => {
+                      sendEvent('progress', {
+                        packageId: pkg.id,
+                        status: 'downloading',
+                        progress: progress.progress,
+                        downloadedBytes: progress.downloadedBytes,
+                        totalBytes: progress.totalBytes,
+                        speed: progress.speed,
+                      });
+                    },
+                    registry
+                  );
+
+                  console.log(`Docker 이미지 다운로드 완료: ${tarPath}`);
+
+                  sendEvent('progress', {
+                    packageId: pkg.id,
+                    status: 'completed',
+                    progress: 100,
+                  });
+
+                  return { id: pkg.id, success: true };
                 }
 
                 if (!downloadInfo) {
@@ -460,7 +524,7 @@ export function downloadApiPlugin(): Plugin {
                   progress: 100,
                 });
 
-                results.push({ id: pkg.id, success: true });
+                return { id: pkg.id, success: true };
               } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -470,9 +534,23 @@ export function downloadApiPlugin(): Plugin {
                   error: errorMessage,
                 });
 
-                results.push({ id: pkg.id, success: false, error: errorMessage });
+                return { id: pkg.id, success: false, error: errorMessage };
               }
+            };
+
+            // 동시 다운로드 실행
+            const downloadPromises = allPackages.map((pkg) => limit(() => downloadPackage(pkg)));
+            const downloadResults = await Promise.all(downloadPromises);
+
+            // 취소 체크
+            if (cancelFlags.get(clientId)) {
+              console.log('Download cancelled');
+              sendEvent('cancelled', { message: '다운로드가 취소되었습니다' });
+              downloadCancelled = true;
             }
+
+            // 결과 수집
+            results.push(...downloadResults.filter(r => r.error !== 'cancelled'));
 
             // 취소된 경우 스크립트 생성 및 압축 건너뛰기
             if (!downloadCancelled) {
@@ -737,7 +815,7 @@ export function downloadApiPlugin(): Plugin {
           });
       });
 
-      // Docker Hub 검색 프록시 (CORS 우회용)
+      // Docker 검색 프록시 (CORS 우회용, 다중 레지스트리 지원)
       server.middlewares.use('/api/docker/search', async (req, res, next) => {
         if (req.method !== 'GET') {
           next();
@@ -746,40 +824,235 @@ export function downloadApiPlugin(): Plugin {
 
         const url = new URL(req.url!, `http://${req.headers.host}`);
         const query = url.searchParams.get('q') || '';
-        const dockerUrl = `https://hub.docker.com/v2/search/repositories/?query=${encodeURIComponent(query)}&page_size=20`;
+        const registry = url.searchParams.get('registry') || 'docker.io';
 
-        https
-          .get(dockerUrl, { headers: { 'User-Agent': 'DepsSmuggler/1.0' } }, (dockerRes) => {
-            let data = '';
-            dockerRes.on('data', (chunk) => (data += chunk));
-            dockerRes.on('end', () => {
-              try {
-                const json = JSON.parse(data);
-                let results = (json.results || []).map((repo: { repo_name: string; short_description?: string }) => ({
-                  name: repo.repo_name,
-                  version: 'latest',
-                  description: repo.short_description || '',
-                }));
-                // Docker 검색 결과 정렬 적용
-                results = sortByRelevance(results, query, 'docker');
-                res.setHeader('Content-Type', 'application/json');
-                res.setHeader('Access-Control-Allow-Origin', '*');
-                res.end(JSON.stringify({ results }));
-              } catch (err) {
-                res.statusCode = 500;
-                res.end(JSON.stringify({ error: 'Failed to parse Docker Hub response' }));
-              }
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        // Docker Hub: 검색 API 사용
+        if (registry === 'docker.io') {
+          const dockerUrl = `https://hub.docker.com/v2/search/repositories/?query=${encodeURIComponent(query)}&page_size=20`;
+
+          https
+            .get(dockerUrl, { headers: { 'User-Agent': 'DepsSmuggler/1.0' } }, (dockerRes) => {
+              let data = '';
+              dockerRes.on('data', (chunk) => (data += chunk));
+              dockerRes.on('end', () => {
+                try {
+                  const json = JSON.parse(data);
+                  let results = (json.results || []).map((repo: {
+                    repo_name: string;
+                    short_description?: string;
+                    is_official?: boolean;
+                    pull_count?: number;
+                  }) => ({
+                    name: repo.repo_name,
+                    version: 'latest',
+                    description: repo.short_description || '',
+                    isOfficial: repo.is_official || false,
+                    pullCount: repo.pull_count || 0,
+                    registry: 'docker.io',
+                  }));
+                  // Docker 검색 결과 정렬 적용
+                  results = sortByRelevance(results, query, 'docker');
+                  res.end(JSON.stringify({ results }));
+                } catch (err) {
+                  res.statusCode = 500;
+                  res.end(JSON.stringify({ error: 'Failed to parse Docker Hub response' }));
+                }
+              });
+            })
+            .on('error', (err) => {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err.message }));
             });
-          })
-          .on('error', (err) => {
+        } else {
+          // 다른 레지스트리: 카탈로그 API 사용
+          const registryConfigs: Record<string, { registryUrl: string; authUrl?: string }> = {
+            'ghcr.io': { registryUrl: 'https://ghcr.io/v2' },
+            'ecr': { registryUrl: 'https://public.ecr.aws/v2' },
+            'quay.io': { registryUrl: 'https://quay.io/v2' },
+          };
+
+          const config = registryConfigs[registry] || { registryUrl: `https://${registry}/v2` };
+          const catalogUrl = `${config.registryUrl}/_catalog?n=100`;
+
+          https
+            .get(catalogUrl, { headers: { 'User-Agent': 'DepsSmuggler/1.0' } }, (catalogRes) => {
+              let data = '';
+              catalogRes.on('data', (chunk) => (data += chunk));
+              catalogRes.on('end', () => {
+                try {
+                  const json = JSON.parse(data);
+                  const repositories = json.repositories || [];
+
+                  // 검색어로 필터링
+                  const filtered = repositories.filter((name: string) =>
+                    name.toLowerCase().includes(query.toLowerCase())
+                  );
+
+                  let results = filtered.map((name: string) => ({
+                    name,
+                    version: 'latest',
+                    description: '',
+                    isOfficial: false,
+                    pullCount: 0,
+                    registry,
+                  }));
+
+                  results = sortByRelevance(results, query, 'docker');
+                  res.end(JSON.stringify({ results }));
+                } catch (err) {
+                  // 인증 필요한 경우 빈 결과 반환
+                  res.end(JSON.stringify({ results: [], message: '레지스트리 접근에 인증이 필요하거나 카탈로그를 지원하지 않습니다.' }));
+                }
+              });
+            })
+            .on('error', (err) => {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err.message }));
+            });
+        }
+      });
+
+      // Docker 이미지 태그 목록 조회 API
+      server.middlewares.use('/api/docker/tags', async (req, res, next) => {
+        if (req.method !== 'GET') {
+          next();
+          return;
+        }
+
+        const url = new URL(req.url!, `http://${req.headers.host}`);
+        const imageName = url.searchParams.get('image') || '';
+        const registry = url.searchParams.get('registry') || 'docker.io';
+
+        if (!imageName) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: 'image parameter required' }));
+          return;
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        // Docker Hub: 태그 API
+        if (registry === 'docker.io') {
+          // library/ 접두사 처리 (공식 이미지)
+          const fullName = imageName.includes('/') ? imageName : `library/${imageName}`;
+          const tagsUrl = `https://hub.docker.com/v2/repositories/${fullName}/tags/?page_size=100`;
+
+          https
+            .get(tagsUrl, { headers: { 'User-Agent': 'DepsSmuggler/1.0' } }, (tagsRes) => {
+              let data = '';
+              tagsRes.on('data', (chunk) => (data += chunk));
+              tagsRes.on('end', () => {
+                try {
+                  const json = JSON.parse(data);
+                  const tags = (json.results || []).map((tag: { name: string }) => tag.name);
+                  res.end(JSON.stringify({ tags }));
+                } catch (err) {
+                  res.statusCode = 500;
+                  res.end(JSON.stringify({ error: 'Failed to parse Docker Hub tags response' }));
+                }
+              });
+            })
+            .on('error', (err) => {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err.message }));
+            });
+        } else {
+          // 다른 레지스트리: Registry V2 API
+          const registryConfigs: Record<string, { registryUrl: string }> = {
+            'ghcr.io': { registryUrl: 'https://ghcr.io/v2' },
+            'ecr': { registryUrl: 'https://public.ecr.aws/v2' },
+            'quay.io': { registryUrl: 'https://quay.io/v2' },
+          };
+
+          const config = registryConfigs[registry] || { registryUrl: `https://${registry}/v2` };
+          const tagsUrl = `${config.registryUrl}/${imageName}/tags/list`;
+
+          https
+            .get(tagsUrl, { headers: { 'User-Agent': 'DepsSmuggler/1.0' } }, (tagsRes) => {
+              let data = '';
+              tagsRes.on('data', (chunk) => (data += chunk));
+              tagsRes.on('end', () => {
+                try {
+                  const json = JSON.parse(data);
+                  const tags = json.tags || ['latest'];
+                  res.end(JSON.stringify({ tags }));
+                } catch (err) {
+                  // 인증 필요시 기본 태그 반환
+                  res.end(JSON.stringify({ tags: ['latest'] }));
+                }
+              });
+            })
+            .on('error', (err) => {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err.message }));
+            });
+        }
+      });
+
+      // Docker 카탈로그 캐시 상태 조회 API
+      server.middlewares.use('/api/docker/cache/status', async (req, res, next) => {
+        if (req.method !== 'GET') {
+          next();
+          return;
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        try {
+          const dockerDownloader = getDockerDownloader();
+          const status = dockerDownloader.getCatalogCacheStatus();
+          res.end(JSON.stringify({ status }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: String(error) }));
+        }
+      });
+
+      // Docker 카탈로그 캐시 새로고침 API
+      server.middlewares.use('/api/docker/cache/refresh', async (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+
+        let body = '';
+        req.on('data', (chunk) => (body += chunk));
+        req.on('end', async () => {
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+
+          try {
+            const { registry } = JSON.parse(body || '{}');
+            const dockerDownloader = getDockerDownloader();
+
+            if (registry) {
+              // 특정 레지스트리 캐시 새로고침
+              const repositories = await dockerDownloader.refreshCatalogCache(registry);
+              res.end(JSON.stringify({ success: true, registry, repositoryCount: repositories.length }));
+            } else {
+              // 모든 캐시 삭제
+              dockerDownloader.clearCatalogCache();
+              res.end(JSON.stringify({ success: true, message: '모든 카탈로그 캐시가 삭제되었습니다' }));
+            }
+          } catch (error) {
             res.statusCode = 500;
-            res.end(JSON.stringify({ error: err.message }));
-          });
+            res.end(JSON.stringify({ error: String(error) }));
+          }
+        });
       });
 
       // ==================== OS 패키지 API ====================
 
       // OS 배포판 목록 조회
+      // - ?source=internet : 인터넷에서 최신 배포판 목록 가져오기
+      // - ?source=local : 로컬 하드코딩된 목록 사용 (기본값)
+      // - ?refresh=true : 캐시 무효화 후 새로 가져오기
+      // - ?type=yum|apt|apk : 특정 패키지 관리자만 필터
       server.middlewares.use('/api/os/distributions', async (req, res, next) => {
         if (req.method !== 'GET') {
           next();
@@ -788,19 +1061,58 @@ export function downloadApiPlugin(): Plugin {
 
         const url = new URL(req.url!, `http://${req.headers.host}`);
         const osType = url.searchParams.get('type') as OSPackageManager | null;
+        const source = url.searchParams.get('source') || 'internet'; // 기본값: 인터넷
+        const refresh = url.searchParams.get('refresh') === 'true';
 
         try {
-          let distributions: OSDistribution[];
-          if (osType) {
-            distributions = getDistributionsByPackageManager(osType);
+          let distributions: Array<{
+            id: string;
+            name: string;
+            version: string;
+            osType: string;
+            packageManager: string;
+            architectures: string[];
+          }>;
+
+          if (source === 'internet') {
+            // 인터넷에서 최신 배포판 목록 가져오기
+            if (refresh) {
+              invalidateDistributionCache();
+            }
+            const internetDistros = await getSimplifiedDistributions();
+
+            // 필터링
+            if (osType) {
+              distributions = internetDistros.filter(d => d.packageManager === osType);
+            } else {
+              distributions = internetDistros;
+            }
           } else {
-            distributions = OS_DISTRIBUTIONS;
+            // 로컬 하드코딩된 목록 사용
+            let localDistros: OSDistribution[];
+            if (osType) {
+              localDistros = getDistributionsByPackageManager(osType);
+            } else {
+              localDistros = OS_DISTRIBUTIONS;
+            }
+
+            // OSDistribution을 간소화된 형태로 변환
+            distributions = localDistros.map(d => ({
+              id: d.id,
+              name: d.name,
+              version: d.version,
+              osType: 'linux',
+              packageManager: d.packageManager,
+              architectures: d.architectures as string[],
+            }));
           }
 
           res.setHeader('Content-Type', 'application/json');
           res.setHeader('Access-Control-Allow-Origin', '*');
-          res.end(JSON.stringify({ distributions }));
+          // 배열 형태로 직접 반환 (SettingsPage에서 배열을 기대함)
+          res.end(JSON.stringify(distributions));
         } catch (error) {
+          console.error('Failed to fetch distributions:', error);
           res.statusCode = 500;
           res.end(JSON.stringify({ error: String(error) }));
         }
