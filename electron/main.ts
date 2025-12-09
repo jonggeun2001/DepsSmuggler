@@ -655,8 +655,39 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
           const filename = path.basename(new URL(tarballUrl).pathname);
           downloadUrl = { url: tarballUrl, filename };
         }
+      } else if (pkg.type === 'maven') {
+        // Maven 패키지: groupId:artifactId 형식에서 URL 생성
+        const parts = pkg.name.split(':');
+        if (parts.length >= 2) {
+          const groupId = parts[0];
+          const artifactId = parts[1];
+          const groupPath = groupId.replace(/\./g, '/');
+          const filename = `${artifactId}-${pkg.version}.jar`;
+          const url = `https://repo1.maven.org/maven2/${groupPath}/${artifactId}/${pkg.version}/${filename}`;
+          downloadUrl = { url, filename };
+        }
+      } else if (pkg.type === 'yum' || pkg.type === 'apt' || pkg.type === 'apk') {
+        // OS 패키지는 장바구니에 담긴 URL 정보 사용
+        const pkgWithUrl = pkg as {
+          downloadUrl?: string;
+          repository?: { baseUrl: string; name?: string };
+          location?: string;
+          architecture?: string;
+        };
+        if (pkgWithUrl.downloadUrl) {
+          const ext = pkg.type === 'yum' ? 'rpm' : pkg.type === 'apt' ? 'deb' : 'apk';
+          const filename = `${pkg.name}-${pkg.version}.${ext}`;
+          downloadUrl = { url: pkgWithUrl.downloadUrl, filename };
+        } else if (pkgWithUrl.repository?.baseUrl && pkgWithUrl.location) {
+          // 저장소 기본 URL과 위치로 URL 생성
+          // $basearch 변수를 실제 아키텍처로 치환
+          const arch = pkgWithUrl.architecture || pkg.architecture || 'x86_64';
+          const baseUrl = pkgWithUrl.repository.baseUrl.replace(/\$basearch/g, arch);
+          const url = `${baseUrl}${pkgWithUrl.location}`;
+          const filename = path.basename(pkgWithUrl.location);
+          downloadUrl = { url, filename };
+        }
       }
-      // TODO: Maven 등 다른 타입 지원
 
       if (!downloadUrl) {
         throw new Error(`다운로드 URL을 찾을 수 없습니다: ${pkg.name}@${pkg.version}`);

@@ -17,10 +17,24 @@ export type DefaultArchitecture = 'x86_64' | 'amd64' | 'arm64' | 'aarch64' | 'no
 // Conda 채널 타입 정의
 export type CondaChannel = 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch';
 
+// Docker 레지스트리 타입 정의
+export type DockerRegistry = 'docker.io' | 'ghcr.io' | 'ecr' | 'quay.io' | 'custom';
+
+// Docker 레이어 압축 방식
+export type DockerLayerCompression = 'gzip' | 'tar';
+
+// Docker 재시도 전략
+export type DockerRetryStrategy = 'layer' | 'full';
+
+// Docker 아키텍처 타입 정의
+export type DockerArchitecture = 'amd64' | 'arm64' | 'arm/v7' | '386';
+
 // OS 배포판 설정 타입 정의
+// id: 배포판 식별자 (예: 'rocky-9', 'almalinux-8', 'ubuntu-22.04', 'debian-12', 'alpine-3.18')
+// architecture: 대상 CPU 아키텍처 (YUM/APK: 'x86_64', 'aarch64' / APT: 'amd64', 'arm64', 'i386')
 export interface OSDistributionSetting {
-  id: string;           // 배포판 ID (예: 'rocky-9', 'ubuntu-22.04')
-  architecture: string; // 아키텍처 (예: 'x86_64', 'amd64')
+  id: string;           // 배포판 ID - API에서 동적으로 로드된 목록과 매칭
+  architecture: string; // 아키텍처 - 배포판별 지원 아키텍처 중 선택
 }
 
 // 설정 상태
@@ -61,6 +75,14 @@ interface SettingsState {
   aptDistribution: OSDistributionSetting;  // APT (Debian/Ubuntu 계열)
   apkDistribution: OSDistributionSetting;  // APK (Alpine)
 
+  // Docker 설정
+  dockerRegistry: DockerRegistry;           // 기본 레지스트리
+  dockerCustomRegistry: string;             // 커스텀 레지스트리 URL
+  dockerArchitecture: DockerArchitecture;   // Docker 이미지 아키텍처
+  dockerLayerCompression: DockerLayerCompression;  // 레이어 압축 방식
+  dockerRetryStrategy: DockerRetryStrategy; // 재시도 전략
+  dockerIncludeLoadScript: boolean;         // docker load 스크립트 포함
+
   // 액션
   updateSettings: (updates: Partial<SettingsState>) => void;
   resetSettings: () => void;
@@ -99,6 +121,14 @@ const defaultSettings = {
   yumDistribution: { id: 'rocky-9', architecture: 'x86_64' },
   aptDistribution: { id: 'ubuntu-22.04', architecture: 'amd64' },
   apkDistribution: { id: 'alpine-3.18', architecture: 'x86_64' },
+
+  // Docker 설정 기본값
+  dockerRegistry: 'docker.io' as const,
+  dockerCustomRegistry: '',
+  dockerArchitecture: 'amd64' as const,
+  dockerLayerCompression: 'gzip' as const,
+  dockerRetryStrategy: 'layer' as const,
+  dockerIncludeLoadScript: true,
 };
 
 export const useSettingsStore = create<SettingsState>()(

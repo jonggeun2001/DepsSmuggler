@@ -15,9 +15,9 @@ import {
   Col,
   Popconfirm,
   Spin,
-  Alert,
   Tag,
   Divider,
+  Tooltip,
 } from 'antd';
 import {
   SaveOutlined,
@@ -27,8 +27,16 @@ import {
   SendOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  CloudOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons';
+
 import { useSettingsStore } from '../stores/settingsStore';
+import type { OSDistribution } from '../global';
+
+// 컴팩트 레이아웃 상수
+const CARD_MARGIN = 12;
+const CARD_BODY_PADDING = '12px 16px';
 
 const { Title, Text } = Typography;
 
@@ -54,6 +62,12 @@ const SettingsPage: React.FC = () => {
     yumDistribution,
     aptDistribution,
     apkDistribution,
+    dockerRegistry,
+    dockerCustomRegistry,
+    dockerArchitecture,
+    dockerLayerCompression,
+    dockerRetryStrategy,
+    dockerIncludeLoadScript,
     updateSettings,
     resetSettings,
   } = useSettingsStore();
@@ -69,6 +83,15 @@ const SettingsPage: React.FC = () => {
   // SMTP 테스트 상태
   const [testingSmtp, setTestingSmtp] = useState(false);
   const [smtpTestResult, setSmtpTestResult] = useState<'success' | 'failed' | null>(null);
+
+  // OS 배포판 목록 상태
+  const [distributions, setDistributions] = useState<OSDistribution[]>([]);
+  const [loadingDistributions, setLoadingDistributions] = useState(false);
+
+  // 캐스케이드 선택을 위한 로컬 상태 (배포판 ID와 아키텍처 분리)
+  const [selectedYumDistroId, setSelectedYumDistroId] = useState<string>(yumDistribution?.id || 'rocky-9');
+  const [selectedAptDistroId, setSelectedAptDistroId] = useState<string>(aptDistribution?.id || 'ubuntu-22.04');
+  const [selectedApkDistroId, setSelectedApkDistroId] = useState<string>(apkDistribution?.id || 'alpine-3.18');
 
   // 캐시 정보 로드
   const loadCacheInfo = async () => {
@@ -155,9 +178,32 @@ const SettingsPage: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  // 컴포넌트 마운트 시 캐시 정보 로드
+  // OS 배포판 목록 로드
+  const loadDistributions = async () => {
+    setLoadingDistributions(true);
+    try {
+      if (window.electronAPI?.os?.getAllDistributions) {
+        const data = await window.electronAPI.os.getAllDistributions();
+        setDistributions(data);
+      } else {
+        // 개발 환경 - API 호출
+        const response = await fetch('/api/os/distributions');
+        if (response.ok) {
+          const data = await response.json();
+          setDistributions(data);
+        }
+      }
+    } catch (error) {
+      console.error('배포판 목록 로드 실패:', error);
+    } finally {
+      setLoadingDistributions(false);
+    }
+  };
+
+  // 컴포넌트 마운트 시 캐시 정보 및 배포판 목록 로드
   useEffect(() => {
     loadCacheInfo();
+    loadDistributions();
   }, []);
 
   // 초기값 설정
@@ -180,11 +226,25 @@ const SettingsPage: React.FC = () => {
       defaultTargetOS,
       defaultArchitecture,
       condaChannel,
-      // OS 배포판은 "id|architecture" 문자열 형식으로 저장
-      yumDistribution: `${yumDistribution?.id}|${yumDistribution?.architecture}`,
-      aptDistribution: `${aptDistribution?.id}|${aptDistribution?.architecture}`,
-      apkDistribution: `${apkDistribution?.id}|${apkDistribution?.architecture}`,
+      // OS 배포판 (2단계 캐스케이드: 배포판 ID와 아키텍처 분리)
+      yumDistributionId: yumDistribution?.id || 'rocky-9',
+      yumArchitecture: yumDistribution?.architecture || 'x86_64',
+      aptDistributionId: aptDistribution?.id || 'ubuntu-22.04',
+      aptArchitecture: aptDistribution?.architecture || 'amd64',
+      apkDistributionId: apkDistribution?.id || 'alpine-3.18',
+      apkArchitecture: apkDistribution?.architecture || 'x86_64',
+      // Docker 설정
+      dockerRegistry,
+      dockerCustomRegistry,
+      dockerArchitecture,
+      dockerLayerCompression,
+      dockerRetryStrategy,
+      dockerIncludeLoadScript,
     });
+    // 로컬 상태도 업데이트
+    setSelectedYumDistroId(yumDistribution?.id || 'rocky-9');
+    setSelectedAptDistroId(aptDistribution?.id || 'ubuntu-22.04');
+    setSelectedApkDistroId(apkDistribution?.id || 'alpine-3.18');
   }, [
     form,
     concurrentDownloads,
@@ -207,26 +267,47 @@ const SettingsPage: React.FC = () => {
     yumDistribution,
     aptDistribution,
     apkDistribution,
+    dockerRegistry,
+    dockerCustomRegistry,
+    dockerArchitecture,
+    dockerLayerCompression,
+    dockerRetryStrategy,
+    dockerIncludeLoadScript,
   ]);
 
   // 저장
   const handleSave = (values: Record<string, unknown>) => {
-    // OS 배포판 문자열("id|architecture")을 객체로 변환
+    // OS 배포판 (2단계 캐스케이드 값을 객체로 합침)
     const convertedValues = { ...values };
 
-    if (typeof values.yumDistribution === 'string') {
-      const [id, architecture] = (values.yumDistribution as string).split('|');
-      convertedValues.yumDistribution = { id, architecture };
+    // yumDistribution 합성
+    if (values.yumDistributionId && values.yumArchitecture) {
+      convertedValues.yumDistribution = {
+        id: values.yumDistributionId as string,
+        architecture: values.yumArchitecture as string,
+      };
+      delete convertedValues.yumDistributionId;
+      delete convertedValues.yumArchitecture;
     }
 
-    if (typeof values.aptDistribution === 'string') {
-      const [id, architecture] = (values.aptDistribution as string).split('|');
-      convertedValues.aptDistribution = { id, architecture };
+    // aptDistribution 합성
+    if (values.aptDistributionId && values.aptArchitecture) {
+      convertedValues.aptDistribution = {
+        id: values.aptDistributionId as string,
+        architecture: values.aptArchitecture as string,
+      };
+      delete convertedValues.aptDistributionId;
+      delete convertedValues.aptArchitecture;
     }
 
-    if (typeof values.apkDistribution === 'string') {
-      const [id, architecture] = (values.apkDistribution as string).split('|');
-      convertedValues.apkDistribution = { id, architecture };
+    // apkDistribution 합성
+    if (values.apkDistributionId && values.apkArchitecture) {
+      convertedValues.apkDistribution = {
+        id: values.apkDistributionId as string,
+        architecture: values.apkArchitecture as string,
+      };
+      delete convertedValues.apkDistributionId;
+      delete convertedValues.apkArchitecture;
     }
 
     updateSettings(convertedValues);
@@ -246,475 +327,741 @@ const SettingsPage: React.FC = () => {
     message.info('폴더 선택 기능은 Electron 환경에서 사용 가능합니다');
   };
 
+  // 배포판 필터링 헬퍼
+  const getDistributionsByManager = (packageManager: 'yum' | 'apt' | 'apk') => {
+    return distributions.filter(d => d.packageManager === packageManager);
+  };
+
+  // 배포판 ID로 배포판 정보 가져오기
+  const getDistributionById = (distroId: string) => {
+    return distributions.find(d => d.id === distroId);
+  };
+
+  // 배포판 ID로 지원 아키텍처 목록 가져오기
+  const getArchitecturesForDistro = (distroId: string, packageManager: 'yum' | 'apt' | 'apk'): string[] => {
+    const distro = getDistributionById(distroId);
+    if (distro) {
+      return distro.architectures;
+    }
+    // 폴백: 기본 아키텍처
+    if (packageManager === 'apt') {
+      return ['amd64', 'arm64', 'i386'];
+    }
+    return ['x86_64', 'aarch64'];
+  };
+
+  // 배포판 그룹화 (이름으로 그룹화)
+  const groupDistributions = (distros: OSDistribution[]) => {
+    const groups: Record<string, OSDistribution[]> = {};
+    distros.forEach(d => {
+      // name에서 버전 없는 기본 이름 추출 (예: "Rocky Linux 9" -> "Rocky Linux")
+      const baseName = d.name.replace(/\s*\d+(\.\d+)*\s*.*$/, '').trim() || d.name;
+      if (!groups[baseName]) {
+        groups[baseName] = [];
+      }
+      groups[baseName].push(d);
+    });
+    return groups;
+  };
+
+  // 배포판만 선택하는 Select 옵션 렌더링 (2단계 캐스케이드용)
+  const renderDistroOnlyOptions = (packageManager: 'yum' | 'apt' | 'apk') => {
+    const distros = getDistributionsByManager(packageManager);
+
+    if (distros.length === 0) {
+      // 배포판이 로드되지 않았을 때 기본값 렌더링
+      return renderFallbackDistroOptions(packageManager);
+    }
+
+    const groups = groupDistributions(distros);
+
+    return Object.entries(groups).map(([groupName, groupDistros]) => (
+      <Select.OptGroup key={groupName} label={groupName}>
+        {groupDistros.map(d => (
+          <Select.Option key={d.id} value={d.id}>
+            {d.name}
+          </Select.Option>
+        ))}
+      </Select.OptGroup>
+    ));
+  };
+
+  // 아키텍처 Select 옵션 렌더링
+  const renderArchOptions = (distroId: string, packageManager: 'yum' | 'apt' | 'apk') => {
+    const architectures = getArchitecturesForDistro(distroId, packageManager);
+    return architectures.map(arch => (
+      <Select.Option key={arch} value={arch}>
+        {arch}
+      </Select.Option>
+    ));
+  };
+
+  // 배포판 로드 전 폴백 옵션 (배포판만)
+  const renderFallbackDistroOptions = (packageManager: 'yum' | 'apt' | 'apk') => {
+    if (packageManager === 'yum') {
+      return (
+        <>
+          <Select.OptGroup label="Rocky Linux">
+            <Select.Option value="rocky-9">Rocky Linux 9</Select.Option>
+            <Select.Option value="rocky-8">Rocky Linux 8</Select.Option>
+          </Select.OptGroup>
+          <Select.OptGroup label="AlmaLinux">
+            <Select.Option value="almalinux-9">AlmaLinux 9</Select.Option>
+            <Select.Option value="almalinux-8">AlmaLinux 8</Select.Option>
+          </Select.OptGroup>
+        </>
+      );
+    } else if (packageManager === 'apt') {
+      return (
+        <>
+          <Select.OptGroup label="Ubuntu">
+            <Select.Option value="ubuntu-24.04">Ubuntu 24.04 LTS</Select.Option>
+            <Select.Option value="ubuntu-22.04">Ubuntu 22.04 LTS</Select.Option>
+            <Select.Option value="ubuntu-20.04">Ubuntu 20.04 LTS</Select.Option>
+          </Select.OptGroup>
+          <Select.OptGroup label="Debian">
+            <Select.Option value="debian-12">Debian 12 Bookworm</Select.Option>
+            <Select.Option value="debian-11">Debian 11 Bullseye</Select.Option>
+          </Select.OptGroup>
+        </>
+      );
+    } else {
+      return (
+        <>
+          <Select.Option value="alpine-3.20">Alpine 3.20</Select.Option>
+          <Select.Option value="alpine-3.18">Alpine 3.18</Select.Option>
+        </>
+      );
+    }
+  };
+
+  // 배포판 선택 변경 핸들러
+  const handleDistroChange = (
+    distroId: string,
+    packageManager: 'yum' | 'apt' | 'apk',
+    setDistroId: React.Dispatch<React.SetStateAction<string>>
+  ) => {
+    setDistroId(distroId);
+    // 아키텍처를 해당 배포판의 첫 번째 지원 아키텍처로 변경
+    const architectures = getArchitecturesForDistro(distroId, packageManager);
+    const fieldName = `${packageManager}Architecture`;
+    if (architectures.length > 0) {
+      form.setFieldValue(fieldName, architectures[0]);
+    }
+  };
+
   return (
-    <div>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 24,
-        }}
-      >
-        <Title level={3} style={{ margin: 0 }}>
-          설정
-        </Title>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={handleReset}>
-            초기화
-          </Button>
-          <Button
-            type="primary"
-            icon={<SaveOutlined />}
-            onClick={() => form.submit()}
-          >
-            저장
-          </Button>
-        </Space>
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      overflow: 'hidden'
+    }}>
+      {/* 고정 헤더 */}
+      <div style={{
+        padding: '12px 0',
+        borderBottom: '1px solid #f0f0f0',
+        backgroundColor: '#fff',
+        flexShrink: 0
+      }}>
+        <Title level={4} style={{ margin: 0 }}>설정</Title>
       </div>
 
-      <Form
-        form={form}
-        layout="vertical"
-        onFinish={handleSave}
-        style={{ maxWidth: 600 }}
-      >
-        {/* 다운로드 설정 */}
-        <Card title="다운로드 설정" style={{ marginBottom: 24 }}>
-          <Form.Item
-            name="concurrentDownloads"
-            label="동시 다운로드 수"
-            tooltip="동시에 다운로드할 수 있는 최대 파일 수"
-          >
-            <InputNumber min={1} max={10} style={{ width: '100%' }} />
-          </Form.Item>
+      {/* 스크롤 가능한 콘텐츠 영역 */}
+      <div style={{
+        flex: 1,
+        overflow: 'auto',
+        paddingTop: 12,
+        paddingBottom: 72  // 하단 버튼 영역 확보
+      }}>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleSave}
+          style={{ maxWidth: 600 }}
+          className="compact-settings-form"
+        >
+        {/* 다운로드 및 의존성 설정 통합 */}
+        <Card
+          title="다운로드 설정"
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
+        >
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="concurrentDownloads"
+                label="동시 다운로드 수"
+                tooltip="동시에 다운로드할 수 있는 최대 파일 수"
+                style={{ marginBottom: 8 }}
+              >
+                <InputNumber min={1} max={10} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="includeDependencies"
+                label="의존성 자동 포함"
+                valuePropName="checked"
+                tooltip="패키지 다운로드 시 전이적 의존성을 함께 다운로드"
+                style={{ marginBottom: 8 }}
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+          </Row>
         </Card>
 
         {/* 기본 언어 버전 설정 */}
-        <Card title="기본 언어 버전" style={{ marginBottom: 24 }}>
-          <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-            패키지 검색 시 기본으로 선택될 언어/런타임 버전입니다.
-          </Text>
-
-          <Form.Item
-            name={['languageVersions', 'python']}
-            label="Python 버전"
-            tooltip="pip/conda 패키지 검색 시 기본 Python 버전"
-          >
-            <Select>
-              <Select.Option value="3.13">Python 3.13</Select.Option>
-              <Select.Option value="3.12">Python 3.12</Select.Option>
-              <Select.Option value="3.11">Python 3.11</Select.Option>
-              <Select.Option value="3.10">Python 3.10</Select.Option>
-              <Select.Option value="3.9">Python 3.9</Select.Option>
-              <Select.Option value="3.8">Python 3.8 (EOL)</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name={['languageVersions', 'java']}
-            label="Java 버전"
-            tooltip="Maven/Gradle 패키지 검색 시 기본 Java 버전"
-          >
-            <Select>
-              <Select.Option value="21">Java 21 (LTS)</Select.Option>
-              <Select.Option value="17">Java 17 (LTS)</Select.Option>
-              <Select.Option value="11">Java 11 (LTS)</Select.Option>
-              <Select.Option value="8">Java 8 (LTS)</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name={['languageVersions', 'node']}
-            label="Node.js 버전"
-            tooltip="npm 패키지 검색 시 기본 Node.js 버전"
-          >
-            <Select>
-              <Select.Option value="22">Node.js 22 (Current)</Select.Option>
-              <Select.Option value="20">Node.js 20 (LTS)</Select.Option>
-              <Select.Option value="18">Node.js 18 (LTS)</Select.Option>
-              <Select.Option value="16">Node.js 16 (EOL)</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Divider />
-
+        <Card
+          title={
+            <Space>
+              <span>기본 언어 버전</span>
+              <Tooltip title="패키지 검색 시 기본으로 선택될 언어/런타임 버전입니다">
+                <InfoCircleOutlined style={{ color: '#999' }} />
+              </Tooltip>
+            </Space>
+          }
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
+        >
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item
+                name={['languageVersions', 'python']}
+                label="Python"
+                tooltip="pip/conda"
+                style={{ marginBottom: 8 }}
+              >
+                <Select size="small">
+                  <Select.Option value="3.13">3.13</Select.Option>
+                  <Select.Option value="3.12">3.12</Select.Option>
+                  <Select.Option value="3.11">3.11</Select.Option>
+                  <Select.Option value="3.10">3.10</Select.Option>
+                  <Select.Option value="3.9">3.9</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name={['languageVersions', 'java']}
+                label="Java"
+                tooltip="Maven/Gradle"
+                style={{ marginBottom: 8 }}
+              >
+                <Select size="small">
+                  <Select.Option value="21">21 LTS</Select.Option>
+                  <Select.Option value="17">17 LTS</Select.Option>
+                  <Select.Option value="11">11 LTS</Select.Option>
+                  <Select.Option value="8">8 LTS</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name={['languageVersions', 'node']}
+                label="Node.js"
+                tooltip="npm"
+                style={{ marginBottom: 8 }}
+              >
+                <Select size="small">
+                  <Select.Option value="22">22</Select.Option>
+                  <Select.Option value="20">20 LTS</Select.Option>
+                  <Select.Option value="18">18 LTS</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item
             name="condaChannel"
             label="Conda 채널"
-            tooltip="Conda 패키지 검색 시 사용할 채널"
+            style={{ marginBottom: 0 }}
           >
-            <Select>
-              <Select.Option value="conda-forge">
-                <Space>
-                  <span>conda-forge</span>
-                  <Tag color="green">가장 많은 패키지, 커뮤니티 관리</Tag>
-                </Space>
-              </Select.Option>
-              <Select.Option value="anaconda">
-                <Space>
-                  <span>anaconda</span>
-                  <Tag color="blue">Anaconda 공식 채널</Tag>
-                </Space>
-              </Select.Option>
-              <Select.Option value="bioconda">
-                <Space>
-                  <span>bioconda</span>
-                  <Tag color="purple">생명과학/바이오인포매틱스</Tag>
-                </Space>
-              </Select.Option>
-              <Select.Option value="pytorch">
-                <Space>
-                  <span>pytorch</span>
-                  <Tag color="orange">PyTorch 공식 채널</Tag>
-                </Space>
-              </Select.Option>
+            <Select size="small">
+              <Select.Option value="conda-forge">conda-forge (커뮤니티)</Select.Option>
+              <Select.Option value="anaconda">anaconda (공식)</Select.Option>
+              <Select.Option value="bioconda">bioconda (생명과학)</Select.Option>
+              <Select.Option value="pytorch">pytorch</Select.Option>
             </Select>
           </Form.Item>
         </Card>
 
         {/* 라이브러리 대상 환경 설정 */}
         <Card
-          title="라이브러리 대상 환경 (폐쇄망 OS)"
-          style={{ marginBottom: 24 }}
-          extra={<Tag color="blue">pip/conda/Maven/npm</Tag>}
+          title={
+            <Space>
+              <span>라이브러리 대상 환경</span>
+              <Tag color="blue">pip/conda/Maven/npm</Tag>
+              <Tooltip title="폐쇄망에 설치된 OS와 CPU 아키텍처에 맞는 바이너리를 다운로드합니다">
+                <InfoCircleOutlined style={{ color: '#999' }} />
+              </Tooltip>
+            </Space>
+          }
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
         >
-          <Alert
-            message="폐쇄망의 운영체제에 맞게 설정하세요"
-            description="이 설정은 라이브러리 패키지(pip 휠, conda, Maven JAR, npm)에 적용됩니다.
-            폐쇄망에 설치된 OS와 CPU 아키텍처에 맞는 바이너리를 다운로드합니다."
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-          />
-
-          <Form.Item
-            name="defaultTargetOS"
-            label="폐쇄망 운영체제"
-            tooltip="폐쇄망에 설치된 운영체제를 선택하세요. pip/conda 휠 파일의 플랫폼 태그에 적용됩니다."
-          >
-            <Select>
-              <Select.Option value="windows">
-                <Space>
-                  <span>Windows</span>
-                  <Tag color="cyan">win_amd64, win32</Tag>
-                </Space>
-              </Select.Option>
-              <Select.Option value="macos">
-                <Space>
-                  <span>macOS (Darwin)</span>
-                  <Tag color="purple">macosx</Tag>
-                </Space>
-              </Select.Option>
-              <Select.Option value="linux">
-                <Space>
-                  <span>Linux</span>
-                  <Tag color="green">manylinux</Tag>
-                </Space>
-              </Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="defaultArchitecture"
-            label="폐쇄망 CPU 아키텍처"
-            tooltip="폐쇄망 시스템의 CPU 아키텍처를 선택하세요"
-          >
-            <Select>
-              <Select.Option value="x86_64">x86_64 (64비트 Intel/AMD - 가장 일반적)</Select.Option>
-              <Select.Option value="amd64">amd64 (x86_64와 동일)</Select.Option>
-              <Select.Option value="arm64">ARM64 (Apple Silicon, AWS Graviton)</Select.Option>
-              <Select.Option value="aarch64">aarch64 (arm64와 동일)</Select.Option>
-              <Select.Option value="noarch">noarch (아키텍처 무관)</Select.Option>
-            </Select>
-          </Form.Item>
-
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="defaultTargetOS"
+                label="폐쇄망 OS"
+                tooltip="pip/conda 휠 파일의 플랫폼 태그에 적용"
+                style={{ marginBottom: 8 }}
+              >
+                <Select size="small">
+                  <Select.Option value="windows">Windows</Select.Option>
+                  <Select.Option value="macos">macOS</Select.Option>
+                  <Select.Option value="linux">Linux</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="defaultArchitecture"
+                label="CPU 아키텍처"
+                style={{ marginBottom: 8 }}
+              >
+                <Select size="small">
+                  <Select.Option value="x86_64">x86_64</Select.Option>
+                  <Select.Option value="amd64">amd64</Select.Option>
+                  <Select.Option value="arm64">ARM64</Select.Option>
+                  <Select.Option value="aarch64">aarch64</Select.Option>
+                  <Select.Option value="noarch">noarch</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
         </Card>
 
         {/* OS 패키지 배포판 설정 */}
         <Card
-          title="OS 패키지 배포판 설정"
-          style={{ marginBottom: 24 }}
-          extra={<Tag color="orange">YUM/APT/APK</Tag>}
+          title={
+            <Space>
+              <span>OS 패키지 배포판</span>
+              <Tag color="orange">YUM/APT/APK</Tag>
+              <Tooltip title="각 패키지 관리자별로 검색할 배포판과 아키텍처를 설정합니다">
+                <InfoCircleOutlined style={{ color: '#999' }} />
+              </Tooltip>
+            </Space>
+          }
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
         >
-          <Alert
-            message="OS 패키지 검색 시 사용할 배포판"
-            description="각 패키지 관리자별로 검색할 배포판과 아키텍처를 설정합니다. 폐쇄망의 OS 버전에 맞게 설정하세요."
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-          />
-
-          <Form.Item
-            name="yumDistribution"
-            label="YUM 배포판 (RHEL 계열)"
-            tooltip="YUM 패키지 검색 시 사용할 배포판과 아키텍처"
-          >
-            <Select>
-              <Select.OptGroup label="Rocky Linux">
-                <Select.Option value="rocky-9|x86_64">Rocky Linux 9 (x86_64)</Select.Option>
-                <Select.Option value="rocky-9|aarch64">Rocky Linux 9 (aarch64)</Select.Option>
-                <Select.Option value="rocky-8|x86_64">Rocky Linux 8 (x86_64)</Select.Option>
-                <Select.Option value="rocky-8|aarch64">Rocky Linux 8 (aarch64)</Select.Option>
-              </Select.OptGroup>
-              <Select.OptGroup label="AlmaLinux">
-                <Select.Option value="almalinux-9|x86_64">AlmaLinux 9 (x86_64)</Select.Option>
-                <Select.Option value="almalinux-9|aarch64">AlmaLinux 9 (aarch64)</Select.Option>
-                <Select.Option value="almalinux-8|x86_64">AlmaLinux 8 (x86_64)</Select.Option>
-                <Select.Option value="almalinux-8|aarch64">AlmaLinux 8 (aarch64)</Select.Option>
-              </Select.OptGroup>
-              <Select.OptGroup label="CentOS (EOL)">
-                <Select.Option value="centos-7|x86_64">CentOS 7 (x86_64) - EOL</Select.Option>
-              </Select.OptGroup>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="aptDistribution"
-            label="APT 배포판 (Debian/Ubuntu 계열)"
-            tooltip="APT 패키지 검색 시 사용할 배포판과 아키텍처"
-          >
-            <Select>
-              <Select.OptGroup label="Ubuntu LTS">
-                <Select.Option value="ubuntu-24.04|amd64">Ubuntu 24.04 LTS (amd64)</Select.Option>
-                <Select.Option value="ubuntu-24.04|arm64">Ubuntu 24.04 LTS (arm64)</Select.Option>
-                <Select.Option value="ubuntu-22.04|amd64">Ubuntu 22.04 LTS (amd64)</Select.Option>
-                <Select.Option value="ubuntu-22.04|arm64">Ubuntu 22.04 LTS (arm64)</Select.Option>
-                <Select.Option value="ubuntu-20.04|amd64">Ubuntu 20.04 LTS (amd64)</Select.Option>
-                <Select.Option value="ubuntu-20.04|arm64">Ubuntu 20.04 LTS (arm64)</Select.Option>
-              </Select.OptGroup>
-              <Select.OptGroup label="Debian">
-                <Select.Option value="debian-12|amd64">Debian 12 Bookworm (amd64)</Select.Option>
-                <Select.Option value="debian-12|arm64">Debian 12 Bookworm (arm64)</Select.Option>
-                <Select.Option value="debian-11|amd64">Debian 11 Bullseye (amd64)</Select.Option>
-                <Select.Option value="debian-11|arm64">Debian 11 Bullseye (arm64)</Select.Option>
-              </Select.OptGroup>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="apkDistribution"
-            label="APK 배포판 (Alpine Linux)"
-            tooltip="APK 패키지 검색 시 사용할 배포판과 아키텍처"
-          >
-            <Select>
-              <Select.Option value="alpine-3.20|x86_64">Alpine 3.20 (x86_64)</Select.Option>
-              <Select.Option value="alpine-3.20|aarch64">Alpine 3.20 (aarch64)</Select.Option>
-              <Select.Option value="alpine-3.18|x86_64">Alpine 3.18 (x86_64)</Select.Option>
-              <Select.Option value="alpine-3.18|aarch64">Alpine 3.18 (aarch64)</Select.Option>
-            </Select>
-          </Form.Item>
-        </Card>
-
-        {/* 의존성 설정 */}
-        <Card title="의존성 설정" style={{ marginBottom: 24 }}>
-          <Form.Item
-            name="includeDependencies"
-            label="의존성 자동 포함 다운로드"
-            valuePropName="checked"
-            tooltip="패키지 다운로드 시 전이적 의존성을 자동으로 해결하여 함께 다운로드합니다"
-          >
-            <Switch />
-          </Form.Item>
-          <Text type="secondary">
-            활성화 시 패키지의 모든 의존성을 자동으로 분석하여 함께 다운로드합니다.
-            폐쇄망 환경에서 설치 시 필요한 모든 파일을 한 번에 준비할 수 있습니다.
-          </Text>
-        </Card>
-
-        {/* 캐시 설정 */}
-        <Card title="캐시 설정" style={{ marginBottom: 24 }}>
-          <Form.Item
-            name="enableCache"
-            label="캐시 사용"
-            valuePropName="checked"
-            tooltip="다운로드한 패키지를 캐시하여 재사용"
-          >
-            <Switch />
-          </Form.Item>
-
-          <Form.Item
-            name="cachePath"
-            label="캐시 경로"
-            tooltip="패키지 캐시 저장 위치"
-          >
-            <Space.Compact style={{ width: '100%' }}>
-              <Form.Item name="cachePath" noStyle>
-                <Input placeholder="~/.depssmuggler/cache" />
-              </Form.Item>
-              <Button icon={<FolderOpenOutlined />} onClick={handleSelectFolder}>
-                선택
-              </Button>
-            </Space.Compact>
-          </Form.Item>
-
-          {/* 캐시 통계 */}
-          <div style={{ marginTop: 16, padding: 16, background: '#f5f5f5', borderRadius: 8 }}>
-            <Text strong style={{ display: 'block', marginBottom: 12 }}>캐시 현황</Text>
-            <Spin spinning={loadingCache}>
-              <Row gutter={24}>
-                <Col span={12}>
-                  <Statistic
-                    title="캐시 크기"
-                    value={formatBytes(cacheSize)}
-                    valueStyle={{ fontSize: 18 }}
-                  />
-                </Col>
-                <Col span={12}>
-                  <Statistic
-                    title="캐시된 패키지"
-                    value={cacheCount}
-                    suffix="개"
-                    valueStyle={{ fontSize: 18 }}
-                  />
-                </Col>
-              </Row>
-            </Spin>
-            <div style={{ marginTop: 16 }}>
-              <Space>
-                <Button onClick={loadCacheInfo} loading={loadingCache}>
-                  새로고침
-                </Button>
-                <Popconfirm
-                  title="캐시 삭제"
-                  description="모든 캐시된 패키지가 삭제됩니다. 계속하시겠습니까?"
-                  onConfirm={handleClearCache}
-                  okText="삭제"
-                  cancelText="취소"
-                  okButtonProps={{ danger: true }}
+          {/* YUM */}
+          <Text type="secondary" style={{ fontSize: 12 }}>YUM (RHEL 계열)</Text>
+          <Row gutter={8} style={{ marginBottom: 8 }}>
+            <Col span={14}>
+              <Form.Item name="yumDistributionId" style={{ marginBottom: 0 }}>
+                <Select
+                  size="small"
+                  loading={loadingDistributions}
+                  onChange={(value) => handleDistroChange(value, 'yum', setSelectedYumDistroId)}
                 >
-                  <Button
-                    danger
-                    icon={<DeleteOutlined />}
-                    loading={clearingCache}
-                    disabled={cacheSize === 0}
-                  >
-                    캐시 삭제
-                  </Button>
-                </Popconfirm>
-              </Space>
-            </div>
-          </div>
-        </Card>
-
-        {/* 출력 설정 */}
-        <Card title="출력 설정" style={{ marginBottom: 24 }}>
-          <Alert
-            message="다운로드 시 자동 적용"
-            description="여기서 설정한 출력 형식과 설치 스크립트 옵션이 모든 다운로드에 자동으로 적용됩니다."
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-          />
-
-          <Form.Item
-            name="defaultOutputFormat"
-            label="기본 출력 형식"
-            tooltip="다운로드 완료 시 기본 출력 형식"
-          >
-            <Select>
-              <Select.Option value="zip">ZIP 압축 (메일 첨부에 적합)</Select.Option>
-              <Select.Option value="tar.gz">TAR.GZ 압축 (Linux 환경에 적합)</Select.Option>
-              <Select.Option value="mirror">오프라인 미러 구조 (로컬 저장소 사용)</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="includeInstallScripts"
-            label="설치 스크립트 포함"
-            valuePropName="checked"
-            tooltip="bash/PowerShell 설치 스크립트 생성"
-          >
-            <Switch />
-          </Form.Item>
-        </Card>
-
-        {/* 파일 분할 설정 */}
-        <Card title="파일 분할 설정" style={{ marginBottom: 24 }}>
-          <Form.Item
-            name="enableFileSplit"
-            label="파일 분할 사용"
-            valuePropName="checked"
-            tooltip="대용량 파일을 작은 파일로 분할"
-          >
-            <Switch />
-          </Form.Item>
-
-          <Form.Item
-            name="maxFileSize"
-            label="최대 파일 크기 (MB)"
-            tooltip="이메일 첨부 제한 등을 고려한 최대 파일 크기"
-          >
-            <InputNumber
-              min={1}
-              max={1000}
-              style={{ width: '100%' }}
-              formatter={(value) => `${value} MB`}
-              parser={(value) => value?.replace(' MB', '') as unknown as number}
-            />
-          </Form.Item>
-        </Card>
-
-        {/* SMTP 설정 */}
-        <Card title="SMTP 설정 (메일 발송)" style={{ marginBottom: 24 }}>
-          <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-            다운로드한 패키지를 이메일로 직접 발송할 수 있습니다.
-          </Text>
-
-          <Row gutter={16}>
-            <Col span={16}>
-              <Form.Item name="smtpHost" label="SMTP 서버">
-                <Input placeholder="smtp.example.com" />
+                  {renderDistroOnlyOptions('yum')}
+                </Select>
               </Form.Item>
             </Col>
-            <Col span={8}>
-              <Form.Item name="smtpPort" label="포트">
-                <InputNumber
-                  min={1}
-                  max={65535}
-                  style={{ width: '100%' }}
-                  placeholder="587"
-                />
+            <Col span={10}>
+              <Form.Item name="yumArchitecture" style={{ marginBottom: 0 }}>
+                <Select size="small">
+                  {renderArchOptions(selectedYumDistroId, 'yum')}
+                </Select>
               </Form.Item>
             </Col>
           </Row>
 
-          <Form.Item name="smtpUser" label="사용자명">
-            <Input placeholder="user@example.com" />
-          </Form.Item>
+          {/* APT */}
+          <Text type="secondary" style={{ fontSize: 12 }}>APT (Debian/Ubuntu)</Text>
+          <Row gutter={8} style={{ marginBottom: 8 }}>
+            <Col span={14}>
+              <Form.Item name="aptDistributionId" style={{ marginBottom: 0 }}>
+                <Select
+                  size="small"
+                  loading={loadingDistributions}
+                  onChange={(value) => handleDistroChange(value, 'apt', setSelectedAptDistroId)}
+                >
+                  {renderDistroOnlyOptions('apt')}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item name="aptArchitecture" style={{ marginBottom: 0 }}>
+                <Select size="small">
+                  {renderArchOptions(selectedAptDistroId, 'apt')}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
 
-          <Form.Item name="smtpPassword" label="비밀번호">
-            <Input.Password placeholder="••••••••" />
-          </Form.Item>
+          {/* APK */}
+          <Text type="secondary" style={{ fontSize: 12 }}>APK (Alpine)</Text>
+          <Row gutter={8}>
+            <Col span={14}>
+              <Form.Item name="apkDistributionId" style={{ marginBottom: 0 }}>
+                <Select
+                  size="small"
+                  loading={loadingDistributions}
+                  onChange={(value) => handleDistroChange(value, 'apk', setSelectedApkDistroId)}
+                >
+                  {renderDistroOnlyOptions('apk')}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item name="apkArchitecture" style={{ marginBottom: 0 }}>
+                <Select size="small">
+                  {renderArchOptions(selectedApkDistroId, 'apk')}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+        </Card>
 
-          <Form.Item name="smtpFrom" label="발신자 주소">
-            <Input placeholder="noreply@example.com" />
-          </Form.Item>
-
-          {/* SMTP 연결 테스트 */}
-          <div style={{ marginTop: 8 }}>
+        {/* Docker 설정 */}
+        <Card
+          title={
             <Space>
-              <Button
-                icon={<SendOutlined />}
-                onClick={handleTestSmtp}
-                loading={testingSmtp}
-              >
-                연결 테스트
-              </Button>
-              {smtpTestResult === 'success' && (
-                <Text type="success">
-                  <CheckCircleOutlined /> 연결 성공
-                </Text>
-              )}
-              {smtpTestResult === 'failed' && (
-                <Text type="danger">
-                  <CloseCircleOutlined /> 연결 실패
-                </Text>
-              )}
+              <CloudOutlined />
+              <span>Docker 설정</span>
+              <Tag color="geekblue">Docker</Tag>
+              <Tooltip title="컨테이너 이미지를 다운로드할 때 사용할 레지스트리, 아키텍처 및 옵션">
+                <InfoCircleOutlined style={{ color: '#999' }} />
+              </Tooltip>
             </Space>
+          }
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
+        >
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="dockerArchitecture"
+                label="아키텍처"
+                tooltip="멀티 아키텍처 이미지에서 다운로드할 플랫폼"
+                style={{ marginBottom: 8 }}
+              >
+                <Select size="small">
+                  <Select.Option value="amd64">amd64</Select.Option>
+                  <Select.Option value="arm64">arm64</Select.Option>
+                  <Select.Option value="arm/v7">arm/v7</Select.Option>
+                  <Select.Option value="386">386</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="dockerRegistry"
+                label="레지스트리"
+                style={{ marginBottom: 8 }}
+              >
+                <Select size="small">
+                  <Select.Option value="docker.io">Docker Hub</Select.Option>
+                  <Select.Option value="ghcr.io">GitHub (ghcr.io)</Select.Option>
+                  <Select.Option value="ecr">Amazon ECR</Select.Option>
+                  <Select.Option value="quay.io">Quay.io</Select.Option>
+                  <Select.Option value="custom">커스텀</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prevValues, currentValues) =>
+              prevValues.dockerRegistry !== currentValues.dockerRegistry
+            }
+          >
+            {({ getFieldValue }) =>
+              getFieldValue('dockerRegistry') === 'custom' ? (
+                <Form.Item
+                  name="dockerCustomRegistry"
+                  label="커스텀 레지스트리 URL"
+                  rules={[{ required: true, message: '레지스트리 URL 입력' }]}
+                  style={{ marginBottom: 8 }}
+                >
+                  <Input size="small" placeholder="registry.example.com" />
+                </Form.Item>
+              ) : null
+            }
+          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item
+                name="dockerLayerCompression"
+                label="압축"
+                style={{ marginBottom: 8 }}
+              >
+                <Select size="small">
+                  <Select.Option value="gzip">gzip</Select.Option>
+                  <Select.Option value="tar">tar</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="dockerRetryStrategy"
+                label="재시도"
+                style={{ marginBottom: 8 }}
+              >
+                <Select size="small">
+                  <Select.Option value="layer">레이어별</Select.Option>
+                  <Select.Option value="full">전체</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="dockerIncludeLoadScript"
+                label="load 스크립트"
+                valuePropName="checked"
+                style={{ marginBottom: 8 }}
+              >
+                <Switch size="small" />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* 캐시 설정 */}
+        <Card
+          title="캐시 설정"
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
+        >
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item
+                name="enableCache"
+                label="캐시 사용"
+                valuePropName="checked"
+                style={{ marginBottom: 8 }}
+              >
+                <Switch size="small" />
+              </Form.Item>
+            </Col>
+            <Col span={16}>
+              <Form.Item
+                name="cachePath"
+                label="캐시 경로"
+                style={{ marginBottom: 8 }}
+              >
+                <Space.Compact style={{ width: '100%' }}>
+                  <Input size="small" placeholder="~/.depssmuggler/cache" />
+                  <Button size="small" icon={<FolderOpenOutlined />} onClick={handleSelectFolder} />
+                </Space.Compact>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {/* 캐시 통계 (컴팩트) */}
+          <div style={{ padding: '8px 12px', background: '#f5f5f5', borderRadius: 4 }}>
+            <Spin spinning={loadingCache}>
+              <Row gutter={16} align="middle">
+                <Col span={8}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>크기: </Text>
+                  <Text strong style={{ fontSize: 13 }}>{formatBytes(cacheSize)}</Text>
+                </Col>
+                <Col span={8}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>패키지: </Text>
+                  <Text strong style={{ fontSize: 13 }}>{cacheCount}개</Text>
+                </Col>
+                <Col span={8} style={{ textAlign: 'right' }}>
+                  <Space size={4}>
+                    <Button size="small" onClick={loadCacheInfo} loading={loadingCache}>새로고침</Button>
+                    <Popconfirm
+                      title="캐시 삭제"
+                      description="모든 캐시가 삭제됩니다"
+                      onConfirm={handleClearCache}
+                      okText="삭제"
+                      cancelText="취소"
+                      okButtonProps={{ danger: true }}
+                    >
+                      <Button size="small" danger icon={<DeleteOutlined />} loading={clearingCache} disabled={cacheSize === 0} />
+                    </Popconfirm>
+                  </Space>
+                </Col>
+              </Row>
+            </Spin>
           </div>
         </Card>
-      </Form>
+
+        {/* 출력 설정 */}
+        <Card
+          title={
+            <Space>
+              <span>출력 설정</span>
+              <Tooltip title="다운로드에 자동 적용됩니다">
+                <InfoCircleOutlined style={{ color: '#999' }} />
+              </Tooltip>
+            </Space>
+          }
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
+        >
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="defaultOutputFormat"
+                label="출력 형식"
+                style={{ marginBottom: 8 }}
+              >
+                <Select size="small">
+                  <Select.Option value="zip">ZIP</Select.Option>
+                  <Select.Option value="tar.gz">TAR.GZ</Select.Option>
+                  <Select.Option value="mirror">미러 구조</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="includeInstallScripts"
+                label="설치 스크립트"
+                valuePropName="checked"
+                tooltip="bash/PowerShell 스크립트 생성"
+                style={{ marginBottom: 8 }}
+              >
+                <Switch size="small" />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* 파일 분할 설정 */}
+        <Card
+          title="파일 분할"
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
+        >
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item
+                name="enableFileSplit"
+                label="분할 사용"
+                valuePropName="checked"
+                style={{ marginBottom: 0 }}
+              >
+                <Switch size="small" />
+              </Form.Item>
+            </Col>
+            <Col span={16}>
+              <Form.Item
+                name="maxFileSize"
+                label="최대 크기 (MB)"
+                tooltip="이메일 첨부 제한"
+                style={{ marginBottom: 0 }}
+              >
+                <InputNumber
+                  size="small"
+                  min={1}
+                  max={1000}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* SMTP 설정 */}
+        <Card
+          title={
+            <Space>
+              <span>SMTP 설정</span>
+              <Tooltip title="다운로드한 패키지를 이메일로 직접 발송">
+                <InfoCircleOutlined style={{ color: '#999' }} />
+              </Tooltip>
+            </Space>
+          }
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
+        >
+          <Row gutter={8}>
+            <Col span={12}>
+              <Form.Item name="smtpHost" label="SMTP 서버" style={{ marginBottom: 8 }}>
+                <Input size="small" placeholder="smtp.example.com" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name="smtpPort" label="포트" style={{ marginBottom: 8 }}>
+                <InputNumber size="small" min={1} max={65535} style={{ width: '100%' }} placeholder="587" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name="smtpFrom" label="발신자" style={{ marginBottom: 8 }}>
+                <Input size="small" placeholder="noreply@..." />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={8}>
+            <Col span={12}>
+              <Form.Item name="smtpUser" label="사용자명" style={{ marginBottom: 8 }}>
+                <Input size="small" placeholder="user@example.com" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="smtpPassword" label="비밀번호" style={{ marginBottom: 8 }}>
+                <Input.Password size="small" placeholder="••••••••" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Space size={8}>
+            <Button
+              size="small"
+              icon={<SendOutlined />}
+              onClick={handleTestSmtp}
+              loading={testingSmtp}
+            >
+              연결 테스트
+            </Button>
+            {smtpTestResult === 'success' && (
+              <Text type="success" style={{ fontSize: 12 }}>
+                <CheckCircleOutlined /> 성공
+              </Text>
+            )}
+            {smtpTestResult === 'failed' && (
+              <Text type="danger" style={{ fontSize: 12 }}>
+                <CloseCircleOutlined /> 실패
+              </Text>
+            )}
+          </Space>
+        </Card>
+        </Form>
+      </div>
+
+      {/* 고정 하단 액션 바 */}
+      <div style={{
+        position: 'sticky',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        padding: '10px 0',
+        backgroundColor: '#fff',
+        borderTop: '1px solid #f0f0f0',
+        boxShadow: '0 -2px 8px rgba(0,0,0,0.06)',
+        display: 'flex',
+        justifyContent: 'flex-end',
+        gap: 8,
+        zIndex: 100,
+        flexShrink: 0
+      }}>
+        <Button size="small" icon={<ReloadOutlined />} onClick={handleReset}>
+          초기화
+        </Button>
+        <Button size="small" type="primary" icon={<SaveOutlined />} onClick={() => form.submit()}>
+          저장
+        </Button>
+      </div>
     </div>
   );
 };

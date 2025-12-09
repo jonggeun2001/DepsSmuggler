@@ -25,9 +25,10 @@ import {
   CodeOutlined,
   CloudServerOutlined,
   ContainerOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { useCartStore, PackageType, Architecture } from '../stores/cartStore';
-import { useSettingsStore } from '../stores/settingsStore';
+import { useSettingsStore, DockerRegistry } from '../stores/settingsStore';
 
 const { Title, Text } = Typography;
 
@@ -67,16 +68,6 @@ const packageTypeOptions: { value: PackageType; label: string; category: Categor
   { value: 'apt', label: 'APT', category: 'os', description: 'Ubuntu/Debian 패키지' },
   { value: 'apk', label: 'APK', category: 'os', description: 'Alpine Linux 패키지' },
   { value: 'docker', label: 'Docker', category: 'container', description: 'Docker Hub 이미지' },
-];
-
-// 아키텍처 옵션
-const archOptions: { value: Architecture; label: string; description: string }[] = [
-  { value: 'x86_64', label: 'x86_64', description: '64비트 Intel/AMD (가장 일반적)' },
-  { value: 'amd64', label: 'amd64', description: '64비트 AMD (x86_64와 동일)' },
-  { value: 'arm64', label: 'ARM64', description: '64비트 ARM (Apple Silicon, AWS Graviton)' },
-  { value: 'aarch64', label: 'aarch64', description: '64비트 ARM (arm64와 동일)' },
-  { value: 'i386', label: 'i386', description: '32비트 Intel/AMD' },
-  { value: 'noarch', label: 'noarch', description: '아키텍처 무관 (순수 스크립트)' },
 ];
 
 // 언어 버전 옵션
@@ -144,12 +135,30 @@ const shouldSkipLanguageVersion = (type: PackageType): boolean => {
   return ['yum', 'apt', 'apk', 'docker'].includes(type);
 };
 
+// Docker 레지스트리 옵션
+const dockerRegistryOptions: { value: DockerRegistry; label: string; description: string }[] = [
+  { value: 'docker.io', label: 'Docker Hub', description: '공식 Docker Hub 레지스트리' },
+  { value: 'ghcr.io', label: 'GitHub Container Registry', description: 'GitHub 컨테이너 레지스트리' },
+  { value: 'ecr', label: 'Amazon ECR Public', description: 'AWS 퍼블릭 컨테이너 레지스트리' },
+  { value: 'quay.io', label: 'Quay.io', description: 'Red Hat Quay 레지스트리' },
+  { value: 'custom', label: '커스텀 레지스트리', description: '직접 레지스트리 URL 입력' },
+];
+
 // 검색 결과 아이템
 interface SearchResult {
   name: string;
   version: string;
   description?: string;
   versions?: string[];
+  // OS 패키지용 추가 필드
+  downloadUrl?: string;
+  repository?: { baseUrl: string; name?: string };
+  location?: string;
+  architecture?: string;
+  // Docker 이미지용 추가 필드
+  registry?: string;
+  isOfficial?: boolean;
+  pullCount?: number;
 }
 
 const WizardPage: React.FC = () => {
@@ -190,10 +199,20 @@ const WizardPage: React.FC = () => {
     yumDistribution,
     aptDistribution,
     apkDistribution,
+    dockerRegistry: defaultDockerRegistry,
+    dockerCustomRegistry,
+    dockerArchitecture,
   } = useSettingsStore();
+
+  // Docker 레지스트리 상태
+  const [dockerRegistry, setDockerRegistry] = useState<DockerRegistry>(defaultDockerRegistry);
+  const [customRegistryUrl, setCustomRegistryUrl] = useState(dockerCustomRegistry);
 
   // 라이브러리 패키지 타입 (설정 기본값 적용 대상)
   const libraryPackageTypes: PackageType[] = ['pip', 'conda', 'maven', 'gradle', 'npm'];
+
+  // OS 패키지 타입 (배포판별 설정 아키텍처 적용)
+  const osPackageTypes: PackageType[] = ['yum', 'apt', 'apk'];
 
   // OS/아키텍처 설정 적용 여부 판단 함수
   const shouldApplyDefaultOSArch = (type: PackageType): boolean => {
@@ -242,11 +261,20 @@ const WizardPage: React.FC = () => {
     if (shouldApplyDefaultOSArch(packageType)) {
       // 라이브러리 패키지: 설정에서 가져온 기본값 적용
       setArchitecture(defaultArchitecture as Architecture);
-    } else {
-      // OS 패키지/컨테이너: 수동 선택 (기본값 x86_64)
-      setArchitecture('x86_64');
+    } else if (osPackageTypes.includes(packageType)) {
+      // OS 패키지: 각 배포판의 설정된 아키텍처 적용
+      if (packageType === 'yum') {
+        setArchitecture(yumDistribution.architecture as Architecture);
+      } else if (packageType === 'apt') {
+        setArchitecture(aptDistribution.architecture as Architecture);
+      } else if (packageType === 'apk') {
+        setArchitecture(apkDistribution.architecture as Architecture);
+      }
+    } else if (packageType === 'docker') {
+      // Docker: 설정에서 가져온 Docker 아키텍처 적용
+      setArchitecture(dockerArchitecture as Architecture);
     }
-  }, [packageType, defaultArchitecture]);
+  }, [packageType, defaultArchitecture, yumDistribution.architecture, aptDistribution.architecture, apkDistribution.architecture, dockerArchitecture]);
 
   // 디바운스된 실시간 검색
   const debouncedSearch = useCallback(async (query: string) => {
@@ -365,18 +393,43 @@ const WizardPage: React.FC = () => {
     }
   };
 
-  // 브라우저에서 Docker Hub API로 이미지 검색
-  const searchDockerImage = async (query: string): Promise<SearchResult[]> => {
+  // 브라우저에서 Docker 이미지 검색 (레지스트리별)
+  const searchDockerImage = async (query: string, registry: DockerRegistry = 'docker.io'): Promise<SearchResult[]> => {
     try {
-      const response = await fetch(`/api/docker/search?q=${encodeURIComponent(query)}`);
+      const registryParam = registry === 'custom' && customRegistryUrl
+        ? customRegistryUrl
+        : registry;
+      const response = await fetch(`/api/docker/search?q=${encodeURIComponent(query)}&registry=${encodeURIComponent(registryParam)}`);
       if (!response.ok) {
         return [];
       }
       const data = await response.json();
-      return data.results || [];
+      // 검색 결과에 레지스트리 정보 추가
+      return (data.results || []).map((item: SearchResult) => ({
+        ...item,
+        registry: registryParam,
+      }));
     } catch (error) {
       console.error('Docker search error:', error);
       return [];
+    }
+  };
+
+  // Docker 이미지 태그 목록 조회
+  const fetchDockerTags = async (imageName: string, registry: DockerRegistry = 'docker.io'): Promise<string[]> => {
+    try {
+      const registryParam = registry === 'custom' && customRegistryUrl
+        ? customRegistryUrl
+        : registry;
+      const response = await fetch(`/api/docker/tags?image=${encodeURIComponent(imageName)}&registry=${encodeURIComponent(registryParam)}`);
+      if (!response.ok) {
+        return ['latest'];
+      }
+      const data = await response.json();
+      return data.tags || ['latest'];
+    } catch (error) {
+      console.error('Docker tags fetch error:', error);
+      return ['latest'];
     }
   };
 
@@ -445,11 +498,40 @@ const WizardPage: React.FC = () => {
 
       const data = await response.json();
 
-      // OS 패키지 결과를 SearchResult 형식으로 변환
-      return (data.packages || []).map((pkg: { name: string; version: string; description?: string; summary?: string }) => ({
+      // OS 패키지 결과를 SearchResult 형식으로 변환 (그룹화된 결과 처리)
+      // API 응답: { packages: OSPackageSearchResult[], totalCount, hasMore }
+      // OSPackageSearchResult: { name, versions: OSPackageInfo[], latest: OSPackageInfo }
+      return (data.packages || []).map((pkg: {
+        name: string;
+        versions: Array<{
+          name: string;
+          version: string;
+          description?: string;
+          summary?: string;
+          downloadUrl?: string;
+          repository?: { baseUrl: string; name?: string };
+          location?: string;
+          architecture?: string;
+        }>;
+        latest: {
+          name: string;
+          version: string;
+          description?: string;
+          summary?: string;
+          downloadUrl?: string;
+          repository?: { baseUrl: string; name?: string };
+          location?: string;
+          architecture?: string;
+        };
+      }) => ({
         name: pkg.name,
-        version: pkg.version,
-        description: pkg.summary || pkg.description || '',
+        version: pkg.latest.version,
+        description: pkg.latest.summary || pkg.latest.description || '',
+        versions: pkg.versions.map(v => v.version), // 버전 목록 포함
+        downloadUrl: pkg.latest.downloadUrl,
+        repository: pkg.latest.repository,
+        location: pkg.latest.location,
+        architecture: pkg.latest.architecture,
       }));
     } catch (error) {
       console.error(`${type} search error:`, error);
@@ -469,7 +551,7 @@ const WizardPage: React.FC = () => {
       case 'npm':
         return searchNpmPackage(query);
       case 'docker':
-        return searchDockerImage(query);
+        return searchDockerImage(query, dockerRegistry);
       case 'yum':
       case 'apt':
       case 'apk':
@@ -528,11 +610,22 @@ const WizardPage: React.FC = () => {
           limit: 50,
         });
 
-        // OS 패키지 결과를 SearchResult 형식으로 변환
-        results = ((response.packages || []) as Array<{ name: string; version: string; description?: string; summary?: string }>).map(pkg => ({
+        // OS 패키지 결과를 SearchResult 형식으로 변환 (메타데이터 포함)
+        results = ((response.packages || []) as Array<{
+          name: string;
+          version: string;
+          description?: string;
+          summary?: string;
+          repository?: { baseUrl: string; name?: string; id?: string };
+          location?: string;
+          architecture?: string;
+        }>).map(pkg => ({
           name: pkg.name,
           version: pkg.version,
           description: pkg.summary || pkg.description || '',
+          repository: pkg.repository,
+          location: pkg.location,
+          architecture: pkg.architecture,
         }));
       } else if (window.electronAPI?.search?.packages) {
         // 일반 패키지: electronAPI.search.packages 사용
@@ -585,7 +678,7 @@ const WizardPage: React.FC = () => {
   const handleSelectPackage = async (record: SearchResult) => {
     setSelectedPackage(record);
     setSelectedVersion(record.version);
-    setCurrentStep(4); // 버전 선택 단계로 이동
+    setCurrentStep(3); // 버전 선택 단계로 이동
     setLoadingVersions(true);
 
     try {
@@ -627,6 +720,26 @@ const WizardPage: React.FC = () => {
           console.error('Maven version fetch error:', err);
           setAvailableVersions([record.version]);
         }
+      } else if (packageType === 'docker') {
+        // Docker: 태그 목록 조회
+        const tags = await fetchDockerTags(record.name, dockerRegistry);
+        if (tags.length > 0) {
+          setAvailableVersions(tags);
+          // latest가 있으면 기본 선택, 아니면 첫 번째
+          const defaultTag = tags.includes('latest') ? 'latest' : tags[0];
+          setSelectedVersion(defaultTag);
+        } else {
+          setAvailableVersions(['latest']);
+          setSelectedVersion('latest');
+        }
+      } else if (['yum', 'apt', 'apk'].includes(packageType)) {
+        // OS 패키지: 검색 결과에 이미 버전 목록이 포함됨 (그룹화된 결과)
+        if (record.versions && record.versions.length > 0) {
+          setAvailableVersions(record.versions);
+          setSelectedVersion(record.versions[0]); // 최신 버전 선택
+        } else {
+          setAvailableVersions([record.version]);
+        }
       } else {
         setAvailableVersions(record.versions || [record.version]);
       }
@@ -647,10 +760,29 @@ const WizardPage: React.FC = () => {
       return;
     }
 
-    // 라이브러리 패키지는 설정값 자동 적용
-    const effectiveArch = libraryPackageTypes.includes(packageType)
-      ? (defaultArchitecture as Architecture)
-      : architecture;
+    // 아키텍처 결정 로직
+    const getEffectiveArchitecture = (): Architecture => {
+      // 라이브러리 패키지: 설정의 기본 아키텍처 사용
+      if (libraryPackageTypes.includes(packageType)) {
+        return defaultArchitecture as Architecture;
+      }
+      // OS 패키지: 각 배포판의 설정된 아키텍처 사용
+      if (packageType === 'yum') return yumDistribution.architecture as Architecture;
+      if (packageType === 'apt') return aptDistribution.architecture as Architecture;
+      if (packageType === 'apk') return apkDistribution.architecture as Architecture;
+      // Docker: 설정의 Docker 아키텍처 사용
+      if (packageType === 'docker') return dockerArchitecture as Architecture;
+      // 기타: 수동 선택된 아키텍처 사용 (폴백)
+      return architecture;
+    };
+    const effectiveArch = getEffectiveArchitecture();
+
+    // Docker 이미지: 레지스트리 정보 포함
+    const dockerMetadata = packageType === 'docker' ? {
+      registry: dockerRegistry === 'custom' ? customRegistryUrl : dockerRegistry,
+      isOfficial: selectedPackage.isOfficial,
+      pullCount: selectedPackage.pullCount,
+    } : {};
 
     addItem({
       type: packageType,
@@ -663,12 +795,18 @@ const WizardPage: React.FC = () => {
         category,
         // 라이브러리 패키지는 targetOS도 저장
         ...(libraryPackageTypes.includes(packageType) && { targetOS: defaultTargetOS }),
+        // Docker 이미지 메타데이터
+        ...dockerMetadata,
       },
+      // OS 패키지 메타데이터 포함
+      downloadUrl: selectedPackage.downloadUrl,
+      repository: selectedPackage.repository,
+      location: selectedPackage.location,
     });
 
     message.success(`${selectedPackage.name}@${selectedVersion}이(가) 장바구니에 추가되었습니다`);
     resetSearch();
-    setCurrentStep(3); // 검색 단계로 이동
+    setCurrentStep(2); // 검색 단계로 이동
   };
 
   // 검색 결과 테이블 컬럼
@@ -709,47 +847,23 @@ const WizardPage: React.FC = () => {
     },
   ];
 
-  // 단계 정보 (언어 버전 단계 스킵 여부에 따라 동적 생성)
+  // 단계 정보 (환경 확인 단계 제거 - 검색 화면에 인라인 표시)
   const getStepItems = () => {
-    const baseSteps = [
+    return [
       { title: '카테고리', icon: <AppstoreOutlined /> },
       { title: '패키지 타입', icon: <CodeOutlined /> },
-    ];
-
-    if (!shouldSkipLanguageVersion(packageType)) {
-      // 라이브러리 패키지: "환경 확인" 단계 (읽기 전용)
-      baseSteps.push({ title: '환경 확인', icon: <CloudServerOutlined /> });
-    }
-
-    baseSteps.push(
       { title: '검색', icon: <SearchOutlined /> },
-      { title: '버전', icon: <Tag /> }
-    );
-
-    // OS/컨테이너 패키지만 아키텍처 선택 단계 표시
-    if (!libraryPackageTypes.includes(packageType)) {
-      baseSteps.push({ title: '아키텍처', icon: <CloudServerOutlined /> });
-    }
-
-    return baseSteps;
+      { title: '버전', icon: <Tag /> },
+    ];
   };
 
   const stepItems = getStepItems();
 
-  // 현재 표시할 단계 인덱스 계산
+  // 현재 표시할 단계 인덱스 계산 (환경확인 단계 제거됨)
+  // 모든 패키지 타입: 0(카테고리) -> 1(패키지타입) -> 2(검색) -> 3(버전)
   const getDisplayStep = () => {
-    if (libraryPackageTypes.includes(packageType)) {
-      // 라이브러리 패키지: 0,1,2,3,4 -> 0,1,2,3,4 (아키텍처 단계 없음)
-      return currentStep;
-    } else {
-      // OS/컨테이너 패키지: 0,1 -> 0,1 / 3,4,5 -> 2,3,4 (환경 확인 단계 없음)
-      if (currentStep <= 1) return currentStep;
-      return currentStep - 1;
-    }
+    return currentStep;
   };
-
-  // 아키텍처 경고 표시 여부
-  const showArchWarning = category === 'container' || packageType === 'pip' || packageType === 'npm';
 
   // 현재 단계 렌더링
   const renderCurrentStep = () => {
@@ -822,7 +936,7 @@ const WizardPage: React.FC = () => {
                 <Button onClick={() => setCurrentStep(0)}>이전</Button>
                 <Button
                   type="primary"
-                  onClick={() => setCurrentStep(shouldSkipLanguageVersion(packageType) ? 3 : 2)}
+                  onClick={() => setCurrentStep(2)}
                 >
                   다음
                 </Button>
@@ -832,81 +946,53 @@ const WizardPage: React.FC = () => {
         );
 
       case 2: {
-        // 환경 설정 확인 단계 (읽기 전용)
-        const langKey = getLanguageKey(packageType);
-        const selectedVersion = langKey ? languageVersions[langKey] : '';
-        const versionLabel = languageVersionOptions[packageType]?.find(
-          v => v.value === selectedVersion
-        )?.label || selectedVersion;
-        const isPython = packageType === 'pip' || packageType === 'conda';
+        // 환경 정보 바 (라이브러리 패키지용)
+        const renderEnvironmentInfoBar = () => {
+          if (!libraryPackageTypes.includes(packageType)) return null;
 
-        // OS 레이블 매핑
-        const osLabels: Record<string, string> = {
-          any: '모든 OS',
-          windows: 'Windows',
-          macos: 'macOS',
-          linux: 'Linux',
+          const langKey = getLanguageKey(packageType);
+          const langVersion = langKey ? languageVersions[langKey] : '';
+          const versionLabel = languageVersionOptions[packageType]?.find(
+            v => v.value === langVersion
+          )?.label || langVersion;
+
+          // OS 레이블 매핑
+          const osLabels: Record<string, string> = {
+            any: '모든 OS',
+            windows: 'Windows',
+            macos: 'macOS',
+            linux: 'Linux',
+          };
+
+          return (
+            <div style={{
+              background: '#fafafa',
+              padding: '8px 12px',
+              borderRadius: 6,
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 8,
+            }}>
+              <Space size={4} wrap>
+                <SettingOutlined style={{ color: '#999', marginRight: 4 }} />
+                {versionLabel && <Tag color="blue">{versionLabel}</Tag>}
+                <Tag color="green">{osLabels[defaultTargetOS] || defaultTargetOS}</Tag>
+                <Tag color="purple">{defaultArchitecture}</Tag>
+              </Space>
+              <a
+                href="/settings"
+                onClick={(e) => { e.preventDefault(); window.location.href = '/settings'; }}
+                style={{ fontSize: 12, color: '#1890ff' }}
+              >
+                설정 변경
+              </a>
+            </div>
+          );
         };
 
-        return (
-          <Card>
-            <Title level={5}>환경 설정 확인</Title>
-            <Text type="secondary">
-              설정 페이지에서 지정한 기본값이 적용됩니다.
-            </Text>
-            <Divider />
-
-            <Alert
-              message="설정에서 변경 가능"
-              description={
-                <span>
-                  아래 값을 변경하려면 <a href="/settings" onClick={(e) => { e.preventDefault(); window.location.href = '/settings'; }}>설정 페이지</a>로 이동하세요.
-                </span>
-              }
-              type="info"
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
-
-            {/* 언어 버전 - 읽기 전용 */}
-            <div style={{ marginBottom: 16, padding: 16, background: '#fafafa', borderRadius: 8 }}>
-              <Text strong style={{ display: 'block', marginBottom: 8 }}>
-                {isPython ? 'Python 버전' : packageType === 'npm' ? 'Node.js 버전' : 'Java 버전'}
-              </Text>
-              <Tag color="blue" style={{ fontSize: 14, padding: '4px 12px' }}>
-                {versionLabel || '미설정'}
-              </Tag>
-            </div>
-
-            {/* 대상 OS - 읽기 전용 */}
-            <div style={{ marginBottom: 16, padding: 16, background: '#fafafa', borderRadius: 8 }}>
-              <Text strong style={{ display: 'block', marginBottom: 8 }}>대상 운영체제</Text>
-              <Tag color="green" style={{ fontSize: 14, padding: '4px 12px' }}>
-                {osLabels[defaultTargetOS] || defaultTargetOS}
-              </Tag>
-            </div>
-
-            {/* 아키텍처 - 읽기 전용 */}
-            <div style={{ marginBottom: 16, padding: 16, background: '#fafafa', borderRadius: 8 }}>
-              <Text strong style={{ display: 'block', marginBottom: 8 }}>대상 아키텍처</Text>
-              <Tag color="purple" style={{ fontSize: 14, padding: '4px 12px' }}>
-                {defaultArchitecture}
-              </Tag>
-            </div>
-
-            <div style={{ marginTop: 24 }}>
-              <Space>
-                <Button onClick={() => setCurrentStep(1)}>이전</Button>
-                <Button type="primary" onClick={() => setCurrentStep(3)}>
-                  다음
-                </Button>
-              </Space>
-            </div>
-          </Card>
-        );
-      }
-
-      case 3: {
         const dropdownItems = suggestions.map((item) => ({
           key: item.name,
           label: (
@@ -914,22 +1000,130 @@ const WizardPage: React.FC = () => {
               style={{ padding: '8px 0', cursor: 'pointer' }}
               onClick={() => handleSuggestionSelect(item)}
             >
-              <div style={{ fontWeight: 'bold' }}>{item.name}</div>
+              <div style={{ fontWeight: 'bold' }}>
+                {item.name}
+                {item.isOfficial && <Tag color="gold" style={{ marginLeft: 8 }}>공식</Tag>}
+              </div>
               <div style={{ fontSize: 12, color: '#666' }}>
-                {item.version} - {item.description || '설명 없음'}
+                {packageType === 'docker' ? (
+                  <>
+                    {item.description || '설명 없음'}
+                    {item.pullCount !== undefined && (
+                      <span style={{ marginLeft: 8 }}>📥 {item.pullCount.toLocaleString()}</span>
+                    )}
+                  </>
+                ) : (
+                  <>{item.version} - {item.description || '설명 없음'}</>
+                )}
               </div>
             </div>
           ),
         }));
 
+        // Docker 전용 검색 결과 컬럼
+        const dockerColumns = [
+          {
+            title: '이미지명',
+            dataIndex: 'name',
+            key: 'name',
+            render: (name: string, record: SearchResult) => (
+              <Space>
+                <Text strong>{name}</Text>
+                {record.isOfficial && <Tag color="gold">공식</Tag>}
+              </Space>
+            ),
+          },
+          {
+            title: '설명',
+            dataIndex: 'description',
+            key: 'description',
+            ellipsis: true,
+          },
+          {
+            title: 'Pull 수',
+            dataIndex: 'pullCount',
+            key: 'pullCount',
+            width: 120,
+            render: (count: number) => count ? count.toLocaleString() : '-',
+          },
+          {
+            title: '액션',
+            key: 'action',
+            width: 100,
+            render: (_: unknown, record: SearchResult) => (
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={() => handleSelectPackage(record)}
+              >
+                선택
+              </Button>
+            ),
+          },
+        ];
+
         return (
           <Card>
-            <Title level={5}>패키지를 검색하세요</Title>
+            <Title level={5}>
+              {packageType === 'docker' ? '컨테이너 이미지를 검색하세요' : '패키지를 검색하세요'}
+            </Title>
             <Text type="secondary">
               <Tag color="blue">{packageTypeOptions.find(p => p.value === packageType)?.label}</Tag>
-              패키지 검색 (2글자 이상 입력하면 자동 검색)
+              {packageType === 'docker' ? '이미지 검색' : '패키지 검색'} (2글자 이상 입력하면 자동 검색)
             </Text>
             <Divider />
+
+            {/* 라이브러리 패키지: 환경 정보 바 */}
+            {renderEnvironmentInfoBar()}
+
+            {/* Docker 타입일 때 레지스트리 선택 UI */}
+            {packageType === 'docker' && (
+              <div style={{ marginBottom: 16 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>레지스트리 선택</Text>
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Select
+                    value={dockerRegistry}
+                    onChange={(value) => {
+                      setDockerRegistry(value);
+                      resetSearch();
+                    }}
+                    style={{ width: '100%' }}
+                    options={dockerRegistryOptions.map(opt => ({
+                      value: opt.value,
+                      label: (
+                        <Space>
+                          <span>{opt.label}</span>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{opt.description}</Text>
+                        </Space>
+                      ),
+                    }))}
+                  />
+                  {dockerRegistry === 'custom' && (
+                    <Input
+                      placeholder="레지스트리 URL을 입력하세요 (예: registry.example.com)"
+                      value={customRegistryUrl}
+                      onChange={(e) => setCustomRegistryUrl(e.target.value)}
+                      style={{ marginTop: 8 }}
+                    />
+                  )}
+                </Space>
+                {dockerRegistry !== 'docker.io' && (
+                  <Alert
+                    message="참고"
+                    description={
+                      dockerRegistry === 'custom'
+                        ? '커스텀 레지스트리는 카탈로그 API를 통해 이미지 목록을 가져옵니다. 이미지명을 정확히 입력하세요.'
+                        : `${dockerRegistryOptions.find(r => r.value === dockerRegistry)?.label}는 카탈로그 API를 통해 검색합니다. Docker Hub와 달리 검색 기능이 제한될 수 있습니다.`
+                    }
+                    type="info"
+                    showIcon
+                    style={{ marginTop: 8 }}
+                  />
+                )}
+              </div>
+            )}
+
             <Dropdown
               menu={{ items: dropdownItems }}
               open={showSuggestions && suggestions.length > 0}
@@ -937,7 +1131,9 @@ const WizardPage: React.FC = () => {
               overlayStyle={{ width: '100%', maxWidth: 600 }}
             >
               <Input
-                placeholder="패키지명을 입력하세요 (예: requests, lodash, nginx)"
+                placeholder={packageType === 'docker'
+                  ? '이미지명을 입력하세요 (예: nginx, python, node)'
+                  : '패키지명을 입력하세요 (예: requests, lodash, nginx)'}
                 allowClear
                 size="large"
                 value={searchQuery}
@@ -952,13 +1148,13 @@ const WizardPage: React.FC = () => {
             {searchResults.length > 0 && (
               <>
                 <Alert
-                  message={`${searchResults.length}개의 패키지를 찾았습니다`}
+                  message={`${searchResults.length}개의 ${packageType === 'docker' ? '이미지' : '패키지'}를 찾았습니다`}
                   type="success"
                   showIcon
                   style={{ marginBottom: 16 }}
                 />
                 <Table
-                  columns={columns}
+                  columns={packageType === 'docker' ? dockerColumns : columns}
                   dataSource={searchResults}
                   rowKey="name"
                   pagination={false}
@@ -969,35 +1165,46 @@ const WizardPage: React.FC = () => {
 
             {!searching && searchResults.length === 0 && (
               <Empty
-                description="검색어를 입력하여 패키지를 찾아보세요"
+                description={packageType === 'docker'
+                  ? '이미지명을 입력하여 컨테이너 이미지를 찾아보세요'
+                  : '검색어를 입력하여 패키지를 찾아보세요'}
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
               />
             )}
 
             <div style={{ marginTop: 24 }}>
-              <Button onClick={() => setCurrentStep(shouldSkipLanguageVersion(packageType) ? 1 : 2)}>이전</Button>
+              <Button onClick={() => setCurrentStep(1)}>이전</Button>
             </div>
           </Card>
         );
       }
 
-      case 4:
+      case 3:
         return (
           <Card>
-            <Title level={5}>버전을 선택하세요</Title>
+            <Title level={5}>
+              {packageType === 'docker' ? '태그를 선택하세요' : '버전을 선택하세요'}
+            </Title>
             {selectedPackage && (
               <>
                 <Text type="secondary">
-                  선택된 패키지: <Tag color="blue">{selectedPackage.name}</Tag>
+                  선택된 {packageType === 'docker' ? '이미지' : '패키지'}: <Tag color="blue">{selectedPackage.name}</Tag>
+                  {packageType === 'docker' && selectedPackage.registry && (
+                    <Tag color="purple" style={{ marginLeft: 4 }}>
+                      {dockerRegistryOptions.find(r => r.value === selectedPackage.registry)?.label || selectedPackage.registry}
+                    </Tag>
+                  )}
                 </Text>
                 <Divider />
 
                 <div style={{ marginBottom: 16 }}>
-                  <Text strong>버전 선택</Text>
+                  <Text strong>{packageType === 'docker' ? '태그 선택' : '버전 선택'}</Text>
                   {loadingVersions ? (
                     <div style={{ textAlign: 'center', padding: 24 }}>
                       <Spin />
-                      <div style={{ marginTop: 8 }}>버전 목록을 불러오는 중...</div>
+                      <div style={{ marginTop: 8 }}>
+                        {packageType === 'docker' ? '태그 목록을 불러오는 중...' : '버전 목록을 불러오는 중...'}
+                      </div>
                     </div>
                   ) : (
                     <Select
@@ -1009,20 +1216,22 @@ const WizardPage: React.FC = () => {
                       optionFilterProp="label"
                       options={availableVersions.map((v, index) => ({
                         value: v,
-                        label: index === 0 ? `${v} (최신)` : v,
+                        label: packageType === 'docker'
+                          ? (v === 'latest' ? `${v} (권장)` : v)
+                          : (index === 0 ? `${v} (최신)` : v),
                       }))}
                     />
                   )}
                   {!loadingVersions && availableVersions.length > 0 && (
                     <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-                      총 {availableVersions.length}개 버전 사용 가능
+                      총 {availableVersions.length}개 {packageType === 'docker' ? '태그' : '버전'} 사용 가능
                     </Text>
                   )}
                 </div>
 
                 {selectedPackage.description && (
                   <Alert
-                    message="패키지 정보"
+                    message={packageType === 'docker' ? '이미지 정보' : '패키지 정보'}
                     description={selectedPackage.description}
                     type="info"
                     showIcon
@@ -1034,107 +1243,13 @@ const WizardPage: React.FC = () => {
 
             <div style={{ marginTop: 24 }}>
               <Space>
-                <Button onClick={() => setCurrentStep(3)}>이전</Button>
-                {libraryPackageTypes.includes(packageType) ? (
-                  // 라이브러리 패키지: 바로 장바구니 추가
-                  <Button
-                    type="primary"
-                    icon={<ShoppingCartOutlined />}
-                    onClick={handleAddToCart}
-                    disabled={!selectedVersion || loadingVersions}
-                    size="large"
-                  >
-                    장바구니에 추가
-                  </Button>
-                ) : (
-                  // OS/컨테이너 패키지: 아키텍처 선택 단계로 이동
-                  <Button type="primary" onClick={() => setCurrentStep(5)} disabled={!selectedVersion || loadingVersions}>
-                    다음
-                  </Button>
-                )}
-              </Space>
-            </div>
-          </Card>
-        );
-
-      case 5:
-        return (
-          <Card>
-            <Title level={5}>아키텍처를 선택하세요</Title>
-            {selectedPackage && (
-              <>
-                <Text type="secondary">
-                  <Tag color="blue">{selectedPackage.name}</Tag>
-                  <Tag color="green">{selectedVersion}</Tag>
-                </Text>
-                <Divider />
-
-                {shouldApplyDefaultOSArch(packageType) && (
-                  <Alert
-                    message="설정 기본값 적용됨"
-                    description={`설정에서 지정한 기본 아키텍처(${defaultArchitecture})가 선택되었습니다. 필요시 변경할 수 있습니다.`}
-                    type="success"
-                    showIcon
-                    style={{ marginBottom: 16 }}
-                  />
-                )}
-
-                {showArchWarning && (
-                  <Alert
-                    message="참고"
-                    description="이 패키지 타입은 대부분 아키텍처에 독립적입니다. 특별한 경우가 아니면 기본값을 사용하세요."
-                    type="info"
-                    showIcon
-                    style={{ marginBottom: 16 }}
-                  />
-                )}
-
-                <div style={{ marginBottom: 16 }}>
-                  <Text strong>대상 아키텍처</Text>
-                  <Radio.Group
-                    value={architecture}
-                    onChange={(e) => setArchitecture(e.target.value)}
-                    style={{ width: '100%', marginTop: 8 }}
-                  >
-                    <Space direction="vertical" style={{ width: '100%' }}>
-                      {archOptions.map((opt) => (
-                        <Radio key={opt.value} value={opt.value} style={{ display: 'block' }}>
-                          <span style={{ fontWeight: 'bold' }}>{opt.label}</span>
-                          <span style={{ marginLeft: 8, fontSize: 12, color: '#666' }}>- {opt.description}</span>
-                        </Radio>
-                      ))}
-                    </Space>
-                  </Radio.Group>
-                </div>
-
-                <Alert
-                  message="선택 요약"
-                  description={
-                    <div>
-                      <div><strong>카테고리:</strong> {categoryOptions.find(c => c.value === category)?.label}</div>
-                      <div><strong>패키지 타입:</strong> {packageTypeOptions.find(p => p.value === packageType)?.label}</div>
-                      {languageVersion && (
-                        <div><strong>언어 버전:</strong> {languageVersionOptions[packageType]?.find(v => v.value === languageVersion)?.label || languageVersion}</div>
-                      )}
-                      <div><strong>패키지:</strong> {selectedPackage.name}</div>
-                      <div><strong>버전:</strong> {selectedVersion}</div>
-                      <div><strong>아키텍처:</strong> {architecture}</div>
-                    </div>
-                  }
-                  type="success"
-                  showIcon
-                  style={{ marginTop: 16 }}
-                />
-              </>
-            )}
-
-            <div style={{ marginTop: 24 }}>
-              <Space>
-                <Button onClick={() => setCurrentStep(4)}>이전</Button>
+                <Button onClick={() => setCurrentStep(2)}>이전</Button>
+                {/* 모든 패키지 타입: 바로 장바구니 추가 (아키텍처는 설정값 사용) */}
                 <Button
                   type="primary"
                   icon={<ShoppingCartOutlined />}
                   onClick={handleAddToCart}
+                  disabled={!selectedVersion || loadingVersions}
                   size="large"
                 >
                   장바구니에 추가

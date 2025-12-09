@@ -17,6 +17,10 @@ export interface CartItem {
   languageVersion?: string;  // 언어/런타임 버전 (예: Python 3.11, Java 17)
   metadata?: Record<string, unknown>;
   addedAt: number;
+  // OS 패키지용 추가 필드
+  downloadUrl?: string;
+  repository?: { baseUrl: string; name?: string };
+  location?: string;
 }
 
 // 장바구니 상태

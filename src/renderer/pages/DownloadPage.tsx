@@ -100,7 +100,7 @@ const DownloadPage: React.FC = () => {
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
-  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions } = useSettingsStore();
+  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, concurrentDownloads } = useSettingsStore();
   const {
     items: downloadItems,
     isDownloading,
@@ -296,10 +296,11 @@ const DownloadPage: React.FC = () => {
 
     // 전체 다운로드 완료 리스너
     const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
-      // 전체 완료 시 모든 pending/downloading 아이템 상태를 completed로 확정
-      // (타이밍 이슈로 개별 complete 이벤트가 늦게 도착해 allCompleted 조건이 충족되지 않는 문제 방지)
-      // ref를 사용하여 최신 아이템 목록 참조 (클로저 문제 방지)
-      downloadItemsRef.current.forEach((item) => {
+      // 전체 완료 시 pending/downloading 상태인 아이템만 completed로 변경
+      // (failed, skipped 등 다른 상태는 보존)
+      // Zustand 스토어에서 직접 최신 상태를 가져옴 (이벤트 처리 타이밍 문제 해결)
+      const currentItems = useDownloadStore.getState().items;
+      currentItems.forEach((item) => {
         if (item.status === 'downloading' || item.status === 'pending') {
           updateItem(item.id, { status: 'completed', progress: 100 });
         }
@@ -335,6 +336,12 @@ const DownloadPage: React.FC = () => {
       }
     };
   }, []);
+
+  // downloadItems 변경 시 ref 동기화 (SSE 이벤트 핸들러에서 최신 상태 참조용)
+  // updateItem 호출 후에도 ref가 최신 상태를 유지하도록 함
+  useEffect(() => {
+    downloadItemsRef.current = downloadItems;
+  }, [downloadItems]);
 
   // 폴더 선택
   const handleSelectFolder = async () => {
@@ -485,6 +492,10 @@ const DownloadPage: React.FC = () => {
           name: item.name,
           version: item.version,
           architecture: item.arch,
+          // OS 패키지용 필드
+          downloadUrl: item.downloadUrl,
+          repository: item.repository,
+          location: item.location,
         }));
 
         const options = {
@@ -669,10 +680,11 @@ const DownloadPage: React.FC = () => {
         outputPath: string;
       };
 
-      // 전체 완료 시 모든 pending/downloading 아이템 상태를 completed로 확정
-      // (타이밍 이슈로 progress 이벤트가 늦게 도착해 allCompleted 조건이 충족되지 않는 문제 방지)
-      // ref를 사용하여 최신 아이템 목록 참조 (클로저 문제 방지)
-      downloadItemsRef.current.forEach((item) => {
+      // 전체 완료 시 pending/downloading 상태인 아이템만 completed로 변경
+      // (failed, skipped 등 다른 상태는 보존)
+      // Zustand 스토어에서 직접 최신 상태를 가져옴 (SSE 이벤트 처리 타이밍 문제 해결)
+      const currentItems = useDownloadStore.getState().items;
+      currentItems.forEach((item) => {
         if (item.status === 'downloading' || item.status === 'pending') {
           updateItem(item.id, { status: 'completed', progress: 100 });
         }
@@ -716,6 +728,10 @@ const DownloadPage: React.FC = () => {
         name: item.name,
         version: item.version,
         architecture: item.arch,
+        // OS 패키지용 필드
+        downloadUrl: item.downloadUrl,
+        repository: item.repository,
+        location: item.location,
       }));
 
       const options = {
@@ -726,6 +742,7 @@ const DownloadPage: React.FC = () => {
         architecture: defaultArchitecture,
         includeDependencies,
         pythonVersion: languageVersions.python,
+        concurrency: concurrentDownloads,
       };
 
       const response = await fetch('/api/download/start', {
