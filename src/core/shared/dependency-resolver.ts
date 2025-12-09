@@ -3,8 +3,10 @@ import { getPipResolver } from '../resolver/pipResolver';
 import { getMavenResolver } from '../resolver/mavenResolver';
 import { getCondaResolver } from '../resolver/condaResolver';
 import { getYumResolver } from '../resolver/yumResolver';
+import { getNpmResolver } from '../resolver/npmResolver';
 import { DownloadPackage } from './types';
 import { DependencyResolutionResult } from '../../types';
+import { NpmResolutionResult } from './npm-types';
 
 /**
  * 고유 ID 생성 함수
@@ -60,6 +62,9 @@ function getResolverByType(type: string) {
       return getMavenResolver();
     case 'yum':
       return getYumResolver();
+    case 'npm':
+      return getNpmResolver();
+    // TODO: apt, apk 리졸버는 인터페이스가 달라 별도 어댑터 필요
     default:
       return null;
   }
@@ -140,25 +145,80 @@ export async function resolveAllDependencies(
         };
       }
 
-      const result = await resolver.resolveDependencies(
-        pkg.name,
-        pkg.version,
-        resolverOptions
-      );
+      // npm은 반환 타입이 다르므로 별도 처리
+      if (pkg.type === 'npm') {
+        const npmResult = await resolver.resolveDependencies(
+          pkg.name,
+          pkg.version,
+          resolverOptions
+        ) as NpmResolutionResult;
 
-      dependencyTrees.push(result);
+        // npm 결과를 공통 형식으로 변환하여 저장
+        const convertedResult: DependencyResolutionResult = {
+          root: {
+            package: {
+              type: 'npm',
+              name: npmResult.root.name,
+              version: npmResult.root.version,
+            },
+            dependencies: [],
+          },
+          flatList: npmResult.flatList.map(p => ({
+            type: 'npm' as const,
+            name: p.name,
+            version: p.version,
+            metadata: { size: p.size },
+          })),
+          conflicts: npmResult.conflicts.map(c => ({
+            type: 'version' as const,
+            packageName: c.packageName,
+            versions: c.requestedVersions,
+          })),
+          totalSize: npmResult.totalSize,
+        };
+        dependencyTrees.push(convertedResult);
 
-      // 평탄화된 의존성 목록 추가
-      for (const depPkg of result.flatList) {
-        const depKey = `${depPkg.type}:${depPkg.name}@${depPkg.version}`;
-        if (!resolvedSet.has(depKey)) {
-          resolvedSet.set(depKey, {
-            id: generateId(),
-            type: depPkg.type,
-            name: depPkg.name,
-            version: depPkg.version,
-            architecture: depPkg.arch || pkg.architecture,
-          });
+        // npm 의존성 목록 추가
+        for (const depPkg of npmResult.flatList) {
+          const depKey = `npm:${depPkg.name}@${depPkg.version}`;
+          if (!resolvedSet.has(depKey)) {
+            resolvedSet.set(depKey, {
+              id: generateId(),
+              type: 'npm',
+              name: depPkg.name,
+              version: depPkg.version,
+              architecture: pkg.architecture,
+            });
+          }
+        }
+      } else {
+        const result = await resolver.resolveDependencies(
+          pkg.name,
+          pkg.version,
+          resolverOptions
+        ) as DependencyResolutionResult;
+
+        dependencyTrees.push(result);
+
+        // 평탄화된 의존성 목록 추가
+        for (const depPkg of result.flatList) {
+          const depKey = `${depPkg.type}:${depPkg.name}@${depPkg.version}`;
+          if (!resolvedSet.has(depKey)) {
+            const downloadPkg: DownloadPackage = {
+              id: generateId(),
+              type: depPkg.type,
+              name: depPkg.name,
+              version: depPkg.version,
+              architecture: depPkg.arch || pkg.architecture,
+            };
+
+            // OS 패키지 (yum/apt/apk)의 경우 downloadUrl 전달
+            if ((depPkg.type === 'yum' || depPkg.type === 'apt' || depPkg.type === 'apk') && depPkg.metadata?.downloadUrl) {
+              downloadPkg.downloadUrl = depPkg.metadata.downloadUrl as string;
+            }
+
+            resolvedSet.set(depKey, downloadPkg);
+          }
         }
       }
     } catch (error) {

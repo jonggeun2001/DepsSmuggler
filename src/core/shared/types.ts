@@ -6,6 +6,12 @@ export interface DownloadPackage {
   name: string;
   version: string;
   architecture?: string;
+  /** OS 패키지의 다운로드 URL (yum/apt/apk 등) */
+  downloadUrl?: string;
+  /** OS 패키지의 저장소 정보 */
+  repository?: { baseUrl: string; name?: string };
+  /** OS 패키지의 파일 경로 (저장소 내 위치) */
+  location?: string;
 }
 
 export type TargetOS = 'windows' | 'macos' | 'linux' | 'any';
@@ -19,6 +25,7 @@ export interface DownloadOptions {
   architecture?: Architecture;
   includeDependencies?: boolean;
   pythonVersion?: string;
+  concurrency?: number;
 }
 
 export interface DownloadUrlResult {

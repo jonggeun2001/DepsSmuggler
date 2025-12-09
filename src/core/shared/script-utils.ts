@@ -15,6 +15,16 @@ export function generateInstallScripts(
 
   fs.writeFileSync(path.join(outputDir, 'install.sh'), bashScript, { mode: 0o755 });
   fs.writeFileSync(path.join(outputDir, 'install.ps1'), psScript);
+
+  // Docker 이미지가 포함된 경우 docker-load 스크립트 생성
+  const dockerPackages = packages.filter((p) => p.type === 'docker');
+  if (dockerPackages.length > 0) {
+    const dockerBashScript = generateDockerLoadBashScript(dockerPackages);
+    const dockerPsScript = generateDockerLoadPowerShellScript(dockerPackages);
+
+    fs.writeFileSync(path.join(outputDir, 'docker-load.sh'), dockerBashScript, { mode: 0o755 });
+    fs.writeFileSync(path.join(outputDir, 'docker-load.ps1'), dockerPsScript);
+  }
 }
 
 /**
@@ -75,5 +85,112 @@ ${mavenPackages.length > 0 ? `# Maven 아티팩트 복사
 Write-Host "Maven artifacts are in packages/ directory"
 ` : ''}
 Write-Host "Installation complete!"
+`;
+}
+
+/**
+ * Docker load Bash 스크립트 생성
+ */
+function generateDockerLoadBashScript(packages: DownloadPackage[]): string {
+  const dockerImages = packages.map((p) => {
+    const imageName = p.name.replace(/[:/]/g, '-');
+    const fileName = `${imageName}-${p.version}.tar`;
+    return {
+      fileName,
+      fullName: `${p.name}:${p.version}`,
+    };
+  });
+
+  return `#!/bin/bash
+# DepsSmuggler Docker 이미지 로드 스크립트
+# 생성일: ${new Date().toISOString()}
+
+set -e
+
+echo "Loading Docker images..."
+
+SCRIPT_DIR="$( cd "$( dirname "\${BASH_SOURCE[0]}" )" && pwd )"
+
+# Docker 설치 확인
+if ! command -v docker &> /dev/null; then
+    echo "Error: Docker가 설치되어 있지 않습니다."
+    exit 1
+fi
+
+# Docker 데몬 실행 확인
+if ! docker info &> /dev/null; then
+    echo "Error: Docker 데몬이 실행 중이지 않습니다."
+    exit 1
+fi
+
+# 이미지 로드
+${dockerImages.map((img) => `echo "Loading ${img.fullName}..."
+docker load -i "$SCRIPT_DIR/packages/${img.fileName}"
+if [ $? -eq 0 ]; then
+    echo "  ✓ ${img.fullName} 로드 완료"
+else
+    echo "  ✗ ${img.fullName} 로드 실패"
+fi
+`).join('\n')}
+
+echo ""
+echo "Docker 이미지 로드 완료!"
+echo "로드된 이미지 목록:"
+docker images | head -20
+`;
+}
+
+/**
+ * Docker load PowerShell 스크립트 생성
+ */
+function generateDockerLoadPowerShellScript(packages: DownloadPackage[]): string {
+  const dockerImages = packages.map((p) => {
+    const imageName = p.name.replace(/[:/]/g, '-');
+    const fileName = `${imageName}-${p.version}.tar`;
+    return {
+      fileName,
+      fullName: `${p.name}:${p.version}`,
+    };
+  });
+
+  return `# DepsSmuggler Docker 이미지 로드 스크립트
+# 생성일: ${new Date().toISOString()}
+
+$ErrorActionPreference = "Stop"
+
+Write-Host "Loading Docker images..."
+
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Docker 설치 확인
+try {
+    docker --version | Out-Null
+} catch {
+    Write-Host "Error: Docker가 설치되어 있지 않습니다." -ForegroundColor Red
+    exit 1
+}
+
+# Docker 데몬 데몬 실행 확인
+try {
+    docker info | Out-Null
+} catch {
+    Write-Host "Error: Docker 데몬이 실행 중이지 않습니다." -ForegroundColor Red
+    exit 1
+}
+
+# 이미지 로드
+${dockerImages.map((img) => `Write-Host "Loading ${img.fullName}..."
+try {
+    docker load -i "$ScriptDir\\packages\\${img.fileName}"
+    Write-Host "  [OK] ${img.fullName} 로드 완료" -ForegroundColor Green
+} catch {
+    Write-Host "  [FAIL] ${img.fullName} 로드 실패" -ForegroundColor Red
+}
+`).join('\n')}
+
+Write-Host ""
+Write-Host "Docker 이미지 로드 완료!"
+Write-Host "로드된 이미지 목록:"
+docker images | Select-Object -First 20
 `;
 }
