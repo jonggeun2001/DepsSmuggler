@@ -21,6 +21,7 @@ src/core/downloaders/os/
 ├── base-resolver.ts         # BaseOSDependencyResolver 추상 클래스
 ├── dependency-tree.ts       # OSDependencyTree 의존성 트리
 ├── repositories.ts          # OS 배포판 및 저장소 프리셋
+├── distribution-fetcher.ts  # 동적 배포판 버전 정보 조회
 ├── yum/                     # YUM/RPM 구현
 │   ├── index.ts
 │   ├── downloader.ts        # YumDownloader
@@ -556,6 +557,97 @@ class OSRepoPackager {
 | YUM | `repodata/repomd.xml`, `primary.xml.gz` | createrepo |
 | APT | `Packages.gz`, `Release` | dpkg-scanpackages |
 | APK | `APKINDEX.tar.gz` | apk index |
+
+---
+
+## Distribution Fetcher (동적 배포판 정보)
+
+### 위치
+`src/core/downloaders/os/distribution-fetcher.ts`
+
+### 개요
+인터넷에서 OS 배포판의 최신 버전 정보를 동적으로 가져오는 모듈. 정적 프리셋(`repositories.ts`)과 달리 실시간 데이터를 제공합니다.
+
+### 주요 타입
+
+#### DistributionVersion
+```typescript
+interface DistributionVersion {
+  id: string;           // 'alpine-3.21'
+  name: string;         // 'Alpine Linux 3.21'
+  version: string;      // '3.21'
+  codename?: string;    // 코드명 (Ubuntu/Debian)
+  status: 'current' | 'lts' | 'eol' | 'supported';
+  releaseDate?: string;
+  eolDate?: string;
+}
+```
+
+#### DistributionFamily
+```typescript
+interface DistributionFamily {
+  id: string;                    // 'alpine'
+  name: string;                  // 'Alpine Linux'
+  packageManager: OSPackageManager;
+  architectures: OSArchitecture[];
+  versions: DistributionVersion[];
+}
+```
+
+### 지원 배포판 및 데이터 소스
+
+| 배포판 | 패키지 관리자 | 데이터 소스 URL |
+|--------|--------------|-----------------|
+| Alpine Linux | apk | `dl-cdn.alpinelinux.org/alpine/` |
+| Ubuntu | apt | `changelogs.ubuntu.com/meta-release-lts` |
+| Debian | apt | `deb.debian.org/debian/dists/` |
+| Rocky Linux | yum | `dl.rockylinux.org/pub/rocky/` |
+| AlmaLinux | yum | `repo.almalinux.org/almalinux/` |
+| CentOS | yum | 정적 데이터 (레거시) |
+
+### 주요 함수
+
+| 함수 | 반환값 | 설명 |
+|------|--------|------|
+| `fetchAllDistributions()` | `Promise<DistributionFamily[]>` | 모든 배포판 정보 (병렬 조회) |
+| `convertToOSDistributions(families)` | `OSDistribution[]` | OSDistribution 형식 변환 |
+| `getSimplifiedDistributions()` | `Promise<SimplifiedDistro[]>` | 설정 페이지용 간소화 목록 |
+| `getDistributionsByPackageManager(pm)` | `Promise<DistributionFamily[]>` | 패키지 관리자별 필터 |
+| `invalidateDistributionCache()` | `void` | 캐시 무효화 |
+
+### 캐싱
+- **TTL**: 24시간 (86,400,000ms)
+- 메모리 캐시 사용 (모듈 레벨 변수)
+- 네트워크 오류 시 폴백 데이터 반환
+
+### 사용 예시
+
+```typescript
+import {
+  fetchAllDistributions,
+  getDistributionsByPackageManager,
+  getSimplifiedDistributions
+} from './distribution-fetcher';
+
+// 모든 배포판 가져오기
+const families = await fetchAllDistributions();
+// [{ id: 'rocky', name: 'Rocky Linux', versions: [...] }, ...]
+
+// YUM 계열만 가져오기
+const rhelFamilies = await getDistributionsByPackageManager('yum');
+
+// 설정 페이지용 간소화 목록
+const simplified = await getSimplifiedDistributions();
+// [{ id: 'rocky-9', name: 'Rocky Linux 9', packageManager: 'yum', ... }]
+```
+
+### 폴백 동작
+네트워크 오류 시 각 배포판별로 하드코딩된 최신 버전 정보를 반환합니다:
+- Alpine: 3.21, 3.20, 3.19, 3.18
+- Ubuntu: 24.04, 22.04, 20.04 (LTS만)
+- Debian: 13, 12, 11
+- Rocky/AlmaLinux: 9, 8
+- CentOS: Stream 9
 
 ---
 
