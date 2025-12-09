@@ -51,6 +51,7 @@ coverage/
 .serena/
 .taskmaster/
 .playwright-mcp/
+.env.example
 
 # download test
 depssmuggler-downloads/
