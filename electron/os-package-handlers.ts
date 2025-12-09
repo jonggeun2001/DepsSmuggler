@@ -9,6 +9,8 @@ import {
   OS_DISTRIBUTIONS,
   getDistributionsByPackageManager,
   getDistributionById,
+  getSimplifiedDistributions,
+  invalidateDistributionCache,
 } from '../src/core/downloaders/os';
 import type {
   OSPackageManager,
@@ -47,10 +49,54 @@ export function registerOSPackageHandlers(getMainWindow: () => BrowserWindow | n
     }
   );
 
-  // 전체 배포판 목록
-  ipcMain.handle('os:getAllDistributions', async (): Promise<OSDistribution[]> => {
-    return OS_DISTRIBUTIONS;
-  });
+  // 전체 배포판 목록 (인터넷에서 가져오기)
+  ipcMain.handle(
+    'os:getAllDistributions',
+    async (
+      _event,
+      options?: { source?: 'internet' | 'local'; refresh?: boolean }
+    ): Promise<{
+      id: string;
+      name: string;
+      version: string;
+      osType: string;
+      packageManager: string;
+      architectures: string[];
+    }[]> => {
+      const source = options?.source || 'internet';
+      const refresh = options?.refresh || false;
+
+      if (source === 'internet') {
+        try {
+          if (refresh) {
+            invalidateDistributionCache();
+          }
+          return await getSimplifiedDistributions();
+        } catch (error) {
+          console.error('Failed to fetch distributions from internet, falling back to local:', error);
+          // 폴백: 로컬 데이터
+          return OS_DISTRIBUTIONS.map(d => ({
+            id: d.id,
+            name: d.name,
+            version: d.version,
+            osType: 'linux',
+            packageManager: d.packageManager,
+            architectures: d.architectures as string[],
+          }));
+        }
+      } else {
+        // 로컬 하드코딩된 목록
+        return OS_DISTRIBUTIONS.map(d => ({
+          id: d.id,
+          name: d.name,
+          version: d.version,
+          osType: 'linux',
+          packageManager: d.packageManager,
+          architectures: d.architectures as string[],
+        }));
+      }
+    }
+  );
 
   // 특정 배포판 조회
   ipcMain.handle(

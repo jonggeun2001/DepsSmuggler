@@ -176,22 +176,25 @@ async function searchCommand(
     }
 
     // 테이블 헤더
-    const header = `${'패키지명'.padEnd(30)} ${'버전'.padEnd(20)} ${'아키텍처'.padEnd(12)} ${'크기'.padEnd(12)}`;
+    const header = `${'패키지명'.padEnd(30)} ${'최신 버전'.padEnd(20)} ${'버전 수'.padEnd(10)} ${'아키텍처'.padEnd(12)} ${'크기'.padEnd(12)}`;
     console.log(chalk.bold(header));
-    console.log(chalk.gray('─'.repeat(74)));
+    console.log(chalk.gray('─'.repeat(84)));
 
-    // 결과 출력
-    for (const pkg of result.packages) {
-      const name = pkg.name.length > 28 ? pkg.name.substring(0, 25) + '...' : pkg.name;
-      const version = pkg.version.length > 18 ? pkg.version.substring(0, 15) + '...' : pkg.version;
+    // 결과 출력 (그룹화된 결과에서 latest 사용)
+    for (const pkgResult of result.packages) {
+      const name = pkgResult.name.length > 28 ? pkgResult.name.substring(0, 25) + '...' : pkgResult.name;
+      const version = pkgResult.latest.version.length > 18
+        ? pkgResult.latest.version.substring(0, 15) + '...'
+        : pkgResult.latest.version;
+      const versionCount = pkgResult.versions.length.toString();
 
       console.log(
-        `${chalk.green(name.padEnd(30))} ${version.padEnd(20)} ${pkg.architecture.padEnd(12)} ${formatBytes(pkg.size).padEnd(12)}`
+        `${chalk.green(name.padEnd(30))} ${version.padEnd(20)} ${versionCount.padEnd(10)} ${pkgResult.latest.architecture.padEnd(12)} ${formatBytes(pkgResult.latest.size).padEnd(12)}`
       );
     }
 
-    console.log(chalk.gray('─'.repeat(74)));
-    console.log(chalk.gray(`총 ${result.totalCount}개 결과 (${result.packages.length}개 표시)`));
+    console.log(chalk.gray('─'.repeat(84)));
+    console.log(chalk.gray(`총 ${result.totalCount}개 패키지 (${result.packages.length}개 표시)`));
     console.log('');
   } catch (error) {
     console.error(chalk.red(`오류: ${(error as Error).message}`));
@@ -248,8 +251,9 @@ async function downloadCommand(
       });
 
       if (result.packages.length > 0) {
-        packages.push(result.packages[0]);
-        console.log(chalk.green(`  ✓ ${pkgName} (${result.packages[0].version})`));
+        // 그룹화된 결과에서 latest 패키지 사용
+        packages.push(result.packages[0].latest);
+        console.log(chalk.green(`  ✓ ${pkgName} (${result.packages[0].latest.version})`));
       } else {
         notFound.push(pkgName);
         console.log(chalk.yellow(`  ✗ ${pkgName} (찾을 수 없음)`));

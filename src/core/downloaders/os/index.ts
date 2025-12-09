@@ -70,7 +70,7 @@ export type { DownloadResult, BaseDownloaderOptions } from './base-downloader';
 export { OSPackageDownloader } from './downloader';
 export type {
   OSDownloaderOptions,
-  OSPackageSearchResult as SearchResult,
+  OSPackageSearchResponse as SearchResult,
   OSPackageDownloadResult,
 } from './downloader';
 
@@ -98,3 +98,16 @@ export { ApkMetadataParser, ApkDependencyResolver, ApkDownloader } from './apk';
 // Packagers
 export { OSArchivePackager, OSRepoPackager } from './packager';
 export type { ArchiveOptions, RepoOptions, RepoResult } from './packager';
+
+// Distribution Fetcher (인터넷에서 배포판 목록 가져오기)
+export {
+  fetchAllDistributions,
+  getSimplifiedDistributions,
+  convertToOSDistributions,
+  invalidateDistributionCache,
+  getDistributionsByPackageManager as fetchDistributionsByPackageManager,
+} from './distribution-fetcher';
+export type {
+  DistributionVersion,
+  DistributionFamily,
+} from './distribution-fetcher';

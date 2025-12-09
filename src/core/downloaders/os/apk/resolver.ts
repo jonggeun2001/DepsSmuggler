@@ -3,8 +3,9 @@
  * Alpine Linux 의존성 해결기
  */
 
-import type { OSPackageInfo, PackageDependency } from '../types';
+import type { OSPackageInfo, PackageDependency, OSPackageSearchResult } from '../types';
 import { BaseOSDependencyResolver, type DependencyResolverOptions } from '../base-resolver';
+import { compareVersions } from '../../../shared/version-utils';
 import { ApkMetadataParser } from './metadata-parser';
 import { isArchitectureCompatible } from '../repositories';
 
@@ -170,15 +171,16 @@ export class ApkDependencyResolver extends BaseOSDependencyResolver {
   }
 
   /**
-   * 패키지 검색
+   * 패키지 검색 (이름별 그룹화)
    */
   async searchPackages(
     query: string,
     matchType: 'exact' | 'partial' | 'wildcard' = 'partial'
-  ): Promise<OSPackageInfo[]> {
+  ): Promise<OSPackageSearchResult[]> {
     await this.loadMetadata();
 
-    return this.allPackages.filter((pkg) => {
+    // 쿼리와 일치하는 패키지 필터링
+    const matchingPackages = this.allPackages.filter((pkg) => {
       switch (matchType) {
         case 'exact':
           return pkg.name === query;
@@ -193,5 +195,35 @@ export class ApkDependencyResolver extends BaseOSDependencyResolver {
           return false;
       }
     });
+
+    // 패키지 이름별로 그룹화
+    const groupedByName = new Map<string, OSPackageInfo[]>();
+    for (const pkg of matchingPackages) {
+      const existing = groupedByName.get(pkg.name) || [];
+      existing.push(pkg);
+      groupedByName.set(pkg.name, existing);
+    }
+
+    // OSPackageSearchResult 형태로 변환
+    const results: OSPackageSearchResult[] = [];
+    for (const [name, versions] of groupedByName) {
+      // 버전 정렬 (최신순)
+      const sortedVersions = versions.sort((a, b) => {
+        try {
+          return compareVersions(b.version, a.version);
+        } catch {
+          return b.version.localeCompare(a.version);
+        }
+      });
+
+      results.push({
+        name,
+        versions: sortedVersions,
+        latest: sortedVersions[0],
+      });
+    }
+
+    // 패키지 이름순으로 정렬
+    return results.sort((a, b) => a.name.localeCompare(b.name));
   }
 }

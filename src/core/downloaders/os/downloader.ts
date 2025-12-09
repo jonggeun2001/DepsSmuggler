@@ -15,6 +15,7 @@ import type {
   OSDownloadProgress,
   DependencyResolutionResult,
   CacheMode,
+  OSPackageSearchResult as OSPackageSearchResultType,
 } from './types';
 import { OSDependencyTree } from './dependency-tree';
 import { BaseOSDownloader, type BaseDownloaderOptions } from './base-downloader';
@@ -40,12 +41,12 @@ export interface OSDownloaderOptions {
 }
 
 /**
- * 검색 결과
+ * 검색 결과 (API 응답용)
  */
-export interface OSPackageSearchResult {
-  /** 패키지 목록 */
-  packages: OSPackageInfo[];
-  /** 전체 개수 */
+export interface OSPackageSearchResponse {
+  /** 패키지 검색 결과 목록 (이름별 그룹화) */
+  packages: OSPackageSearchResultType[];
+  /** 전체 개수 (고유 패키지 이름 수) */
   totalCount: number;
   /** 추가 결과 있음 */
   hasMore: boolean;
@@ -86,18 +87,18 @@ export class OSPackageDownloader {
   /**
    * 패키지 검색
    */
-  async search(options: OSPackageSearchOptions): Promise<OSPackageSearchResult> {
+  async search(options: OSPackageSearchOptions): Promise<OSPackageSearchResponse> {
     const resolver = this.getResolver(options.distribution, options.architecture);
-    const packages = await resolver.searchPackages(options.query, options.matchType);
+    const searchResults = await resolver.searchPackages(options.query, options.matchType);
 
-    // 제한 적용
+    // 제한 적용 (고유 패키지 이름 수 기준)
     const limit = options.limit || 100;
-    const limited = packages.slice(0, limit);
+    const limited = searchResults.slice(0, limit);
 
     return {
       packages: limited,
-      totalCount: packages.length,
-      hasMore: packages.length > limit,
+      totalCount: searchResults.length,
+      hasMore: searchResults.length > limit,
     };
   }
 

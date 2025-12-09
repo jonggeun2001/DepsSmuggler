@@ -12,6 +12,7 @@ import type {
   VersionOperator,
   Checksum,
   ChecksumType,
+  OSPackageSearchResult,
 } from '../types';
 
 /**
@@ -334,15 +335,16 @@ export class AptMetadataParser {
   }
 
   /**
-   * 패키지 검색 (이름으로)
+   * 패키지 검색 (이름별 그룹화)
    */
   async searchPackages(
     query: string,
     matchType: 'exact' | 'partial' | 'wildcard' = 'partial'
-  ): Promise<OSPackageInfo[]> {
+  ): Promise<OSPackageSearchResult[]> {
     const allPackages = await this.parsePackages();
 
-    return allPackages.filter((pkg) => {
+    // 쿼리와 일치하는 패키지 필터링
+    const matchingPackages = allPackages.filter((pkg) => {
       switch (matchType) {
         case 'exact':
           return pkg.name === query;
@@ -355,15 +357,42 @@ export class AptMetadataParser {
           return false;
       }
     });
+
+    // 패키지 이름별로 그룹화
+    const groupedByName = new Map<string, OSPackageInfo[]>();
+    for (const pkg of matchingPackages) {
+      const existing = groupedByName.get(pkg.name) || [];
+      existing.push(pkg);
+      groupedByName.set(pkg.name, existing);
+    }
+
+    // OSPackageSearchResult 형태로 변환
+    const results: OSPackageSearchResult[] = [];
+    for (const [name, versions] of groupedByName) {
+      // 버전 정렬 (최신순)
+      const sortedVersions = versions.sort((a, b) => this.compareVersions(b.version, a.version));
+
+      results.push({
+        name,
+        versions: sortedVersions,
+        latest: sortedVersions[0],
+      });
+    }
+
+    // 패키지 이름순으로 정렬
+    return results.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /**
    * 특정 패키지의 모든 버전 가져오기
    */
   async getPackageVersions(packageName: string): Promise<OSPackageInfo[]> {
-    const packages = await this.searchPackages(packageName, 'exact');
-    // 버전순 정렬 (최신순)
-    return packages.sort((a, b) => this.compareVersions(b.version, a.version));
+    const results = await this.searchPackages(packageName, 'exact');
+    // 검색 결과에서 첫 번째 일치하는 패키지의 모든 버전 반환
+    if (results.length === 0) {
+      return [];
+    }
+    return results[0].versions;
   }
 
   /**
