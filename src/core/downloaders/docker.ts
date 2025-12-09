@@ -86,71 +86,204 @@ const ARCH_MAP: Record<Architecture, string> = {
   all: 'amd64',
 };
 
+// 지원하는 레지스트리 타입
+export type RegistryType = 'docker.io' | 'ghcr.io' | 'ecr' | 'quay.io' | 'custom';
+
+// 레지스트리 설정 인터페이스
+export interface RegistryConfig {
+  authUrl: string;
+  registryUrl: string;
+  service: string;
+  hubUrl?: string; // 검색용 Hub URL (Docker Hub만 해당)
+}
+
+// 레지스트리별 설정
+const REGISTRY_CONFIGS: Record<string, RegistryConfig> = {
+  'docker.io': {
+    authUrl: 'https://auth.docker.io',
+    registryUrl: 'https://registry-1.docker.io/v2',
+    service: 'registry.docker.io',
+    hubUrl: 'https://hub.docker.com/v2',
+  },
+  'ghcr.io': {
+    authUrl: 'https://ghcr.io/token',
+    registryUrl: 'https://ghcr.io/v2',
+    service: 'ghcr.io',
+  },
+  'ecr': {
+    authUrl: 'https://public.ecr.aws/token',
+    registryUrl: 'https://public.ecr.aws/v2',
+    service: 'public.ecr.aws',
+  },
+  'quay.io': {
+    authUrl: 'https://quay.io/v2/auth',
+    registryUrl: 'https://quay.io/v2',
+    service: 'quay.io',
+  },
+};
+
+// 레지스트리 URL에서 타입 추출
+function getRegistryType(registry: string): RegistryType {
+  if (registry === 'docker.io' || registry === 'registry-1.docker.io') {
+    return 'docker.io';
+  }
+  if (registry === 'ghcr.io') {
+    return 'ghcr.io';
+  }
+  if (registry === 'public.ecr.aws' || registry === 'ecr') {
+    return 'ecr';
+  }
+  if (registry === 'quay.io') {
+    return 'quay.io';
+  }
+  return 'custom';
+}
+
+// 커스텀 레지스트리 설정 생성
+function createCustomRegistryConfig(registryUrl: string): RegistryConfig {
+  const url = registryUrl.startsWith('http') ? registryUrl : `https://${registryUrl}`;
+  const baseUrl = url.replace(/\/v2\/?$/, '');
+  return {
+    authUrl: `${baseUrl}/v2/auth`,
+    registryUrl: `${baseUrl}/v2`,
+    service: new URL(baseUrl).hostname,
+  };
+}
+
+// 카탈로그 캐시 인터페이스
+interface CatalogCache {
+  registry: string;
+  repositories: string[];
+  fetchedAt: number;
+  expiresAt: number;
+}
+
+// 기본 캐시 TTL (1시간)
+const DEFAULT_CATALOG_CACHE_TTL = 60 * 60 * 1000;
+
 export class DockerDownloader implements IDownloader {
   readonly type = 'docker' as const;
   private hubClient: AxiosInstance;
-  private registryClient: AxiosInstance;
   private tokenCache: Map<string, { token: string; expires: number }> = new Map();
+  private registryConfigCache: Map<string, RegistryConfig> = new Map();
+  private catalogCache: Map<string, CatalogCache> = new Map();
+  private catalogCacheTTL: number = DEFAULT_CATALOG_CACHE_TTL;
 
-  private readonly hubUrl = 'https://hub.docker.com/v2';
-  private readonly authUrl = 'https://auth.docker.io';
-  private readonly registryUrl = 'https://registry-1.docker.io/v2';
+  private readonly defaultHubUrl = 'https://hub.docker.com/v2';
 
   constructor() {
     this.hubClient = axios.create({
-      baseURL: this.hubUrl,
+      baseURL: this.defaultHubUrl,
       timeout: 30000,
-    });
-
-    this.registryClient = axios.create({
-      baseURL: this.registryUrl,
-      timeout: 60000,
     });
   }
 
   /**
-   * 이미지 검색
+   * 레지스트리 설정 가져오기
    */
-  async searchPackages(query: string): Promise<PackageInfo[]> {
+  private getRegistryConfig(registry: string): RegistryConfig {
+    // 캐시 확인
+    const cached = this.registryConfigCache.get(registry);
+    if (cached) return cached;
+
+    const registryType = getRegistryType(registry);
+    let config: RegistryConfig;
+
+    if (registryType === 'custom') {
+      config = createCustomRegistryConfig(registry);
+    } else {
+      config = REGISTRY_CONFIGS[registryType];
+    }
+
+    this.registryConfigCache.set(registry, config);
+    return config;
+  }
+
+  /**
+   * 이미지 검색
+   * @param query 검색어
+   * @param registry 레지스트리 (기본값: docker.io)
+   */
+  async searchPackages(query: string, registry: string = 'docker.io'): Promise<PackageInfo[]> {
     try {
-      const response = await this.hubClient.get<DockerSearchResponse>(
-        '/search/repositories/',
-        {
-          params: { query, page_size: 50 },
-        }
+      const registryType = getRegistryType(registry);
+
+      // Docker Hub만 검색 API 지원
+      if (registryType === 'docker.io') {
+        const response = await this.hubClient.get<DockerSearchResponse>(
+          '/search/repositories/',
+          {
+            params: { query, page_size: 50 },
+          }
+        );
+
+        return response.data.results.map((result) => ({
+          type: 'docker',
+          name: result.repo_name,
+          version: 'latest',
+          metadata: {
+            description: result.short_description,
+            registry: 'docker.io',
+          },
+        }));
+      }
+
+      // 다른 레지스트리는 캐시된 카탈로그 사용
+      const repositories = await this.getCachedCatalog(registry);
+      const filtered = repositories.filter(name =>
+        name.toLowerCase().includes(query.toLowerCase())
       );
 
-      return response.data.results.map((result) => ({
+      return filtered.slice(0, 50).map((name) => ({
         type: 'docker',
-        name: result.repo_name,
+        name,
         version: 'latest',
         metadata: {
-          description: result.short_description,
-          registry: 'docker.io',
+          registry,
         },
       }));
     } catch (error) {
-      logger.error('Docker 이미지 검색 실패', { query, error });
+      logger.error('Docker 이미지 검색 실패', { query, registry, error });
       throw error;
     }
   }
 
   /**
    * 태그 목록 조회
+   * @param packageName 패키지 이름
+   * @param registry 레지스트리 (기본값: docker.io)
    */
-  async getVersions(packageName: string): Promise<string[]> {
+  async getVersions(packageName: string, registry: string = 'docker.io'): Promise<string[]> {
     try {
       const [namespace, repo] = this.parseImageName(packageName);
-      const response = await this.hubClient.get<DockerTagsResponse>(
-        `/repositories/${namespace}/${repo}/tags`,
+      const registryType = getRegistryType(registry);
+
+      // Docker Hub의 경우 Hub API 사용
+      if (registryType === 'docker.io') {
+        const response = await this.hubClient.get<DockerTagsResponse>(
+          `/repositories/${namespace}/${repo}/tags`,
+          {
+            params: { page_size: 100 },
+          }
+        );
+        return response.data.results.map((tag) => tag.name);
+      }
+
+      // 다른 레지스트리는 Registry API 사용
+      const config = this.getRegistryConfig(registry);
+      const fullName = `${namespace}/${repo}`;
+      const token = await this.getTokenForRegistry(registry, fullName);
+
+      const response = await axios.get(
+        `${config.registryUrl}/${fullName}/tags/list`,
         {
-          params: { page_size: 100 },
+          headers: { Authorization: `Bearer ${token}` },
         }
       );
 
-      return response.data.results.map((tag) => tag.name);
+      return response.data.tags || [];
     } catch (error) {
-      logger.error('Docker 태그 목록 조회 실패', { packageName, error });
+      logger.error('Docker 태그 목록 조회 실패', { packageName, registry, error });
       throw error;
     }
   }
@@ -211,13 +344,20 @@ export class DockerDownloader implements IDownloader {
 
   /**
    * 이미지 다운로드 (전체 과정)
+   * @param repository 저장소 (예: nginx, library/nginx)
+   * @param tag 태그 (예: latest, alpine)
+   * @param arch 아키텍처
+   * @param destPath 저장 경로
+   * @param onProgress 진행률 콜백
+   * @param registry 레지스트리 (기본값: docker.io)
    */
   async downloadImage(
     repository: string,
     tag: string,
     arch: Architecture,
     destPath: string,
-    onProgress?: (progress: DownloadProgressEvent) => void
+    onProgress?: (progress: DownloadProgressEvent) => void,
+    registry: string = 'docker.io'
   ): Promise<string> {
     try {
       const [namespace, repo] = this.parseImageName(repository);
@@ -225,10 +365,10 @@ export class DockerDownloader implements IDownloader {
       const dockerArch = ARCH_MAP[arch] || 'amd64';
 
       // 토큰 획득
-      const token = await this.getToken(fullName);
+      const token = await this.getTokenForRegistry(registry, fullName);
 
       // 매니페스트 조회
-      let manifest = await this.getManifest(fullName, tag, token);
+      let manifest = await this.getManifest(fullName, tag, token, registry);
 
       // 멀티 아키텍처인 경우 해당 아키텍처 매니페스트 찾기
       if (manifest.manifests) {
@@ -240,7 +380,7 @@ export class DockerDownloader implements IDownloader {
           throw new Error(`아키텍처 ${arch}를 지원하지 않습니다`);
         }
 
-        manifest = await this.getManifest(fullName, archManifest.digest, token);
+        manifest = await this.getManifest(fullName, archManifest.digest, token, registry);
       }
 
       if (!manifest.layers || !manifest.config) {
@@ -248,7 +388,8 @@ export class DockerDownloader implements IDownloader {
       }
 
       // 디렉토리 생성
-      const imageDir = path.join(destPath, `${repo}-${tag}`);
+      const safeTag = tag.replace(/[/\\:*?"<>|]/g, '_');
+      const imageDir = path.join(destPath, `${repo}-${safeTag}`);
       await fs.ensureDir(imageDir);
 
       // 전체 크기 계산
@@ -257,7 +398,7 @@ export class DockerDownloader implements IDownloader {
 
       // Config blob 다운로드
       const configPath = path.join(imageDir, 'config.json');
-      await this.downloadBlob(fullName, manifest.config.digest, configPath, token);
+      await this.downloadBlob(fullName, manifest.config.digest, configPath, token, registry);
 
       // 레이어 다운로드
       const layerPaths: string[] = [];
@@ -271,11 +412,12 @@ export class DockerDownloader implements IDownloader {
           layer.digest,
           layerPath,
           token,
+          registry,
           (bytes) => {
             downloadedSize += bytes;
             if (onProgress) {
               onProgress({
-                itemId: `${repository}:${tag}`,
+                itemId: `${registry}/${repository}:${tag}`,
                 progress: (downloadedSize / totalSize) * 100,
                 downloadedBytes: downloadedSize,
                 totalBytes: totalSize,
@@ -288,11 +430,15 @@ export class DockerDownloader implements IDownloader {
         layerPaths.push(layerPath);
       }
 
+      // RepoTag 생성 (레지스트리 포함)
+      const repoTagPrefix = registry === 'docker.io' ? '' : `${registry}/`;
+      const repoTag = `${repoTagPrefix}${fullName}:${tag}`;
+
       // manifest.json 생성 (docker load 형식)
       const manifestJson = [
         {
           Config: 'config.json',
-          RepoTags: [`${fullName}:${tag}`],
+          RepoTags: [repoTag],
           Layers: layerPaths.map((p) => path.basename(p)),
         },
       ];
@@ -300,7 +446,7 @@ export class DockerDownloader implements IDownloader {
       await fs.writeJson(path.join(imageDir, 'manifest.json'), manifestJson);
 
       // tar 파일로 패키징
-      const tarPath = path.join(destPath, `${repo}-${tag}.tar`);
+      const tarPath = path.join(destPath, `${repo}-${safeTag}.tar`);
       await this.createImageTar(imageDir, tarPath);
 
       // 임시 디렉토리 삭제
@@ -310,68 +456,164 @@ export class DockerDownloader implements IDownloader {
         repository,
         tag,
         arch,
+        registry,
         tarPath,
       });
 
       return tarPath;
     } catch (error) {
-      logger.error('Docker 이미지 다운로드 실패', { repository, tag, arch, error });
+      logger.error('Docker 이미지 다운로드 실패', { repository, tag, arch, registry, error });
       throw error;
     }
   }
 
   /**
-   * 인증 토큰 획득
+   * 레지스트리별 인증 토큰 획득
+   * @param registry 레지스트리
+   * @param repository 저장소 (예: library/nginx)
    */
-  private async getToken(repository: string): Promise<string> {
-    const cacheKey = repository;
+  private async getTokenForRegistry(registry: string, repository: string): Promise<string> {
+    const cacheKey = `${registry}:${repository}`;
     const cached = this.tokenCache.get(cacheKey);
 
     if (cached && cached.expires > Date.now()) {
       return cached.token;
     }
 
+    const config = this.getRegistryConfig(registry);
+    const registryType = getRegistryType(registry);
+
     try {
-      const response = await axios.get<TokenResponse>(`${this.authUrl}/token`, {
-        params: {
-          service: 'registry.docker.io',
-          scope: `repository:${repository}:pull`,
-        },
-      });
+      let token: string;
+      let expiresIn = 300; // 기본 5분
 
-      const token = response.data.token;
-      const expires = Date.now() + (response.data.expires_in - 60) * 1000;
+      if (registryType === 'docker.io') {
+        // Docker Hub 인증
+        const response = await axios.get<TokenResponse>(`${config.authUrl}/token`, {
+          params: {
+            service: config.service,
+            scope: repository ? `repository:${repository}:pull` : '',
+          },
+        });
+        token = response.data.token;
+        expiresIn = response.data.expires_in || 300;
+      } else if (registryType === 'ghcr.io') {
+        // GitHub Container Registry - Anonymous 토큰
+        const response = await axios.get<TokenResponse>(`${config.authUrl}`, {
+          params: {
+            service: config.service,
+            scope: repository ? `repository:${repository}:pull` : '',
+          },
+        });
+        token = response.data.token;
+        expiresIn = response.data.expires_in || 300;
+      } else if (registryType === 'ecr') {
+        // AWS ECR Public - 기본 토큰 없이 시도
+        const response = await axios.get<TokenResponse>(`${config.authUrl}`, {
+          params: {
+            service: config.service,
+            scope: repository ? `repository:${repository}:pull` : '',
+          },
+        });
+        token = response.data.token;
+        expiresIn = response.data.expires_in || 300;
+      } else if (registryType === 'quay.io') {
+        // Quay.io - Anonymous 접근
+        // Quay.io는 public 이미지에 대해 토큰 없이 접근 가능
+        // WWW-Authenticate 헤더에서 토큰 URL 파싱 필요
+        try {
+          const authResponse = await axios.get(`${config.registryUrl}/`, {
+            validateStatus: (status) => status === 401,
+          });
+          const wwwAuth = authResponse.headers['www-authenticate'];
+          if (wwwAuth) {
+            const realmMatch = wwwAuth.match(/realm="([^"]+)"/);
+            const serviceMatch = wwwAuth.match(/service="([^"]+)"/);
+            if (realmMatch) {
+              const realm = realmMatch[1];
+              const service = serviceMatch?.[1] || config.service;
+              const tokenResponse = await axios.get<TokenResponse>(realm, {
+                params: {
+                  service,
+                  scope: repository ? `repository:${repository}:pull` : '',
+                },
+              });
+              token = tokenResponse.data.token;
+              expiresIn = tokenResponse.data.expires_in || 300;
+            } else {
+              token = '';
+            }
+          } else {
+            token = '';
+          }
+        } catch {
+          token = '';
+        }
+      } else {
+        // 커스텀 레지스트리 - 기본 토큰 요청 시도
+        try {
+          const response = await axios.get<TokenResponse>(`${config.authUrl}`, {
+            params: {
+              service: config.service,
+              scope: repository ? `repository:${repository}:pull` : '',
+            },
+          });
+          token = response.data.token;
+          expiresIn = response.data.expires_in || 300;
+        } catch {
+          // 인증 없이 접근 시도
+          token = '';
+        }
+      }
 
+      const expires = Date.now() + (expiresIn - 60) * 1000;
       this.tokenCache.set(cacheKey, { token, expires });
 
       return token;
     } catch (error) {
-      logger.error('Docker 토큰 획득 실패', { repository, error });
+      logger.error('Docker 토큰 획득 실패', { registry, repository, error });
       throw error;
     }
   }
 
   /**
+   * 인증 토큰 획득 (Docker Hub 기본)
+   * @deprecated getTokenForRegistry 사용 권장
+   */
+  private async getToken(repository: string): Promise<string> {
+    return this.getTokenForRegistry('docker.io', repository);
+  }
+
+  /**
    * 매니페스트 조회
+   * @param repository 저장소 (예: library/nginx)
+   * @param reference 태그 또는 다이제스트
+   * @param token 인증 토큰
+   * @param registry 레지스트리 (기본값: docker.io)
    */
   private async getManifest(
     repository: string,
     reference: string,
-    token: string
+    token: string,
+    registry: string = 'docker.io'
   ): Promise<DockerManifest> {
-    const response = await this.registryClient.get<DockerManifest>(
-      `/${repository}/manifests/${reference}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: [
-            'application/vnd.docker.distribution.manifest.v2+json',
-            'application/vnd.docker.distribution.manifest.list.v2+json',
-            'application/vnd.oci.image.manifest.v1+json',
-            'application/vnd.oci.image.index.v1+json',
-          ].join(', '),
-        },
-      }
+    const config = this.getRegistryConfig(registry);
+    const headers: Record<string, string> = {
+      Accept: [
+        'application/vnd.docker.distribution.manifest.v2+json',
+        'application/vnd.docker.distribution.manifest.list.v2+json',
+        'application/vnd.oci.image.manifest.v1+json',
+        'application/vnd.oci.image.index.v1+json',
+      ].join(', '),
+    };
+
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const response = await axios.get<DockerManifest>(
+      `${config.registryUrl}/${repository}/manifests/${reference}`,
+      { headers }
     );
 
     return response.data;
@@ -379,21 +621,33 @@ export class DockerDownloader implements IDownloader {
 
   /**
    * Blob 다운로드
+   * @param repository 저장소 (예: library/nginx)
+   * @param digest 다이제스트 (sha256:xxx)
+   * @param destPath 저장 경로
+   * @param token 인증 토큰
+   * @param registry 레지스트리 (기본값: docker.io)
+   * @param onChunk 청크 콜백
    */
   private async downloadBlob(
     repository: string,
     digest: string,
     destPath: string,
     token: string,
+    registry: string = 'docker.io',
     onChunk?: (bytes: number) => void
   ): Promise<void> {
+    const config = this.getRegistryConfig(registry);
+    const headers: Record<string, string> = {};
+
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
     const response = await axios({
       method: 'GET',
-      url: `${this.registryUrl}/${repository}/blobs/${digest}`,
+      url: `${config.registryUrl}/${repository}/blobs/${digest}`,
       responseType: 'stream',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers,
     });
 
     const writer = fs.createWriteStream(destPath);
@@ -468,6 +722,106 @@ export class DockerDownloader implements IDownloader {
   async verifyChecksum(filePath: string, expected: string): Promise<boolean> {
     const actual = await this.calculateSha256(filePath);
     return actual === expected;
+  }
+
+
+  /**
+   * 캐시된 카탈로그 가져오기
+   */
+  private async getCachedCatalog(registry: string): Promise<string[]> {
+    const cached = this.catalogCache.get(registry);
+    
+    // 캐시가 유효한 경우 반환
+    if (cached && cached.expiresAt > Date.now()) {
+      logger.info(`카탈로그 캐시 히트: ${registry} (${cached.repositories.length}개 저장소)`);
+      return cached.repositories;
+    }
+
+    // 캐시 미스 또는 만료 - API 호출 후 캐싱
+    try {
+      const repositories = await this.fetchCatalog(registry);
+      const now = Date.now();
+      
+      this.catalogCache.set(registry, {
+        registry,
+        repositories,
+        fetchedAt: now,
+        expiresAt: now + this.catalogCacheTTL,
+      });
+      
+      logger.info(`카탈로그 캐시 저장: ${registry} (${repositories.length}개 저장소, TTL: ${this.catalogCacheTTL / 1000}초)`);
+      return repositories;
+    } catch (error) {
+      // 네트워크 오류 시 만료된 캐시라도 사용 (graceful degradation)
+      if (cached) {
+        logger.warn(`카탈로그 조회 실패, 만료된 캐시 사용: ${registry}`, { error });
+        return cached.repositories;
+      }
+      logger.error(`레지스트리 ${registry}에서 카탈로그 조회 실패`, { error });
+      return [];
+    }
+  }
+
+  /**
+   * 카탈로그 API 호출
+   */
+  private async fetchCatalog(registry: string): Promise<string[]> {
+    const config = this.getRegistryConfig(registry);
+    const token = await this.getTokenForRegistry(registry, '');
+
+    const response = await axios.get(`${config.registryUrl}/_catalog`, {
+      headers: { Authorization: `Bearer ${token}` },
+      params: { n: 1000 }, // 최대 1000개 저장소 조회
+      timeout: 30000,
+    });
+
+    return response.data.repositories || [];
+  }
+
+  /**
+   * 특정 레지스트리의 카탈로그 캐시 새로고침
+   */
+  async refreshCatalogCache(registry: string): Promise<string[]> {
+    // 기존 캐시 삭제
+    this.catalogCache.delete(registry);
+    // 새로 조회
+    return this.getCachedCatalog(registry);
+  }
+
+  /**
+   * 모든 카탈로그 캐시 삭제
+   */
+  clearCatalogCache(): void {
+    this.catalogCache.clear();
+    logger.info('모든 카탈로그 캐시 삭제됨');
+  }
+
+  /**
+   * 카탈로그 캐시 TTL 설정
+   */
+  setCatalogCacheTTL(ttlMs: number): void {
+    this.catalogCacheTTL = ttlMs;
+    logger.info(`카탈로그 캐시 TTL 설정: ${ttlMs / 1000}초`);
+  }
+
+  /**
+   * 카탈로그 캐시 상태 조회
+   */
+  getCatalogCacheStatus(): Array<{ registry: string; repositoryCount: number; fetchedAt: number; expiresAt: number; isExpired: boolean }> {
+    const now = Date.now();
+    const status: Array<{ registry: string; repositoryCount: number; fetchedAt: number; expiresAt: number; isExpired: boolean }> = [];
+    
+    this.catalogCache.forEach((cache) => {
+      status.push({
+        registry: cache.registry,
+        repositoryCount: cache.repositories.length,
+        fetchedAt: cache.fetchedAt,
+        expiresAt: cache.expiresAt,
+        isExpired: cache.expiresAt <= now,
+      });
+    });
+    
+    return status;
   }
 }
 
