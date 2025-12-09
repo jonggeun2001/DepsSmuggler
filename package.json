@@ -67,6 +67,7 @@
     "electron-builder": "^26.0.12",
     "nodemon": "^3.1.11",
     "playwright": "^1.57.0",
+    "sharp": "^0.34.5",
     "swagger-ui-dist": "^5.30.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
@@ -81,17 +82,21 @@
     },
     "files": [
       "dist/**/*",
+      "assets/**/*",
       "package.json"
     ],
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icons/icon.icns"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/icons/icon.png"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "icon": "assets/icons"
     }
   },
   "dependencies": {
