@@ -447,15 +447,67 @@ const valid = await downloader.verifyIntegrity(result.filePath, result.integrity
 ### 개요
 - 목적: Docker 이미지 검색 및 다운로드
 - 위치: `src/core/downloaders/docker.ts`
+- **다중 레지스트리 지원**: Docker Hub, GitHub Container Registry, Amazon ECR Public, Quay.io, 커스텀 레지스트리
 
 ### 클래스 구조
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `searchPackages` | query: string | Promise<PackageInfo[]> | Docker Hub에서 이미지 검색 |
-| `getVersions` | imageName: string | Promise<string[]> | 이미지 태그 목록 조회 |
+| `searchPackages` | query: string, registry?: string | Promise<PackageInfo[]> | 레지스트리에서 이미지 검색 |
+| `getVersions` | imageName: string, registry?: string | Promise<string[]> | 이미지 태그 목록 조회 |
 | `getPackageMetadata` | name: string, tag?: string | Promise<PackageMetadata> | 이미지 메타데이터 조회 |
-| `downloadPackage` | name: string, tag: string, destDir: string | Promise<DownloadResult> | 이미지 레이어 다운로드 |
+| `downloadImage` | name, tag, arch, destDir, onProgress?, registry? | Promise<string> | 이미지 다운로드 (tar 파일 생성) |
+
+### 지원 레지스트리
+
+| 레지스트리 타입 | 설명 | URL 패턴 |
+|----------------|------|----------|
+| `docker.io` | Docker Hub (기본) | registry-1.docker.io |
+| `ghcr.io` | GitHub Container Registry | ghcr.io |
+| `ecr` | Amazon ECR Public | public.ecr.aws |
+| `quay.io` | Red Hat Quay.io | quay.io |
+| `custom` | 사용자 정의 레지스트리 | 사용자 입력 |
+
+### 레지스트리 타입 정의
+
+```typescript
+type RegistryType = 'docker.io' | 'ghcr.io' | 'ecr' | 'quay.io' | 'custom';
+
+interface RegistryConfig {
+  authUrl: string;      // 인증 URL
+  registryUrl: string;  // Registry API URL
+  service: string;      // 서비스 이름
+  hubUrl?: string;      // 검색용 Hub URL (Docker Hub만 해당)
+}
+```
+
+### 레지스트리별 설정
+
+```typescript
+const REGISTRY_CONFIGS: Record<string, RegistryConfig> = {
+  'docker.io': {
+    authUrl: 'https://auth.docker.io',
+    registryUrl: 'https://registry-1.docker.io/v2',
+    service: 'registry.docker.io',
+    hubUrl: 'https://hub.docker.com/v2',
+  },
+  'ghcr.io': {
+    authUrl: 'https://ghcr.io/token',
+    registryUrl: 'https://ghcr.io/v2',
+    service: 'ghcr.io',
+  },
+  'ecr': {
+    authUrl: 'https://public.ecr.aws/token',
+    registryUrl: 'https://public.ecr.aws/v2',
+    service: 'public.ecr.aws',
+  },
+  'quay.io': {
+    authUrl: 'https://quay.io/v2/auth',
+    registryUrl: 'https://quay.io/v2',
+    service: 'quay.io',
+  },
+};
+```
 
 ### 아키텍처 매핑
 ```typescript
@@ -467,16 +519,57 @@ const ARCH_MAP: Record<string, string> = {
 };
 ```
 
+### 내부 캐싱
+
+- **토큰 캐시**: 레지스트리별 인증 토큰 캐싱 (만료 시 자동 갱신)
+- **레지스트리 설정 캐시**: 커스텀 레지스트리 설정 캐싱
+- **카탈로그 캐시**: 비 Docker Hub 레지스트리의 저장소 목록 캐싱 (기본 TTL: 1시간)
+
+### 검색 동작
+
+- **Docker Hub**: Search API 사용 (`/search/repositories/`)
+- **기타 레지스트리**: 카탈로그 API(`/_catalog`)에서 캐시된 저장소 목록 필터링
+
 ### 타입 정의
 
 | 타입 | 설명 |
 |------|------|
+| `RegistryType` | 레지스트리 타입 열거 |
+| `RegistryConfig` | 레지스트리 설정 인터페이스 |
+| `CatalogCache` | 카탈로그 캐시 인터페이스 |
 | `TokenResponse` | Docker Registry 인증 토큰 |
 | `DockerManifest` | 이미지 매니페스트 |
 | `DockerSearchResult` | 검색 결과 항목 |
 | `DockerSearchResponse` | 검색 응답 전체 |
 | `DockerTag` | 태그 정보 |
 | `DockerTagsResponse` | 태그 목록 응답 |
+
+### 사용 예시
+
+```typescript
+import { getDockerDownloader } from './core/downloaders/docker';
+
+const downloader = getDockerDownloader();
+
+// Docker Hub 검색 (기본)
+const hubResults = await downloader.searchPackages('nginx');
+
+// GitHub Container Registry 검색
+const ghcrResults = await downloader.searchPackages('hello-world', 'ghcr.io');
+
+// Quay.io에서 태그 조회
+const quayTags = await downloader.getVersions('prometheus/prometheus', 'quay.io');
+
+// 이미지 다운로드 (진행률 콜백 포함)
+const tarPath = await downloader.downloadImage(
+  'nginx',
+  'latest',
+  'amd64',
+  '/tmp/images',
+  (progress) => console.log(`${progress.progress}%`),
+  'docker.io'
+);
+```
 
 ---
 

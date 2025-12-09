@@ -324,6 +324,24 @@ src/renderer/
 pip/conda 선택 시 Python 버전 선택 UI 표시:
 - 지원 버전: 3.8 ~ 3.13
 
+#### Docker 레지스트리 선택 (신규)
+
+Docker 타입 선택 시 레지스트리 선택 UI 표시:
+
+```typescript
+const dockerRegistryOptions = [
+  { value: 'docker.io', label: 'Docker Hub', description: '공식 Docker Hub 레지스트리' },
+  { value: 'ghcr.io', label: 'GitHub Container Registry', description: 'GitHub 컨테이너 레지스트리' },
+  { value: 'ecr', label: 'Amazon ECR Public', description: 'AWS 퍼블릭 컨테이너 레지스트리' },
+  { value: 'quay.io', label: 'Quay.io', description: 'Red Hat Quay 레지스트리' },
+  { value: 'custom', label: '커스텀 레지스트리', description: '직접 레지스트리 URL 입력' },
+];
+```
+
+- **기본 레지스트리**: 설정 페이지의 `dockerRegistry` 값이 기본 선택됨
+- **커스텀 레지스트리**: 'custom' 선택 시 URL 입력 필드 표시
+- **검색 및 태그 조회**: 선택된 레지스트리에 맞게 API 호출
+
 #### Maven 버전 조회 (브라우저 환경)
 
 브라우저 환경에서 Maven 패키지 선택 시 Vite 플러그인 API를 통해 버전 목록 조회:
@@ -383,6 +401,8 @@ const outputFormat = defaultOutputFormat;  // 설정 페이지 값 직접 사용
 - **출력 설정**: 기본 출력 형식, 설치 스크립트 포함 여부
 - **파일 분할 설정**: 자동 분할, 분할 크기
 - **SMTP 설정**: 메일 발송 설정
+- **OS 배포판 설정 (신규)**: YUM/APT/APK별 기본 배포판 및 아키텍처
+- **Docker 설정 (신규)**: 기본 레지스트리, 커스텀 레지스트리 URL, 이미지 아키텍처 등
 
 #### 출력 설정 자동 적용
 
@@ -512,6 +532,9 @@ interface LanguageVersions {
   node: string;     // 예: '20'
 }
 
+// Docker 레지스트리 타입
+type DockerRegistry = 'docker.io' | 'ghcr.io' | 'ecr' | 'quay.io' | 'custom';
+
 interface SettingsState {
   // 다운로드 설정
   concurrentDownloads: number;
@@ -540,8 +563,22 @@ interface SettingsState {
   smtpUser: string;
   smtpPassword: string;
 
+  // OS 배포판 설정 (신규)
+  yumDistribution: { id: string; architecture: string };   // 예: { id: 'rocky-9', architecture: 'x86_64' }
+  aptDistribution: { id: string; architecture: string };   // 예: { id: 'ubuntu-22.04', architecture: 'amd64' }
+  apkDistribution: { id: string; architecture: string };   // 예: { id: 'alpine-3.18', architecture: 'x86_64' }
+
+  // Docker 설정 (신규)
+  dockerRegistry: DockerRegistry;           // 기본 레지스트리
+  dockerCustomRegistry: string;             // 커스텀 레지스트리 URL
+  dockerArchitecture: string;               // Docker 이미지 아키텍처 (예: 'amd64')
+  dockerLayerCompression: boolean;          // 레이어 압축 여부
+  dockerRetryStrategy: 'none' | 'linear' | 'exponential';  // 재시도 전략
+  dockerIncludeLoadScript: boolean;         // docker load 스크립트 포함 여부
+
   // Actions
   setSetting<K extends keyof SettingsState>(key: K, value: SettingsState[K]): void;
+  updateSettings(updates: Partial<SettingsState>): void;
   resetSettings(): void;
   loadSettings(): Promise<void>;
   saveSettings(): Promise<void>;

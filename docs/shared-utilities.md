@@ -52,10 +52,18 @@ src/core/shared/
 ```typescript
 interface DownloadPackage {
   id: string;
-  type: string;           // 'pip' | 'conda' | 'maven' | 'yum' | 'docker'
+  type: string;           // 'pip' | 'conda' | 'maven' | 'npm' | 'yum' | 'apt' | 'apk' | 'docker'
   name: string;           // 패키지명
   version: string;        // 버전
   architecture?: string;  // 아키텍처 (예: 'x86_64', 'arm64')
+  /** OS 패키지의 다운로드 URL (yum/apt/apk 등) */
+  downloadUrl?: string;
+  /** OS 패키지의 저장소 정보 */
+  repository?: { baseUrl: string; name?: string };
+  /** OS 패키지의 파일 경로 (저장소 내 위치) */
+  location?: string;
+  /** Docker 이미지 메타데이터 (레지스트리 정보 등) */
+  metadata?: Record<string, unknown>;
 }
 ```
 
@@ -68,6 +76,11 @@ interface DownloadOptions {
   outputDir: string;                       // 출력 디렉토리
   outputFormat: 'zip' | 'tar.gz' | 'mirror'; // 출력 형식
   includeScripts: boolean;                 // 설치 스크립트 포함 여부
+  targetOS?: TargetOS;                     // 타겟 OS
+  architecture?: Architecture;             // 아키텍처
+  includeDependencies?: boolean;           // 의존성 포함 여부
+  pythonVersion?: string;                  // Python 버전 (pip/conda용)
+  concurrency?: number;                    // 동시 다운로드 수 (기본: 3)
 }
 ```
 
@@ -430,6 +443,18 @@ console.log(result);
 | `resolveAllDependencies` | packages: DownloadPackage[], options?: DependencyResolverOptions | Promise<ResolvedPackageList> | 모든 패키지의 의존성 해결 |
 | `resolveSinglePackageDependencies` | pkg: DownloadPackage, options?: DependencyResolverOptions | Promise<ResolvedPackageList> | 단일 패키지 의존성 해결 |
 
+### 지원 패키지 타입
+
+| 타입 | 리졸버 | 비고 |
+|------|--------|------|
+| `pip` | PipResolver | PyPI 의존성 |
+| `conda` | CondaResolver | Conda 의존성 |
+| `maven` | MavenResolver | Maven 의존성 |
+| `npm` | NpmResolver | npm 의존성 (신규) |
+| `yum` | YumResolver | RPM 의존성 |
+
+> **참고**: apt, apk 리졸버는 인터페이스가 달라 별도 어댑터 필요
+
 ### ResolvedPackageList
 
 ```typescript
@@ -534,6 +559,8 @@ function generateInstallScripts(
 
 - `install.sh` (Bash): Linux/macOS용
 - `install.ps1` (PowerShell): Windows용
+- `docker-load.sh` (Bash): Docker 이미지 로드용 (Docker 패키지 포함 시 자동 생성)
+- `docker-load.ps1` (PowerShell): Docker 이미지 로드용 (Docker 패키지 포함 시 자동 생성)
 
 ### 생성되는 스크립트 예시
 
@@ -546,6 +573,49 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # pip 패키지 설치
 pip install --no-index --find-links="$SCRIPT_DIR/packages" requests==2.28.0
+```
+
+**docker-load.sh:** (Docker 이미지 포함 시 자동 생성)
+```bash
+#!/bin/bash
+# DepsSmuggler Docker 이미지 로드 스크립트
+set -e
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Docker 설치 확인
+if ! command -v docker &> /dev/null; then
+    echo "Error: Docker가 설치되어 있지 않습니다."
+    exit 1
+fi
+
+# Docker 데몬 실행 확인
+if ! docker info &> /dev/null; then
+    echo "Error: Docker 데몬이 실행 중이지 않습니다."
+    exit 1
+fi
+
+# 이미지 로드
+echo "Loading nginx:latest..."
+docker load -i "$SCRIPT_DIR/packages/nginx-latest.tar"
+echo "  ✓ nginx:latest 로드 완료"
+```
+
+**docker-load.ps1:** (Windows PowerShell)
+```powershell
+# DepsSmuggler Docker 이미지 로드 스크립트
+$ErrorActionPreference = "Stop"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Docker 설치 확인
+try { docker --version | Out-Null } catch {
+    Write-Host "Error: Docker가 설치되어 있지 않습니다." -ForegroundColor Red
+    exit 1
+}
+
+# 이미지 로드
+Write-Host "Loading nginx:latest..."
+docker load -i "$ScriptDir\packages\nginx-latest.tar"
+Write-Host "  [OK] nginx:latest 로드 완료" -ForegroundColor Green
 ```
 
 ---

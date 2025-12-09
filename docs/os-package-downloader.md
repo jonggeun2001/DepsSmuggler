@@ -164,7 +164,7 @@ interface PackageDependency {
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `search` | options: OSPackageSearchOptions | Promise<OSPackageSearchResult> | 패키지 검색 |
+| `search` | options: OSPackageSearchOptions | Promise<OSPackageSearchResponse> | 패키지 검색 |
 | `resolveDependencies` | packages, distribution, architecture, options? | Promise<DependencyResolutionResult> | 의존성 해결 |
 | `download` | options: OSPackageDownloadOptions | Promise<OSPackageDownloadResult> | 패키지 다운로드 |
 | `getCacheStats` | - | CacheStats | 캐시 통계 조회 |
@@ -181,6 +181,28 @@ interface OSPackageSearchOptions {
   matchType?: MatchType;         // 'exact' | 'contains' | 'startsWith' | 'wildcard'
   includeVersions?: boolean;
   limit?: number;
+}
+```
+
+### 검색 결과 타입
+
+```typescript
+/**
+ * 패키지 검색 결과 (이름별 그룹화)
+ */
+interface OSPackageSearchResult {
+  name: string;                  // 패키지 이름
+  versions: OSPackageInfo[];     // 해당 이름의 모든 버전 (최신순 정렬)
+  latest: OSPackageInfo;         // 최신 버전 패키지 정보
+}
+
+/**
+ * 검색 API 응답
+ */
+interface OSPackageSearchResponse {
+  packages: OSPackageSearchResult[];  // 이름별 그룹화된 검색 결과
+  totalCount: number;                  // 전체 고유 패키지 이름 수
+  hasMore: boolean;                    // 추가 결과 존재 여부
 }
 ```
 
@@ -210,7 +232,7 @@ const downloader = new OSPackageDownloader({ concurrency: 5 });
 // 배포판 선택
 const distribution = getDistributionById('rocky-9')!;
 
-// 패키지 검색
+// 패키지 검색 (결과는 이름별로 그룹화됨)
 const searchResult = await downloader.search({
   query: 'httpd',
   distribution,
@@ -219,9 +241,19 @@ const searchResult = await downloader.search({
   limit: 50,
 });
 
+// searchResult.packages 구조 예시:
+// [
+//   { name: 'httpd', versions: [...], latest: {...} },
+//   { name: 'httpd-devel', versions: [...], latest: {...} },
+//   { name: 'httpd-tools', versions: [...], latest: {...} },
+// ]
+
+// 최신 버전 패키지만 선택
+const packagesToDownload = searchResult.packages.map(p => p.latest);
+
 // 의존성 해결
 const depResult = await downloader.resolveDependencies(
-  searchResult.packages.slice(0, 1),
+  packagesToDownload.slice(0, 1),
   distribution,
   'x86_64',
   { includeOptional: false }
