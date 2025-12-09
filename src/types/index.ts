@@ -281,3 +281,59 @@ export interface IEventEmitter<Events extends Record<string, unknown>> {
   off<K extends keyof Events>(event: K, callback: EventCallback<Events[K]>): void;
   emit<K extends keyof Events>(event: K, data: Events[K]): void;
 }
+
+
+// ============================================
+// 다운로드 히스토리 관련 타입
+// ============================================
+
+/** 히스토리에 저장되는 패키지 항목 */
+export interface HistoryPackageItem {
+  /** 패키지 타입 (pip, maven, npm 등) */
+  type: PackageType;
+  /** 패키지 이름 */
+  name: string;
+  /** 패키지 버전 */
+  version: string;
+  /** 아키텍처 */
+  arch?: Architecture;
+  /** 언어/런타임 버전 */
+  languageVersion?: string;
+  /** 추가 메타데이터 */
+  metadata?: Record<string, unknown>;
+}
+
+/** 히스토리에 저장되는 다운로드 설정 */
+export interface HistorySettings {
+  /** 출력 형식 (zip, tar.gz, mirror) */
+  outputFormat: 'zip' | 'tar.gz' | 'mirror';
+  /** 설치 스크립트 포함 여부 */
+  includeScripts: boolean;
+  /** 의존성 포함 여부 */
+  includeDependencies: boolean;
+}
+
+/** 다운로드 히스토리 상태 */
+export type HistoryStatus = 'success' | 'partial' | 'failed';
+
+/** 다운로드 히스토리 항목 */
+export interface DownloadHistory {
+  /** 고유 ID */
+  id: string;
+  /** 다운로드 완료 시각 (ISO 8601 형식) */
+  timestamp: string;
+  /** 다운로드한 패키지 목록 */
+  packages: HistoryPackageItem[];
+  /** 다운로드 설정 */
+  settings: HistorySettings;
+  /** 출력 파일/폴더 경로 */
+  outputPath: string;
+  /** 총 다운로드 크기 (바이트) */
+  totalSize: number;
+  /** 다운로드 상태 */
+  status: HistoryStatus;
+  /** 다운로드된 파일 수 */
+  downloadedCount?: number;
+  /** 실패한 파일 수 */
+  failedCount?: number;
+}

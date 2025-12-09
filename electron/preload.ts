@@ -8,8 +8,11 @@ const electronAPI = {
 
   // 파일 다이얼로그
   selectFolder: (): Promise<string | null> => ipcRenderer.invoke('select-folder'),
+  selectDirectory: (): Promise<string | null> => ipcRenderer.invoke('select-directory'),
   saveFile: (defaultPath: string): Promise<string | null> =>
     ipcRenderer.invoke('save-file', defaultPath),
+  openFolder: (folderPath: string): Promise<void> =>
+    ipcRenderer.invoke('open-folder', folderPath),
 
   // 다운로드 관련
   download: {
@@ -85,6 +88,19 @@ const electronAPI = {
   cache: {
     getSize: (): Promise<number> => ipcRenderer.invoke('cache:get-size'),
     clear: (): Promise<void> => ipcRenderer.invoke('cache:clear'),
+  },
+
+  // 히스토리 관련
+  history: {
+    load: (): Promise<unknown[]> => ipcRenderer.invoke('history:load'),
+    save: (histories: unknown[]): Promise<{ success: boolean }> =>
+      ipcRenderer.invoke('history:save', histories),
+    add: (history: unknown): Promise<{ success: boolean }> =>
+      ipcRenderer.invoke('history:add', history),
+    delete: (id: string): Promise<{ success: boolean }> =>
+      ipcRenderer.invoke('history:delete', id),
+    clear: (): Promise<{ success: boolean }> =>
+      ipcRenderer.invoke('history:clear'),
   },
 
   // 패키지 검색 관련

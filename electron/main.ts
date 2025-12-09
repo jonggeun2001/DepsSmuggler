@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import axios from 'axios';
 import { getLogger, createScopedLogger } from './utils/logger';
 
@@ -81,12 +82,18 @@ async function waitForViteServer(
 }
 
 async function createWindow(): Promise<void> {
+  // 아이콘 경로 설정
+  const iconPath = path.join(__dirname, '..', 'assets', 'icons',
+    process.platform === 'darwin' ? 'icon.icns' : 'icon.png'
+  );
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     resizable: true,
+    icon: iconPath,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -170,6 +177,25 @@ ipcMain.handle('select-folder', async () => {
   }
 
   return result.filePaths[0];
+});
+
+// 디렉토리 선택 다이얼로그 (설정용)
+ipcMain.handle('select-directory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: '다운로드 폴더 선택',
+  });
+
+  if (result.canceled) {
+    return null;
+  }
+
+  return result.filePaths[0];
+});
+
+// 폴더 열기 (Finder/Explorer)
+ipcMain.handle('open-folder', async (_, folderPath: string) => {
+  await shell.openPath(folderPath);
 });
 
 // 파일 저장 다이얼로그
@@ -809,6 +835,111 @@ ipcMain.handle('dependency:resolve', async (_, packages: DownloadPackage[]) => {
     };
   } catch (error) {
     downloadLog.error('Failed to resolve dependencies:', error);
+    throw error;
+  }
+});
+
+// ============================================
+// 히스토리 관련 IPC 핸들러
+// ============================================
+const historyLog = createScopedLogger('History');
+const HISTORY_DIR = path.join(os.homedir(), '.depssmuggler');
+const HISTORY_FILE = path.join(HISTORY_DIR, 'history.json');
+
+// 히스토리 디렉토리 및 파일 초기화
+async function ensureHistoryFile(): Promise<void> {
+  try {
+    if (!fs.existsSync(HISTORY_DIR)) {
+      fs.mkdirSync(HISTORY_DIR, { recursive: true });
+      historyLog.info(`Created history directory: ${HISTORY_DIR}`);
+    }
+    if (!fs.existsSync(HISTORY_FILE)) {
+      fs.writeFileSync(HISTORY_FILE, JSON.stringify([], null, 2), 'utf-8');
+      historyLog.info(`Created history file: ${HISTORY_FILE}`);
+    }
+  } catch (error) {
+    historyLog.error('Failed to ensure history file:', error);
+    throw error;
+  }
+}
+
+// 히스토리 로드
+ipcMain.handle('history:load', async () => {
+  historyLog.info('Loading history...');
+  try {
+    await ensureHistoryFile();
+    const data = fs.readFileSync(HISTORY_FILE, 'utf-8');
+    const histories = JSON.parse(data);
+    historyLog.info(`Loaded ${histories.length} history items`);
+    return histories;
+  } catch (error) {
+    historyLog.error('Failed to load history:', error);
+    return [];
+  }
+});
+
+// 히스토리 저장 (전체 덮어쓰기)
+ipcMain.handle('history:save', async (_, histories: unknown[]) => {
+  historyLog.info(`Saving ${histories.length} history items...`);
+  try {
+    await ensureHistoryFile();
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(histories, null, 2), 'utf-8');
+    historyLog.info('History saved successfully');
+    return { success: true };
+  } catch (error) {
+    historyLog.error('Failed to save history:', error);
+    throw error;
+  }
+});
+
+// 히스토리 항목 추가
+ipcMain.handle('history:add', async (_, history: unknown) => {
+  historyLog.info('Adding new history item...');
+  try {
+    await ensureHistoryFile();
+    const data = fs.readFileSync(HISTORY_FILE, 'utf-8');
+    const histories = JSON.parse(data);
+    histories.unshift(history); // 최신 항목을 앞에 추가
+    // 최대 100개 유지
+    if (histories.length > 100) {
+      histories.splice(100);
+    }
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(histories, null, 2), 'utf-8');
+    historyLog.info('History item added successfully');
+    return { success: true };
+  } catch (error) {
+    historyLog.error('Failed to add history:', error);
+    throw error;
+  }
+});
+
+// 특정 히스토리 항목 삭제
+ipcMain.handle('history:delete', async (_, id: string) => {
+  historyLog.info(`Deleting history item: ${id}`);
+  try {
+    await ensureHistoryFile();
+    const data = fs.readFileSync(HISTORY_FILE, 'utf-8');
+    const histories = JSON.parse(data);
+    const filteredHistories = histories.filter((h: { id: string }) => h.id !== id);
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(filteredHistories, null, 2), 'utf-8');
+    historyLog.info(`History item ${id} deleted successfully`);
+    return { success: true };
+  } catch (error) {
+    historyLog.error('Failed to delete history:', error);
+    throw error;
+  }
+});
+
+// 전체 히스토리 삭제
+ipcMain.handle('history:clear', async () => {
+  historyLog.info('Clearing all history...');
+  try {
+    await ensureHistoryFile();
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify([], null, 2), 'utf-8');
+    historyLog.info('All history cleared');
+    return { success: true };
+  } catch (error) {
+    historyLog.error('Failed to clear history:', error);
     throw error;
   }
 });

@@ -51,6 +51,8 @@ import {
   LogEntry,
 } from '../stores/downloadStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useHistoryStore } from '../stores/historyStore';
+import type { HistoryPackageItem, HistorySettings, HistoryStatus } from '../../types';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -100,7 +102,7 @@ const DownloadPage: React.FC = () => {
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
-  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, concurrentDownloads } = useSettingsStore();
+  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, concurrentDownloads, defaultDownloadPath } = useSettingsStore();
   const {
     items: downloadItems,
     isDownloading,
@@ -127,8 +129,9 @@ const DownloadPage: React.FC = () => {
   const { defaultOutputFormat, includeInstallScripts } = useSettingsStore();
   // 설정 페이지의 outputFormat을 직접 사용
   const outputFormat = defaultOutputFormat;
+  const { addHistory } = useHistoryStore();
 
-  const [outputDir, setOutputDir] = useState(outputPath || '');
+  const [outputDir, setOutputDir] = useState(outputPath || defaultDownloadPath || '');
   const [errorModalOpen, setErrorModalOpen] = useState(false);
   const [errorItem, setErrorItem] = useState<DownloadItem | null>(null);
   const downloadCancelledRef = useRef(false);
@@ -309,8 +312,56 @@ const DownloadPage: React.FC = () => {
       setIsDownloading(false);
       setPackagingStatus('completed');
       setPackagingProgress(100);
-      addLog('success', '다운로드 및 패키징 완료', `출력 경로: ${data.outputPath}`);
+      addLog('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
       message.success('다운로드 및 패키징이 완료되었습니다');
+
+      // 히스토리 저장
+      const finalItems = useDownloadStore.getState().items;
+      const cartState = useCartStore.getState().items;
+      const settings = useSettingsStore.getState();
+
+      // 패키지 정보 변환
+      const historyPackages: HistoryPackageItem[] = cartState.map((item) => ({
+        type: item.type,
+        name: item.name,
+        version: item.version,
+        arch: item.arch,
+        languageVersion: item.languageVersion,
+        metadata: item.metadata,
+      }));
+
+      // 설정 정보
+      const historySettings: HistorySettings = {
+        outputFormat: settings.defaultOutputFormat,
+        includeScripts: settings.includeInstallScripts,
+        includeDependencies: settings.includeDependencies,
+      };
+
+      // 상태 계산
+      const completedCount = finalItems.filter((i) => i.status === 'completed').length;
+      const failedCount = finalItems.filter((i) => i.status === 'failed').length;
+      const totalCount = finalItems.length;
+
+      let historyStatus: HistoryStatus = 'success';
+      if (failedCount === totalCount) {
+        historyStatus = 'failed';
+      } else if (failedCount > 0) {
+        historyStatus = 'partial';
+      }
+
+      // 총 크기 계산
+      const totalSize = finalItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
+
+      // 히스토리 저장
+      addHistory(
+        historyPackages,
+        historySettings,
+        data.outputPath,
+        totalSize,
+        historyStatus,
+        completedCount,
+        failedCount
+      );
 
       // 다운로드 완료 시 장바구니 비우기
       clearCart();
@@ -325,7 +376,7 @@ const DownloadPage: React.FC = () => {
       unsubAllComplete?.();
     };
     // downloadItems 대신 downloadItemsRef를 사용하므로 dependency에서 제거
-  }, [updateItem, addLog, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, clearCart]);
+  }, [updateItem, addLog, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, clearCart, addHistory]);
 
   // 컴포넌트 언마운트 시 SSE 연결 정리
   useEffect(() => {
@@ -358,7 +409,7 @@ const DownloadPage: React.FC = () => {
       setOutputDir(devOutputPath);
       setOutputPath(devOutputPath);
       message.warning('브라우저 환경에서는 폴더 선택이 불가능합니다. 개발 서버의 기본 경로를 사용합니다.');
-      addLog('info', `개발 환경 출력 경로: ${devOutputPath}`);
+      addLog('info', `개발 환경 다운로드 경로: ${devOutputPath}`);
     }
   };
 
@@ -693,7 +744,7 @@ const DownloadPage: React.FC = () => {
       setIsDownloading(false);
       setPackagingStatus('completed');
       setPackagingProgress(100);
-      addLog('success', '다운로드 및 패키징 완료', `출력 경로: ${data.outputPath}`);
+      addLog('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
       message.success('다운로드 및 패키징이 완료되었습니다');
 
       // 다운로드 완료 시 장바구니 비우기
@@ -864,11 +915,14 @@ const DownloadPage: React.FC = () => {
     message.success('완료되었습니다');
   };
 
-  // 출력 폴더 열기
-  const handleOpenFolder = () => {
-    // TODO: Electron shell.openPath 호출
-    message.info(`폴더 열기: ${outputDir}`);
-    addLog('info', `폴더 열기: ${outputDir}`);
+  // 다운로드 폴더 열기 (Finder/Explorer)
+  const handleOpenFolder = async () => {
+    if (window.electronAPI?.openFolder) {
+      await window.electronAPI.openFolder(outputDir);
+    } else {
+      message.info(`폴더 열기: ${outputDir}`);
+    }
+    addLog('info', `다운로드 폴더 열기: ${outputDir}`);
   };
 
   // 테이블 컬럼
@@ -1045,7 +1099,7 @@ const DownloadPage: React.FC = () => {
               icon={<FolderOpenOutlined />}
               onClick={handleOpenFolder}
             >
-              출력 폴더 열기
+              다운로드 폴더 열기
             </Button>,
             <Button key="done" onClick={handleComplete}>
               완료
@@ -1094,7 +1148,7 @@ const DownloadPage: React.FC = () => {
           <Divider />
 
           <div>
-            <Text strong>출력 경로:</Text>
+            <Text strong>다운로드 경로:</Text>
             <Paragraph copyable style={{ marginTop: 8 }}>
               {outputDir}
             </Paragraph>
@@ -1149,15 +1203,15 @@ const DownloadPage: React.FC = () => {
     <div>
       <Title level={3}>다운로드</Title>
 
-      {/* 출력 설정 */}
-      <Card title="출력 설정" style={{ marginBottom: 24 }}>
+      {/* 다운로드 경로 설정 */}
+      <Card title="다운로드 경로" style={{ marginBottom: 24 }}>
         <div style={{ marginBottom: 16 }}>
-          <Text strong>출력 폴더</Text>
+          <Text strong>다운로드 폴더</Text>
           <Space.Compact style={{ width: '100%', marginTop: 8 }}>
             <Input
               value={outputDir}
               onChange={(e) => setOutputDir(e.target.value)}
-              placeholder="출력 폴더 경로"
+              placeholder="다운로드 폴더 경로"
               disabled={isDownloading}
             />
             <Button
@@ -1170,26 +1224,6 @@ const DownloadPage: React.FC = () => {
           </Space.Compact>
         </div>
 
-        <div style={{ marginBottom: 16, padding: 16, background: '#fafafa', borderRadius: 8 }}>
-          <Text strong style={{ display: 'block', marginBottom: 8 }}>출력 형식</Text>
-          <Tag color="blue" style={{ fontSize: 14, padding: '4px 12px' }}>
-            {outputFormat === 'zip' ? 'ZIP 압축'
-              : outputFormat === 'tar.gz' ? 'TAR.GZ 압축'
-              : '오프라인 미러 구조'}
-          </Tag>
-          <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-            <a onClick={() => navigate('/settings')}>설정 페이지</a>에서 변경 가능
-          </Text>
-        </div>
-
-        {includeInstallScripts && (
-          <Alert
-            message="설치 스크립트 포함"
-            description="bash (install.sh) 및 PowerShell (install.ps1) 스크립트가 포함됩니다."
-            type="info"
-            showIcon
-          />
-        )}
       </Card>
 
       {/* 진행 상황 */}

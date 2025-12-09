@@ -1,3 +1,5 @@
+import type { DownloadHistory } from '../types';
+
 // OS 패키지 관련 타입
 export interface OSDistribution {
   id: string;
@@ -35,7 +37,9 @@ export interface ElectronAPI {
 
   // 파일 다이얼로그
   selectFolder: () => Promise<string | null>;
+  selectDirectory: () => Promise<string | null>;
   saveFile: (defaultPath: string) => Promise<string | null>;
+  openFolder: (folderPath: string) => Promise<void>;
 
   // 다운로드 관련
   download: {
@@ -74,6 +78,15 @@ export interface ElectronAPI {
   cache: {
     getSize: () => Promise<number>;
     clear: () => Promise<void>;
+  };
+
+  // 히스토리 관련
+  history: {
+    load: () => Promise<DownloadHistory[]>;
+    save: (histories: DownloadHistory[]) => Promise<{ success: boolean }>;
+    add: (history: DownloadHistory) => Promise<{ success: boolean }>;
+    delete: (id: string) => Promise<{ success: boolean }>;
+    clear: () => Promise<{ success: boolean }>;
   };
 
   // 패키지 검색 관련
