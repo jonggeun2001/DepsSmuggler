@@ -12,6 +12,37 @@
 - 위치: `electron/main.ts`
 - 역할: 윈도우 생성, IPC 핸들링, 시스템 API 접근
 
+### 앱 아이콘
+
+플랫폼별 아이콘 설정:
+
+```
+assets/icons/
+├── icon.svg          # 소스 SVG
+├── icon.png          # 512x512 PNG (기본)
+├── icon.icns         # macOS용
+├── icon-16.png       # 다양한 크기
+├── icon-32.png
+├── icon-48.png
+├── icon-64.png
+├── icon-128.png
+├── icon-256.png
+├── icon-512.png
+└── icon-1024.png
+```
+
+#### 아이콘 생성 스크립트
+
+`scripts/generate-icons.mjs` - SVG에서 다양한 크기의 PNG 및 플랫폼별 아이콘 생성
+
+```bash
+node scripts/generate-icons.mjs
+```
+
+- sharp 라이브러리로 PNG 생성
+- macOS: iconutil로 .icns 생성
+- Windows: electron-builder가 PNG에서 자동 변환
+
 ### 로깅 시스템 (`electron/utils/logger.ts`)
 
 electron-log 기반 파일 로깅 시스템
@@ -93,7 +124,9 @@ async function waitForViteServer(
 | `get-app-version` | 앱 버전 조회 |
 | `get-app-path` | 앱 경로 조회 |
 | `select-folder` | 폴더 선택 다이얼로그 |
+| `select-directory` | 디렉토리 선택 다이얼로그 (설정용) |
 | `save-file` | 파일 저장 다이얼로그 |
+| `open-folder` | 폴더 열기 (Finder/Explorer) |
 | `search:packages` | 패키지 검색 (PyPI, Maven 실제 API 연동) |
 | `search:suggest` | 자동완성 제안 |
 | `search:versions` | 패키지 버전 목록 조회 |
@@ -102,6 +135,20 @@ async function waitForViteServer(
 | `download:pause` | 다운로드 일시정지 |
 | `download:resume` | 다운로드 재개 |
 | `download:cancel` | 다운로드 취소 |
+
+### 히스토리 IPC 핸들러
+
+다운로드 히스토리 관리를 위한 IPC 핸들러
+
+| 채널 | 파라미터 | 반환값 | 설명 |
+|------|----------|--------|------|
+| `history:load` | - | DownloadHistory[] | 파일에서 히스토리 로드 |
+| `history:save` | histories: unknown[] | { success: boolean } | 전체 히스토리 저장 |
+| `history:add` | history: unknown | { success: boolean } | 히스토리 항목 추가 |
+| `history:delete` | id: string | { success: boolean } | 특정 히스토리 삭제 |
+| `history:clear` | - | { success: boolean } | 전체 히스토리 삭제 |
+
+히스토리 파일 위치: `~/.depssmuggler/history.json`
 
 ### OS 패키지 IPC 핸들러
 
@@ -208,7 +255,9 @@ interface ElectronAPI {
 
   // 파일 다이얼로그
   selectFolder(): Promise<string | null>;
+  selectDirectory(): Promise<string | null>;  // 설정용 디렉토리 선택
   saveFile(defaultPath: string): Promise<string | null>;
+  openFolder(folderPath: string): Promise<void>;  // Finder/Explorer로 열기
 
   // 다운로드 관련
   download: {
@@ -246,6 +295,15 @@ interface ElectronAPI {
   cache: {
     getSize(): Promise<number>;
     clear(): Promise<void>;
+  };
+
+  // 히스토리 관련
+  history: {
+    load(): Promise<unknown[]>;
+    save(histories: unknown[]): Promise<{ success: boolean }>;
+    add(history: unknown): Promise<{ success: boolean }>;
+    delete(id: string): Promise<{ success: boolean }>;
+    clear(): Promise<{ success: boolean }>;
   };
 
   // 패키지 검색
@@ -286,6 +344,7 @@ src/renderer/
 │   ├── WizardPage.tsx
 │   ├── CartPage.tsx
 │   ├── DownloadPage.tsx
+│   ├── HistoryPage.tsx    # 다운로드 히스토리
 │   └── SettingsPage.tsx
 ├── components/        # 재사용 컴포넌트
 │   ├── index.ts
@@ -295,6 +354,7 @@ src/renderer/
 ├── stores/            # Zustand 상태 관리
 │   ├── cartStore.ts
 │   ├── downloadStore.ts
+│   ├── historyStore.ts    # 다운로드 히스토리
 │   └── settingsStore.ts
 └── styles/
     └── global.css
@@ -359,6 +419,18 @@ if (packageType === 'maven') {
 - 경로: `/cart`
 - 역할: 선택한 패키지 목록 관리 (장바구니)
 
+#### 주요 기능
+- 패키지 목록 표시 (타입, 이름, 버전, 아키텍처)
+- 개별/전체 삭제
+- 텍스트 파일에서 패키지 추가 (requirements.txt, pom.xml, package.json)
+- 예상 다운로드 크기 및 소요 시간 표시
+- 의존성 트리 미리보기
+- 다운로드 시작 → 다운로드 페이지로 이동
+
+#### 다운로드 옵션
+다운로드 옵션(출력 형식, 전달 방식 등)은 설정 페이지에서 관리합니다.
+장바구니에서 "다운로드 시작" 클릭 시 바로 다운로드 페이지로 이동합니다.
+
 ### DownloadPage
 - 경로: `/download`
 - 역할: 다운로드 진행 상황, 의존성 트리 표시, 로그 뷰어
@@ -368,7 +440,8 @@ if (packageType === 'maven') {
 - 다운로드 속도 및 남은 시간 표시
 - 패키지별 상태 (대기/다운로드 중/완료/실패)
 - 에러 발생 시 재시도/건너뛰기/취소 선택
-- 완료 후 폴더 열기
+- 완료 후 폴더 열기 (Finder/Explorer)
+- 다운로드 완료 시 히스토리 자동 저장
 
 #### 출력 설정 통합
 
@@ -390,19 +463,36 @@ const outputFormat = defaultOutputFormat;  // 설정 페이지 값 직접 사용
 </Text>
 ```
 
+### HistoryPage
+- 경로: `/history`
+- 역할: 다운로드 이력 관리 및 재다운로드
+
+#### 주요 기능
+- 히스토리 목록 테이블 (날짜, 패키지, 상태, 크기, 출력 형식)
+- 상태별 필터링 (성공/부분 성공/실패)
+- 통계 카드 (전체/성공/실패 건수, 총 용량)
+- 상세 정보 모달
+- 폴더 열기 (Finder/Explorer)
+- 재다운로드 (장바구니에 추가 후 다운로드 페이지 이동)
+- 개별/전체 삭제
+
 ### SettingsPage
 - 경로: `/settings`
 - 역할: 앱 설정 관리
 
 #### 설정 항목
-- **다운로드 설정**: 동시 다운로드 수, 저장 디렉토리
+- **다운로드 설정**: 동시 다운로드 수, 기본 다운로드 경로
 - **언어 버전 설정**: Python, Java, Node.js 기본 버전
 - **캐시 설정**: 캐시 사용 여부, 디렉토리, 최대 크기
 - **출력 설정**: 기본 출력 형식, 설치 스크립트 포함 여부
 - **파일 분할 설정**: 자동 분할, 분할 크기
 - **SMTP 설정**: 메일 발송 설정
-- **OS 배포판 설정 (신규)**: YUM/APT/APK별 기본 배포판 및 아키텍처
-- **Docker 설정 (신규)**: 기본 레지스트리, 커스텀 레지스트리 URL, 이미지 아키텍처 등
+- **OS 배포판 설정**: YUM/APT/APK별 기본 배포판 및 아키텍처
+- **Docker 설정**: 기본 레지스트리, 커스텀 레지스트리 URL, 이미지 아키텍처 등
+
+#### 레이아웃 개선
+- 헤더 고정: 저장/초기화 버튼이 상단에 항상 표시
+- 스크롤 가능한 콘텐츠 영역
 
 #### 출력 설정 자동 적용
 
@@ -425,6 +515,37 @@ const outputFormat = defaultOutputFormat;  // 설정 페이지 값 직접 사용
 ---
 
 ## Zustand Stores
+
+### HistoryStore (`stores/historyStore.ts`)
+
+다운로드 히스토리 상태 관리
+
+```typescript
+interface HistoryState {
+  histories: DownloadHistory[];
+
+  // Actions
+  addHistory: (
+    packages: HistoryPackageItem[],
+    settings: HistorySettings,
+    outputPath: string,
+    totalSize: number,
+    status: HistoryStatus,
+    downloadedCount?: number,
+    failedCount?: number
+  ) => string;
+  getHistory: (id: string) => DownloadHistory | undefined;
+  getHistories: () => DownloadHistory[];
+  deleteHistory: (id: string) => void;
+  clearAll: () => void;
+}
+
+const useHistoryStore = create<HistoryState>()(persist(...));
+```
+
+- **영속성**: Zustand persist (`localStorage`)
+- **최대 개수**: 100개 (초과 시 오래된 항목 삭제)
+- **자세한 내용**: [다운로드 히스토리 문서](./download-history.md) 참조
 
 ### CartStore (`stores/cartStore.ts`)
 
@@ -539,6 +660,7 @@ interface SettingsState {
   // 다운로드 설정
   concurrentDownloads: number;
   downloadDir: string;
+  defaultDownloadPath: string;  // 기본 다운로드 경로
 
   // 언어 버전 설정
   languageVersions: LanguageVersions;
@@ -606,6 +728,21 @@ interface DependencyTreeProps {
 ### MainLayout (`layouts/MainLayout.tsx`)
 
 메인 레이아웃 (사이드바, 헤더, 컨텐츠 영역)
+
+#### 사이드바 메뉴
+
+| 경로 | 아이콘 | 라벨 |
+|------|--------|------|
+| `/` | HomeOutlined | 홈 |
+| `/wizard` | SearchOutlined | 패키지 검색 |
+| `/cart` | ShoppingCartOutlined | 장바구니 |
+| `/download` | DownloadOutlined | 다운로드 |
+| `/history` | HistoryOutlined | 히스토리 |
+| `/settings` | SettingOutlined | 설정 |
+
+#### 레이아웃 구조
+- **사이드바**: 고정(fixed) 위치, 화면 왼쪽에 항상 표시
+- **콘텐츠**: 사이드바 너비만큼 margin-left 적용 (80px collapsed, 200px expanded)
 
 ### OS 패키지 컴포넌트 (`components/os/`)
 
@@ -862,3 +999,4 @@ function LanguageVersionSelector() {
 - [Downloaders](./downloaders.md)
 - [Resolvers](./resolvers.md)
 - [OS 패키지 다운로더](./os-package-downloader.md)
+- [다운로드 히스토리](./download-history.md)
