@@ -14,7 +14,6 @@ import {
   Modal,
   Input,
   Select,
-  Radio,
   Divider,
   Statistic,
   Row,
@@ -32,7 +31,6 @@ import {
   SearchOutlined,
   FileTextOutlined,
   InboxOutlined,
-  SettingOutlined,
   InfoCircleOutlined,
   NodeIndexOutlined,
 } from '@ant-design/icons';
@@ -73,19 +71,6 @@ const estimatedSizePerPackage: Record<PackageType, number> = {
   docker: 150.0,
 };
 
-// 출력 형식 옵션
-const outputFormatOptions = [
-  { value: 'zip', label: 'ZIP 압축 파일', description: '단일 압축 파일 (.zip)' },
-  { value: 'tar.gz', label: 'TAR.GZ 파일', description: 'Linux 친화적 압축 (.tar.gz)' },
-  { value: 'mirror', label: '오프라인 미러', description: '로컬 저장소 구조' },
-];
-
-// 전달 방식 옵션
-const deliveryMethodOptions = [
-  { value: 'local', label: '로컬 저장', description: 'USB, 수동 전달용' },
-  { value: 'email', label: '메일 발송', description: 'SMTP 설정 필요' },
-];
-
 const CartPage: React.FC = () => {
   const navigate = useNavigate();
   const { items, removeItem, clearCart, addItem } = useCartStore();
@@ -96,11 +81,6 @@ const CartPage: React.FC = () => {
   const [textInputValue, setTextInputValue] = useState('');
   const [textInputType, setTextInputType] = useState<'requirements' | 'pom' | 'package'>('requirements');
 
-  // 다운로드 옵션 모달
-  const [optionsModalOpen, setOptionsModalOpen] = useState(false);
-  const [outputFormat, setOutputFormat] = useState<string>('zip');
-  const [deliveryMethod, setDeliveryMethod] = useState<string>('local');
-  const [includeScript, setIncludeScript] = useState(true);
 
   // 의존성 트리 모달
   const [dependencyTreeModalOpen, setDependencyTreeModalOpen] = useState(false);
@@ -398,13 +378,6 @@ const CartPage: React.FC = () => {
 
   // 다운로드 시작
   const handleStartDownload = () => {
-    // 다운로드 옵션 저장 후 다운로드 페이지로 이동
-    localStorage.setItem('downloadOptions', JSON.stringify({
-      outputFormat,
-      deliveryMethod,
-      includeScript,
-    }));
-    setOptionsModalOpen(false);
     navigate('/download');
   };
 
@@ -618,41 +591,32 @@ flask~=2.0.0`}
 
           {/* 요약 및 다운로드 옵션 */}
           <Card>
-            <Row gutter={24} align="middle">
-              <Col span={6}>
+            <Row gutter={[16, 16]} align="middle">
+              <Col xs={12} sm={6} md={5}>
                 <Statistic title="총 패키지 수" value={items.length} suffix="개" />
               </Col>
-              <Col span={6}>
+              <Col xs={12} sm={6} md={5}>
                 <Statistic
                   title="예상 다운로드 크기"
                   value={formatSize(estimatedSize)}
                   prefix={<InfoCircleOutlined />}
                 />
               </Col>
-              <Col span={6}>
+              <Col xs={12} sm={6} md={5}>
                 <Statistic
                   title="예상 소요 시간"
                   value={Math.ceil(estimatedSize / 10)}
                   suffix="분"
                 />
               </Col>
-              <Col span={6} style={{ textAlign: 'right' }}>
-                <Space>
-                  <Button
-                    icon={<SettingOutlined />}
-                    onClick={() => setOptionsModalOpen(true)}
-                  >
-                    다운로드 옵션
-                  </Button>
-                  <Button
-                    type="primary"
-                    size="large"
-                    icon={<DownloadOutlined />}
-                    onClick={() => setOptionsModalOpen(true)}
-                  >
-                    다운로드 시작
-                  </Button>
-                </Space>
+              <Col xs={24} sm={24} md={9} style={{ textAlign: 'right' }}>
+                <Button
+                  type="primary"
+                  icon={<DownloadOutlined />}
+                  onClick={handleStartDownload}
+                >
+                  다운로드 시작
+                </Button>
               </Col>
             </Row>
 
@@ -729,76 +693,6 @@ flask~=2.0.0`}
         />
       </Modal>
 
-      {/* 다운로드 옵션 모달 */}
-      <Modal
-        title="다운로드 옵션 설정"
-        open={optionsModalOpen}
-        onCancel={() => setOptionsModalOpen(false)}
-        onOk={handleStartDownload}
-        okText="다운로드 시작"
-        cancelText="취소"
-        width={500}
-      >
-        <div style={{ marginBottom: 24 }}>
-          <Text strong>출력 형식</Text>
-          <Radio.Group
-            value={outputFormat}
-            onChange={(e) => setOutputFormat(e.target.value)}
-            style={{ display: 'block', marginTop: 8 }}
-          >
-            <Space direction="vertical" style={{ width: '100%' }}>
-              {outputFormatOptions.map((opt) => (
-                <Radio key={opt.value} value={opt.value}>
-                  <span style={{ fontWeight: 500 }}>{opt.label}</span>
-                  <span style={{ color: '#888', marginLeft: 8 }}>{opt.description}</span>
-                </Radio>
-              ))}
-            </Space>
-          </Radio.Group>
-        </div>
-
-        <Divider />
-
-        <div style={{ marginBottom: 24 }}>
-          <Text strong>전달 방식</Text>
-          <Radio.Group
-            value={deliveryMethod}
-            onChange={(e) => setDeliveryMethod(e.target.value)}
-            style={{ display: 'block', marginTop: 8 }}
-          >
-            <Space direction="vertical" style={{ width: '100%' }}>
-              {deliveryMethodOptions.map((opt) => (
-                <Radio key={opt.value} value={opt.value}>
-                  <span style={{ fontWeight: 500 }}>{opt.label}</span>
-                  <span style={{ color: '#888', marginLeft: 8 }}>{opt.description}</span>
-                </Radio>
-              ))}
-            </Space>
-          </Radio.Group>
-        </div>
-
-        <Divider />
-
-        <div>
-          <Text strong>추가 옵션</Text>
-          <div style={{ marginTop: 8 }}>
-            <Radio.Group
-              value={includeScript}
-              onChange={(e) => setIncludeScript(e.target.value)}
-            >
-              <Radio value={true}>설치 스크립트 포함</Radio>
-              <Radio value={false}>패키지만 다운로드</Radio>
-            </Radio.Group>
-          </div>
-        </div>
-
-        <Alert
-          message={`총 ${items.length}개 패키지, 예상 ${formatSize(estimatedSize)}`}
-          type="info"
-          showIcon
-          style={{ marginTop: 24 }}
-        />
-      </Modal>
 
       {/* 의존성 트리 모달 */}
       <Modal

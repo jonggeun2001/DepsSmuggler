@@ -1125,9 +1125,10 @@ const WizardPage: React.FC = () => {
             )}
 
             <Dropdown
-              menu={{ items: dropdownItems }}
+              menu={{ items: dropdownItems, style: { maxHeight: 300, overflowY: 'auto' } }}
               open={showSuggestions && suggestions.length > 0}
               placement="bottomLeft"
+              autoAdjustOverflow={false}
               overlayStyle={{ width: '100%', maxWidth: 600 }}
             >
               <Input

@@ -44,6 +44,7 @@ interface SettingsState {
   enableCache: boolean;
   cachePath: string;
   includeDependencies: boolean; // 의존성 자동 포함 다운로드
+  defaultDownloadPath: string;  // 기본 다운로드 경로
 
   // 출력 설정
   defaultOutputFormat: 'zip' | 'tar.gz' | 'mirror';
@@ -93,6 +94,7 @@ const defaultSettings = {
   enableCache: true,
   cachePath: '',
   includeDependencies: true, // 기본값: 의존성 포함
+  defaultDownloadPath: '',   // 기본 다운로드 경로 (빈 값이면 시스템 기본 다운로드 폴더 사용)
 
   defaultOutputFormat: 'zip' as const,
   includeInstallScripts: true,

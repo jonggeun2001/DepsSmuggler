@@ -6,6 +6,7 @@ import {
   SearchOutlined,
   ShoppingCartOutlined,
   DownloadOutlined,
+  HistoryOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
 import { useCartStore } from '../stores/cartStore';
@@ -45,6 +46,11 @@ const MainLayout: React.FC = () => {
       label: '다운로드',
     },
     {
+      key: '/history',
+      icon: <HistoryOutlined />,
+      label: '히스토리',
+    },
+    {
       key: '/settings',
       icon: <SettingOutlined />,
       label: '설정',
@@ -58,6 +64,15 @@ const MainLayout: React.FC = () => {
         collapsed={collapsed}
         onCollapse={setCollapsed}
         theme="dark"
+        style={{
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          height: '100vh',
+          overflow: 'auto',
+          zIndex: 100,
+        }}
       >
         <div
           style={{
@@ -88,15 +103,15 @@ const MainLayout: React.FC = () => {
           onClick={({ key }) => navigate(key)}
         />
       </Sider>
-      <Layout>
-        
+      <Layout style={{ marginLeft: collapsed ? 80 : 200, transition: 'margin-left 0.2s' }}>
         <Content
           style={{
             margin: 24,
             padding: 24,
             background: '#fff',
             borderRadius: 8,
-            minHeight: 'calc(100vh - 64px - 70px - 48px)',
+            minHeight: 'calc(100vh - 70px - 48px)',
+            overflow: 'auto',
           }}
         >
           <Outlet />

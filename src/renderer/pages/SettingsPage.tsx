@@ -46,6 +46,7 @@ const SettingsPage: React.FC = () => {
     enableCache,
     cachePath,
     includeDependencies,
+    defaultDownloadPath,
     defaultOutputFormat,
     includeInstallScripts,
     enableFileSplit,
@@ -213,6 +214,7 @@ const SettingsPage: React.FC = () => {
       enableCache,
       cachePath,
       includeDependencies,
+      defaultDownloadPath,
       defaultOutputFormat,
       includeInstallScripts,
       enableFileSplit,
@@ -251,6 +253,7 @@ const SettingsPage: React.FC = () => {
     enableCache,
     cachePath,
     includeDependencies,
+    defaultDownloadPath,
     defaultOutputFormat,
     includeInstallScripts,
     enableFileSplit,
@@ -454,25 +457,37 @@ const SettingsPage: React.FC = () => {
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      height: '100%',
+      height: 'calc(100vh - 70px - 48px - 48px)', // viewport - footer - margin
+      margin: '-24px', // Content padding 상쇄
       overflow: 'hidden'
     }}>
       {/* 고정 헤더 */}
       <div style={{
-        padding: '12px 0',
+        flexShrink: 0,
+        height: 56,
+        padding: '0 24px',
         borderBottom: '1px solid #f0f0f0',
         backgroundColor: '#fff',
-        flexShrink: 0
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
       }}>
         <Title level={4} style={{ margin: 0 }}>설정</Title>
+        <Space>
+          <Button size="small" icon={<ReloadOutlined />} onClick={handleReset}>
+            초기화
+          </Button>
+          <Button size="small" type="primary" icon={<SaveOutlined />} onClick={() => form.submit()}>
+            저장
+          </Button>
+        </Space>
       </div>
 
       {/* 스크롤 가능한 콘텐츠 영역 */}
       <div style={{
         flex: 1,
         overflow: 'auto',
-        paddingTop: 12,
-        paddingBottom: 72  // 하단 버튼 영역 확보
+        padding: '12px 24px'
       }}>
         <Form
           form={form}
@@ -511,6 +526,28 @@ const SettingsPage: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
+          <Form.Item
+            name="defaultDownloadPath"
+            label="기본 다운로드 경로"
+            tooltip="다운로드 파일이 저장될 기본 경로 (비워두면 시스템 기본 다운로드 폴더 사용)"
+            style={{ marginBottom: 8 }}
+          >
+            <Input.Search
+              placeholder="다운로드 경로를 선택하세요"
+              enterButton={<FolderOpenOutlined />}
+              onSearch={async () => {
+                if (window.electronAPI?.selectDirectory) {
+                  const selectedPath = await window.electronAPI.selectDirectory();
+                  if (selectedPath) {
+                    form.setFieldValue('defaultDownloadPath', selectedPath);
+                  }
+                } else {
+                  message.info('폴더 선택은 Electron 환경에서만 가능합니다');
+                }
+              }}
+              readOnly
+            />
+          </Form.Item>
         </Card>
 
         {/* 기본 언어 버전 설정 */}
@@ -1037,30 +1074,6 @@ const SettingsPage: React.FC = () => {
           </Space>
         </Card>
         </Form>
-      </div>
-
-      {/* 고정 하단 액션 바 */}
-      <div style={{
-        position: 'sticky',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        padding: '10px 0',
-        backgroundColor: '#fff',
-        borderTop: '1px solid #f0f0f0',
-        boxShadow: '0 -2px 8px rgba(0,0,0,0.06)',
-        display: 'flex',
-        justifyContent: 'flex-end',
-        gap: 8,
-        zIndex: 100,
-        flexShrink: 0
-      }}>
-        <Button size="small" icon={<ReloadOutlined />} onClick={handleReset}>
-          초기화
-        </Button>
-        <Button size="small" type="primary" icon={<SaveOutlined />} onClick={() => form.submit()}>
-          저장
-        </Button>
       </div>
     </div>
   );
