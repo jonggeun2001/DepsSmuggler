@@ -117,6 +117,26 @@ async function waitForViteServer(
 - 최대 30회 재시도 (500ms 간격, 총 15초)
 - 서버 준비 전 로드 시 발생하는 오류 방지
 
+### SSL 인증서 설정
+
+기업 환경의 프록시/방화벽에서 자체 서명 인증서로 인한 `self signed certificate in certificate chain` 에러를 방지하기 위해 SSL 검증을 비활성화합니다.
+
+```typescript
+// electron/main.ts
+if (process.env.DEPSSMUGGLER_STRICT_SSL !== 'true') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  axios.defaults.httpsAgent = new https.Agent({
+    rejectUnauthorized: false
+  });
+}
+```
+
+| 환경변수 | 기본값 | 설명 |
+|----------|--------|------|
+| `DEPSSMUGGLER_STRICT_SSL` | `false` | `true`로 설정 시 SSL 인증서 검증 활성화 |
+
+**주의**: 보안상 SSL 검증 비활성화는 폐쇄망/신뢰할 수 있는 네트워크에서만 사용해야 합니다.
+
 ### IPC 핸들러
 
 | 채널 | 설명 |
@@ -127,9 +147,9 @@ async function waitForViteServer(
 | `select-directory` | 디렉토리 선택 다이얼로그 (설정용) |
 | `save-file` | 파일 저장 다이얼로그 |
 | `open-folder` | 폴더 열기 (Finder/Explorer) |
-| `search:packages` | 패키지 검색 (PyPI, Maven 실제 API 연동) |
-| `search:suggest` | 자동완성 제안 |
-| `search:versions` | 패키지 버전 목록 조회 |
+| `search:packages` | 패키지 검색 (pip, conda, maven, npm, docker) |
+| `search:suggest` | 자동완성 제안 (pip, conda, maven, npm, docker, yum) |
+| `search:versions` | 패키지 버전 목록 조회 (pip, conda, maven, npm, docker) |
 | `dependency:resolve` | 의존성 해결 |
 | `download:start` | 다운로드 시작 |
 | `download:pause` | 다운로드 일시정지 |
@@ -149,6 +169,30 @@ async function waitForViteServer(
 | `history:clear` | - | { success: boolean } | 전체 히스토리 삭제 |
 
 히스토리 파일 위치: `~/.depssmuggler/history.json`
+
+### 캐시 IPC 핸들러
+
+전체 캐시(pip, npm, maven, conda) 통합 관리를 위한 핸들러
+
+| 채널 | 파라미터 | 반환값 | 설명 |
+|------|----------|--------|------|
+| `cache:stats` | - | CacheStatsResult | 통합 캐시 통계 조회 |
+| `cache:clear` | - | { success: boolean } | 전체 캐시 삭제 |
+
+#### CacheStatsResult 타입
+
+```typescript
+interface CacheStatsResult {
+  totalSize: number;      // 전체 디스크 캐시 크기 (bytes)
+  entryCount: number;     // 전체 캐시 항목 수
+  details: {
+    pip: PipCacheStats;
+    npm: NpmCacheStats;
+    maven: MavenCacheStats;
+    conda: CondaCacheStats;
+  };
+}
+```
 
 ### OS 패키지 IPC 핸들러
 
