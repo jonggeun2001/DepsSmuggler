@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as zlib from 'zlib';
 import { PackageInfo } from '../../types';
 import logger from '../../utils/logger';
+import { resolvePath, toUnixPath } from '../shared/path-utils';
 
 // 압축 형식 타입
 export type ArchiveFormat = 'zip' | 'tar.gz';
@@ -133,6 +134,7 @@ export class ArchivePackager {
 
   /**
    * ZIP 압축 파일 생성
+   * ZIP 표준에서는 경로 구분자로 forward slash(/)만 허용
    */
   private async createZip(
     sourceDir: string,
@@ -140,7 +142,11 @@ export class ArchivePackager {
     compressionLevel: number
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const output = fs.createWriteStream(outputPath);
+      // 경로 정규화
+      const normalizedSourceDir = resolvePath(sourceDir);
+      const normalizedOutputPath = resolvePath(outputPath);
+
+      const output = fs.createWriteStream(normalizedOutputPath);
       const archive = archiver.create('zip', {
         zlib: { level: compressionLevel },
       });
@@ -149,7 +155,8 @@ export class ArchivePackager {
       archive.on('error', (err) => reject(err));
 
       archive.pipe(output);
-      archive.directory(sourceDir, false);
+      // archiver는 내부적으로 경로를 처리하지만, 명시적으로 정규화된 경로 사용
+      archive.directory(normalizedSourceDir, false);
       archive.finalize();
     });
   }
@@ -260,6 +267,23 @@ export class ArchivePackager {
       lines.push('  docker load -i ./packages/<이미지명>.tar');
       lines.push('');
     }
+
+    lines.push('--------------------------------------------------------------------------------');
+    lines.push('                              스크립트 실행');
+    lines.push('--------------------------------------------------------------------------------');
+    lines.push('');
+    lines.push('[Windows]');
+    lines.push('  - PowerShell 스크립트 (.ps1):');
+    lines.push('    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser');
+    lines.push('    .\\install.ps1');
+    lines.push('');
+    lines.push('  - Bash 스크립트 (.sh): Git Bash 또는 WSL 필요');
+    lines.push('    bash install.sh');
+    lines.push('');
+    lines.push('[Linux/macOS]');
+    lines.push('  chmod +x install.sh');
+    lines.push('  ./install.sh');
+    lines.push('');
 
     lines.push('================================================================================');
     lines.push('                    DepsSmuggler - 폐쇄망을 위한 패키지 다운로더');

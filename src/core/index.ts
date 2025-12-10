@@ -16,7 +16,6 @@ export { ScriptGenerator, getScriptGenerator } from './packager/scriptGenerator'
 export type { ScriptOptions, GeneratedScript } from './packager/scriptGenerator';
 
 export { FileSplitter, getFileSplitter } from './packager/fileSplitter';
-export { MirrorPackager, getMirrorPackager } from './packager/mirrorPackager';
 
 // Download Manager
 export { DownloadManager, getDownloadManager } from './downloadManager';

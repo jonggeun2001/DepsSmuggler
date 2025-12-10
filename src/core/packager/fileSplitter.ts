@@ -7,6 +7,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import logger from '../../utils/logger';
+import { resolvePath, getWriteOptions } from '../shared/path-utils';
 
 export interface SplitOptions {
   maxSizeMB?: number; // 분할 크기 (MB), 기본 25MB
@@ -77,10 +78,12 @@ export class FileSplitter {
       throw new Error(`파일을 찾을 수 없습니다: ${filePath}`);
     }
 
-    const stat = await fs.stat(filePath);
+    // 경로를 정규화하여 크로스 플랫폼 호환성 보장
+    const normalizedPath = resolvePath(filePath);
+    const stat = await fs.stat(normalizedPath);
     const totalBytes = stat.size;
-    const fileName = path.basename(filePath);
-    const fileDir = path.dirname(filePath);
+    const fileName = path.basename(normalizedPath);
+    const fileDir = path.dirname(normalizedPath);
 
     // 파일이 분할 크기보다 작으면 분할하지 않음
     if (totalBytes <= maxSizeBytes) {
@@ -404,7 +407,8 @@ export class FileSplitter {
     ];
 
     const content = lines.join('\n');
-    await fs.writeFile(scriptPath, content, { encoding: 'utf-8', mode: 0o755 });
+    // 플랫폼에 따른 파일 권한 처리 - Windows에서는 mode 무시됨
+    await fs.writeFile(scriptPath, content, getWriteOptions(true));
 
     return scriptPath;
   }
@@ -449,13 +453,15 @@ export class FileSplitter {
       '# 파일 병합',
       'Write-Info "$PartCount 개의 파트를 병합합니다..."',
       '',
-      '# 출력 파일 생성',
-      '$OutStream = [System.IO.File]::Create("$ScriptDir\\$OutputFile")',
+      '# 출력 파일 생성 - Join-Path를 사용하여 크로스 플랫폼 호환성 보장',
+      '$OutputPath = Join-Path -Path $ScriptDir -ChildPath $OutputFile',
+      '$OutStream = [System.IO.File]::Create($OutputPath)',
       '',
       'for ($i = 1; $i -le $PartCount; $i++) {',
       '    $PartFile = "$OutputFile.part$($i.ToString().PadLeft(3, \'0\'))"',
+      '    $PartPath = Join-Path -Path $ScriptDir -ChildPath $PartFile',
       '    Write-Host "  파트 $i / $PartCount 병합 중..." -NoNewline',
-      '    $Bytes = [System.IO.File]::ReadAllBytes("$ScriptDir\\$PartFile")',
+      '    $Bytes = [System.IO.File]::ReadAllBytes($PartPath)',
       '    $OutStream.Write($Bytes, 0, $Bytes.Length)',
       '    Write-Host " 완료"',
       '}',

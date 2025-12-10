@@ -7,6 +7,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import { PackageInfo } from '../../types';
 import logger from '../../utils/logger';
+import { stripLeadingDotSlash, toUnixPath, getWriteOptions } from '../shared/path-utils';
 
 export interface ScriptOptions {
   includeHeader?: boolean;
@@ -272,7 +273,8 @@ export class ScriptGenerator {
 
     const content = lines.join('\n');
     await fs.ensureDir(path.dirname(outputPath));
-    await fs.writeFile(outputPath, content, { encoding: 'utf-8', mode: 0o755 });
+    // 플랫폼에 따른 파일 권한 처리 - Windows에서는 mode 무시됨
+    await fs.writeFile(outputPath, content, getWriteOptions(true));
 
     logger.info('Bash 스크립트 생성 완료', { outputPath });
 
@@ -290,8 +292,11 @@ export class ScriptGenerator {
     const {
       includeHeader = true,
       includeErrorHandling = true,
-      packageDir = '.\\packages',
+      packageDir = './packages',
     } = options;
+
+    // 크로스 플랫폼 경로 처리: 입력 경로를 정규화하고 선행 ./ 제거
+    const normalizedPackageDir = stripLeadingDotSlash(toUnixPath(packageDir));
 
     const lines: string[] = [];
 
@@ -320,10 +325,10 @@ export class ScriptGenerator {
     lines.push('function Write-Err { param($Message) Write-Host "[ERROR] $Message" -ForegroundColor Red }');
     lines.push('');
 
-    // 패키지 디렉토리 설정
+    // 패키지 디렉토리 설정 - Join-Path를 사용하여 플랫폼 독립적으로 경로 생성
     lines.push('# 패키지 디렉토리 설정');
     lines.push('$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path');
-    lines.push(`$PackageDir = Join-Path $ScriptDir "${packageDir.replace(/\\/g, '\\\\')}"`);
+    lines.push(`$PackageDir = Join-Path -Path $ScriptDir -ChildPath '${normalizedPackageDir}'`);
     lines.push('');
     lines.push('if (-not (Test-Path $PackageDir)) {');
     lines.push('    Write-Err "패키지 디렉토리를 찾을 수 없습니다: $PackageDir"');
@@ -390,7 +395,8 @@ export class ScriptGenerator {
       lines.push('    }');
       lines.push('');
       lines.push('    # JAR 파일 설치');
-      lines.push('    Get-ChildItem "$PackageDir\\*.jar" | ForEach-Object {');
+      lines.push('    $JarPattern = Join-Path -Path $PackageDir -ChildPath "*.jar"');
+      lines.push('    Get-ChildItem $JarPattern | ForEach-Object {');
       lines.push('        Write-Info "$($_.Name) 설치 중..."');
       lines.push('        try {');
       lines.push('            mvn install:install-file -Dfile="$($_.FullName)" -DgeneratePom=true');
@@ -424,10 +430,12 @@ export class ScriptGenerator {
 
       for (const pkg of dockerPackages) {
         const imageName = pkg.name.replace(/[\/]/g, '_');
+        const tarFileName = `${imageName}_${pkg.version}.tar`;
         lines.push(`    # ${pkg.name}:${pkg.version} 로드`);
         lines.push(`    Write-Info "${pkg.name}:${pkg.version} 로드 중..."`);
+        lines.push(`    $ImagePath = Join-Path -Path $PackageDir -ChildPath '${tarFileName}'`);
         lines.push('    try {');
-        lines.push(`        docker load -i "$PackageDir\\${imageName}_${pkg.version}.tar"`);
+        lines.push('        docker load -i $ImagePath');
         lines.push('    } catch {');
         lines.push(`        Write-Warn "${pkg.name}:${pkg.version} 로드 실패"`);
         lines.push('    }');

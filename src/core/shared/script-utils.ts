@@ -2,6 +2,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { DownloadPackage } from './types';
+import { isWindows } from './path-utils';
 
 /**
  * 설치 스크립트 생성 (Bash + PowerShell)
@@ -13,7 +14,9 @@ export function generateInstallScripts(
   const bashScript = generateBashScript(packages);
   const psScript = generatePowerShellScript(packages);
 
-  fs.writeFileSync(path.join(outputDir, 'install.sh'), bashScript, { mode: 0o755 });
+  // Windows에서는 mode 옵션이 무시되므로 조건부 처리
+  const bashWriteOptions = isWindows ? {} : { mode: 0o755 };
+  fs.writeFileSync(path.join(outputDir, 'install.sh'), bashScript, bashWriteOptions);
   fs.writeFileSync(path.join(outputDir, 'install.ps1'), psScript);
 
   // Docker 이미지가 포함된 경우 docker-load 스크립트 생성
@@ -22,7 +25,8 @@ export function generateInstallScripts(
     const dockerBashScript = generateDockerLoadBashScript(dockerPackages);
     const dockerPsScript = generateDockerLoadPowerShellScript(dockerPackages);
 
-    fs.writeFileSync(path.join(outputDir, 'docker-load.sh'), dockerBashScript, { mode: 0o755 });
+    const dockerBashWriteOptions = isWindows ? {} : { mode: 0o755 };
+    fs.writeFileSync(path.join(outputDir, 'docker-load.sh'), dockerBashScript, dockerBashWriteOptions);
     fs.writeFileSync(path.join(outputDir, 'docker-load.ps1'), dockerPsScript);
   }
 }
@@ -75,11 +79,13 @@ Write-Host "Installing packages..."
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+$PackagesDir = Join-Path -Path $ScriptDir -ChildPath 'packages'
+
 ${pipPackages.length > 0 ? `# pip 패키지 설치
-${pipPackages.map((p) => `pip install --no-index --find-links="$ScriptDir\\packages" ${p.name}==${p.version}`).join('\n')}
+${pipPackages.map((p) => `pip install --no-index --find-links="$PackagesDir" ${p.name}==${p.version}`).join('\n')}
 ` : ''}
 ${condaPackages.length > 0 ? `# conda 패키지 설치
-${condaPackages.map((p) => `pip install --no-index --find-links="$ScriptDir\\packages" ${p.name}==${p.version}`).join('\n')}
+${condaPackages.map((p) => `pip install --no-index --find-links="$PackagesDir" ${p.name}==${p.version}`).join('\n')}
 ` : ''}
 ${mavenPackages.length > 0 ? `# Maven 아티팩트 복사
 Write-Host "Maven artifacts are in packages/ directory"
@@ -161,6 +167,7 @@ $ErrorActionPreference = "Stop"
 Write-Host "Loading Docker images..."
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$PackagesDir = Join-Path -Path $ScriptDir -ChildPath 'packages'
 
 # Docker 설치 확인
 try {
@@ -170,7 +177,7 @@ try {
     exit 1
 }
 
-# Docker 데몬 데몬 실행 확인
+# Docker 데몬 실행 확인
 try {
     docker info | Out-Null
 } catch {
@@ -181,7 +188,8 @@ try {
 # 이미지 로드
 ${dockerImages.map((img) => `Write-Host "Loading ${img.fullName}..."
 try {
-    docker load -i "$ScriptDir\\packages\\${img.fileName}"
+    $ImagePath = Join-Path -Path $PackagesDir -ChildPath '${img.fileName}'
+    docker load -i $ImagePath
     Write-Host "  [OK] ${img.fullName} 로드 완료" -ForegroundColor Green
 } catch {
     Write-Host "  [FAIL] ${img.fullName} 로드 실패" -ForegroundColor Red
