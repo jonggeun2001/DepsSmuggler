@@ -1,6 +1,7 @@
 {
   "name": "depssmuggler",
   "version": "1.0.0",
+  "type": "module",
   "description": "폐쇄망 환경을 위한 패키지 의존성 다운로드 및 전달 애플리케이션",
   "main": "dist/electron/main.js",
   "scripts": {

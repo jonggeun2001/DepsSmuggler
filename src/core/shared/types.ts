@@ -12,6 +12,8 @@ export interface DownloadPackage {
   repository?: { baseUrl: string; name?: string };
   /** OS 패키지의 파일 경로 (저장소 내 위치) */
   location?: string;
+  /** 추가 메타데이터 (Docker registry 등) */
+  metadata?: Record<string, unknown>;
 }
 
 export type TargetOS = 'windows' | 'macos' | 'linux' | 'any';

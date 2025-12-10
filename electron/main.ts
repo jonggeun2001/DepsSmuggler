@@ -30,6 +30,7 @@ import {
   generateInstallScripts,
   resolveAllDependencies,
   sortByRelevance,
+  Architecture,
 } from '../src/core/shared';
 
 // OS 패키지 핸들러
@@ -769,6 +770,50 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
           const url = `${baseUrl}${pkgWithUrl.location}`;
           const filename = path.basename(pkgWithUrl.location);
           downloadUrl = { url, filename };
+        }
+      } else if (pkg.type === 'docker') {
+        // Docker 이미지는 별도 처리 (레이어별 다운로드 + tar 생성)
+        const dockerDownloader = getDockerDownloader();
+        const registry = (pkg.metadata?.registry as string) || 'docker.io';
+        const arch = (pkg.architecture || 'amd64') as Architecture;
+
+        try {
+          const tarPath = await dockerDownloader.downloadImage(
+            pkg.name,
+            pkg.version,
+            arch,
+            packagesDir,
+            (progress) => {
+              mainWindow?.webContents.send('download:progress', {
+                packageId: pkg.id,
+                status: 'downloading',
+                progress: progress.progress,
+                downloadedBytes: progress.downloadedBytes,
+                totalBytes: progress.totalBytes,
+                speed: progress.speed,
+              });
+            },
+            registry
+          );
+
+          // 완료 상태 전송
+          mainWindow?.webContents.send('download:progress', {
+            packageId: pkg.id,
+            status: 'completed',
+            progress: 100,
+          });
+
+          results.push({ id: pkg.id, success: true });
+          continue; // Docker는 별도 처리 완료, 다음 패키지로
+        } catch (dockerError) {
+          const errorMessage = dockerError instanceof Error ? dockerError.message : String(dockerError);
+          mainWindow?.webContents.send('download:progress', {
+            packageId: pkg.id,
+            status: 'error',
+            error: errorMessage,
+          });
+          results.push({ id: pkg.id, success: false, error: errorMessage });
+          continue;
         }
       }
 

@@ -47,7 +47,7 @@ export class CondaDownloader implements IDownloader {
 
   constructor() {
     this.client = axios.create({
-      timeout: 30000,
+      timeout: 600000, // 10분
       headers: {
         Accept: 'application/json',
       },
@@ -127,32 +127,51 @@ export class CondaDownloader implements IDownloader {
     query: string,
     channel: CondaChannel = 'conda-forge'
   ): Promise<PackageInfo[]> {
-    try {
-      const response = await this.client.get<CondaSearchResult[]>(
-        `${this.apiUrl}/search`,
-        {
-          params: { name: query },
+    const maxRetries = 2;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await this.client.get<CondaSearchResult[]>(
+          `${this.apiUrl}/search`,
+          {
+            params: { name: query },
+            timeout: 600000, // 10분
+          }
+        );
+
+        // 채널 필터링
+        const filtered = response.data.filter(
+          (pkg) => pkg.owner === channel || channel === 'all'
+        );
+
+        return filtered.slice(0, 50).map((pkg) => ({
+          type: 'conda',
+          name: pkg.name,
+          version: 'latest',
+          metadata: {
+            description: pkg.summary,
+            repository: pkg.full_name,
+          },
+        }));
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        
+        // 타임아웃이나 네트워크 에러면 재시도
+        if (axios.isAxiosError(error) && (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT')) {
+          logger.warn(`Conda 검색 타임아웃, 재시도 ${attempt + 1}/${maxRetries + 1}`, { query, channel });
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+            continue;
+          }
         }
-      );
-
-      // 채널 필터링
-      const filtered = response.data.filter(
-        (pkg) => pkg.owner === channel || channel === 'all'
-      );
-
-      return filtered.slice(0, 50).map((pkg) => ({
-        type: 'conda',
-        name: pkg.name,
-        version: 'latest',
-        metadata: {
-          description: pkg.summary,
-          repository: pkg.full_name,
-        },
-      }));
-    } catch (error) {
-      logger.error('Conda 패키지 검색 실패', { query, channel, error });
-      throw error;
+        
+        logger.error('Conda 패키지 검색 실패', { query, channel, error });
+        throw error;
+      }
     }
+
+    throw lastError || new Error('Conda 검색 실패');
   }
 
   /**

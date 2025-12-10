@@ -144,6 +144,35 @@ const CondaChannel = {
 - **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
 - **Anaconda API fallback**: RC 버전 등 특수 라벨 패키지 지원
 
+### 타임아웃 및 재시도 설정
+
+Anaconda API가 느린 경우를 대비하여 타임아웃과 재시도 로직이 구현되어 있습니다:
+
+| 설정 | 값 | 설명 |
+|------|-----|------|
+| 기본 타임아웃 | 10분 (600,000ms) | HTTP 클라이언트 기본 타임아웃 |
+| 검색 타임아웃 | 10분 (600,000ms) | `searchPackages` 메서드 전용 |
+| 최대 재시도 | 3회 | 타임아웃/네트워크 에러 시 |
+| 재시도 대기 | 1초, 2초, 3초 | 점진적 백오프 |
+
+```typescript
+// 재시도 로직 (searchPackages 내부)
+for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  try {
+    const response = await this.client.get(..., { timeout: 600000 });
+    // ...
+  } catch (error) {
+    if (axios.isAxiosError(error) &&
+        (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT')) {
+      // 타임아웃이면 재시도
+      await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+      continue;
+    }
+    throw error;
+  }
+}
+```
+
 ### 사용 예시
 ```typescript
 import { getCondaDownloader, CondaChannel } from './core/downloaders/conda';

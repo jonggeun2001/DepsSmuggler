@@ -269,8 +269,37 @@ const downloaderMap = {
   maven: getMavenDownloader,
   docker: getDockerDownloader,
   yum: getYumDownloader,
+  npm: getNpmDownloader,
 };
 ```
+
+### Docker 이미지 다운로드 처리
+
+`download:start` 핸들러에서 Docker 이미지는 별도로 처리됩니다:
+
+```typescript
+// Docker 이미지는 레이어별 다운로드 + tar 생성 방식
+if (pkg.type === 'docker') {
+  const dockerDownloader = getDockerDownloader();
+  const registry = (pkg.metadata?.registry as string) || 'docker.io';
+  const arch = (pkg.architecture || 'amd64') as Architecture;
+
+  const tarPath = await dockerDownloader.downloadImage(
+    pkg.name,
+    pkg.version,
+    arch,
+    packagesDir,
+    (progress) => {
+      mainWindow?.webContents.send('download:progress', { ... });
+    },
+    registry
+  );
+}
+```
+
+- **별도 처리 이유**: Docker 이미지는 단순 URL 다운로드가 아닌 레이어별 다운로드 후 tar로 패키징
+- **레지스트리 지정**: `metadata.registry` 필드로 커스텀 레지스트리 지원
+- **아키텍처 지정**: `architecture` 필드로 타겟 아키텍처 지정 (기본: amd64)
 
 ### PyPI 패키지 캐시
 
