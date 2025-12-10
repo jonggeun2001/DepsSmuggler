@@ -1,0 +1,234 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  # 테스트 먼저 실행
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+  # Windows 빌드
+  build-windows:
+    name: Build Windows
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Package for Windows
+        run: npm run package:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            build/*.exe
+            build/*.msi
+          if-no-files-found: warn
+
+  # macOS 빌드
+  build-macos:
+    name: Build macOS
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Package for macOS
+        run: npm run package:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 코드 서명 (선택사항 - secrets 설정 필요)
+          # CSC_LINK: ${{ secrets.MAC_CERTS }}
+          # CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: |
+            build/*.dmg
+            build/*.zip
+          if-no-files-found: warn
+
+  # Linux 빌드
+  build-linux:
+    name: Build Linux
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Package for Linux
+        run: npm run package:linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            build/*.AppImage
+            build/*.deb
+            build/*.rpm
+            build/*.tar.gz
+          if-no-files-found: warn
+
+  # GitHub Release 생성
+  create-release:
+    name: Create Release
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: |
+          echo "=== Downloaded artifacts ==="
+          find artifacts -type f -name "*" | head -50
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: DepsSmuggler v${{ steps.get_version.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          generate_release_notes: true
+          files: |
+            artifacts/windows-build/*
+            artifacts/macos-build/*
+            artifacts/linux-build/*
+          body: |
+            ## DepsSmuggler v${{ steps.get_version.outputs.version }}
+
+            폐쇄망 환경을 위한 패키지 의존성 다운로드 및 전달 애플리케이션
+
+            ### 다운로드
+
+            | 플랫폼 | 파일 |
+            |--------|------|
+            | Windows | `.exe` 또는 `.msi` |
+            | macOS | `.dmg` 또는 `.zip` |
+            | Linux | `.AppImage`, `.deb`, 또는 `.rpm` |
+
+            ### 설치 방법
+
+            **Windows**
+            - `.exe` 파일을 다운로드하여 실행
+            - 또는 `.msi` 파일로 설치
+
+            **macOS**
+            - `.dmg` 파일을 다운로드
+            - 앱을 Applications 폴더로 드래그
+
+            **Linux**
+            ```bash
+            # AppImage (권장)
+            chmod +x DepsSmuggler-*.AppImage
+            ./DepsSmuggler-*.AppImage
+
+            # Debian/Ubuntu
+            sudo dpkg -i depssmuggler_*.deb
+
+            # RHEL/Fedora
+            sudo rpm -i depssmuggler-*.rpm
+            ```
+
+            ### 변경 사항
+
+            자세한 변경 사항은 아래 자동 생성된 릴리즈 노트를 참조하세요.
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
