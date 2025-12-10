@@ -2,7 +2,19 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as https from 'https';
 import axios from 'axios';
+
+// SSL 인증서 검증 비활성화 (기업 프록시/방화벽 환경 지원)
+// 환경변수로 제어 가능: DEPSSMUGGLER_STRICT_SSL=true로 설정하면 검증 활성화
+if (process.env.DEPSSMUGGLER_STRICT_SSL !== 'true') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
+  // axios 기본 설정에 httpsAgent 추가
+  axios.defaults.httpsAgent = new https.Agent({
+    rejectUnauthorized: false
+  });
+}
 import { getLogger, createScopedLogger } from './utils/logger';
 
 // 스코프별 로거 생성
