@@ -4,6 +4,7 @@
  */
 
 import type { OSPackageInfo, OSPackageManager, ScriptType } from '../types';
+import { stripLeadingDotSlash, toUnixPath } from '../../../shared/path-utils';
 
 /**
  * 생성된 스크립트
@@ -101,9 +102,9 @@ export class OSScriptGenerator {
       lines.push('');
     }
 
-    // 변수 설정
+    // 변수 설정 - 크로스 플랫폼 경로 처리 (./와 .\ 모두 지원)
     lines.push('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"');
-    lines.push(`PACKAGE_DIR="\${SCRIPT_DIR}/${opts.packageDir.replace(/^\.\//, '')}"`);
+    lines.push(`PACKAGE_DIR="\${SCRIPT_DIR}/${stripLeadingDotSlash(toUnixPath(opts.packageDir))}"`);
     lines.push('');
 
     // 관리자 권한 확인
@@ -253,9 +254,9 @@ export class OSScriptGenerator {
       lines.push('');
     }
 
-    // 변수 설정
+    // 변수 설정 - 크로스 플랫폼 경로 처리 (./와 .\ 모두 지원)
     lines.push('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"');
-    lines.push(`REPO_DIR="\${SCRIPT_DIR}/${opts.packageDir.replace(/^\.\//, '')}"`);
+    lines.push(`REPO_DIR="\${SCRIPT_DIR}/${stripLeadingDotSlash(toUnixPath(opts.packageDir))}"`);
     lines.push(`REPO_NAME="${opts.repoName}"`);
     lines.push('');
 

@@ -25,7 +25,7 @@ program
   .option('-V, --pkg-version <version>', '패키지 버전', 'latest')
   .option('-a, --arch <arch>', '아키텍처 (x86_64, arm64 등)', 'x86_64')
   .option('-o, --output <path>', '출력 경로', './output')
-  .option('-f, --format <format>', '출력 형식 (zip, tar.gz, mirror)', 'zip')
+  .option('-f, --format <format>', '출력 형식 (zip, tar.gz)', 'zip')
   .option('--file <file>', '패키지 목록 파일 (requirements.txt, pom.xml 등)')
   .option('--no-deps', '의존성 포함하지 않음')
   .option('--concurrency <num>', '동시 다운로드 수', '3')

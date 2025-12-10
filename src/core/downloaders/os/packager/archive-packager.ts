@@ -259,8 +259,12 @@ metadata.json - 패키지 메타데이터
 
 Windows에서 사용
 --------------
-WSL(Windows Subsystem for Linux)이 필요합니다.
-install.ps1 또는 setup-repo.ps1을 실행하면 WSL 설정을 안내합니다.
+- PowerShell 스크립트 실행 시:
+  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+  .\\install.ps1
+
+- Bash 스크립트는 WSL(Windows Subsystem for Linux) 또는 Git Bash 필요:
+  bash install.sh
 
 포함된 패키지
 -----------

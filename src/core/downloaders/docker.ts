@@ -11,6 +11,7 @@ import {
   Architecture,
 } from '../../types';
 import logger from '../../utils/logger';
+import { sanitizeDockerTag } from '../shared/filename-utils';
 
 // Docker Hub 검색 응답
 interface DockerSearchResponse {
@@ -388,7 +389,7 @@ export class DockerDownloader implements IDownloader {
       }
 
       // 디렉토리 생성
-      const safeTag = tag.replace(/[/\\:*?"<>|]/g, '_');
+      const safeTag = sanitizeDockerTag(tag);
       const imageDir = path.join(destPath, `${repo}-${safeTag}`);
       await fs.ensureDir(imageDir);
 

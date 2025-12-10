@@ -1289,6 +1289,87 @@ export function downloadApiPlugin(): Plugin {
           }
         });
       });
+
+      // =====================================================
+      // 캐시 통계 조회 API (개발 환경용)
+      // =====================================================
+      server.middlewares.use('/api/cache/stats', async (req, res, next) => {
+        if (req.method !== 'GET') {
+          next();
+          return;
+        }
+
+        try {
+          const { getCacheStats: getPipCacheStats } = await import('./src/core/shared/pip-cache');
+          const { getNpmCacheStats } = await import('./src/core/shared/npm-cache');
+          const { getMavenCacheStats } = await import('./src/core/shared/maven-cache');
+          const { getCacheStats: getCondaCacheStats } = await import('./src/core/shared/conda-cache');
+
+          const pipStats = getPipCacheStats();
+          const npmStats = getNpmCacheStats();
+          const mavenStats = getMavenCacheStats();
+          const condaStats = getCondaCacheStats();
+
+          const totalEntryCount =
+            pipStats.memoryEntries +
+            pipStats.diskEntries +
+            npmStats.entries +
+            mavenStats.memoryEntries +
+            condaStats.entries.length;
+
+          const totalSize = pipStats.diskSize + condaStats.totalSize;
+
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({
+            totalSize,
+            entryCount: totalEntryCount,
+            details: {
+              pip: pipStats,
+              npm: npmStats,
+              maven: mavenStats,
+              conda: condaStats,
+            }
+          }));
+        } catch (error) {
+          console.error('Cache stats error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: String(error) }));
+        }
+      });
+
+      // =====================================================
+      // 캐시 삭제 API (개발 환경용)
+      // =====================================================
+      server.middlewares.use('/api/cache/clear', async (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+
+        try {
+          const { clearAllCache: clearPipCache } = await import('./src/core/shared/pip-cache');
+          const { clearNpmCache } = await import('./src/core/shared/npm-cache');
+          const { clearMemoryCache: clearMavenMemoryCache, clearDiskCache: clearMavenDiskCache } = await import('./src/core/shared/maven-cache');
+          const { clearCache: clearCondaCache } = await import('./src/core/shared/conda-cache');
+
+          clearPipCache();
+          clearNpmCache();
+          clearMavenMemoryCache();
+          await clearMavenDiskCache();
+          clearCondaCache();
+
+          console.log('All caches cleared (including conda)');
+
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({ success: true }));
+        } catch (error) {
+          console.error('Cache clear error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: String(error) }));
+        }
+      });
     },
   };
 }

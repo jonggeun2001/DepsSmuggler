@@ -20,6 +20,7 @@ import {
   DownloadProgressEvent,
 } from '../../types';
 import logger from '../../utils/logger';
+import { fetchPackument, clearNpmCache } from '../shared/npm-cache';
 
 /**
  * npm 다운로더 클래스
@@ -29,9 +30,6 @@ export class NpmDownloader implements IDownloader {
   private client: AxiosInstance;
   private readonly registryUrl: string;
   private readonly searchUrl: string;
-
-  // 캐시
-  private packumentCache: Map<string, { data: NpmPackument; fetchedAt: number }> = new Map();
 
   constructor(registryUrl = 'https://registry.npmjs.org', searchUrl = 'https://registry.npmjs.org/-/v1/search') {
     this.registryUrl = registryUrl;
@@ -77,7 +75,7 @@ export class NpmDownloader implements IDownloader {
    */
   async getVersions(packageName: string): Promise<string[]> {
     try {
-      const packument = await this.fetchPackument(packageName);
+      const packument = await this.fetchPackumentInternal(packageName);
       const versions = Object.keys(packument.versions);
 
       // 최신순 정렬 (semver)
@@ -95,7 +93,7 @@ export class NpmDownloader implements IDownloader {
    */
   async getPackageMetadata(name: string, version: string): Promise<PackageInfo> {
     try {
-      const packument = await this.fetchPackument(name);
+      const packument = await this.fetchPackumentInternal(name);
       const resolvedVersion = this.resolveVersion(version, packument);
 
       if (!resolvedVersion || !packument.versions[resolvedVersion]) {
@@ -322,28 +320,9 @@ export class NpmDownloader implements IDownloader {
   /**
    * packument 조회 (캐싱)
    */
-  private async fetchPackument(name: string): Promise<NpmPackument> {
-    const cached = this.packumentCache.get(name);
-    const now = Date.now();
-
-    // 5분 캐시
-    if (cached && now - cached.fetchedAt < 5 * 60 * 1000) {
-      return cached.data;
-    }
-
-    try {
-      // scoped 패키지 처리 (@scope/name -> @scope%2Fname)
-      const encodedName = name.startsWith('@') ? name.replace('/', '%2F') : name;
-      const response = await this.client.get<NpmPackument>(`${this.registryUrl}/${encodedName}`);
-
-      this.packumentCache.set(name, { data: response.data, fetchedAt: now });
-      return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        throw new Error(`패키지를 찾을 수 없습니다: ${name}`);
-      }
-      throw error;
-    }
+  private async fetchPackumentInternal(name: string): Promise<NpmPackument> {
+    // 공유 캐시 모듈 사용
+    return fetchPackument(name, { registryUrl: this.registryUrl });
   }
 
   /**
@@ -486,7 +465,7 @@ export class NpmDownloader implements IDownloader {
    */
   async getPackageVersion(name: string, version: string): Promise<NpmPackageVersion | null> {
     try {
-      const packument = await this.fetchPackument(name);
+      const packument = await this.fetchPackumentInternal(name);
       const resolvedVersion = this.resolveVersion(version, packument);
 
       if (!resolvedVersion) return null;
@@ -500,7 +479,7 @@ export class NpmDownloader implements IDownloader {
    * dist-tags 조회
    */
   async getDistTags(packageName: string): Promise<Record<string, string>> {
-    const packument = await this.fetchPackument(packageName);
+    const packument = await this.fetchPackumentInternal(packageName);
     return packument['dist-tags'];
   }
 
@@ -508,7 +487,8 @@ export class NpmDownloader implements IDownloader {
    * 캐시 초기화
    */
   clearCache(): void {
-    this.packumentCache.clear();
+    // 공유 캐시 모듈 초기화
+    clearNpmCache();
   }
 }
 

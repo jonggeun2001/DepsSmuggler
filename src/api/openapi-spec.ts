@@ -35,7 +35,7 @@ DepsSmuggler는 인터넷이 차단된 환경에서 필요한 패키지와 의�
 
 ## 지원 패키지 타입
 - **pip/conda**: Python 패키지 (PyPI, Anaconda)
-- **maven/gradle**: Java 라이브러리 (Maven Central)
+- **maven**: Java 라이브러리 (Maven Central)
 - **npm**: Node.js 패키지 (npm Registry)
 - **docker**: Docker 컨테이너 이미지 (Docker Hub)
 - **yum/apt/apk**: Linux OS 패키지
@@ -353,7 +353,7 @@ Server-Sent Events를 통해 다운로드 진행 상태를 실시간으로 수�
             },
             type: {
               type: 'string',
-              enum: ['pip', 'conda', 'maven', 'gradle', 'npm', 'docker', 'yum', 'apt', 'apk'],
+              enum: ['pip', 'conda', 'maven', 'npm', 'docker', 'yum', 'apt', 'apk'],
               description: '패키지 타입',
               example: 'pip',
             },

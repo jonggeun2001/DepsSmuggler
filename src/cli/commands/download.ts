@@ -5,7 +5,6 @@ import * as fs from 'fs-extra';
 import { PackageInfo, PackageType, Architecture } from '../../types';
 import { getDownloadManager, OverallProgress } from '../../core/downloadManager';
 import { getArchivePackager, ArchiveFormat } from '../../core/packager/archivePackager';
-import { getMirrorPackager } from '../../core/packager/mirrorPackager';
 import { getScriptGenerator } from '../../core/packager/scriptGenerator';
 
 // 다운로드 옵션
@@ -15,7 +14,7 @@ interface DownloadOptions {
   pkgVersion: string;
   arch: Architecture;
   output: string;
-  format: ArchiveFormat | 'mirror';
+  format: ArchiveFormat;
   file?: string;
   deps: boolean;
   concurrency: string;
@@ -120,45 +119,26 @@ export async function downloadCommand(options: DownloadOptions): Promise<void> {
         .filter((item) => item.status === 'completed' && item.filePath)
         .map((item) => item.filePath!);
 
-      if (options.format === 'mirror') {
-        // 미러 구조 생성
-        console.log(chalk.cyan('\n미러 저장소 구조 생성 중...'));
+      // 압축 파일 생성
+      console.log(chalk.cyan('\n압축 파일 생성 중...'));
 
-        const mirrorPackager = getMirrorPackager();
-        const mirrorPath = path.join(outputPath, 'mirror');
+      const archivePackager = getArchivePackager();
+      const archiveName = `packages-${Date.now()}.${options.format === 'zip' ? 'zip' : 'tar.gz'}`;
+      const archivePath = path.join(outputPath, archiveName);
 
-        const mirrorResult = await mirrorPackager.createMirror(files, packages, mirrorPath, {
-          includeReadme: true,
-          onProgress: (progress) => {
-            process.stdout.write(`\r  진행: ${progress.percentage.toFixed(1)}%`);
-          },
-        });
+      await archivePackager.createArchive(files, archivePath, packages, {
+        format: options.format,
+        includeManifest: true,
+        includeReadme: true,
+      });
 
-        console.log(chalk.green(`\n✓ 미러 저장소 생성 완료: ${mirrorPath}`));
-        console.log(chalk.gray(`  파일 수: ${mirrorResult.totalFiles}개`));
-        console.log(chalk.gray(`  총 크기: ${formatBytes(mirrorResult.totalSize)}`));
+      console.log(chalk.green(`✓ 압축 파일 생성 완료: ${archivePath}`));
 
-        // 설치 스크립트 생성
-        console.log(chalk.cyan('\n설치 스크립트 생성 중...'));
-        const scriptGenerator = getScriptGenerator();
-        await scriptGenerator.generateAllScripts(packages, mirrorPath);
-        console.log(chalk.green('✓ 설치 스크립트 생성 완료'));
-      } else {
-        // 압축 파일 생성
-        console.log(chalk.cyan('\n압축 파일 생성 중...'));
-
-        const archivePackager = getArchivePackager();
-        const archiveName = `packages-${Date.now()}.${options.format === 'zip' ? 'zip' : 'tar.gz'}`;
-        const archivePath = path.join(outputPath, archiveName);
-
-        await archivePackager.createArchive(files, archivePath, packages, {
-          format: options.format as ArchiveFormat,
-          includeManifest: true,
-          includeReadme: true,
-        });
-
-        console.log(chalk.green(`✓ 압축 파일 생성 완료: ${archivePath}`));
-      }
+      // 설치 스크립트 생성
+      console.log(chalk.cyan('\n설치 스크립트 생성 중...'));
+      const scriptGenerator = getScriptGenerator();
+      await scriptGenerator.generateAllScripts(packages, outputPath);
+      console.log(chalk.green('✓ 설치 스크립트 생성 완료'));
     } else {
       console.log(chalk.yellow('⚠ 다운로드 완료 (일부 실패)'));
 

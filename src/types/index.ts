@@ -7,7 +7,6 @@ export type PackageType =
   | 'pip'
   | 'conda'
   | 'maven'
-  | 'gradle'
   | 'npm'
   | 'yum'
   | 'apt'
@@ -154,7 +153,7 @@ export interface DownloadResult {
 // ============================================
 
 /** 출력 형식 */
-export type OutputFormat = 'archive' | 'mirror' | 'withScript';
+export type OutputFormat = 'archive' | 'withScript';
 
 /** 압축 형식 */
 export type ArchiveType = 'zip' | 'tar.gz';
@@ -305,8 +304,8 @@ export interface HistoryPackageItem {
 
 /** 히스토리에 저장되는 다운로드 설정 */
 export interface HistorySettings {
-  /** 출력 형식 (zip, tar.gz, mirror) */
-  outputFormat: 'zip' | 'tar.gz' | 'mirror';
+  /** 출력 형식 (zip, tar.gz) */
+  outputFormat: 'zip' | 'tar.gz';
   /** 설치 스크립트 포함 여부 */
   includeScripts: boolean;
   /** 의존성 포함 여부 */

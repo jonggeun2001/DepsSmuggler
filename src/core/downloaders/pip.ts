@@ -17,6 +17,7 @@ import {
   PyPISearchResult,
 } from '../shared/pip-types';
 import { compareVersions } from '../shared';
+import { fetchVersionsFromSimpleApi } from '../shared/pip-simple-api';
 
 export class PipDownloader implements IDownloader {
   readonly type = 'pip' as const;
@@ -71,6 +72,19 @@ export class PipDownloader implements IDownloader {
    */
   async getVersions(packageName: string): Promise<string[]> {
     try {
+      // Simple API 우선 사용 (데이터 크기 90% 감소: ~50KB -> ~5KB)
+      const simpleVersions = await fetchVersionsFromSimpleApi(packageName);
+      if (simpleVersions && simpleVersions.length > 0) {
+        logger.debug('Simple API로 버전 목록 조회 성공', {
+          packageName,
+          versionCount: simpleVersions.length,
+        });
+        // 버전 정렬 (최신순)
+        return simpleVersions.sort((a, b) => compareVersions(b, a));
+      }
+
+      // Simple API 실패 시 JSON API 폴백
+      logger.debug('JSON API로 폴백', { packageName });
       const response = await this.client.get<PyPIResponse>(
         `/${packageName}/json`
       );

@@ -10,6 +10,7 @@ import * as zlib from 'zlib';
 import { promisify } from 'util';
 import type { OSPackageInfo, OSPackageManager } from '../types';
 import { OSScriptGenerator } from '../utils/script-generator';
+import { getWriteOptions } from '../../../shared/path-utils';
 
 const gzip = promisify(zlib.gzip);
 
@@ -90,7 +91,7 @@ export class OSRepoPackager {
         { repoName: options.repoName, packageDir: '.' }
       );
 
-      fs.writeFileSync(path.join(repoPath, 'setup-repo.sh'), scripts.bash, { mode: 0o755 });
+      fs.writeFileSync(path.join(repoPath, 'setup-repo.sh'), scripts.bash, getWriteOptions(true));
       fs.writeFileSync(path.join(repoPath, 'setup-repo.ps1'), scripts.powershell);
     }
 

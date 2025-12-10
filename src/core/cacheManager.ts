@@ -9,6 +9,7 @@ import * as crypto from 'crypto';
 import * as os from 'os';
 import { PackageInfo } from '../types';
 import logger from '../utils/logger';
+import { sanitizeCacheKey } from './shared/filename-utils';
 
 export interface CacheOptions {
   cacheDir?: string;
@@ -298,7 +299,7 @@ export class CacheManager {
    * 파일명에 안전한 문자로 변환
    */
   private sanitizeFileName(name: string): string {
-    return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 50);
+    return sanitizeCacheKey(name, 50);
   }
 
   /**

@@ -69,7 +69,7 @@ describe('maven downloader', () => {
 
   describe('getVersions (integration)', () => {
     it.skip('버전 목록 조회', async () => {
-      const versions = await downloader.getVersions('com.google.code.gson', 'gson');
+      const versions = await downloader.getVersions('com.google.code.gson:gson');
       expect(Array.isArray(versions)).toBe(true);
       expect(versions.length).toBeGreaterThan(0);
     });
