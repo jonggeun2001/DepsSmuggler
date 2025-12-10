@@ -84,10 +84,20 @@ const electronAPI = {
       ipcRenderer.invoke('fs:read-file', filePath),
   },
 
-  // 캐시 관련 (향후 구현)
+  // 캐시 관련
   cache: {
     getSize: (): Promise<number> => ipcRenderer.invoke('cache:get-size'),
-    clear: (): Promise<void> => ipcRenderer.invoke('cache:clear'),
+    getStats: (): Promise<{
+      totalSize: number;
+      entryCount: number;
+      details: {
+        pip: unknown;
+        npm: unknown;
+        maven: unknown;
+        conda: unknown;
+      };
+    }> => ipcRenderer.invoke('cache:stats'),
+    clear: (): Promise<{ success: boolean }> => ipcRenderer.invoke('cache:clear'),
   },
 
   // 히스토리 관련

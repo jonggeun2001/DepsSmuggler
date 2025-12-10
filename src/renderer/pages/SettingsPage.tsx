@@ -99,8 +99,8 @@ const SettingsPage: React.FC = () => {
     setLoadingCache(true);
     try {
       // Electron 환경
-      if (window.electronAPI?.getCacheStats) {
-        const stats = await window.electronAPI.getCacheStats();
+      if (window.electronAPI?.cache?.getStats) {
+        const stats = await window.electronAPI.cache.getStats();
         setCacheSize(stats.totalSize);
         setCacheCount(stats.entryCount);
       } else {
@@ -129,8 +129,8 @@ const SettingsPage: React.FC = () => {
     setClearingCache(true);
     try {
       // Electron 환경
-      if (window.electronAPI?.clearCache) {
-        await window.electronAPI.clearCache();
+      if (window.electronAPI?.cache?.clear) {
+        await window.electronAPI.cache.clear();
       } else {
         // 개발 환경 - API 호출
         const response = await fetch('/api/cache/clear', { method: 'POST' });

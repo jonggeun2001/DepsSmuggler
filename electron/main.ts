@@ -51,6 +51,12 @@ import {
   NpmDownloader,
 } from '../src/core';
 
+// 캐시 모듈 import
+import * as pipCache from '../src/core/shared/pip-cache';
+import * as npmCache from '../src/core/shared/npm-cache';
+import * as mavenCache from '../src/core/shared/maven-cache';
+import * as condaCache from '../src/core/shared/conda-cache';
+
 // 다운로더 타입 매핑
 const downloaderMap = {
   pip: getPipDownloader,
@@ -982,6 +988,60 @@ ipcMain.handle('history:clear', async () => {
     return { success: true };
   } catch (error) {
     historyLog.error('Failed to clear history:', error);
+    throw error;
+  }
+});
+
+// 캐시 통계 조회
+const cacheLog = createScopedLogger('Cache');
+
+ipcMain.handle('cache:stats', async () => {
+  cacheLog.debug('Getting cache stats...');
+  try {
+    const [pipStats, npmStats, mavenStats, condaStats] = await Promise.all([
+      Promise.resolve(pipCache.getCacheStats()),
+      Promise.resolve(npmCache.getNpmCacheStats()),
+      Promise.resolve(mavenCache.getMavenCacheStats()),
+      condaCache.getCacheStats(),
+    ]);
+
+    const totalSize = (pipStats.diskSize || 0) + (condaStats.totalSize || 0);
+    const entryCount =
+      (pipStats.memoryEntries || 0) +
+      (npmStats.entries || 0) +
+      (mavenStats.memoryEntries || 0) +
+      (condaStats.entries?.length || 0);
+
+    return {
+      totalSize,
+      entryCount,
+      details: {
+        pip: pipStats,
+        npm: npmStats,
+        maven: mavenStats,
+        conda: condaStats,
+      },
+    };
+  } catch (error) {
+    cacheLog.error('Failed to get cache stats:', error);
+    throw error;
+  }
+});
+
+// 캐시 전체 삭제
+ipcMain.handle('cache:clear', async () => {
+  cacheLog.info('Clearing all caches...');
+  try {
+    await Promise.all([
+      Promise.resolve(pipCache.clearAllCache()),
+      Promise.resolve(npmCache.clearNpmCache()),
+      Promise.all([mavenCache.clearMemoryCache(), mavenCache.clearDiskCache()]),
+      condaCache.clearCache(),
+    ]);
+    cacheLog.info('All caches cleared');
+    return { success: true };
+  } catch (error) {
+    cacheLog.error('Failed to clear caches:', error);
     throw error;
   }
 });
