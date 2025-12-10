@@ -29,6 +29,7 @@ import {
   CloseCircleOutlined,
   CloudOutlined,
   InfoCircleOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 
 import { useSettingsStore } from '../stores/settingsStore';
@@ -69,6 +70,8 @@ const SettingsPage: React.FC = () => {
     dockerLayerCompression,
     dockerRetryStrategy,
     dockerIncludeLoadScript,
+    autoUpdate,
+    autoDownloadUpdate,
     updateSettings,
     resetSettings,
   } = useSettingsStore();
@@ -259,6 +262,9 @@ const SettingsPage: React.FC = () => {
       dockerLayerCompression,
       dockerRetryStrategy,
       dockerIncludeLoadScript,
+      // 자동 업데이트
+      autoUpdate,
+      autoDownloadUpdate,
     });
     // 로컬 상태도 업데이트
     setSelectedYumDistroId(yumDistribution?.id || 'rocky-9');
@@ -293,6 +299,8 @@ const SettingsPage: React.FC = () => {
     dockerLayerCompression,
     dockerRetryStrategy,
     dockerIncludeLoadScript,
+    autoUpdate,
+    autoDownloadUpdate,
   ]);
 
   // 저장
@@ -945,6 +953,60 @@ const SettingsPage: React.FC = () => {
             </Spin>
           </div>
         </Card>
+
+        {/* 자동 업데이트 설정 */}
+        {window.electronAPI?.updater && (
+          <Card
+            title="자동 업데이트"
+            size="small"
+            style={{ marginBottom: CARD_MARGIN }}
+            styles={{ body: { padding: CARD_BODY_PADDING } }}
+          >
+            <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item
+                  name="autoUpdate"
+                  label="자동 업데이트 확인"
+                  valuePropName="checked"
+                  style={{ marginBottom: 8 }}
+                  tooltip="앱 시작 시 새 버전을 자동으로 확인합니다"
+                >
+                  <Switch size="small" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item
+                  name="autoDownloadUpdate"
+                  label="자동 다운로드"
+                  valuePropName="checked"
+                  style={{ marginBottom: 8 }}
+                  tooltip="새 버전 발견 시 자동으로 다운로드합니다"
+                >
+                  <Switch size="small" />
+                </Form.Item>
+              </Col>
+              <Col span={8} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                <Button
+                  size="small"
+                  icon={<SyncOutlined />}
+                  onClick={async () => {
+                    if (window.electronAPI?.updater) {
+                      message.loading({ content: '업데이트 확인 중...', key: 'update-check' });
+                      const result = await window.electronAPI.updater.check();
+                      if (result.success) {
+                        message.success({ content: '업데이트 확인 완료', key: 'update-check' });
+                      } else {
+                        message.error({ content: `업데이트 확인 실패: ${result.error}`, key: 'update-check' });
+                      }
+                    }
+                  }}
+                >
+                  지금 확인
+                </Button>
+              </Col>
+            </Row>
+          </Card>
+        )}
 
         {/* 출력 설정 */}
         <Card

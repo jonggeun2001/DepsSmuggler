@@ -84,6 +84,10 @@ interface SettingsState {
   dockerRetryStrategy: DockerRetryStrategy; // 재시도 전략
   dockerIncludeLoadScript: boolean;         // docker load 스크립트 포함
 
+  // 자동 업데이트 설정
+  autoUpdate: boolean;                      // 자동 업데이트 활성화
+  autoDownloadUpdate: boolean;              // 자동 다운로드 (알림 없이)
+
   // 액션
   updateSettings: (updates: Partial<SettingsState>) => void;
   resetSettings: () => void;
@@ -131,6 +135,10 @@ const defaultSettings = {
   dockerLayerCompression: 'gzip' as const,
   dockerRetryStrategy: 'layer' as const,
   dockerIncludeLoadScript: true,
+
+  // 자동 업데이트 기본값
+  autoUpdate: true,
+  autoDownloadUpdate: false,
 };
 
 export const useSettingsStore = create<SettingsState>()(

@@ -97,6 +97,12 @@
     "linux": {
       "target": "AppImage",
       "icon": "assets/icons"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "jonggeun2001",
+      "repo": "DepsSmuggler",
+      "releaseType": "release"
     }
   },
   "dependencies": {
@@ -110,6 +116,7 @@
     "cli-table3": "^0.6.5",
     "commander": "^14.0.2",
     "electron-log": "^5.4.3",
+    "electron-updater": "^6.6.2",
     "eventemitter3": "^5.0.1",
     "fast-xml-parser": "^5.3.2",
     "fs-extra": "^11.3.2",

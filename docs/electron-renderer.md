@@ -194,6 +194,43 @@ interface CacheStatsResult {
 }
 ```
 
+### 자동 업데이트 IPC 핸들러
+
+GitHub Releases에서 자동으로 새 버전을 체크하고 설치하는 기능입니다.
+
+| 채널 | 파라미터 | 반환값 | 설명 |
+|------|----------|--------|------|
+| `updater:check` | - | { success, result?, error? } | 업데이트 확인 |
+| `updater:download` | - | { success, error? } | 업데이트 다운로드 |
+| `updater:install` | - | { success } | 설치 및 재시작 |
+| `updater:status` | - | UpdateStatus | 현재 상태 조회 |
+| `updater:set-auto-download` | enabled: boolean | { success } | 자동 다운로드 설정 |
+
+#### UpdateStatus 타입
+
+```typescript
+interface UpdateStatus {
+  checking: boolean;       // 업데이트 확인 중
+  available: boolean;      // 새 버전 존재
+  downloaded: boolean;     // 다운로드 완료
+  downloading: boolean;    // 다운로드 중
+  error: string | null;    // 에러 메시지
+  progress: ProgressInfo | null;  // 다운로드 진행률
+  updateInfo: UpdateInfo | null;  // 버전 정보
+}
+```
+
+#### 이벤트 채널
+
+| 이벤트 | 데이터 | 설명 |
+|--------|--------|------|
+| `updater:status` | UpdateStatus | 업데이트 상태 변경 |
+
+#### 관련 파일
+
+- `electron/updater.ts`: 자동 업데이트 모듈
+- `src/renderer/components/UpdateNotification.tsx`: 업데이트 알림 UI
+
 ### OS 패키지 IPC 핸들러
 
 OS 패키지 관련 핸들러는 `electron/os-package-handlers.ts`에서 별도 관리됩니다.

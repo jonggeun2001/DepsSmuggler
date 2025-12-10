@@ -57,6 +57,9 @@ import * as npmCache from '../src/core/shared/npm-cache';
 import * as mavenCache from '../src/core/shared/maven-cache';
 import * as condaCache from '../src/core/shared/conda-cache';
 
+// 자동 업데이트 모듈
+import { initAutoUpdater, checkForUpdatesOnStartup } from './updater';
+
 // 다운로더 타입 매핑
 const downloaderMap = {
   pip: getPipDownloader,
@@ -147,17 +150,23 @@ async function createWindow(): Promise<void> {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  // 자동 업데이트 초기화
+  initAutoUpdater(mainWindow);
 }
 
 // Electron 앱이 준비되면 윈도우 생성
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // 로거 초기화
   getLogger();
 
-  createWindow();
+  await createWindow();
 
   // OS 패키지 IPC 핸들러 등록
   registerOSPackageHandlers(() => mainWindow);
+
+  // 앱 시작 시 업데이트 체크 (프로덕션만)
+  checkForUpdatesOnStartup();
 
   // macOS: Dock 아이콘 클릭 시 윈도우가 없으면 새로 생성
   app.on('activate', () => {

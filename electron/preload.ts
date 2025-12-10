@@ -100,6 +100,39 @@ const electronAPI = {
     clear: (): Promise<{ success: boolean }> => ipcRenderer.invoke('cache:clear'),
   },
 
+  // 자동 업데이트 관련
+  updater: {
+    // 업데이트 체크
+    check: (): Promise<{ success: boolean; result?: unknown; error?: string }> =>
+      ipcRenderer.invoke('updater:check'),
+    // 업데이트 다운로드
+    download: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('updater:download'),
+    // 업데이트 설치 및 재시작
+    install: (): Promise<{ success: boolean }> =>
+      ipcRenderer.invoke('updater:install'),
+    // 현재 상태 조회
+    getStatus: (): Promise<{
+      checking: boolean;
+      available: boolean;
+      downloaded: boolean;
+      downloading: boolean;
+      error: string | null;
+      progress: { percent: number; bytesPerSecond: number; total: number; transferred: number } | null;
+      updateInfo: { version: string; releaseDate: string; releaseNotes?: string } | null;
+    }> => ipcRenderer.invoke('updater:status'),
+    // 자동 다운로드 설정
+    setAutoDownload: (enabled: boolean): Promise<{ success: boolean }> =>
+      ipcRenderer.invoke('updater:set-auto-download', enabled),
+    // 상태 변경 이벤트 리스너
+    onStatusChange: (callback: (status: unknown) => void): () => void => {
+      const handler = (_event: Electron.IpcRendererEvent, status: unknown) =>
+        callback(status);
+      ipcRenderer.on('updater:status', handler);
+      return () => ipcRenderer.removeListener('updater:status', handler);
+    },
+  },
+
   // 히스토리 관련
   history: {
     load: (): Promise<unknown[]> => ipcRenderer.invoke('history:load'),

@@ -7,20 +7,24 @@ import CartPage from './pages/CartPage';
 import DownloadPage from './pages/DownloadPage';
 import HistoryPage from './pages/HistoryPage';
 import SettingsPage from './pages/SettingsPage';
+import { UpdateNotification } from './components/UpdateNotification';
 
 const App: React.FC = () => {
   return (
-    <Routes>
-      <Route path="/" element={<MainLayout />}>
-        <Route index element={<HomePage />} />
-        <Route path="wizard" element={<WizardPage />} />
-        <Route path="cart" element={<CartPage />} />
-        <Route path="download" element={<DownloadPage />} />
-        <Route path="history" element={<HistoryPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/" element={<MainLayout />}>
+          <Route index element={<HomePage />} />
+          <Route path="wizard" element={<WizardPage />} />
+          <Route path="cart" element={<CartPage />} />
+          <Route path="download" element={<DownloadPage />} />
+          <Route path="history" element={<HistoryPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+      <UpdateNotification />
+    </>
   );
 };
 
