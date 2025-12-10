@@ -1,4 +1,3 @@
-import axios from 'axios';
 import {
   IResolver,
   PackageInfo,
@@ -10,6 +9,7 @@ import {
 import logger from '../../utils/logger';
 import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
 import { compareVersions, isVersionCompatible } from '../shared';
+import { fetchPackageMetadata, clearMemoryCache as clearPipCache, PipCacheOptions } from '../shared/pip-cache';
 
 // 의존성 파싱 결과
 interface ParsedDependency {
@@ -32,6 +32,21 @@ export class PipResolver implements IResolver {
   private conflicts: DependencyConflict[] = [];
   private targetPlatform: TargetPlatform | null = null;
   private pythonVersion: string | null = null;
+  private cacheOptions: PipCacheOptions = {};
+
+  /**
+   * 캐시 옵션 설정
+   */
+  setCacheOptions(options: PipCacheOptions): void {
+    this.cacheOptions = options;
+  }
+
+  /**
+   * 캐시 초기화
+   */
+  clearCache(): void {
+    clearPipCache();
+  }
 
   /**
    * 의존성 해결
@@ -77,7 +92,18 @@ export class PipResolver implements IResolver {
     depth: number,
     maxDepth: number
   ): Promise<DependencyNode> {
-    const cacheKey = `${name.toLowerCase()}@${version}`;
+    // "latest" 버전인 경우 실제 최신 버전 조회
+    let actualVersion = version;
+    if (version === 'latest' || !version) {
+      const latestVersion = await this.getLatestVersion(name);
+      if (!latestVersion) {
+        throw new Error(`패키지를 찾을 수 없음: ${name}@${version}`);
+      }
+      actualVersion = latestVersion;
+      logger.debug('"latest" 버전을 실제 버전으로 변환', { name, version, actualVersion });
+    }
+
+    const cacheKey = `${name.toLowerCase()}@${actualVersion}`;
 
     // 이미 방문한 패키지인 경우 캐시된 결과 반환 (순환 의존성 방지)
     if (this.visited.has(cacheKey)) {
@@ -87,18 +113,19 @@ export class PipResolver implements IResolver {
     // 최대 깊이 도달
     if (depth >= maxDepth) {
       const node: DependencyNode = {
-        package: { type: 'pip', name, version },
+        package: { type: 'pip', name, version: actualVersion },
         dependencies: [],
       };
       return node;
     }
 
     try {
-      // PyPI에서 패키지 정보 조회
-      const response = await axios.get<PyPIResponse>(
-        `${this.baseUrl}/${name}/${version}/json`
-      );
-      const { info } = response.data;
+      // PyPI에서 패키지 정보 조회 (캐시 사용)
+      const cacheResult = await fetchPackageMetadata(name, actualVersion, this.cacheOptions);
+      if (!cacheResult) {
+        throw new Error(`패키지를 찾을 수 없음: ${name}@${actualVersion}`);
+      }
+      const { info } = cacheResult.data;
 
       const packageInfo: PackageInfo = {
         type: 'pip',
@@ -153,7 +180,7 @@ export class PipResolver implements IResolver {
 
       return node;
     } catch (error) {
-      logger.error('패키지 정보 조회 실패', { name, version, error });
+      logger.error('패키지 정보 조회 실패', { name, version: actualVersion, error });
       throw error;
     }
   }
@@ -267,25 +294,27 @@ export class PipResolver implements IResolver {
   }
 
   /**
-   * 버전 스펙에 맞는 최신 버전 조회
+   * 버전 스펙에 맞는 최신 버전 조회 (캐시 사용)
    */
   private async getLatestVersion(
     name: string,
     versionSpec?: string
   ): Promise<string | null> {
     try {
-      const response = await axios.get<PyPIResponse>(
-        `${this.baseUrl}/${name}/json`
-      );
-      const versions = Object.keys(response.data.releases).filter(
-        (v) => response.data.releases[v].length > 0 // 실제 릴리스가 있는 버전만
+      // 캐시에서 패키지 메타데이터 조회
+      const cacheResult = await fetchPackageMetadata(name, undefined, this.cacheOptions);
+      if (!cacheResult) return null;
+
+      const { data } = cacheResult;
+      const versions = Object.keys(data.releases).filter(
+        (v) => data.releases[v].length > 0 // 실제 릴리스가 있는 버전만
       );
 
       if (versions.length === 0) return null;
 
       // 버전 스펙이 없으면 최신 버전
       if (!versionSpec) {
-        return response.data.info.version;
+        return data.info.version;
       }
 
       // 버전 스펙 파싱 및 필터링
@@ -298,10 +327,10 @@ export class PipResolver implements IResolver {
         this.conflicts.push({
           type: 'version',
           packageName: name,
-          versions: [versionSpec, response.data.info.version],
-          resolvedVersion: response.data.info.version,
+          versions: [versionSpec, data.info.version],
+          resolvedVersion: data.info.version,
         });
-        return response.data.info.version;
+        return data.info.version;
       }
 
       // 최신 호환 버전 반환

@@ -29,9 +29,14 @@ import {
   exclusionKey,
   matchesExclusion,
   transitScope,
-  PomCacheEntry,
 } from '../shared/maven-types';
 import { DependencyResolutionSkipper } from '../shared/maven-skipper';
+import {
+  fetchPom as fetchPomFromCache,
+  prefetchPomsParallel,
+  clearMemoryCache as clearMavenCache,
+  MavenCacheOptions,
+} from '../shared/maven-cache';
 
 /** Maven Resolver 옵션 */
 export interface MavenResolverOptions extends ResolverOptions {
@@ -49,9 +54,6 @@ export class MavenResolver implements IResolver {
   private parser: XMLParser;
   private axiosInstance: AxiosInstance;
 
-  /** POM 캐시 (G:A:V -> PomCacheEntry) */
-  private pomCache: Map<string, PomCacheEntry> = new Map();
-
   /** dependencyManagement 버전 관리 */
   private dependencyManagement: Map<string, string> = new Map();
 
@@ -61,8 +63,8 @@ export class MavenResolver implements IResolver {
   /** Skipper 인스턴스 */
   private skipper: DependencyResolutionSkipper;
 
-  /** 병렬 POM 다운로드 중인 Promise들 */
-  private pendingPomFetches: Map<string, Promise<PomProject>> = new Map();
+  /** 캐시 옵션 */
+  private cacheOptions: MavenCacheOptions = {};
 
   /** 기본 옵션 */
   private defaultOptions: MavenResolverOptions = {
@@ -181,12 +183,16 @@ export class MavenResolver implements IResolver {
     this.skipper.getCoordinateManager().createCoordinate(rootCoordinate, 0);
     this.skipper.recordResolved(rootCoordinate);
 
+    // 먼저 모든 의존성 좌표를 수집
+    const coordinatesToPrefetch: MavenCoordinate[] = [];
     let sequence = 0;
     for (const dep of rootDependencies) {
       if (!this.shouldIncludeDependency(dep, includeOptional)) continue;
 
       const depCoordinate = this.resolveDependencyCoordinate(dep, rootPom.properties);
       if (!depCoordinate) continue;
+
+      coordinatesToPrefetch.push(depCoordinate);
 
       sequence++;
       const context: DependencyProcessingContext = {
@@ -200,9 +206,12 @@ export class MavenResolver implements IResolver {
         managedVersion: !!this.dependencyManagement.get(coordinateToKey(depCoordinate)),
       };
 
-      // 비동기로 POM 프리페치 시작
-      this.prefetchPom(depCoordinate);
       queue.push(context);
+    }
+
+    // 모든 루트 의존성 POM을 병렬로 프리페치
+    if (coordinatesToPrefetch.length > 0) {
+      this.prefetchPomsParallel(coordinatesToPrefetch);
     }
 
     // BF 탐색
@@ -279,6 +288,9 @@ export class MavenResolver implements IResolver {
       const newPath = [...parentPath, nodeKey];
       let childSequence = 0;
 
+      // 하위 의존성들의 좌표 수집
+      const childCoordinates: MavenCoordinate[] = [];
+
       for (const dep of dependencies) {
         if (!this.shouldIncludeDependency(dep, includeOptional)) continue;
 
@@ -294,6 +306,8 @@ export class MavenResolver implements IResolver {
         // Exclusion 병합
         const mergedExclusions = new Set([...exclusions, ...this.extractExclusions(dep)]);
 
+        childCoordinates.push(depCoordinate);
+
         childSequence++;
         const childContext: DependencyProcessingContext = {
           coordinate: depCoordinate,
@@ -306,9 +320,12 @@ export class MavenResolver implements IResolver {
           managedVersion: !!this.dependencyManagement.get(coordinateToKey(depCoordinate)),
         };
 
-        // 비동기로 POM 프리페치
-        this.prefetchPom(depCoordinate);
         queue.push(childContext);
+      }
+
+      // 하위 의존성들 POM 병렬 프리페치
+      if (childCoordinates.length > 0) {
+        this.prefetchPomsParallel(childCoordinates);
       }
     }
 
@@ -583,80 +600,36 @@ export class MavenResolver implements IResolver {
   }
 
   /**
-   * POM 캐시와 함께 조회
+   * POM 캐시와 함께 조회 (공유 캐시 모듈 사용)
    */
   private async fetchPomWithCache(coordinate: MavenCoordinate): Promise<PomProject> {
-    const cacheKey = coordinateToString(coordinate);
-    const cached = this.pomCache.get(cacheKey);
-
-    if (cached && Date.now() - cached.fetchedAt < this.defaultOptions.pomCacheTtl!) {
-      return cached.pom;
-    }
-
-    // 이미 진행 중인 요청이 있으면 재사용
-    const pending = this.pendingPomFetches.get(cacheKey);
-    if (pending) {
-      return pending;
-    }
-
-    const fetchPromise = this.fetchPom(coordinate);
-    this.pendingPomFetches.set(cacheKey, fetchPromise);
-
-    try {
-      const pom = await fetchPromise;
-
-      // 캐시에 저장
-      this.pomCache.set(cacheKey, {
-        pom,
-        fetchedAt: Date.now(),
-        effectiveGroupId: pom.groupId || coordinate.groupId,
-        effectiveVersion: pom.version || coordinate.version,
-      });
-
-      return pom;
-    } finally {
-      this.pendingPomFetches.delete(cacheKey);
-    }
-  }
-
-  /**
-   * POM 프리페치 (비동기)
-   */
-  private prefetchPom(coordinate: MavenCoordinate): void {
-    const cacheKey = coordinateToString(coordinate);
-
-    if (this.pomCache.has(cacheKey) || this.pendingPomFetches.has(cacheKey)) {
-      return;
-    }
-
-    // 백그라운드에서 프리페치
-    this.fetchPomWithCache(coordinate).catch((err) => {
-      // 프리페치 실패는 무시 (나중에 실제 요청 시 처리)
-      logger.debug('POM 프리페치 실패', { coordinate: cacheKey });
+    return fetchPomFromCache(coordinate, {
+      repoUrl: this.repoUrl,
+      memoryTtl: this.defaultOptions.pomCacheTtl,
+      ...this.cacheOptions,
     });
   }
 
   /**
-   * POM 파일 조회
+   * POM 프리페치 (비동기, 병렬)
    */
-  private async fetchPom(coordinate: MavenCoordinate): Promise<PomProject> {
-    const { groupId, artifactId, version } = coordinate;
-    const groupPath = groupId.replace(/\./g, '/');
-    const url = `${this.repoUrl}/${groupPath}/${artifactId}/${version}/${artifactId}-${version}.pom`;
+  private prefetchPom(coordinate: MavenCoordinate): void {
+    // 단일 프리페치는 그냥 백그라운드로 실행
+    this.fetchPomWithCache(coordinate).catch((err) => {
+      logger.debug('POM 프리페치 실패', { coordinate: coordinateToString(coordinate) });
+    });
+  }
 
-    try {
-      const response = await this.axiosInstance.get<string>(url, {
-        responseType: 'text',
-      });
-
-      const parsed = this.parser.parse(response.data);
-      return parsed.project as PomProject;
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        throw new Error(`POM not found: ${coordinateToString(coordinate)}`);
-      }
-      throw error;
-    }
+  /**
+   * 여러 POM 병렬 프리페치
+   */
+  private prefetchPomsParallel(coordinates: MavenCoordinate[]): void {
+    prefetchPomsParallel(coordinates, {
+      repoUrl: this.repoUrl,
+      memoryTtl: this.defaultOptions.pomCacheTtl,
+      batchSize: this.defaultOptions.parallelThreads,
+      ...this.cacheOptions,
+    });
   }
 
   /**
@@ -776,8 +749,14 @@ export class MavenResolver implements IResolver {
    * POM 캐시 클리어
    */
   clearCache(): void {
-    this.pomCache.clear();
-    this.pendingPomFetches.clear();
+    clearMavenCache();
+  }
+
+  /**
+   * 캐시 옵션 설정
+   */
+  setCacheOptions(options: MavenCacheOptions): void {
+    this.cacheOptions = options;
   }
 
   /**

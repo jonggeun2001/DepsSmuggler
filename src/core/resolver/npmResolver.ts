@@ -22,8 +22,8 @@ import {
   DependencyType,
   DepsQueueItem,
   PlacementResult,
-  PackumentCacheEntry,
 } from '../shared/npm-types';
+import { fetchPackument } from '../shared/npm-cache';
 
 // 로거 타입 (프로젝트 공통 로거 사용)
 const logger = {
@@ -41,8 +41,7 @@ export class NpmResolver {
   private readonly registryUrl: string;
   private client: AxiosInstance;
 
-  // 캐시
-  private packumentCache: Map<string, PackumentCacheEntry> = new Map();
+  // 캐시 (packumentCache는 공유 모듈 사용)
   private resolvedCache: Map<string, string> = new Map(); // name@spec -> version
 
   // 의존성 트리 (해결 결과)
@@ -91,7 +90,7 @@ export class NpmResolver {
 
     try {
       // 1. 루트 패키지 정보 조회
-      const packument = await this.fetchPackument(packageName);
+      const packument = await this.fetchPackumentInternal(packageName);
       const resolvedVersion = this.resolveVersion(version, packument);
 
       if (!resolvedVersion) {
@@ -219,7 +218,7 @@ export class NpmResolver {
     const { name, spec, type, depth, parent } = item;
 
     // 패키지 정보 조회
-    const packument = await this.fetchPackument(name);
+    const packument = await this.fetchPackumentInternal(name);
     const resolvedVersion = this.resolveVersion(spec, packument);
 
     if (!resolvedVersion) {
@@ -476,29 +475,9 @@ export class NpmResolver {
   /**
    * packument 조회 (캐싱)
    */
-  private async fetchPackument(name: string): Promise<NpmPackument> {
-    const cached = this.packumentCache.get(name);
-    const now = Date.now();
-
-    // 5분 캐시
-    if (cached && now - cached.fetchedAt < 5 * 60 * 1000) {
-      return cached.packument;
-    }
-
-    try {
-      // scoped 패키지 처리 (@scope/name -> @scope%2Fname)
-      const encodedName = name.startsWith('@') ? name.replace('/', '%2F') : name;
-      const response = await this.client.get<NpmPackument>(`/${encodedName}`);
-      const packument = response.data;
-
-      this.packumentCache.set(name, { packument, fetchedAt: now });
-      return packument;
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        throw new Error(`패키지를 찾을 수 없습니다: ${name}`);
-      }
-      throw error;
-    }
+  private async fetchPackumentInternal(name: string): Promise<NpmPackument> {
+    // 공유 캐시 모듈 사용
+    return fetchPackument(name, { registryUrl: this.registryUrl });
   }
 
   /**
@@ -632,7 +611,7 @@ export class NpmResolver {
         if (typeof spec !== 'string') continue;
 
         try {
-          const packument = await this.fetchPackument(name);
+          const packument = await this.fetchPackumentInternal(name);
           const version = this.resolveVersion(spec, packument);
           if (version) {
             result.push({ name, version });
@@ -653,7 +632,7 @@ export class NpmResolver {
    * 패키지 버전 목록 조회
    */
   async getVersions(packageName: string): Promise<string[]> {
-    const packument = await this.fetchPackument(packageName);
+    const packument = await this.fetchPackumentInternal(packageName);
     return Object.keys(packument.versions)
       .filter((v) => !semver.prerelease(v))
       .sort((a, b) => semver.rcompare(a, b));
@@ -664,7 +643,7 @@ export class NpmResolver {
    */
   async getPackageInfo(name: string, version: string): Promise<NpmPackageVersion | null> {
     try {
-      const packument = await this.fetchPackument(name);
+      const packument = await this.fetchPackumentInternal(name);
       const resolvedVersion = this.resolveVersion(version, packument);
       if (!resolvedVersion) return null;
       return packument.versions[resolvedVersion] || null;
