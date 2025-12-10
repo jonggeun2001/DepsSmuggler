@@ -47,7 +47,7 @@ interface SettingsState {
   defaultDownloadPath: string;  // 기본 다운로드 경로
 
   // 출력 설정
-  defaultOutputFormat: 'zip' | 'tar.gz' | 'mirror';
+  defaultOutputFormat: 'zip' | 'tar.gz';
   includeInstallScripts: boolean;
 
   // 파일 분할 설정

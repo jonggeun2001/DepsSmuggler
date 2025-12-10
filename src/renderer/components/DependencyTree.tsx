@@ -37,7 +37,6 @@ const typeColors: Record<PackageType, string> = {
   pip: '#3776ab',
   conda: '#44a833',
   maven: '#c71a36',
-  gradle: '#02303a',
   npm: '#cb3837',
   yum: '#ff6600',
   apt: '#a80030',
@@ -130,7 +129,7 @@ const DependencyTree: React.FC<DependencyTreeProps> = ({ data, onNodeClick, styl
 
   // 커스텀 노드 렌더러
   const renderCustomNode = ({ nodeDatum }: CustomNodeElementProps) => {
-    const datum = nodeDatum as TreeNodeDatum;
+    const datum = nodeDatum as unknown as TreeNodeDatum;
     const pkgType = datum.attributes?.type as PackageType;
     const color = typeColors[pkgType] || '#666';
     const isOptional = datum.attributes?.optional;

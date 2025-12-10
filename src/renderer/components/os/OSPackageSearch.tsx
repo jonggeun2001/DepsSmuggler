@@ -35,7 +35,7 @@ export const OSPackageSearch: React.FC<OSPackageSearchProps> = ({
 }) => {
   const [state, setState] = useState<SearchState>({
     query: '',
-    matchType: 'contains',
+    matchType: 'partial',
     isSearching: false,
     results: [],
     error: null,

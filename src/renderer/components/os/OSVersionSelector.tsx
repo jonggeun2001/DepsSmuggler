@@ -39,7 +39,7 @@ export const OSVersionSelector: React.FC<OSVersionSelectorProps> = ({
 
   const getUseCaseBadge = (distId: string): string | null => {
     for (const [useCase, rec] of Object.entries(USE_CASE_RECOMMENDATIONS)) {
-      if (rec.recommendedDistributions.includes(distId)) {
+      if (rec.distributions.includes(distId)) {
         switch (useCase) {
           case 'enterprise':
             return '엔터프라이즈';

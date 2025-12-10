@@ -40,7 +40,6 @@ const typeColors: Record<PackageType, string> = {
   pip: 'blue',
   conda: 'green',
   maven: 'orange',
-  gradle: 'gold',
   npm: 'red',
   yum: 'purple',
   apt: 'cyan',

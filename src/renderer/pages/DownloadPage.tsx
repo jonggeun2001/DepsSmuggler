@@ -141,6 +141,8 @@ const DownloadPage: React.FC = () => {
   // SSE 연결 및 클라이언트 ID 관리 (취소 시 사용)
   const eventSourceRef = useRef<EventSource | null>(null);
   const clientIdRef = useRef<string>('');
+  // 히스토리 저장용 장바구니 데이터 (다운로드 시작 시 스냅샷)
+  const cartSnapshotRef = useRef<typeof cartItems>([]);
 
   // 초기화
   useEffect(() => {
@@ -317,11 +319,10 @@ const DownloadPage: React.FC = () => {
 
       // 히스토리 저장
       const finalItems = useDownloadStore.getState().items;
-      const cartState = useCartStore.getState().items;
       const settings = useSettingsStore.getState();
 
-      // 패키지 정보 변환
-      const historyPackages: HistoryPackageItem[] = cartState.map((item) => ({
+      // 패키지 정보 변환 (다운로드 시작 시 저장된 스냅샷 사용)
+      const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
         type: item.type,
         name: item.name,
         version: item.version,
@@ -363,8 +364,10 @@ const DownloadPage: React.FC = () => {
         failedCount
       );
 
-      // 다운로드 완료 시 장바구니 비우기
-      clearCart();
+      // 실패 없이 모두 완료되면 장바구니 자동 비우기
+      if (failedCount === 0) {
+        clearCart();
+      }
     });
 
     return () => {
@@ -376,7 +379,7 @@ const DownloadPage: React.FC = () => {
       unsubAllComplete?.();
     };
     // downloadItems 대신 downloadItemsRef를 사용하므로 dependency에서 제거
-  }, [updateItem, addLog, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, clearCart, addHistory]);
+  }, [updateItem, addLog, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, addHistory, clearCart]);
 
   // 컴포넌트 언마운트 시 SSE 연결 정리
   useEffect(() => {
@@ -524,6 +527,8 @@ const DownloadPage: React.FC = () => {
     setStartTime(Date.now());
     downloadCancelledRef.current = false;
     downloadPausedRef.current = false;
+    // 히스토리 저장용 장바구니 스냅샷 저장
+    cartSnapshotRef.current = [...cartItems];
 
     addLog('info', '다운로드 시작', `총 ${downloadItems.length}개 패키지`);
 
@@ -747,8 +752,57 @@ const DownloadPage: React.FC = () => {
       addLog('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
       message.success('다운로드 및 패키징이 완료되었습니다');
 
-      // 다운로드 완료 시 장바구니 비우기
-      clearCart();
+      // 히스토리 저장
+      const finalItems = useDownloadStore.getState().items;
+      const settings = useSettingsStore.getState();
+
+      // 패키지 정보 변환 (다운로드 시작 시 저장된 스냅샷 사용)
+      const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
+        type: item.type,
+        name: item.name,
+        version: item.version,
+        arch: item.arch,
+        languageVersion: item.languageVersion,
+        metadata: item.metadata,
+      }));
+
+      // 설정 정보
+      const historySettings: HistorySettings = {
+        outputFormat: settings.defaultOutputFormat,
+        includeScripts: settings.includeInstallScripts,
+        includeDependencies: settings.includeDependencies,
+      };
+
+      // 상태 계산
+      const completedCount = finalItems.filter((i) => i.status === 'completed').length;
+      const failedCount = finalItems.filter((i) => i.status === 'failed').length;
+      const totalCount = finalItems.length;
+
+      let historyStatus: HistoryStatus = 'success';
+      if (failedCount === totalCount) {
+        historyStatus = 'failed';
+      } else if (failedCount > 0) {
+        historyStatus = 'partial';
+      }
+
+      // 총 크기 계산
+      const totalSize = finalItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
+
+      // 히스토리 저장
+      addHistory(
+        historyPackages,
+        historySettings,
+        data.outputPath,
+        totalSize,
+        historyStatus,
+        completedCount,
+        failedCount
+      );
+
+      // 실패 없이 모두 완료되면 장바구니 자동 비우기
+      if (failedCount === 0) {
+        clearCart();
+      }
 
       eventSource.close();
       eventSourceRef.current = null;
@@ -907,12 +961,10 @@ const DownloadPage: React.FC = () => {
     handleCancelDownload();
   };
 
-  // 완료 후 초기화
+  // 완료 후 초기화 (장바구니는 유지, 다운로드 상태만 초기화)
   const handleComplete = () => {
-    clearCart();
     reset();
     navigate('/');
-    message.success('완료되었습니다');
   };
 
   // 다운로드 폴더 열기 (Finder/Explorer)
@@ -1101,8 +1153,8 @@ const DownloadPage: React.FC = () => {
             >
               다운로드 폴더 열기
             </Button>,
-            <Button key="done" onClick={handleComplete}>
-              완료
+            <Button key="done" icon={<ReloadOutlined />} onClick={handleComplete}>
+              새 다운로드
             </Button>,
           ]}
         />
@@ -1155,6 +1207,18 @@ const DownloadPage: React.FC = () => {
           </div>
         </Card>
 
+        {/* 다운로드된 패키지 목록 */}
+        <Card title="다운로드된 패키지" style={{ marginTop: 24 }}>
+          <Table
+            dataSource={downloadItems}
+            columns={columns}
+            rowKey="id"
+            pagination={false}
+            size="small"
+            scroll={{ y: 300 }}
+          />
+        </Card>
+
         {/* 로그 */}
         <Card
           size="small"
@@ -1186,7 +1250,7 @@ const DownloadPage: React.FC = () => {
                   <Text style={{ color: '#888', flexShrink: 0, minWidth: 70 }}>
                     {new Date(log.timestamp).toLocaleTimeString()}
                   </Text>
-                  <Text style={{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warning' ? '#faad14' : '#d9d9d9' }}>
+                  <Text style={{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warn' ? '#faad14' : '#d9d9d9' }}>
                     {log.message}
                     {log.details && <span style={{ color: '#888' }}> - {log.details}</span>}
                   </Text>
@@ -1497,7 +1561,7 @@ const DownloadPage: React.FC = () => {
                 <Text style={{ color: '#888', flexShrink: 0, minWidth: 70 }}>
                   {new Date(log.timestamp).toLocaleTimeString()}
                 </Text>
-                <Text style={{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warning' ? '#faad14' : '#d9d9d9' }}>
+                <Text style={{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warn' ? '#faad14' : '#d9d9d9' }}>
                   {log.message}
                   {log.details && <span style={{ color: '#888' }}> - {log.details}</span>}
                 </Text>

@@ -98,18 +98,27 @@ const SettingsPage: React.FC = () => {
   const loadCacheInfo = async () => {
     setLoadingCache(true);
     try {
-      // IPC를 통해 캐시 정보 조회
+      // Electron 환경
       if (window.electronAPI?.getCacheStats) {
         const stats = await window.electronAPI.getCacheStats();
         setCacheSize(stats.totalSize);
         setCacheCount(stats.entryCount);
       } else {
-        // 개발 환경 시뮬레이션
-        setCacheSize(256 * 1024 * 1024); // 256MB
-        setCacheCount(12);
+        // 개발 환경 - API 호출
+        const response = await fetch('/api/cache/stats');
+        if (response.ok) {
+          const stats = await response.json();
+          setCacheSize(stats.totalSize);
+          setCacheCount(stats.entryCount);
+        } else {
+          throw new Error('Failed to fetch cache stats');
+        }
       }
     } catch (error) {
       console.error('캐시 정보 로드 실패:', error);
+      // 에러 시 0으로 설정
+      setCacheSize(0);
+      setCacheCount(0);
     } finally {
       setLoadingCache(false);
     }
@@ -119,13 +128,21 @@ const SettingsPage: React.FC = () => {
   const handleClearCache = async () => {
     setClearingCache(true);
     try {
+      // Electron 환경
       if (window.electronAPI?.clearCache) {
         await window.electronAPI.clearCache();
+      } else {
+        // 개발 환경 - API 호출
+        const response = await fetch('/api/cache/clear', { method: 'POST' });
+        if (!response.ok) {
+          throw new Error('Failed to clear cache');
+        }
       }
       setCacheSize(0);
       setCacheCount(0);
       message.success('캐시가 삭제되었습니다');
     } catch (error) {
+      console.error('캐시 삭제 실패:', error);
       message.error('캐시 삭제에 실패했습니다');
     } finally {
       setClearingCache(false);
@@ -585,7 +602,7 @@ const SettingsPage: React.FC = () => {
               <Form.Item
                 name={['languageVersions', 'java']}
                 label="Java"
-                tooltip="Maven/Gradle"
+                tooltip="Maven"
                 style={{ marginBottom: 8 }}
               >
                 <Select size="small">
@@ -953,7 +970,6 @@ const SettingsPage: React.FC = () => {
                 <Select size="small">
                   <Select.Option value="zip">ZIP</Select.Option>
                   <Select.Option value="tar.gz">TAR.GZ</Select.Option>
-                  <Select.Option value="mirror">미러 구조</Select.Option>
                 </Select>
               </Form.Item>
             </Col>

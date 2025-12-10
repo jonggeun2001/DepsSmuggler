@@ -62,7 +62,6 @@ const packageTypeOptions: { value: PackageType; label: string; category: Categor
   { value: 'pip', label: 'pip', category: 'library', description: 'Python 패키지 (PyPI)' },
   { value: 'conda', label: 'conda', category: 'library', description: 'Python/R 패키지 (Anaconda)' },
   { value: 'maven', label: 'Maven', category: 'library', description: 'Java 라이브러리 및 플러그인' },
-  { value: 'gradle', label: 'Gradle', category: 'library', description: 'Java/Kotlin 빌드 도구' },
   { value: 'npm', label: 'npm', category: 'library', description: 'Node.js 패키지' },
   { value: 'yum', label: 'YUM', category: 'os', description: 'RHEL/CentOS/Fedora 패키지' },
   { value: 'apt', label: 'APT', category: 'os', description: 'Ubuntu/Debian 패키지' },
@@ -100,12 +99,6 @@ const languageVersionOptions: Record<string, LanguageVersionOption[]> = {
     { value: '11', label: 'Java 11 (LTS)' },
     { value: '8', label: 'Java 8 (LTS)' },
   ],
-  gradle: [
-    { value: '21', label: 'Java 21 (LTS)' },
-    { value: '17', label: 'Java 17 (LTS)' },
-    { value: '11', label: 'Java 11 (LTS)' },
-    { value: '8', label: 'Java 8 (LTS)' },
-  ],
   npm: [
     { value: '22', label: 'Node.js 22 (Current)' },
     { value: '20', label: 'Node.js 20 (LTS)' },
@@ -121,7 +114,6 @@ const getLanguageKey = (type: PackageType): 'python' | 'java' | 'node' | null =>
     case 'conda':
       return 'python';
     case 'maven':
-    case 'gradle':
       return 'java';
     case 'npm':
       return 'node';
@@ -209,7 +201,7 @@ const WizardPage: React.FC = () => {
   const [customRegistryUrl, setCustomRegistryUrl] = useState(dockerCustomRegistry);
 
   // 라이브러리 패키지 타입 (설정 기본값 적용 대상)
-  const libraryPackageTypes: PackageType[] = ['pip', 'conda', 'maven', 'gradle', 'npm'];
+  const libraryPackageTypes: PackageType[] = ['pip', 'conda', 'maven', 'npm'];
 
   // OS 패키지 타입 (배포판별 설정 아키텍처 적용)
   const osPackageTypes: PackageType[] = ['yum', 'apt', 'apk'];
@@ -546,7 +538,6 @@ const WizardPage: React.FC = () => {
       case 'conda':
         return searchPyPIPackage(query);
       case 'maven':
-      case 'gradle':
         return searchMavenPackage(query);
       case 'npm':
         return searchNpmPackage(query);
@@ -605,8 +596,8 @@ const WizardPage: React.FC = () => {
             osType: 'linux',
             packageManager: distInfo.packageManager,
           },
-          architecture: distInfo.architecture,
-          matchType: 'contains',
+          architecture: distInfo.architecture as import('../../core/downloaders/os/types').OSArchitecture,
+          matchType: 'partial',
           limit: 50,
         });
 

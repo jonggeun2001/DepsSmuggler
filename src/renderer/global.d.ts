@@ -1,26 +1,10 @@
 import type { DownloadHistory } from '../types';
-
-// OS 패키지 관련 타입
-export interface OSDistribution {
-  id: string;
-  name: string;
-  version: string;
-  osType: 'linux' | 'windows' | 'macos';
-  packageManager: 'yum' | 'apt' | 'apk';
-  architectures: string[];
-  repositories: string[];
-}
-
-export interface OSPackageInfo {
-  name: string;
-  version: string;
-  architecture: string;
-  size: number;
-  repository?: string;
-  downloadUrl?: string;
-  checksum?: string;
-  dependencies?: string[];
-}
+import type {
+  OSDistribution,
+  OSPackageInfo,
+  MatchType,
+  OSArchitecture,
+} from '../core/downloaders/os/types';
 
 export interface OSPackageOutputOptions {
   type: 'archive' | 'repository' | 'both';
@@ -29,11 +13,26 @@ export interface OSPackageOutputOptions {
   scriptTypes: Array<'dependency-order' | 'local-repo'>;
 }
 
+export { OSDistribution, OSPackageInfo, MatchType, OSArchitecture };
+
 // Electron API 타입 정의
 export interface ElectronAPI {
   // 앱 정보
   getAppVersion: () => Promise<string>;
   getAppPath: () => Promise<string>;
+
+  // 캐시 통계 및 관리 (최상위 레벨)
+  getCacheStats: () => Promise<{ totalSize: number; entryCount: number }>;
+  clearCache: () => Promise<void>;
+
+  // SMTP 연결 테스트
+  testSmtpConnection: (config: {
+    host: string;
+    port: number;
+    secure?: boolean;
+    user?: string;
+    password?: string;
+  }) => Promise<boolean>;
 
   // 파일 다이얼로그
   selectFolder: () => Promise<string | null>;
@@ -113,7 +112,7 @@ export interface ElectronAPI {
 
   // 의존성 해결 관련
   dependency: {
-    resolve: (packages: unknown[]) => Promise<{
+    resolve: (packages: unknown[], options?: { targetOS?: string }) => Promise<{
       originalPackages: unknown[];
       allPackages: unknown[];
       dependencyTrees?: unknown[];
@@ -132,8 +131,8 @@ export interface ElectronAPI {
     search: (options: {
       query: string;
       distribution: OSDistribution | { id: string; name: string; osType: string; packageManager: string };
-      architecture: string;
-      matchType?: string;
+      architecture: OSArchitecture;
+      matchType?: MatchType;
       limit?: number;
     }) => Promise<{ packages: OSPackageInfo[]; totalCount: number }>;
 
@@ -141,7 +140,7 @@ export interface ElectronAPI {
     resolveDependencies: (options: {
       packages: OSPackageInfo[];
       distribution: OSDistribution;
-      architecture: string;
+      architecture: OSArchitecture;
       includeOptional?: boolean;
       includeRecommends?: boolean;
     }) => Promise<{

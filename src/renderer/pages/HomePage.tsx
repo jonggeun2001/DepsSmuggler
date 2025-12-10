@@ -26,7 +26,7 @@ const HomePage: React.FC = () => {
     {
       icon: <CodeOutlined style={{ fontSize: 32, color: '#fa8c16' }} />,
       title: 'Java',
-      description: 'Maven, Gradle 아티팩트',
+      description: 'Maven 아티팩트',
     },
     {
       icon: <CloudServerOutlined style={{ fontSize: 32, color: '#52c41a' }} />,
