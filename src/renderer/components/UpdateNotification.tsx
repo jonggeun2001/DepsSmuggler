@@ -137,7 +137,7 @@ export function UpdateNotification() {
       maskClosable={!status.downloading}
     >
       {status.updateInfo && (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
           <Title level={4}>v{status.updateInfo.version}</Title>
 
           <Text type="secondary">
@@ -203,7 +203,7 @@ export function UpdateNotification() {
               </>
             )}
           </Space>
-        </Space>
+        </div>
       )}
     </Modal>
   );

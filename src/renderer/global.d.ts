@@ -76,7 +76,61 @@ export interface ElectronAPI {
   // 캐시 관련
   cache: {
     getSize: () => Promise<number>;
-    clear: () => Promise<void>;
+    getStats: () => Promise<{
+      totalSize: number;
+      entryCount: number;
+      details: {
+        pip: unknown;
+        npm: unknown;
+        maven: unknown;
+        conda: unknown;
+      };
+    }>;
+    clear: () => Promise<{ success: boolean }>;
+  };
+
+  // 자동 업데이트 관련
+  updater: {
+    check: () => Promise<{ success: boolean; result?: unknown; error?: string }>;
+    download: () => Promise<{ success: boolean; error?: string }>;
+    install: () => Promise<{ success: boolean }>;
+    getStatus: () => Promise<{
+      checking: boolean;
+      available: boolean;
+      downloaded: boolean;
+      downloading: boolean;
+      error: string | null;
+      progress: {
+        percent: number;
+        bytesPerSecond: number;
+        total: number;
+        transferred: number;
+      } | null;
+      updateInfo: {
+        version: string;
+        releaseDate: string;
+        releaseNotes?: string;
+      } | null;
+    }>;
+    setAutoDownload: (enabled: boolean) => Promise<{ success: boolean }>;
+    onStatusChange: (callback: (status: {
+      checking: boolean;
+      available: boolean;
+      downloaded: boolean;
+      downloading: boolean;
+      error: string | null;
+      progress: {
+        percent: number;
+        bytesPerSecond: number;
+        total: number;
+        transferred: number;
+      } | null;
+      updateInfo: {
+        version: string;
+        releaseDate: string;
+        releaseNotes?: string;
+      } | null;
+    }) => void) => () => void;
   };
 
   // 히스토리 관련
