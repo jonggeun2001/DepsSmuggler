@@ -123,6 +123,7 @@
     "react-d3-tree": "^3.6.6",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.10.0",
+    "semver": "^7.7.3",
     "tar": "^7.5.2",
     "winston": "^3.18.3",
     "winston-daily-rotate-file": "^5.0.0",
