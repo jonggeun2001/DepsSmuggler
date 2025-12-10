@@ -1,7 +1,7 @@
 /**
  * Conda Repodata 캐시 관리
  * HTTP 조건부 요청 (RFC 7232) 및 파일 시스템 캐시 지원
- * 모듈 레벨 메모리 캐시로 파일 파싱 오버헤드 최소화
+ * 디스크 캐시만 사용 (repodata.json이 350MB+ 크기이므로 메모리 캐시 제외)
  */
 
 import * as fs from 'fs';
@@ -11,12 +11,6 @@ import axios, { AxiosResponse } from 'axios';
 import * as fzstd from 'fzstd';
 import logger from '../../utils/logger';
 import { RepoData } from './conda-types';
-
-/**
- * 모듈 레벨 메모리 캐시 (프로세스 수명 동안 유지)
- * 350MB+ JSON 파일의 반복 파싱 방지
- */
-const memoryCache: Map<string, { data: RepoData; meta: RepodataCacheMeta }> = new Map();
 
 /** DepsSmuggler용 기본 TTL: 24시간 (폐쇄망 전달 목적이므로 길게 설정) */
 const DEFAULT_MAX_AGE = 86400; // 24시간
@@ -204,26 +198,7 @@ export async function fetchRepodata(
     timeout = 120000,
   } = options;
 
-  const cacheKey = `${channel}/${subdir}`;
   const { dataPath, metaPath } = getCachePaths(cacheDir, channel, subdir);
-
-  // 0. 메모리 캐시 확인 (가장 빠름 - 파일 파싱 불필요)
-  if (useCache && !forceRefresh) {
-    const memoryCached = memoryCache.get(cacheKey);
-    if (memoryCached && isCacheValid(memoryCached.meta)) {
-      logger.info('메모리 캐시 사용 (TTL 유효)', {
-        channel,
-        subdir,
-        age: Math.round((Date.now() - memoryCached.meta.cachedAt) / 1000),
-        maxAge: memoryCached.meta.maxAge,
-      });
-      return {
-        data: memoryCached.data,
-        fromCache: true,
-        meta: memoryCached.meta,
-      };
-    }
-  }
 
   // 1. 파일 시스템 캐시 확인 (forceRefresh가 아닐 때)
   if (useCache && !forceRefresh) {
@@ -233,10 +208,7 @@ export async function fetchRepodata(
       // TTL 내 - 캐시 데이터 반환 (네트워크 요청 없음)
       const cachedData = readCacheData(dataPath);
       if (cachedData) {
-        // 메모리 캐시에도 저장
-        memoryCache.set(cacheKey, { data: cachedData, meta: cachedMeta });
-
-        logger.info('파일 캐시 사용 (TTL 유효)', {
+        logger.info('디스크 캐시 사용 (TTL 유효)', {
           channel,
           subdir,
           age: Math.round((Date.now() - cachedMeta.cachedAt) / 1000),
@@ -290,34 +262,8 @@ export async function fetchRepodata(
         validateStatus: (status) => status === 200 || status === 304,
       });
 
-      // 304 Not Modified - 캐시 유효
+      // 304 Not Modified - 캐시 유효 (디스크에서 읽기)
       if (response.status === 304) {
-        // 먼저 메모리 캐시 확인 (파일 파싱 불필요)
-        const memoryCached = memoryCache.get(cacheKey);
-        if (memoryCached && existingMeta) {
-          // 메모리 캐시 시간 갱신
-          const { maxAge } = extractCacheHeaders(response);
-          const updatedMeta: RepodataCacheMeta = {
-            ...existingMeta,
-            maxAge,
-            cachedAt: Date.now(),
-          };
-          writeCacheMeta(metaPath, updatedMeta);
-          memoryCache.set(cacheKey, { data: memoryCached.data, meta: updatedMeta });
-
-          logger.info('캐시 유효 (304 Not Modified, 메모리)', {
-            url,
-            packages: existingMeta.packageCount,
-          });
-
-          return {
-            data: memoryCached.data,
-            fromCache: true,
-            meta: updatedMeta,
-          };
-        }
-
-        // 메모리 캐시가 없으면 파일에서 읽기
         const cachedData = readCacheData(dataPath);
         if (cachedData && existingMeta) {
           // 캐시 시간 갱신
@@ -328,9 +274,8 @@ export async function fetchRepodata(
             cachedAt: Date.now(),
           };
           writeCacheMeta(metaPath, updatedMeta);
-          memoryCache.set(cacheKey, { data: cachedData, meta: updatedMeta });
 
-          logger.info('캐시 유효 (304 Not Modified, 파일)', {
+          logger.info('캐시 유효 (304 Not Modified)', {
             url,
             packages: existingMeta.packageCount,
           });
@@ -378,11 +323,10 @@ export async function fetchRepodata(
         compressed,
       };
 
-      // 캐시 저장 (파일 + 메모리)
+      // 캐시 저장 (디스크만)
       if (useCache) {
         writeCacheData(dataPath, repodata);
         writeCacheMeta(metaPath, meta);
-        memoryCache.set(cacheKey, { data: repodata, meta });
       }
 
       logger.info('repodata 가져오기 성공', {
@@ -473,7 +417,7 @@ export function getCacheStats(cacheDir: string = getDefaultCacheDir()): CacheSta
 }
 
 /**
- * 캐시 삭제
+ * 캐시 삭제 (디스크 캐시)
  */
 export function clearCache(
   cacheDir: string = getDefaultCacheDir(),
@@ -483,19 +427,12 @@ export function clearCache(
   try {
     if (channel && subdir) {
       // 특정 채널/subdir만 삭제
-      const cacheKey = `${channel}/${subdir}`;
-      memoryCache.delete(cacheKey);
       const { dataPath, metaPath } = getCachePaths(cacheDir, channel, subdir);
       if (fs.existsSync(dataPath)) fs.unlinkSync(dataPath);
       if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
       logger.info('캐시 삭제', { channel, subdir });
     } else if (channel) {
-      // 특정 채널 전체 삭제 (메모리 캐시도 정리)
-      for (const key of memoryCache.keys()) {
-        if (key.startsWith(`${channel}/`)) {
-          memoryCache.delete(key);
-        }
-      }
+      // 특정 채널 전체 삭제
       const channelPath = path.join(cacheDir, channel);
       if (fs.existsSync(channelPath)) {
         fs.rmSync(channelPath, { recursive: true });
@@ -503,7 +440,6 @@ export function clearCache(
       }
     } else {
       // 전체 캐시 삭제
-      memoryCache.clear();
       if (fs.existsSync(cacheDir)) {
         fs.rmSync(cacheDir, { recursive: true });
         logger.info('전체 캐시 삭제', { cacheDir });
@@ -541,21 +477,5 @@ export function pruneExpiredCache(
   return pruned;
 }
 
-/**
- * 메모리 캐시 초기화 (프로세스 내에서 캐시 갱신 필요 시)
- */
-export function clearMemoryCache(): void {
-  const size = memoryCache.size;
-  memoryCache.clear();
-  logger.info('메모리 캐시 초기화', { clearedEntries: size });
-}
-
-/**
- * 메모리 캐시 통계
- */
-export function getMemoryCacheStats(): { size: number; entries: string[] } {
-  return {
-    size: memoryCache.size,
-    entries: Array.from(memoryCache.keys()),
-  };
-}
+// 메모리 캐시 관련 함수 제거됨 (디스크 캐시만 사용)
+// 350MB+ repodata.json을 메모리에 저장하면 메모리 부족 발생 가능
