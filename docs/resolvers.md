@@ -11,6 +11,7 @@
 ### 개요
 - 목적: Python/PyPI 패키지 의존성 해결
 - 위치: `src/core/resolver/pipResolver.ts`
+- 캐시: `src/core/shared/pip-cache.ts` 모듈 사용 (메모리 + 디스크 캐싱)
 
 ### 클래스 구조
 
@@ -39,6 +40,14 @@
 | `conflicts` | DependencyConflict[] | 감지된 충돌 목록 |
 | `pythonVersion` | string | 타겟 Python 버전 (예: '3.11') |
 | `targetPlatform` | TargetPlatform | 타겟 플랫폼 정보 |
+| `cacheOptions` | PipCacheOptions | 공유 캐시 옵션 (메타데이터 캐시는 공유 모듈 사용) |
+
+### 메서드 (캐시 관련)
+
+| 메서드 | 설명 |
+|--------|------|
+| `setCacheOptions` | 캐시 옵션 설정 |
+| `clearCache` | 캐시 초기화 (공유 캐시 초기화) |
 
 ### TargetPlatform
 
@@ -106,6 +115,7 @@ pywin32>=300; sys_platform == 'win32'
 ### 개요
 - 목적: Conda/Anaconda 패키지 의존성 해결
 - 위치: `src/core/resolver/condaResolver.ts`
+- 캐시: `src/core/shared/conda-cache.ts` 모듈 사용 (디스크 캐싱 전용 - 350MB+ repodata)
 
 ### 클래스 구조
 
@@ -210,6 +220,7 @@ dependencies:
 ### 개요
 - 목적: Maven/Java 아티팩트 의존성 해결
 - 위치: `src/core/resolver/mavenResolver.ts`
+- 캐시: `src/core/shared/maven-cache.ts` 모듈 사용 (메모리 + 디스크 캐싱, 병렬 프리페치 지원)
 
 ### 클래스 구조
 
@@ -240,6 +251,7 @@ dependencies:
 | `visited` | Map<string, DependencyNode> | 방문 캐시 |
 | `conflicts` | DependencyConflict[] | 충돌 목록 |
 | `dependencyManagement` | Map<string, string> | BOM 버전 관리 |
+| `cacheOptions` | MavenCacheOptions | 공유 캐시 옵션 (POM 캐시는 공유 모듈 사용) |
 
 ### pom.xml 파싱
 ```typescript
@@ -305,6 +317,7 @@ const deps = resolver.parseFromText(`
 ### 개요
 - 목적: npm 패키지 의존성 해결 (node_modules 트리 구축)
 - 위치: `src/core/resolver/npmResolver.ts`
+- 캐시: `src/core/shared/npm-cache.ts` 모듈 사용 (메모리 캐싱)
 
 ### 클래스 구조
 
@@ -335,8 +348,7 @@ const deps = resolver.parseFromText(`
 |------|------|------|
 | `type` | PackageType | 'npm' |
 | `registryUrl` | string | npm Registry URL |
-| `packumentCache` | Map<string, NpmPackument> | packument 캐시 |
-| `resolvedCache` | Map<string, string> | 해결된 버전 캐시 |
+| `resolvedCache` | Map<string, string> | 해결된 버전 캐시 (packument 캐시는 공유 모듈 사용) |
 | `tree` | NpmNode | 의존성 트리 루트 |
 | `conflicts` | NpmConflict[] | 감지된 충돌 목록 |
 | `depsQueue` | DepsQueueItem[] | 처리 대기 큐 |

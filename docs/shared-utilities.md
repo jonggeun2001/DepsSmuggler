@@ -23,6 +23,12 @@ src/core/shared/
 ├── file-utils.ts                 # 파일 다운로드/압축 유틸리티
 ├── script-utils.ts               # 설치 스크립트 생성
 │
+│   # 공유 캐시 모듈
+├── pip-cache.ts                  # PyPI 메타데이터 캐시 (메모리 + 디스크)
+├── npm-cache.ts                  # npm packument 캐시 (메모리)
+├── maven-cache.ts                # Maven POM 캐시 (메모리 + 디스크)
+├── conda-cache.ts                # repodata 캐싱 시스템
+│
 │   # pip 고급 의존성 해결 모듈
 ├── pip-backtracking-resolver.ts  # pip 백트래킹 Resolver
 ├── pip-candidate.ts              # 후보 평가기
@@ -31,7 +37,6 @@ src/core/shared/
 ├── pip-wheel.ts                  # Wheel 파일 파싱/선택
 │
 │   # conda 고급 모듈
-├── conda-cache.ts                # repodata 캐싱 시스템
 ├── conda-matchspec.ts            # MatchSpec 파싱/매칭
 │
 │   # maven 고급 모듈
@@ -1117,28 +1122,296 @@ const best = selectBestWheel(wheels, supportedTags);
 
 ---
 
-## Conda 캐시 (`conda-cache.ts`)
+## PyPI 캐시 (`pip-cache.ts`)
 
-repodata.json 캐싱 및 조회 시스템
+PyPI 패키지 메타데이터 캐싱 (메모리 + 디스크)
+
+PipResolver와 PipDownloader가 공유하여 중복 API 호출을 방지합니다.
 
 ### 주요 함수
 
 | 함수명 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `fetchRepodata` | channel, subdir, options? | Promise<CacheResult> | repodata 가져오기 (캐시 지원) |
-| `isCacheValid` | cachePath: string, maxAge: number | Promise<boolean> | 캐시 유효성 검사 |
-| `clearCache` | channel?, subdir? | Promise<void> | 캐시 삭제 |
-| `getCacheStats` | - | Promise<CacheStats> | 캐시 통계 조회 |
-| `pruneExpiredCache` | maxAge: number | Promise<number> | 만료 캐시 정리 |
+| `fetchPackageMetadata` | name, version, options? | Promise<PipCacheResult \| null> | 패키지 메타데이터 조회 (캐시 지원) |
+| `clearMemoryCache` | - | void | 메모리 캐시 초기화 |
+| `clearDiskCache` | cacheDir? | Promise<void> | 디스크 캐시 삭제 |
+| `clearAllCache` | cacheDir? | Promise<void> | 모든 캐시 삭제 |
+| `getCacheStats` | cacheDir? | PipCacheStats | 캐시 통계 조회 |
+| `pruneExpiredCache` | cacheDir?, maxAge? | Promise<number> | 만료 캐시 정리 |
+
+### PipCacheOptions
+
+```typescript
+interface PipCacheOptions {
+  /** 메모리 TTL (초), 기본: 300 (5분) */
+  ttl?: number;
+  /** 강제 새로고침 */
+  forceRefresh?: boolean;
+  /** 디스크 캐시 사용 여부, 기본: true */
+  useDiskCache?: boolean;
+  /** 캐시 디렉토리 */
+  cacheDir?: string;
+}
+```
+
+### PipCacheResult
+
+```typescript
+interface PipCacheResult {
+  info: PyPIPackageInfo;
+  releases: Record<string, PyPIRelease[]>;
+  fromCache: 'memory' | 'disk' | 'network';
+}
+```
+
+### PipCacheStats
+
+```typescript
+interface PipCacheStats {
+  memoryEntries: number;  // 메모리 캐시 항목 수
+  diskEntries: number;    // 디스크 캐시 항목 수
+  diskSize: number;       // 디스크 캐시 크기 (bytes)
+}
+```
+
+### 캐시 위치
+
+```
+~/.depssmuggler/cache/pip/
+├── requests/
+│   ├── 2.28.0.json
+│   ├── 2.31.0.json
+│   └── latest.json
+└── flask/
+    └── ...
+```
+
+### 사용 예시
+
+```typescript
+import { fetchPackageMetadata, getCacheStats, clearAllCache } from './pip-cache';
+
+// 패키지 메타데이터 조회
+const result = await fetchPackageMetadata('requests', '2.28.0');
+if (result) {
+  console.log('소스:', result.fromCache); // 'memory', 'disk', 또는 'network'
+  console.log('정보:', result.info);
+}
+
+// 캐시 통계 조회
+const stats = getCacheStats();
+console.log(`메모리: ${stats.memoryEntries}개, 디스크: ${stats.diskEntries}개`);
+
+// 캐시 삭제
+await clearAllCache();
+```
+
+---
+
+## npm 캐시 (`npm-cache.ts`)
+
+npm Registry packument 캐싱 (메모리)
+
+NpmResolver와 NpmDownloader가 공유하여 중복 API 호출을 방지합니다.
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `fetchPackument` | name, options? | Promise<NpmPackument> | packument 조회 (캐시 지원) |
+| `fetchPackumentWithCacheInfo` | name, options? | Promise<NpmCacheResult> | packument + 캐시 정보 조회 |
+| `getPackumentFromCache` | name, registryUrl? | NpmPackument \| null | 캐시에서 직접 조회 |
+| `isPackumentCached` | name, registryUrl? | boolean | 캐시 존재 여부 확인 |
+| `invalidatePackage` | name, registryUrl? | void | 특정 패키지 캐시 무효화 |
+| `clearNpmCache` | - | void | 전체 캐시 초기화 |
+| `getNpmCacheStats` | - | NpmCacheStats | 캐시 통계 조회 |
+| `pruneExpiredNpmCache` | - | number | 만료 캐시 정리 |
+
+### NpmCacheOptions
+
+```typescript
+interface NpmCacheOptions {
+  /** 레지스트리 URL, 기본: https://registry.npmjs.org */
+  registryUrl?: string;
+  /** TTL (ms), 기본: 300000 (5분) */
+  ttl?: number;
+  /** 강제 새로고침 */
+  forceRefresh?: boolean;
+}
+```
+
+### NpmCacheResult
+
+```typescript
+interface NpmCacheResult {
+  packument: NpmPackument;
+  fromCache: boolean;
+}
+```
+
+### NpmCacheStats
+
+```typescript
+interface NpmCacheStats {
+  entries: number;      // 캐시 항목 수
+  pendingRequests: number; // 진행 중인 요청 수
+}
+```
+
+### 사용 예시
+
+```typescript
+import { fetchPackument, getNpmCacheStats, clearNpmCache } from './npm-cache';
+
+// packument 조회
+const packument = await fetchPackument('express');
+console.log('최신 버전:', packument['dist-tags'].latest);
+
+// 캐시 통계
+const stats = getNpmCacheStats();
+console.log(`캐시 항목: ${stats.entries}개`);
+
+// 캐시 초기화
+clearNpmCache();
+```
+
+---
+
+## Maven 캐시 (`maven-cache.ts`)
+
+Maven POM 캐싱 (메모리 + 디스크)
+
+MavenResolver와 MavenDownloader가 공유하여 중복 API 호출을 방지합니다.
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `fetchPom` | coordinate, options? | Promise<PomProject> | POM 조회 (캐시 지원) |
+| `fetchPomWithCacheInfo` | coordinate, options? | Promise<MavenCacheResult> | POM + 캐시 정보 조회 |
+| `prefetchPomsParallel` | coordinates, options? | Promise<void> | 여러 POM 병렬 프리페치 |
+| `fetchPomsParallel` | coordinates, options? | Promise<Map<string, PomProject>> | 여러 POM 병렬 조회 |
+| `getPomFromCache` | coordinate | PomProject \| null | 메모리 캐시에서 직접 조회 |
+| `isPomCached` | coordinate | boolean | 캐시 존재 여부 확인 |
+| `invalidatePom` | coordinate | void | 특정 POM 캐시 무효화 |
+| `clearMemoryCache` | - | void | 메모리 캐시 초기화 |
+| `clearDiskCache` | cacheDir? | Promise<void> | 디스크 캐시 삭제 |
+| `getMavenCacheStats` | - | MavenCacheStats | 캐시 통계 조회 |
+| `pruneExpiredMemoryCache` | - | number | 만료 메모리 캐시 정리 |
+
+### MavenCacheOptions
+
+```typescript
+interface MavenCacheOptions {
+  /** 레포지토리 URL, 기본: https://repo1.maven.org/maven2 */
+  repoUrl?: string;
+  /** 메모리 TTL (ms), 기본: 300000 (5분) */
+  memoryTtl?: number;
+  /** 디스크 TTL (ms), 기본: 86400000 (24시간) */
+  diskTtl?: number;
+  /** 강제 새로고침 */
+  forceRefresh?: boolean;
+  /** 디스크 캐시 사용 여부, 기본: true */
+  useDiskCache?: boolean;
+  /** 캐시 디렉토리 */
+  cacheDir?: string;
+}
+```
+
+### MavenCacheResult
+
+```typescript
+interface MavenCacheResult {
+  pom: PomProject;
+  fromCache: 'memory' | 'disk' | 'network';
+}
+```
+
+### MavenCacheStats
+
+```typescript
+interface MavenCacheStats {
+  memoryEntries: number;   // 메모리 캐시 항목 수
+  pendingRequests: number; // 진행 중인 요청 수
+}
+```
+
+### 캐시 위치
+
+```
+~/.depssmuggler/cache/maven/
+├── org/
+│   └── springframework/
+│       └── spring-core/
+│           └── 5.3.0/
+│               ├── pom.xml
+│               └── meta.json
+└── com/
+    └── ...
+```
+
+### 사용 예시
+
+```typescript
+import { fetchPom, prefetchPomsParallel, getMavenCacheStats } from './maven-cache';
+
+// 단일 POM 조회
+const pom = await fetchPom({
+  groupId: 'org.springframework',
+  artifactId: 'spring-core',
+  version: '5.3.0'
+});
+
+// 여러 POM 병렬 프리페치 (의존성 해결 최적화)
+await prefetchPomsParallel([
+  { groupId: 'org.springframework', artifactId: 'spring-beans', version: '5.3.0' },
+  { groupId: 'org.springframework', artifactId: 'spring-context', version: '5.3.0' },
+]);
+
+// 캐시 통계
+const stats = getMavenCacheStats();
+console.log(`메모리: ${stats.memoryEntries}개`);
+```
+
+---
+
+## Conda 캐시 (`conda-cache.ts`)
+
+repodata.json 캐싱 및 조회 시스템 (**디스크 캐시 전용** - 메모리 캐시 미사용)
+
+> **참고**: Conda repodata.json 파일은 350MB+ 크기이므로 메모리 캐시를 사용하지 않고 디스크 캐시만 사용합니다.
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `fetchRepodata` | channel, subdir, options? | Promise<CacheResult \| null> | repodata 가져오기 (디스크 캐시 지원) |
+| `getCacheStats` | cacheDir? | CacheStats | 캐시 통계 조회 |
+| `clearCache` | cacheDir?, channel?, subdir? | void | 캐시 삭제 |
+| `pruneExpiredCache` | cacheDir?, maxAgeMultiplier? | number | 만료 캐시 정리 |
 
 ### CacheResult
 
 ```typescript
 interface CacheResult {
-  data: RepoData;        // repodata 내용
-  fromCache: boolean;    // 캐시에서 로드 여부
-  etag?: string;         // HTTP ETag
-  lastModified?: string; // 마지막 수정 시간
+  data: RepoData;               // repodata 내용
+  fromCache: boolean;           // 캐시에서 로드 여부
+  meta: RepodataCacheMeta;      // 캐시 메타데이터
+}
+```
+
+### RepodataCacheMeta
+
+```typescript
+interface RepodataCacheMeta {
+  url: string;              // 원본 URL
+  etag?: string;            // HTTP ETag
+  lastModified?: string;    // HTTP Last-Modified
+  maxAge: number;           // Cache-Control max-age (초)
+  cachedAt: number;         // 캐시 저장 시간 (Unix timestamp ms)
+  fileSize: number;         // 파일 크기 (바이트)
+  packageCount: number;     // 패키지 수
+  compressed: boolean;      // zstd 압축 여부
 }
 ```
 
@@ -1146,9 +1419,26 @@ interface CacheResult {
 
 ```typescript
 interface FetchRepodataOptions {
-  maxAge?: number;           // 캐시 최대 수명 (ms)
-  forceRefresh?: boolean;    // 강제 새로고침
-  preferZstd?: boolean;      // zstd 압축 우선 사용
+  baseUrl?: string;        // Conda 기본 URL (기본: https://conda.anaconda.org)
+  cacheDir?: string;       // 캐시 디렉토리
+  useCache?: boolean;      // 캐시 사용 여부 (기본: true)
+  forceRefresh?: boolean;  // 강제 새로고침 (기본: false)
+  timeout?: number;        // 요청 타임아웃 (ms, 기본: 120000)
+}
+```
+
+### CacheStats
+
+```typescript
+interface CacheStats {
+  totalSize: number;       // 총 캐시 크기 (바이트)
+  channelCount: number;    // 캐시된 채널 수
+  entries: Array<{
+    channel: string;
+    subdir: string;
+    meta: RepodataCacheMeta;
+    dataSize: number;
+  }>;
 }
 ```
 
@@ -1361,6 +1651,166 @@ const mavenResults = [
 
 const sortedMaven = sortByRelevance(mavenResults, 'spring', 'maven');
 // spring-core, spring-beans가 상위로 정렬됨 (artifactId 기준)
+```
+
+---
+
+## PyPI Simple API (`pip-simple-api.ts`)
+
+PEP 503 Simple Repository API 파싱 유틸리티
+
+> **참고**: Simple API는 JSON API보다 훨씬 가볍습니다.
+> - JSON API: ~50KB+ (전체 메타데이터)
+> - Simple API: ~5KB (버전/파일 목록만)
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `fetchReleasesFromSimpleApi` | packageName, options? | Promise<SimpleRelease[]> | Simple API에서 릴리스 목록 가져오기 |
+| `fetchVersionsFromSimpleApi` | packageName, options? | Promise<string[]> | 버전 목록만 가져오기 |
+| `parseSimpleApiHtml` | html, packageName | SimpleRelease[] | HTML 파싱 |
+| `extractVersionFromFilename` | filename, packageName | string \| null | 파일명에서 버전 추출 |
+| `extractVersionsFromReleases` | releases | string[] | 릴리스에서 중복 없는 버전 목록 추출 |
+| `getPackageType` | filename | 'wheel' \| 'sdist' \| 'egg' \| 'unknown' | 패키지 타입 판별 |
+
+### SimpleRelease
+
+```typescript
+interface SimpleRelease {
+  filename: string;           // 파일명
+  url: string;                // 다운로드 URL
+  hash?: string;              // 해시값
+  hashAlgorithm?: string;     // 해시 알고리즘
+  requiresPython?: string;    // Python 버전 요구사항
+  version: string;            // 버전 (파일명에서 추출)
+  packageType: 'wheel' | 'sdist' | 'egg' | 'unknown';
+}
+```
+
+### SimpleApiOptions
+
+```typescript
+interface SimpleApiOptions {
+  baseUrl?: string;    // 기본: https://pypi.org/simple
+  timeout?: number;    // 타임아웃 (ms)
+}
+```
+
+### 사용 예시
+
+```typescript
+import { fetchVersionsFromSimpleApi, extractVersionFromFilename } from './pip-simple-api';
+
+// 버전 목록 가져오기
+const versions = await fetchVersionsFromSimpleApi('requests');
+// ['2.31.0', '2.30.0', '2.29.0', ...]
+
+// 파일명에서 버전 추출
+extractVersionFromFilename('requests-2.28.0.tar.gz', 'requests');
+// '2.28.0'
+
+extractVersionFromFilename('requests-2.28.0-py3-none-any.whl', 'requests');
+// '2.28.0'
+```
+
+---
+
+## 파일명 유틸리티 (`filename-utils.ts`)
+
+Windows 호환 파일명 처리 유틸리티
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `sanitizeFilename` | name, maxLength? | string | 파일명을 Windows/Unix 모두에서 안전하게 변환 |
+| `sanitizeCacheKey` | key | string | 캐시 키를 파일명으로 안전하게 변환 |
+| `sanitizeDockerTag` | tag | string | Docker 태그 정규화 |
+| `getExtension` | filename | string | 확장자 추출 |
+| `removeExtension` | filename | string | 확장자 제거 |
+| `isPathLengthValid` | path, os? | boolean | 경로 길이 유효성 검사 |
+| `getPathLengthWarning` | path, os? | string \| null | 경로 길이 경고 메시지 |
+| `toLongPath` | path | string | Windows Long Path 형식 (\\\\?\\) 변환 |
+
+### Windows 제약사항
+
+```typescript
+// 금지된 문자
+const WINDOWS_FORBIDDEN_CHARS = /[<>:"/\\|?*\x00-\x1F]/g;
+
+// 예약된 파일명
+const WINDOWS_RESERVED_NAMES = [
+  'CON', 'PRN', 'AUX', 'NUL',
+  'COM1'...'COM9', 'LPT1'...'LPT9'
+];
+```
+
+### 사용 예시
+
+```typescript
+import { sanitizeFilename, sanitizeCacheKey } from './filename-utils';
+
+sanitizeFilename('file<>:name');      // 'file___name'
+sanitizeFilename('CON');              // '_CON'
+sanitizeFilename('@types/node');      // '_types_node'
+
+sanitizeCacheKey('org.springframework:spring-core:5.3.0');
+// 'org.springframework_spring-core_5.3.0'
+```
+
+---
+
+## 경로 유틸리티 (`path-utils.ts`)
+
+크로스 플랫폼 경로 처리 유틸리티
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `normalizePath` | path | string | 경로 정규화 (forward slash 통일) |
+| `toWindowsPath` | path | string | Windows 스타일 (백슬래시) |
+| `toUnixPath` | path | string | Unix 스타일 (슬래시) |
+| `toBashPath` | path | string | Bash 스크립트용 경로 |
+| `toPowerShellPath` | path | string | PowerShell 스크립트용 경로 |
+| `toScriptPath` | path, scriptType | string | 스크립트 타입에 맞는 경로 |
+| `ensureForwardSlashForArchive` | path | string | ZIP 아카이브용 (forward slash) |
+| `getRelativePath` | fullPath, baseDir | string | 상대 경로 추출 |
+| `joinAndNormalize` | ...paths | string | 경로 결합 후 정규화 |
+| `joinPath` | ...paths | string | 플랫폼 네이티브 경로 결합 |
+| `isAbsolutePath` | path | boolean | 절대 경로 여부 |
+| `resolvePath` | ...paths | string | 경로 정규화 (native) |
+| `stripLeadingDotSlash` | path | string | 선행 './' 제거 |
+| `psJoinPath` | base, child | string | PowerShell Join-Path 구문 |
+| `psQuotePath` | path | string | PowerShell 경로 이스케이프 |
+| `getFileMode` | options | number | 파일 권한 모드 |
+| `getWriteOptions` | options | object | 파일 쓰기 옵션 |
+
+### 플랫폼 상수
+
+```typescript
+const isWindows: boolean;     // Windows 환경 여부
+const isMac: boolean;         // macOS 환경 여부
+const isLinux: boolean;       // Linux 환경 여부
+const pathSeparator: string;  // 플랫폼별 경로 구분자
+```
+
+### 사용 예시
+
+```typescript
+import { toUnixPath, toWindowsPath, ensureForwardSlashForArchive } from './path-utils';
+
+// 크로스 플랫폼 경로 변환
+toUnixPath('C:\\Users\\name\\file.txt');
+// 'C:/Users/name/file.txt'
+
+toWindowsPath('/home/user/file.txt');
+// '\\home\\user\\file.txt'
+
+// ZIP 아카이브 내부 경로
+ensureForwardSlashForArchive('packages\\requests\\file.whl');
+// 'packages/requests/file.whl'
 ```
 
 ---
