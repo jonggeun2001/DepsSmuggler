@@ -447,6 +447,25 @@ ipcMain.handle('search:packages', async (_, type: string, query: string, options
         results = await searchMaven(query);
         results = sortByRelevance(results, query, 'maven');
         break;
+      case 'npm':
+        const npmDownloader = getNpmDownloader();
+        const npmResults = await npmDownloader.searchPackages(query);
+        results = npmResults.map(pkg => ({
+          name: pkg.name,
+          version: pkg.version,
+          description: pkg.metadata?.description || '',
+        }));
+        results = sortByRelevance(results, query, 'npm');
+        break;
+      case 'docker':
+        const dockerDownloader = getDockerDownloader();
+        const dockerResults = await dockerDownloader.searchPackages(query);
+        results = dockerResults.map(pkg => ({
+          name: pkg.name,
+          version: pkg.version || 'latest',
+          description: pkg.metadata?.description || '',
+        }));
+        break;
       default:
         // 미구현 타입은 빈 배열 반환
         results = [];
@@ -478,6 +497,14 @@ ipcMain.handle('search:versions', async (_, type: string, packageName: string, o
         break;
       case 'maven':
         versions = await getMavenVersions(packageName);
+        break;
+      case 'npm':
+        const npmDownloaderForVersions = getNpmDownloader();
+        versions = await npmDownloaderForVersions.getVersions(packageName);
+        break;
+      case 'docker':
+        const dockerDownloaderForVersions = getDockerDownloader();
+        versions = await dockerDownloaderForVersions.getVersions(packageName);
         break;
       default:
         versions = [];
@@ -542,6 +569,9 @@ ipcMain.handle('search:suggest', async (_, type: string, query: string, options?
         break;
       case 'docker':
         searchPromise = (downloader as DockerDownloader).searchPackages(query);
+        break;
+      case 'npm':
+        searchPromise = (downloader as NpmDownloader).searchPackages(query);
         break;
       case 'yum':
         searchPromise = (downloader as YumDownloader).searchPackages(query);
