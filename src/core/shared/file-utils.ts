@@ -2,7 +2,7 @@
 import * as fs from 'fs';
 import * as https from 'https';
 import * as http from 'http';
-import * as archiver from 'archiver';
+import archiver from 'archiver';
 
 export type ProgressCallback = (downloaded: number, total: number) => void;
 
@@ -66,7 +66,7 @@ export async function createZipArchive(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(outputPath);
-    const archive = archiver.create('zip', { zlib: { level: 9 } });
+    const archive = archiver('zip', { zlib: { level: 9 } });
 
     output.on('close', () => resolve());
     archive.on('error', (err: Error) => reject(err));
@@ -86,7 +86,7 @@ export async function createTarGzArchive(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(outputPath);
-    const archive = archiver.create('tar', { gzip: true, gzipOptions: { level: 9 } });
+    const archive = archiver('tar', { gzip: true, gzipOptions: { level: 9 } });
 
     output.on('close', () => resolve());
     archive.on('error', (err: Error) => reject(err));

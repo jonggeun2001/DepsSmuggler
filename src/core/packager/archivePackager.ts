@@ -1,4 +1,4 @@
-import * as archiver from 'archiver';
+import archiver from 'archiver';
 import * as tar from 'tar';
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -147,7 +147,7 @@ export class ArchivePackager {
       const normalizedOutputPath = resolvePath(outputPath);
 
       const output = fs.createWriteStream(normalizedOutputPath);
-      const archive = archiver.create('zip', {
+      const archive = archiver('zip', {
         zlib: { level: compressionLevel },
       });
 
