@@ -7,11 +7,10 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
-    "dev:electron": "tsc -p tsconfig.electron.json && electron .",
+    "dev:electron": "tsc -p tsconfig.electron.json && node -e \"require('fs').writeFileSync('dist/package.json', '{\\\"type\\\":\\\"commonjs\\\"}')\" && electron .",
     "build": "npm run build:vite && npm run build:electron",
     "build:vite": "vite build",
-    "build:electron": "tsc -p tsconfig.electron.json",
-    "start": "electron .",
+    "build:electron": "tsc -p tsconfig.electron.json && node -e \"require('fs').writeFileSync('dist/package.json', '{\\\"type\\\":\\\"commonjs\\\"}')\"",
     "watch": "tsc -w",
     "package:win": "npm run build && electron-builder --win",
     "package:mac": "npm run build && electron-builder --mac",
@@ -86,6 +85,9 @@
       "assets/**/*",
       "package.json"
     ],
+    "extraMetadata": {
+      "type": "commonjs"
+    },
     "mac": {
       "target": "dmg",
       "category": "public.app-category.developer-tools",
