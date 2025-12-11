@@ -383,12 +383,17 @@ export class DockerDownloader implements IDownloader {
     destPath: string,
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string> {
+    // 이름에서 레지스트리 추출 (포함된 경우)
+    const extracted = this.extractRegistry(info.name);
+    const registry = extracted.registry || (info.metadata?.registry as string) || 'docker.io';
+
     return this.downloadImage(
       info.name,
       info.version,
       info.arch || 'amd64',
       destPath,
-      onProgress
+      onProgress,
+      registry
     );
   }
 
