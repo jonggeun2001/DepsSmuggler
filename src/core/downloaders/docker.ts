@@ -221,7 +221,7 @@ export class DockerDownloader implements IDownloader {
 
         return response.data.results.map((result) => ({
           type: 'docker',
-          name: result.repo_name,
+          name: `docker.io/${result.repo_name}`,
           version: 'latest',
           metadata: {
             description: result.short_description,
@@ -249,7 +249,7 @@ export class DockerDownloader implements IDownloader {
           .slice(0, 50)
           .map((repo) => ({
             type: 'docker',
-            name: `${repo.namespace.name}/${repo.name}`,
+            name: `quay.io/${repo.namespace.name}/${repo.name}`,
             version: 'latest',
             metadata: {
               description: repo.description || '',
@@ -265,7 +265,7 @@ export class DockerDownloader implements IDownloader {
         // 입력한 검색어를 그대로 이미지 이름으로 사용할 수 있도록 제안
         return [{
           type: 'docker',
-          name: query,
+          name: `${registry}/${query}`,
           version: 'latest',
           metadata: {
             description: `"${query}" 이미지를 ${registry}에서 가져옵니다. (검색 미지원 - 정확한 이미지명 입력 필요)`,
@@ -282,7 +282,7 @@ export class DockerDownloader implements IDownloader {
 
       return filtered.slice(0, 50).map((name) => ({
         type: 'docker',
-        name,
+        name: `${registry}/${name}`,
         version: 'latest',
         metadata: {
           registry,
@@ -296,13 +296,17 @@ export class DockerDownloader implements IDownloader {
 
   /**
    * 태그 목록 조회
-   * @param packageName 패키지 이름
-   * @param registry 레지스트리 (기본값: docker.io)
+   * @param packageName 패키지 이름 (레지스트리 포함 가능: docker.io/library/nginx)
+   * @param registry 레지스트리 (기본값: docker.io, 이름에 레지스트리가 포함되면 무시됨)
    */
   async getVersions(packageName: string, registry: string = 'docker.io'): Promise<string[]> {
+    // 이름에서 레지스트리 추출 (포함된 경우)
+    const extracted = this.extractRegistry(packageName);
+    const effectiveRegistry = extracted.registry || registry;
+
     try {
       const [namespace, repo] = this.parseImageName(packageName);
-      const registryType = getRegistryType(registry);
+      const registryType = getRegistryType(effectiveRegistry);
 
       // Docker Hub의 경우 Hub API 사용
       if (registryType === 'docker.io') {
@@ -316,9 +320,9 @@ export class DockerDownloader implements IDownloader {
       }
 
       // 다른 레지스트리는 Registry API 사용
-      const config = this.getRegistryConfig(registry);
+      const config = this.getRegistryConfig(effectiveRegistry);
       const fullName = `${namespace}/${repo}`;
-      const token = await this.getTokenForRegistry(registry, fullName);
+      const token = await this.getTokenForRegistry(effectiveRegistry, fullName);
 
       const response = await axios.get(
         `${config.registryUrl}/${fullName}/tags/list`,
@@ -329,7 +333,7 @@ export class DockerDownloader implements IDownloader {
 
       return response.data.tags || [];
     } catch (error) {
-      logger.error('Docker 태그 목록 조회 실패', { packageName, registry, error });
+      logger.error('Docker 태그 목록 조회 실패', { packageName, registry: effectiveRegistry, error });
       throw error;
     }
   }
@@ -756,19 +760,46 @@ export class DockerDownloader implements IDownloader {
   }
 
   /**
-   * 이미지 이름 파싱
+   * 이름에서 레지스트리 분리 (레지스트리가 포함된 경우)
+   * 예: docker.io/library/nginx -> { registry: docker.io, imageName: library/nginx }
+   *     quay.io/coreos/etcd -> { registry: quay.io, imageName: coreos/etcd }
+   *     nginx -> { registry: null, imageName: nginx }
+   */
+  private extractRegistry(fullName: string): { registry: string | null; imageName: string } {
+    const knownRegistries = ['docker.io', 'quay.io', 'ghcr.io', 'gcr.io', 'public.ecr.aws'];
+    const parts = fullName.split('/');
+
+    if (parts.length > 1) {
+      const firstPart = parts[0];
+      // 알려진 레지스트리거나 점이 포함된 경우 레지스트리로 간주
+      if (knownRegistries.includes(firstPart) || firstPart.includes('.')) {
+        return {
+          registry: firstPart,
+          imageName: parts.slice(1).join('/'),
+        };
+      }
+    }
+
+    return { registry: null, imageName: fullName };
+  }
+
+  /**
+   * 이미지 이름 파싱 (레지스트리 제외 후 namespace/repo 분리)
    */
   private parseImageName(name: string): [string, string] {
-    if (name.includes('/')) {
-      const parts = name.split('/');
+    // 먼저 레지스트리 제거
+    const { imageName } = this.extractRegistry(name);
+
+    if (imageName.includes('/')) {
+      const parts = imageName.split('/');
       if (parts.length === 2) {
         return [parts[0], parts[1]];
       }
-      // 레지스트리 포함된 경우 (예: gcr.io/project/image)
+      // 여러 depth인 경우 (예: coreos/etcd/subpath)
       return [parts.slice(0, -1).join('/'), parts[parts.length - 1]];
     }
     // library 이미지 (예: nginx, ubuntu)
-    return ['library', name];
+    return ['library', imageName];
   }
 
   /**
