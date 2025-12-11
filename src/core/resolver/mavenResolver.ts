@@ -170,11 +170,11 @@ export class MavenResolver implements IResolver {
     // 루트 POM 로드 및 초기 의존성 큐에 추가
     const rootPom = await this.fetchPomWithCache(rootCoordinate);
 
-    // Parent POM 처리
-    await this.processParentPom(rootPom, rootCoordinate);
+    // Parent POM 처리 및 properties 체인 구축
+    const resolvedProperties = await this.processParentPom(rootPom, rootCoordinate);
 
-    // 현재 POM의 dependencyManagement 처리
-    this.processDependencyManagement(rootPom, rootPom.properties);
+    // 현재 POM의 dependencyManagement 처리 (해결된 properties 사용)
+    this.processDependencyManagement(rootPom, resolvedProperties);
 
     // 루트의 직접 의존성을 큐에 추가
     // isRoot=true로 설정하여 dependencies가 없는 pom 타입도 dependencyManagement에서 의존성 추출
@@ -190,7 +190,7 @@ export class MavenResolver implements IResolver {
     for (const dep of rootDependencies) {
       if (!this.shouldIncludeDependency(dep, includeOptional)) continue;
 
-      const depCoordinate = this.resolveDependencyCoordinate(dep, rootPom.properties);
+      const depCoordinate = this.resolveDependencyCoordinate(dep, resolvedProperties);
       if (!depCoordinate) continue;
 
       coordinatesToPrefetch.push(depCoordinate);
@@ -515,14 +515,32 @@ export class MavenResolver implements IResolver {
   /**
    * Parent POM 처리
    */
-  private async processParentPom(pom: PomProject, coordinate: MavenCoordinate): Promise<void> {
-    if (!pom.parent) return;
+  private async processParentPom(
+    pom: PomProject,
+    coordinate: MavenCoordinate,
+    inheritedProperties?: Record<string, string>
+  ): Promise<Record<string, string>> {
+    // 현재 POM의 properties와 상속받은 properties 병합
+    // 자식의 properties가 부모보다 우선 (오버라이드)
+    const mergedProperties: Record<string, string> = {
+      ...inheritedProperties,
+      ...pom.properties,
+      // 프로젝트 좌표 정보 추가
+      'project.version': coordinate.version,
+      'project.groupId': coordinate.groupId,
+      'project.artifactId': coordinate.artifactId,
+      version: coordinate.version,
+      groupId: coordinate.groupId,
+      artifactId: coordinate.artifactId,
+    };
+
+    if (!pom.parent) return mergedProperties;
 
     const parentGroupId = pom.parent.groupId || coordinate.groupId;
     const parentArtifactId = pom.parent.artifactId;
-    const parentVersion = this.resolveProperty(pom.parent.version || '', pom.properties);
+    const parentVersion = this.resolveProperty(pom.parent.version || '', mergedProperties);
 
-    if (!parentArtifactId || !parentVersion) return;
+    if (!parentArtifactId || !parentVersion) return mergedProperties;
 
     try {
       const parentCoordinate: MavenCoordinate = {
@@ -533,15 +551,30 @@ export class MavenResolver implements IResolver {
 
       const parentPom = await this.fetchPomWithCache(parentCoordinate);
 
-      // Parent의 parent도 재귀적으로 처리
-      await this.processParentPom(parentPom, parentCoordinate);
+      // Parent의 parent도 재귀적으로 처리하고 properties 체인 받아오기
+      const parentProperties = await this.processParentPom(parentPom, parentCoordinate, mergedProperties);
 
-      // Parent의 dependencyManagement 상속
-      this.processDependencyManagement(parentPom, pom.properties);
+      // 최종 properties: 부모 체인의 properties + 현재 POM의 properties
+      const finalProperties: Record<string, string> = {
+        ...parentProperties,
+        ...pom.properties,
+        'project.version': coordinate.version,
+        'project.groupId': coordinate.groupId,
+        'project.artifactId': coordinate.artifactId,
+        version: coordinate.version,
+        groupId: coordinate.groupId,
+        artifactId: coordinate.artifactId,
+      };
+
+      // Parent의 dependencyManagement 상속 (부모의 properties로 해결)
+      this.processDependencyManagement(parentPom, parentProperties);
+
+      return finalProperties;
     } catch (error) {
       logger.debug('Parent POM 로드 실패 (계속 진행)', {
         parent: `${parentGroupId}:${parentArtifactId}:${parentVersion}`,
       });
+      return mergedProperties;
     }
   }
 

@@ -135,9 +135,10 @@ const CartPage: React.FC = () => {
         targetOS: settings.defaultTargetOS || 'any',
       };
 
-      if (window.electronAPI?.dependency?.resolve) {
+      const dependencyAPI = window.electronAPI?.dependency;
+      if (dependencyAPI?.resolve) {
         // Electron 환경
-        result = await window.electronAPI.dependency.resolve({ packages, options: resolverOptions });
+        result = await dependencyAPI.resolve({ packages, options: resolverOptions });
       } else {
         // Vite dev 서버 환경
         const response = await fetch('/api/dependency/resolve', {

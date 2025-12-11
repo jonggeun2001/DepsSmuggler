@@ -595,11 +595,13 @@ const DownloadPage: React.FC = () => {
         }
 
         data = await response.json() as DependencyResolveResponse;
-      } else if (window.electronAPI?.dependency?.resolve) {
-        // 프로덕션 Electron 환경: IPC 사용
-        data = await window.electronAPI.dependency.resolve({ packages, options }) as DependencyResolveResponse;
       } else {
-        throw new Error('의존성 해결 API를 사용할 수 없습니다');
+        // 프로덕션 Electron 환경: IPC 사용
+        const dependencyAPI = window.electronAPI?.dependency;
+        if (!dependencyAPI?.resolve) {
+          throw new Error('의존성 해결 API를 사용할 수 없습니다');
+        }
+        data = await dependencyAPI.resolve({ packages, options }) as DependencyResolveResponse;
       }
 
       const originalCount = data.originalPackages.length;
