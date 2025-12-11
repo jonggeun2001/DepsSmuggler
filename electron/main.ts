@@ -809,15 +809,53 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
           downloadUrl = { url: tarballUrl, filename };
         }
       } else if (pkg.type === 'maven') {
-        // Maven 패키지: groupId:artifactId 형식에서 URL 생성
+        // Maven 패키지: MavenDownloader 사용 (jar + pom + sha1 파일 다운로드)
+        const mavenDownloader = getMavenDownloader();
         const parts = pkg.name.split(':');
         if (parts.length >= 2) {
-          const groupId = parts[0];
-          const artifactId = parts[1];
-          const groupPath = groupId.replace(/\./g, '/');
-          const filename = `${artifactId}-${pkg.version}.jar`;
-          const url = `https://repo1.maven.org/maven2/${groupPath}/${artifactId}/${pkg.version}/${filename}`;
-          downloadUrl = { url, filename };
+          try {
+            const jarPath = await mavenDownloader.downloadPackage(
+              {
+                type: 'maven',
+                name: pkg.name,
+                version: pkg.version,
+                metadata: {
+                  groupId: parts[0],
+                  artifactId: parts[1],
+                },
+              },
+              packagesDir,
+              (progress) => {
+                mainWindow?.webContents.send('download:progress', {
+                  packageId: pkg.id,
+                  status: 'downloading',
+                  progress: progress.progress,
+                  downloadedBytes: progress.downloadedBytes,
+                  totalBytes: progress.totalBytes,
+                  speed: progress.speed,
+                });
+              }
+            );
+
+            // 완료 상태 전송
+            mainWindow?.webContents.send('download:progress', {
+              packageId: pkg.id,
+              status: 'completed',
+              progress: 100,
+            });
+
+            results.push({ id: pkg.id, success: true });
+            continue; // Maven은 별도 처리 완료, 다음 패키지로
+          } catch (mavenError) {
+            const errorMessage = mavenError instanceof Error ? mavenError.message : String(mavenError);
+            mainWindow?.webContents.send('download:progress', {
+              packageId: pkg.id,
+              status: 'error',
+              error: errorMessage,
+            });
+            results.push({ id: pkg.id, success: false, error: errorMessage });
+            continue;
+          }
         }
       } else if (pkg.type === 'yum' || pkg.type === 'apt' || pkg.type === 'apk') {
         // OS 패키지는 장바구니에 담긴 URL 정보 사용
