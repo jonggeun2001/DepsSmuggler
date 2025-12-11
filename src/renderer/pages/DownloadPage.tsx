@@ -491,37 +491,34 @@ const DownloadPage: React.FC = () => {
           okType: 'danger',
           cancelText: '취소',
           onOk: async () => {
-            try {
-              // Electron 환경에서는 IPC API 사용, 개발 환경에서는 HTTP API 사용
-              if (!isDevelopment && window.electronAPI?.download?.clearPath) {
-                const clearResult = await window.electronAPI.download.clearPath(outputDir);
-                if (clearResult.success) {
-                  message.success('기존 데이터 삭제 완료');
-                  addLog('info', '기존 데이터 삭제', outputDir);
-                  resolve(true);
-                } else {
-                  message.error('데이터 삭제 실패');
-                  resolve(false);
-                }
+            // Electron 환경에서는 IPC API 사용, 개발 환경에서는 HTTP API 사용
+            if (!isDevelopment && window.electronAPI?.download?.clearPath) {
+              const clearResult = await window.electronAPI.download.clearPath(outputDir);
+              if (clearResult.success) {
+                message.success('기존 데이터 삭제 완료');
+                addLog('info', '기존 데이터 삭제', outputDir);
+                resolve(true);
               } else {
-                const clearResponse = await fetch('/api/download/clear-path', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ outputDir }),
-                });
-
-                if (clearResponse.ok) {
-                  message.success('기존 데이터 삭제 완료');
-                  addLog('info', '기존 데이터 삭제', outputDir);
-                  resolve(true);
-                } else {
-                  message.error('데이터 삭제 실패');
-                  resolve(false);
-                }
+                message.error('데이터 삭제 실패');
+                resolve(false);
+                throw new Error('삭제 실패'); // 모달 닫힘 방지
               }
-            } catch (error) {
-              message.error('데이터 삭제 중 오류 발생');
-              resolve(false);
+            } else {
+              const clearResponse = await fetch('/api/download/clear-path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ outputDir }),
+              });
+
+              if (clearResponse.ok) {
+                message.success('기존 데이터 삭제 완료');
+                addLog('info', '기존 데이터 삭제', outputDir);
+                resolve(true);
+              } else {
+                message.error('데이터 삭제 실패');
+                resolve(false);
+                throw new Error('삭제 실패'); // 모달 닫힘 방지
+              }
             }
           },
           onCancel: () => {
