@@ -221,6 +221,7 @@ const valid = await downloader.verifyChecksum(result.filePath, result.sha256);
 |--------|------|
 | `buildDownloadUrl` | Maven 저장소 URL 생성 |
 | `buildFileName` | 다운로드 파일명 생성 |
+| `buildM2Path` | .m2 저장소 형식의 경로 생성 |
 | `compareVersions` | Maven 버전 비교 |
 | `parseCoordinates` | GAV 좌표 파싱 (groupId:artifactId:version) |
 
@@ -247,6 +248,24 @@ const ArtifactType = {
 
 이를 통해 다운로드된 패키지를 폐쇄망의 로컬 Maven 저장소로 직접 사용할 수 있습니다.
 
+### .m2 저장소 구조 지원
+
+Maven 아티팩트는 `.m2` 로컬 저장소 형식의 디렉토리 구조로 저장됩니다:
+
+```
+destPath/
+├── com/
+│   └── example/
+│       └── my-library/
+│           └── 1.0.0/
+│               ├── my-library-1.0.0.jar
+│               ├── my-library-1.0.0.jar.sha1
+│               ├── my-library-1.0.0.pom
+│               └── my-library-1.0.0.pom.sha1
+```
+
+이 구조는 Maven의 로컬 저장소 (`~/.m2/repository`)와 동일하여, 폐쇄망 환경에서 직접 로컬 저장소로 복사하여 사용할 수 있습니다.
+
 ### 사용 예시
 ```typescript
 import { getMavenDownloader } from './core/downloaders/maven';
@@ -261,11 +280,11 @@ const result = await downloader.downloadPackage(
   '/tmp/downloads'
 );
 
-// 다운로드된 파일:
-// /tmp/downloads/spring-core-5.3.0.jar
-// /tmp/downloads/spring-core-5.3.0.jar.sha1
-// /tmp/downloads/spring-core-5.3.0.pom
-// /tmp/downloads/spring-core-5.3.0.pom.sha1
+// 다운로드된 파일 (.m2 구조):
+// /tmp/downloads/org/springframework/spring-core/5.3.0/spring-core-5.3.0.jar
+// /tmp/downloads/org/springframework/spring-core/5.3.0/spring-core-5.3.0.jar.sha1
+// /tmp/downloads/org/springframework/spring-core/5.3.0/spring-core-5.3.0.pom
+// /tmp/downloads/org/springframework/spring-core/5.3.0/spring-core-5.3.0.pom.sha1
 
 // 특정 아티팩트만 다운로드
 const artifactResult = await downloader.downloadArtifact({

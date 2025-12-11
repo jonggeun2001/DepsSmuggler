@@ -237,7 +237,8 @@ dependencies:
 |--------|------|
 | `fetchPom` | Maven Central에서 POM 파일 가져오기 |
 | `processDependencyManagement` | BOM (Bill of Materials) 처리 |
-| `resolveProperty` | ${property} 치환 |
+| `extractDependencies` | POM에서 의존성 목록 추출 (BOM/Parent POM 지원) |
+| `resolveProperty` | ${property} 치환 (비문자열 값 자동 변환) |
 | `normalizeDependencies` | 의존성 배열 정규화 |
 | `getLatestVersion` | 최신 버전 조회 |
 
@@ -252,6 +253,23 @@ dependencies:
 | `conflicts` | DependencyConflict[] | 충돌 목록 |
 | `dependencyManagement` | Map<string, string> | BOM 버전 관리 |
 | `cacheOptions` | MavenCacheOptions | 공유 캐시 옵션 (POM 캐시는 공유 모듈 사용) |
+
+### BOM/Parent POM 지원
+
+`dependencies` 섹션이 없는 Parent POM이나 BOM(Bill of Materials) 타입의 POM을 처리할 수 있습니다:
+
+1. **dependencies가 없는 루트 패키지**: `dependencyManagement`에서 의존성 목록 추출
+2. **import scope BOM 제외**: BOM import 자체는 의존성에서 제외
+3. **상속된 dependencyManagement**: parent로부터 상속받은 버전 관리 정보 활용
+
+```typescript
+// Parent POM 예시 (dependencies 없음)
+const result = await resolver.resolveDependencies(
+  'org.springframework.boot:spring-boot-dependencies',
+  '3.2.0'
+);
+// → dependencyManagement의 모든 의존성이 해결됨
+```
 
 ### pom.xml 파싱
 ```typescript

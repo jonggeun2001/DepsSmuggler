@@ -677,8 +677,42 @@ if (packageType === 'maven') {
 - 개별/전체 삭제
 - 텍스트 파일에서 패키지 추가 (requirements.txt, pom.xml, package.json)
 - 예상 다운로드 크기 및 소요 시간 표시
-- 의존성 트리 미리보기
+- 의존성 트리 미리보기 (캐싱 지원)
 - 다운로드 시작 → 다운로드 페이지로 이동
+
+#### 의존성 트리 캐싱
+
+의존성 트리 데이터는 장바구니가 변경되지 않는 한 캐싱되어 재사용됩니다:
+
+```tsx
+// 장바구니 아이템 해시 계산 (캐싱용)
+const itemsHash = useMemo(() => {
+  return items.map(i => `${i.type}:${i.name}:${i.version}:${i.arch || ''}`).sort().join('|');
+}, [items]);
+
+// 캐시 히트 시 API 호출 생략
+if (!forceRefresh && itemsHash === lastDepsHash && dependencyData) {
+  console.log('의존성 트리 캐시 히트 - 재사용');
+  return;
+}
+```
+
+#### package.json latest 버전 해결
+
+`package.json`에서 `"latest"` 버전으로 지정된 패키지는 자동으로 최신 버전으로 해결됩니다:
+
+```tsx
+// latest 버전인 패키지들의 실제 버전 조회
+const resolvedPackages = await Promise.all(
+  packages.map(async (pkg) => {
+    if (pkg.version === 'latest') {
+      const latestVersion = await fetchLatestVersion(type, pkg.name);
+      return { ...pkg, version: latestVersion || 'latest' };
+    }
+    return pkg;
+  })
+);
+```
 
 #### 다운로드 옵션
 다운로드 옵션(출력 형식, 전달 방식 등)은 설정 페이지에서 관리합니다.
@@ -686,15 +720,43 @@ if (packageType === 'maven') {
 
 ### DownloadPage
 - 경로: `/download`
-- 역할: 다운로드 진행 상황, 의존성 트리 표시, 로그 뷰어
+- 역할: 의존성 확인, 다운로드 진행 상황, 의존성 트리 표시, 로그 뷰어
 
 #### 주요 기능
+- **2단계 다운로드 프로세스**: 의존성 확인 → 다운로드 시작
+- 의존성 확인 단계에서 모든 패키지의 전이 의존성 해결
+- Collapse 트리 구조로 패키지별 의존성 목록 표시
 - 실시간 진행률 표시 (패키지별, 전체)
 - 다운로드 속도 및 남은 시간 표시
 - 패키지별 상태 (대기/다운로드 중/완료/실패)
 - 에러 발생 시 재시도/건너뛰기/취소 선택
 - 완료 후 폴더 열기 (Finder/Explorer)
 - 다운로드 완료 시 히스토리 자동 저장
+
+#### 의존성 확인 단계
+
+다운로드 전 의존성을 먼저 확인하여 사용자에게 전체 패키지 목록을 보여줍니다:
+
+1. **의존성 확인 버튼**: 출력 폴더 선택 후 "의존성 확인" 버튼 클릭
+2. **의존성 해결**: `/api/dependency/resolve` API 호출
+3. **트리 구조 표시**: 원본 패키지별로 의존성 Collapse 패널 표시
+4. **다운로드 시작**: 의존성 확인 완료 후 "다운로드 시작" 버튼 활성화
+
+```tsx
+// 의존성 확인 상태 관리
+const [isResolvingDeps, setIsResolvingDeps] = useState(false);
+const [depsResolved, setDepsResolved] = useState(false);
+
+// 의존성 확인 버튼 (depsResolved가 false일 때만 표시)
+<Button onClick={handleResolveDependencies} disabled={!outputDir}>
+  {isResolvingDeps ? '의존성 확인 중...' : '의존성 확인'}
+</Button>
+
+// 다운로드 시작 버튼 (depsResolved가 true일 때만 표시)
+<Button onClick={handleStartDownload} disabled={!depsResolved}>
+  다운로드 시작
+</Button>
+```
 
 #### 출력 설정 통합
 
