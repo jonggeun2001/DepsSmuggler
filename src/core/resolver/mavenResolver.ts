@@ -284,6 +284,9 @@ export class MavenResolver implements IResolver {
         continue;
       }
 
+      // 하위 의존성의 properties 체인 구축 (parent POM에서 상속)
+      const childProperties = await this.processParentPom(pom, coordinate);
+
       // 하위 의존성 처리
       const dependencies = this.extractDependencies(pom, coordinate);
       const newPath = [...parentPath, nodeKey];
@@ -295,7 +298,7 @@ export class MavenResolver implements IResolver {
       for (const dep of dependencies) {
         if (!this.shouldIncludeDependency(dep, includeOptional)) continue;
 
-        const depCoordinate = this.resolveDependencyCoordinate(dep, pom.properties);
+        const depCoordinate = this.resolveDependencyCoordinate(dep, childProperties);
         if (!depCoordinate) continue;
 
         // Scope 전이 계산
