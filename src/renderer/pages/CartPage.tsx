@@ -84,6 +84,12 @@ const CartPage: React.FC = () => {
   const [dependencyTreeModalOpen, setDependencyTreeModalOpen] = useState(false);
   const [dependencyData, setDependencyData] = useState<DependencyResolutionResult | null>(null);
   const [loadingDeps, setLoadingDeps] = useState(false);
+  const [lastDepsHash, setLastDepsHash] = useState<string>(''); // 캐싱용 해시
+
+  // 장바구니 아이템 해시 계산 (캐싱용)
+  const itemsHash = useMemo(() => {
+    return items.map(i => `${i.type}:${i.name}:${i.version}:${i.arch || ''}`).sort().join('|');
+  }, [items]);
 
   // 예상 다운로드 크기 계산
   const estimatedSize = useMemo(() => {
@@ -93,9 +99,16 @@ const CartPage: React.FC = () => {
   }, [items]);
 
   // 의존성 트리 로드 함수
-  const loadDependencyTree = useCallback(async () => {
+  const loadDependencyTree = useCallback(async (forceRefresh = false) => {
     if (items.length === 0) {
       setDependencyData(null);
+      setLastDepsHash('');
+      return;
+    }
+
+    // 캐시 히트: 장바구니가 변경되지 않았고 데이터가 있으면 재사용
+    if (!forceRefresh && itemsHash === lastDepsHash && dependencyData) {
+      console.log('의존성 트리 캐시 히트 - 재사용');
       return;
     }
 
@@ -141,9 +154,23 @@ const CartPage: React.FC = () => {
       // 의존성 트리 결과 처리
       const dependencyTrees = result.dependencyTrees as DependencyResolutionResult[] | undefined;
 
+      // 디버그: 트리 구조 확인
+      console.log('의존성 트리 결과:', {
+        treesCount: dependencyTrees?.length,
+        trees: dependencyTrees?.map(t => ({
+          rootName: t.root.package.name,
+          rootDepsCount: t.root.dependencies.length,
+          flatListCount: t.flatList.length,
+        })),
+      });
+
       if (dependencyTrees && dependencyTrees.length > 0) {
         if (dependencyTrees.length === 1) {
           // 단일 패키지인 경우 그대로 사용
+          console.log('단일 트리 사용:', {
+            rootDepsCount: dependencyTrees[0].root.dependencies.length,
+            flatListCount: dependencyTrees[0].flatList.length,
+          });
           setDependencyData(dependencyTrees[0]);
         } else {
           // 여러 패키지인 경우 가상 루트 아래에 병합
@@ -163,6 +190,18 @@ const CartPage: React.FC = () => {
             (pkg, index, self) =>
               self.findIndex((p) => p.type === pkg.type && p.name === pkg.name && p.version === pkg.version) === index
           );
+
+          // 디버그: 트리 노드 수 vs flatList 수 비교
+          const countTreeNodes = (node: DependencyNode): number => {
+            return 1 + node.dependencies.reduce((sum, dep) => sum + countTreeNodes(dep), 0);
+          };
+          const totalTreeNodes = mergedRoot.dependencies.reduce((sum, dep) => sum + countTreeNodes(dep), 0);
+          console.log('병합된 트리:', {
+            mergedRootDepsCount: mergedRoot.dependencies.length,
+            totalTreeNodes,
+            uniqueFlatListCount: uniqueFlatList.length,
+            allFlatListCount: allFlatList.length,
+          });
 
           setDependencyData({
             root: mergedRoot,
@@ -207,14 +246,17 @@ const CartPage: React.FC = () => {
           totalSize: estimatedSize * 1024 * 1024,
         });
       }
+      // 캐시 해시 저장
+      setLastDepsHash(itemsHash);
     } catch (error) {
       console.error('의존성 트리 로드 실패:', error);
       message.error('의존성 트리를 불러오는데 실패했습니다');
       setDependencyData(null);
+      setLastDepsHash(''); // 실패 시 캐시 무효화
     } finally {
       setLoadingDeps(false);
     }
-  }, [items, estimatedSize, settings.defaultTargetOS]);
+  }, [items, itemsHash, estimatedSize, settings.defaultTargetOS, dependencyData, lastDepsHash]);
 
   // 의존성 트리 보기 핸들러
   const handleShowDependencyTree = useCallback(async () => {
@@ -233,9 +275,9 @@ const CartPage: React.FC = () => {
   // 파일 업로드 처리
   const handleFileUpload = async (file: File) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const content = e.target?.result as string;
-      parsePackageFile(file.name, content);
+      await parsePackageFile(file.name, content);
     };
     reader.readAsText(file);
     return false; // 자동 업로드 방지
@@ -251,7 +293,7 @@ const CartPage: React.FC = () => {
   };
 
   // 패키지 파일 파싱
-  const parsePackageFile = (filename: string, content: string) => {
+  const parsePackageFile = async (filename: string, content: string) => {
     let type: PackageType = 'pip';
     let packages: { name: string; version: string }[] = [];
 
@@ -266,7 +308,7 @@ const CartPage: React.FC = () => {
       packages = parsePackageJson(content);
     }
 
-    addParsedPackages(type, packages);
+    await addParsedPackages(type, packages);
   };
 
   // requirements.txt 파싱
@@ -315,15 +357,54 @@ const CartPage: React.FC = () => {
     }
   };
 
+  // 패키지 최신 버전 조회
+  const fetchLatestVersion = async (type: PackageType, packageName: string): Promise<string | null> => {
+    try {
+      if (type === 'pip') {
+        const response = await fetch(`/api/pypi/pypi/${encodeURIComponent(packageName)}/json`);
+        if (response.ok) {
+          const data = await response.json();
+          return data.info?.version || null;
+        }
+      } else if (type === 'maven') {
+        const response = await fetch(`/api/maven/versions?package=${encodeURIComponent(packageName)}`);
+        if (response.ok) {
+          const data = await response.json();
+          return data.versions?.[0] || null;
+        }
+      } else if (type === 'npm') {
+        const response = await fetch(`/api/npm/${encodeURIComponent(packageName)}`);
+        if (response.ok) {
+          const data = await response.json();
+          return data['dist-tags']?.latest || null;
+        }
+      }
+    } catch (error) {
+      console.warn(`최신 버전 조회 실패: ${packageName}`, error);
+    }
+    return null;
+  };
+
   // 파싱된 패키지 추가
-  const addParsedPackages = (type: PackageType, packages: { name: string; version: string }[]) => {
+  const addParsedPackages = async (type: PackageType, packages: { name: string; version: string }[]) => {
     if (packages.length === 0) {
       message.warning('파싱된 패키지가 없습니다');
       return;
     }
 
+    // latest 버전인 패키지들의 실제 버전 조회
+    const resolvedPackages = await Promise.all(
+      packages.map(async (pkg) => {
+        if (pkg.version === 'latest') {
+          const latestVersion = await fetchLatestVersion(type, pkg.name);
+          return { ...pkg, version: latestVersion || 'latest' };
+        }
+        return pkg;
+      })
+    );
+
     let addedCount = 0;
-    packages.forEach((pkg) => {
+    resolvedPackages.forEach((pkg) => {
       const exists = items.some(
         (item) => item.type === type && item.name === pkg.name && item.version === pkg.version
       );
@@ -345,7 +426,7 @@ const CartPage: React.FC = () => {
   };
 
   // 텍스트 입력 처리
-  const handleTextInputSubmit = () => {
+  const handleTextInputSubmit = async () => {
     if (!textInputValue.trim()) {
       message.warning('내용을 입력하세요');
       return;
@@ -369,7 +450,7 @@ const CartPage: React.FC = () => {
         break;
     }
 
-    addParsedPackages(type, packages);
+    await addParsedPackages(type, packages);
     setTextInputModalOpen(false);
     setTextInputValue('');
   };
@@ -698,12 +779,12 @@ flask~=2.0.0`}
         open={dependencyTreeModalOpen}
         onCancel={() => {
           setDependencyTreeModalOpen(false);
-          setDependencyData(null);
+          // 캐싱을 위해 dependencyData는 유지
         }}
         footer={[
           <Button key="close" onClick={() => {
             setDependencyTreeModalOpen(false);
-            setDependencyData(null);
+            // 캐싱을 위해 dependencyData는 유지
           }}>
             닫기
           </Button>,
