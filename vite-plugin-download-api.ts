@@ -1,5 +1,6 @@
 import type { Plugin, ViteDevServer } from 'vite';
 import * as fs from 'fs';
+import * as fsExtra from 'fs-extra';
 import * as path from 'path';
 import * as https from 'https';
 import * as http from 'http';
@@ -58,7 +59,7 @@ const MAVEN_REPO_URL = 'https://repo1.maven.org/maven2';
 function getMavenDownloadUrl(
   name: string,
   version: string
-): { url: string; filename: string; size: number } | null {
+): { url: string; filename: string; size: number; m2SubPath: string } | null {
   // name은 "groupId:artifactId" 형식
   const parts = name.split(':');
   if (parts.length < 2) {
@@ -70,8 +71,10 @@ function getMavenDownloadUrl(
   const groupPath = groupId.replace(/\./g, '/');
   const filename = `${artifactId}-${version}.jar`;
   const url = `${MAVEN_REPO_URL}/${groupPath}/${artifactId}/${version}/${filename}`;
+  // .m2 저장소 구조: groupId/artifactId/version
+  const m2SubPath = `${groupPath}/${artifactId}/${version}`;
 
-  return { url, filename, size: 0 };
+  return { url, filename, size: 0, m2SubPath };
 }
 
 // npm 다운로드 URL 조회 (registry에서 tarball URL 가져오기)
@@ -451,6 +454,7 @@ export function downloadApiPlugin(): Plugin {
                   const dockerDownloader = getDockerDownloader();
                   const registry = (pkg.metadata?.registry as string) || 'docker.io';
                   const arch = (pkg.architecture || 'amd64') as Architecture;
+                  let dockerTotalBytes = 0;
 
                   sendEvent('progress', {
                     packageId: pkg.id,
@@ -465,6 +469,7 @@ export function downloadApiPlugin(): Plugin {
                     arch,
                     packagesDir,
                     (progress) => {
+                      dockerTotalBytes = progress.totalBytes;
                       sendEvent('progress', {
                         packageId: pkg.id,
                         status: 'downloading',
@@ -483,6 +488,8 @@ export function downloadApiPlugin(): Plugin {
                     packageId: pkg.id,
                     status: 'completed',
                     progress: 100,
+                    downloadedBytes: dockerTotalBytes,
+                    totalBytes: dockerTotalBytes,
                   });
 
                   return { id: pkg.id, success: true };
@@ -492,13 +499,30 @@ export function downloadApiPlugin(): Plugin {
                   throw new Error(`다운로드 URL을 찾을 수 없습니다: ${pkg.name}@${pkg.version}`);
                 }
 
-                const destPath = path.join(packagesDir, downloadInfo.filename);
+                // Maven의 경우 .m2 구조로 다운로드
+                let destPath: string;
+                let m2DestPath: string | null = null;
+
+                if (pkg.type === 'maven' && 'm2SubPath' in downloadInfo && downloadInfo.m2SubPath) {
+                  // .m2 구조: packages/m2repo/com/example/artifact/1.0.0/artifact-1.0.0.jar
+                  const m2RepoDir = path.join(packagesDir, 'm2repo');
+                  const m2Dir = path.join(m2RepoDir, downloadInfo.m2SubPath);
+                  await fsExtra.ensureDir(m2Dir);
+                  m2DestPath = path.join(m2Dir, downloadInfo.filename);
+                  // flat 구조로 먼저 다운로드
+                  destPath = path.join(packagesDir, downloadInfo.filename);
+                } else {
+                  destPath = path.join(packagesDir, downloadInfo.filename);
+                }
+
                 let lastProgressUpdate = Date.now();
                 let lastBytes = 0;
+                let finalTotalBytes = 0;
 
                 await downloadFile(downloadInfo.url, destPath, (downloaded, total) => {
                   const now = Date.now();
                   const elapsed = (now - lastProgressUpdate) / 1000;
+                  finalTotalBytes = total;
 
                   if (elapsed >= 0.3) {
                     const speed = (downloaded - lastBytes) / elapsed;
@@ -518,10 +542,45 @@ export function downloadApiPlugin(): Plugin {
                   }
                 });
 
+                // Maven의 경우 m2repo 구조에도 복제하고, pom/sha1 파일도 다운로드
+                if (pkg.type === 'maven' && m2DestPath && 'm2SubPath' in downloadInfo) {
+                  // flat에서 m2repo로 복제
+                  await fsExtra.copy(destPath, m2DestPath);
+
+                  // pom, sha1 파일도 다운로드 (m2repo 구조에만)
+                  const m2RepoDir = path.join(packagesDir, 'm2repo');
+                  const m2Dir = path.join(m2RepoDir, downloadInfo.m2SubPath);
+                  const baseUrl = downloadInfo.url.replace(/\.jar$/, '');
+                  const baseFilename = downloadInfo.filename.replace(/\.jar$/, '');
+
+                  // 추가 파일 다운로드 (pom, jar.sha1, pom.sha1)
+                  const additionalFiles = [
+                    { ext: '.pom', filename: `${baseFilename}.pom` },
+                    { ext: '.jar.sha1', filename: `${baseFilename}.jar.sha1` },
+                    { ext: '.pom.sha1', filename: `${baseFilename}.pom.sha1` },
+                  ];
+
+                  for (const file of additionalFiles) {
+                    try {
+                      const url = file.ext === '.pom'
+                        ? `${baseUrl}.pom`
+                        : file.ext === '.jar.sha1'
+                          ? `${downloadInfo.url}.sha1`
+                          : `${baseUrl}.pom.sha1`;
+                      const filePath = path.join(m2Dir, file.filename);
+                      await downloadFile(url, filePath, () => {});
+                    } catch {
+                      // pom이나 sha1 파일은 없을 수 있으므로 무시
+                    }
+                  }
+                }
+
                 sendEvent('progress', {
                   packageId: pkg.id,
                   status: 'completed',
                   progress: 100,
+                  downloadedBytes: finalTotalBytes,
+                  totalBytes: finalTotalBytes,
                 });
 
                 return { id: pkg.id, success: true };

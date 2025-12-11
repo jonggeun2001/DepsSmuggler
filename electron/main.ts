@@ -814,6 +814,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         const parts = pkg.name.split(':');
         if (parts.length >= 2) {
           try {
+            let mavenTotalBytes = 0;
             const jarPath = await mavenDownloader.downloadPackage(
               {
                 type: 'maven',
@@ -826,6 +827,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
               },
               packagesDir,
               (progress) => {
+                mavenTotalBytes = progress.totalBytes;
                 mainWindow?.webContents.send('download:progress', {
                   packageId: pkg.id,
                   status: 'downloading',
@@ -842,6 +844,8 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
               packageId: pkg.id,
               status: 'completed',
               progress: 100,
+              downloadedBytes: mavenTotalBytes,
+              totalBytes: mavenTotalBytes,
             });
 
             results.push({ id: pkg.id, success: true });
@@ -885,12 +889,14 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         const arch = (pkg.architecture || 'amd64') as Architecture;
 
         try {
+          let dockerTotalBytes = 0;
           const tarPath = await dockerDownloader.downloadImage(
             pkg.name,
             pkg.version,
             arch,
             packagesDir,
             (progress) => {
+              dockerTotalBytes = progress.totalBytes;
               mainWindow?.webContents.send('download:progress', {
                 packageId: pkg.id,
                 status: 'downloading',
@@ -908,6 +914,8 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
             packageId: pkg.id,
             status: 'completed',
             progress: 100,
+            downloadedBytes: dockerTotalBytes,
+            totalBytes: dockerTotalBytes,
           });
 
           results.push({ id: pkg.id, success: true });
@@ -931,10 +939,12 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
       const destPath = path.join(packagesDir, downloadUrl.filename);
       let lastProgressUpdate = Date.now();
       let lastBytes = 0;
+      let finalTotalBytes = 0;
 
       await downloadFile(downloadUrl.url, destPath, (downloaded, total) => {
         const now = Date.now();
         const elapsed = (now - lastProgressUpdate) / 1000;
+        finalTotalBytes = total;
 
         if (elapsed >= 0.5) { // 0.5초마다 업데이트
           const speed = (downloaded - lastBytes) / elapsed;
@@ -959,6 +969,8 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         packageId: pkg.id,
         status: 'completed',
         progress: 100,
+        downloadedBytes: finalTotalBytes,
+        totalBytes: finalTotalBytes,
       });
 
       results.push({ id: pkg.id, success: true });
