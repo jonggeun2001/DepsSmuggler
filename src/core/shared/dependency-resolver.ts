@@ -153,6 +153,25 @@ export async function resolveAllDependencies(
           resolverOptions
         ) as NpmResolutionResult;
 
+        // npm hoisted 구조를 트리 구조로 변환
+        // hoistedPath가 "node_modules/xxx"인 패키지들이 1단계 의존성
+        const directDeps = npmResult.flatList
+          .filter(p => {
+            // hoistedPath가 "node_modules/{name}" 형태인 것이 직접 의존성
+            const path = p.hoistedPath || '';
+            const parts = path.split('/').filter(Boolean);
+            return parts.length === 2 && parts[0] === 'node_modules';
+          })
+          .map(p => ({
+            package: {
+              type: 'npm' as const,
+              name: p.name,
+              version: p.version,
+              metadata: { size: p.size },
+            },
+            dependencies: [], // 재귀적 트리 구성은 하지 않음 (flatList 사용)
+          }));
+
         // npm 결과를 공통 형식으로 변환하여 저장
         const convertedResult: DependencyResolutionResult = {
           root: {
@@ -161,7 +180,7 @@ export async function resolveAllDependencies(
               name: npmResult.root.name,
               version: npmResult.root.version,
             },
-            dependencies: [],
+            dependencies: directDeps,
           },
           flatList: npmResult.flatList.map(p => ({
             type: 'npm' as const,
