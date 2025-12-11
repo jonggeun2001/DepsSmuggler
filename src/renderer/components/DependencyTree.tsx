@@ -50,6 +50,15 @@ const DependencyTree: React.FC<DependencyTreeProps> = ({ data, onNodeClick, styl
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const treeContainerRef = useRef<HTMLDivElement>(null);
 
+  // 바이트 포맷 (convertToTreeData보다 먼저 정의해야 함)
+  const formatBytes = useCallback((bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }, []);
+
   // DependencyNode를 react-d3-tree 형식으로 변환
   const convertToTreeData = useCallback((node: DependencyNode): TreeNodeDatum => {
     return {
@@ -66,21 +75,12 @@ const DependencyTree: React.FC<DependencyTreeProps> = ({ data, onNodeClick, styl
       children: node.dependencies.map(convertToTreeData),
       originalNode: node,
     };
-  }, []);
+  }, [formatBytes]);
 
   const treeData = useMemo(() => {
     if (!data?.root) return null;
     return convertToTreeData(data.root);
   }, [data, convertToTreeData]);
-
-  // 바이트 포맷
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
 
   // 노드 클릭 핸들러
   const handleNodeClick = useCallback((nodeData: TreeNodeDatum) => {
