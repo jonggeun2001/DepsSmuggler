@@ -18,6 +18,7 @@ import {
   Tag,
   Divider,
   Tooltip,
+  Alert,
 } from 'antd';
 import {
   SaveOutlined,
@@ -64,11 +65,8 @@ const SettingsPage: React.FC = () => {
     yumDistribution,
     aptDistribution,
     apkDistribution,
-    dockerRegistry,
-    dockerCustomRegistry,
     dockerArchitecture,
     dockerLayerCompression,
-    dockerRetryStrategy,
     dockerIncludeLoadScript,
     autoUpdate,
     autoDownloadUpdate,
@@ -256,11 +254,8 @@ const SettingsPage: React.FC = () => {
       apkDistributionId: apkDistribution?.id || 'alpine-3.18',
       apkArchitecture: apkDistribution?.architecture || 'x86_64',
       // Docker 설정
-      dockerRegistry,
-      dockerCustomRegistry,
       dockerArchitecture,
       dockerLayerCompression,
-      dockerRetryStrategy,
       dockerIncludeLoadScript,
       // 자동 업데이트
       autoUpdate,
@@ -293,11 +288,8 @@ const SettingsPage: React.FC = () => {
     yumDistribution,
     aptDistribution,
     apkDistribution,
-    dockerRegistry,
-    dockerCustomRegistry,
     dockerArchitecture,
     dockerLayerCompression,
-    dockerRetryStrategy,
     dockerIncludeLoadScript,
     autoUpdate,
     autoDownloadUpdate,
@@ -799,8 +791,14 @@ const SettingsPage: React.FC = () => {
           style={{ marginBottom: CARD_MARGIN }}
           styles={{ body: { padding: CARD_BODY_PADDING } }}
         >
+          <Alert
+            message="레지스트리는 패키지 검색 화면에서 선택합니다"
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+          />
           <Row gutter={16}>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item
                 name="dockerArchitecture"
                 label="아키텍처"
@@ -815,44 +813,6 @@ const SettingsPage: React.FC = () => {
                 </Select>
               </Form.Item>
             </Col>
-            <Col span={12}>
-              <Form.Item
-                name="dockerRegistry"
-                label="레지스트리"
-                style={{ marginBottom: 8 }}
-              >
-                <Select size="small">
-                  <Select.Option value="docker.io">Docker Hub</Select.Option>
-                  <Select.Option value="ghcr.io">GitHub (ghcr.io)</Select.Option>
-                  <Select.Option value="ecr">Amazon ECR</Select.Option>
-                  <Select.Option value="quay.io">Quay.io</Select.Option>
-                  <Select.Option value="custom">커스텀</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(prevValues, currentValues) =>
-              prevValues.dockerRegistry !== currentValues.dockerRegistry
-            }
-          >
-            {({ getFieldValue }) =>
-              getFieldValue('dockerRegistry') === 'custom' ? (
-                <Form.Item
-                  name="dockerCustomRegistry"
-                  label="커스텀 레지스트리 URL"
-                  rules={[{ required: true, message: '레지스트리 URL 입력' }]}
-                  style={{ marginBottom: 8 }}
-                >
-                  <Input size="small" placeholder="registry.example.com" />
-                </Form.Item>
-              ) : null
-            }
-          </Form.Item>
-
-          <Row gutter={16}>
             <Col span={8}>
               <Form.Item
                 name="dockerLayerCompression"
@@ -862,18 +822,6 @@ const SettingsPage: React.FC = () => {
                 <Select size="small">
                   <Select.Option value="gzip">gzip</Select.Option>
                   <Select.Option value="tar">tar</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item
-                name="dockerRetryStrategy"
-                label="재시도"
-                style={{ marginBottom: 8 }}
-              >
-                <Select size="small">
-                  <Select.Option value="layer">레이어별</Select.Option>
-                  <Select.Option value="full">전체</Select.Option>
                 </Select>
               </Form.Item>
             </Col>
