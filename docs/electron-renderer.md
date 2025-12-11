@@ -363,6 +363,48 @@ if (pkg.type === 'docker') {
 - **레지스트리 지정**: `metadata.registry` 필드로 커스텀 레지스트리 지원
 - **아키텍처 지정**: `architecture` 필드로 타겟 아키텍처 지정 (기본: amd64)
 
+### Maven 패키지 다운로드 처리
+
+`download:start` 핸들러에서 Maven 패키지는 `MavenDownloader.downloadPackage()`를 사용하여 처리됩니다:
+
+```typescript
+// Maven 패키지는 MavenDownloader를 통해 완전 다운로드
+if (pkg.type === 'maven') {
+  const mavenDownloader = getMavenDownloader();
+  const parts = pkg.name.split(':');
+
+  const jarPath = await mavenDownloader.downloadPackage(
+    {
+      type: 'maven',
+      name: pkg.name,
+      version: pkg.version,
+      metadata: {
+        groupId: parts[0],
+        artifactId: parts[1],
+      },
+    },
+    packagesDir,
+    (progress) => {
+      mainWindow?.webContents.send('download:progress', { ... });
+    }
+  );
+}
+```
+
+- **다운로드 파일**: JAR, JAR.sha1, POM, POM.sha1 (총 4개 파일)
+- **별도 처리 이유**: 오프라인 Maven 저장소 구성에 필요한 모든 파일을 다운로드
+- **체크섬 파일**: 무결성 검증을 위한 SHA1 체크섬 파일 포함
+
+#### 다운로드되는 파일 구조
+
+```
+packages/
+├── spring-core-5.3.0.jar
+├── spring-core-5.3.0.jar.sha1
+├── spring-core-5.3.0.pom
+└── spring-core-5.3.0.pom.sha1
+```
+
 ### PyPI 패키지 캐시
 
 앱 시작 시 PyPI Simple API에서 전체 패키지 목록을 백그라운드로 로드하여 검색 성능 향상

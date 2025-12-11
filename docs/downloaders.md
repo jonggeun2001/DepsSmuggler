@@ -485,7 +485,19 @@ const valid = await downloader.verifyIntegrity(result.filePath, result.integrity
 | `searchPackages` | query: string, registry?: string | Promise<PackageInfo[]> | 레지스트리에서 이미지 검색 |
 | `getVersions` | imageName: string, registry?: string | Promise<string[]> | 이미지 태그 목록 조회 |
 | `getPackageMetadata` | name: string, tag?: string | Promise<PackageMetadata> | 이미지 메타데이터 조회 |
+| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | 이미지 다운로드 (레지스트리 자동 추출) |
 | `downloadImage` | name, tag, arch, destDir, onProgress?, registry? | Promise<string> | 이미지 다운로드 (tar 파일 생성) |
+
+### 내부 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `extractRegistry` | 전체 이미지명에서 레지스트리와 이미지 이름 분리 |
+| `parseImageName` | 레지스트리 제외 후 namespace/repo 분리 |
+| `getRegistryConfig` | 레지스트리별 설정 조회 |
+| `getTokenForRegistry` | 레지스트리별 인증 토큰 획득 |
+| `getCachedCatalog` | 캐시된 저장소 카탈로그 조회 |
+| `calculateSha256` | SHA256 체크섬 계산 |
 
 ### 지원 레지스트리
 
@@ -572,6 +584,58 @@ ghcr.io, ECR 등 공개 검색 API가 없는 레지스트리의 경우:
 - 입력한 검색어를 이미지 이름으로 제안
 - 사용자가 정확한 이미지명을 알고 있어야 함
 - 예: `ghcr.io/owner/image-name` 형식으로 직접 입력
+
+### 이미지 이름 형식
+
+검색 결과의 이미지 이름은 항상 **레지스트리를 포함**한 형식으로 반환됩니다:
+
+```typescript
+// 검색 결과 예시
+'docker.io/library/nginx'     // Docker Hub 공식 이미지
+'docker.io/bitnami/redis'     // Docker Hub 사용자 이미지
+'quay.io/coreos/etcd'         // Quay.io 이미지
+'ghcr.io/owner/image'         // GitHub Container Registry
+```
+
+이 형식을 통해 사용자가 어느 레지스트리의 이미지인지 명확히 알 수 있습니다.
+
+### 레지스트리 자동 추출
+
+`downloadPackage` 및 `getVersions` 메서드는 이미지 이름에서 레지스트리를 자동 추출합니다:
+
+```typescript
+// 내부 extractRegistry 로직
+private extractRegistry(fullName: string): { registry: string | null; imageName: string } {
+  const knownRegistries = ['docker.io', 'quay.io', 'ghcr.io', 'gcr.io', 'public.ecr.aws'];
+  const parts = fullName.split('/');
+
+  if (parts.length > 1) {
+    const firstPart = parts[0];
+    // 알려진 레지스트리거나 점(.)이 포함된 경우 레지스트리로 간주
+    if (knownRegistries.includes(firstPart) || firstPart.includes('.')) {
+      return { registry: firstPart, imageName: parts.slice(1).join('/') };
+    }
+  }
+  return { registry: null, imageName: fullName };
+}
+
+// 사용 예시
+extractRegistry('docker.io/library/nginx')  // { registry: 'docker.io', imageName: 'library/nginx' }
+extractRegistry('quay.io/coreos/etcd')      // { registry: 'quay.io', imageName: 'coreos/etcd' }
+extractRegistry('nginx')                     // { registry: null, imageName: 'nginx' }
+```
+
+이를 통해 `downloadPackage` 호출 시 별도로 레지스트리를 지정하지 않아도 이름에서 자동 추출됩니다:
+
+```typescript
+// 레지스트리 명시 불필요
+await downloader.downloadPackage({
+  type: 'docker',
+  name: 'quay.io/coreos/etcd',  // 레지스트리 포함된 이름
+  version: 'v3.5.0',
+  arch: 'amd64',
+}, '/tmp/images');
+```
 
 ### 타입 정의
 

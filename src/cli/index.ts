@@ -118,7 +118,13 @@ program
 
 // 에러 핸들링
 program.exitOverride((err) => {
-  if (err.code === 'commander.help' || err.code === 'commander.version') {
+  // help, version, helpDisplayed 등은 정상 종료로 처리
+  if (
+    err.code === 'commander.help' ||
+    err.code === 'commander.helpDisplayed' ||
+    err.code === 'commander.version' ||
+    err.message === '(outputHelp)'
+  ) {
     process.exit(0);
   }
   console.error(chalk.red(`오류: ${err.message}`));
