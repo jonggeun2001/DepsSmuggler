@@ -567,8 +567,8 @@ const DownloadPage: React.FC = () => {
         pythonVersion: languageVersions.python,
       };
 
-      // 개발 환경 또는 브라우저: HTTP API 사용
-      if (isDevelopment || !window.electronAPI?.download?.resolveDeps) {
+      // HTTP API를 사용하여 의존성 해결 (개발/프로덕션 모두)
+      {
         const response = await fetch('/api/dependency/resolve', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -672,13 +672,6 @@ const DownloadPage: React.FC = () => {
 
         setDepsResolved(true);
         message.success(`의존성 확인 완료: ${totalCount}개 패키지`);
-      } else {
-        // 프로덕션 Electron 환경: IPC 사용
-        const result = await window.electronAPI.download.resolveDeps?.({ packages, options });
-        if (result) {
-          setDepsResolved(true);
-          message.success('의존성 확인 완료');
-        }
       }
     } catch (error) {
       addLog('error', '의존성 확인 실패', String(error));
