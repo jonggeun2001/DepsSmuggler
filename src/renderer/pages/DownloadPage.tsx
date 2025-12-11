@@ -732,18 +732,19 @@ const DownloadPage: React.FC = () => {
     } else {
       // 프로덕션 Electron 환경: IPC 사용
       try {
-        const packages = cartItems.map(item => ({
+        // 의존성 해결된 downloadItems 사용 (cartItems가 아닌)
+        const packages = downloadItems.map((item: DownloadItem) => ({
           id: item.id,
           type: item.type,
           name: item.name,
           version: item.version,
-          architecture: item.arch,
+          architecture: (item as unknown as { arch?: string }).arch,
           // OS 패키지용 필드
-          downloadUrl: item.downloadUrl,
-          repository: item.repository,
-          location: item.location,
+          downloadUrl: (item as unknown as { downloadUrl?: string }).downloadUrl,
+          repository: (item as unknown as { repository?: string }).repository,
+          location: (item as unknown as { location?: string }).location,
           // Docker 레지스트리 등 추가 메타데이터
-          metadata: item.metadata,
+          metadata: (item as unknown as { metadata?: unknown }).metadata,
         }));
 
         const options = {
