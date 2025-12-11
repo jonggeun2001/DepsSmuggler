@@ -437,14 +437,22 @@ const DownloadPage: React.FC = () => {
 
   // 출력 폴더 검사 및 삭제
   const checkOutputPath = async (): Promise<boolean> => {
-    try {
-      const response = await fetch('/api/download/check-path', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outputDir }),
-      });
+    const isDevelopment = import.meta.env.DEV;
 
-      const data = await response.json();
+    try {
+      let data: { exists: boolean; fileCount?: number; totalSize?: number };
+
+      // Electron 환경에서는 IPC API 사용, 개발 환경에서는 HTTP API 사용
+      if (!isDevelopment && window.electronAPI?.download?.checkPath) {
+        data = await window.electronAPI.download.checkPath(outputDir);
+      } else {
+        const response = await fetch('/api/download/check-path', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outputDir }),
+        });
+        data = await response.json();
+      }
 
       if (!data.exists || data.fileCount === 0) {
         return true; // 폴더가 없거나 비어있으면 바로 진행
@@ -467,7 +475,7 @@ const DownloadPage: React.FC = () => {
               <p>출력 폴더에 기존 데이터가 있습니다:</p>
               <ul style={{ margin: '8px 0', paddingLeft: 20 }}>
                 <li>파일 수: <strong>{data.fileCount}개</strong></li>
-                <li>총 크기: <strong>{formatBytes(data.totalSize)}</strong></li>
+                <li>총 크기: <strong>{formatBytes(data.totalSize || 0)}</strong></li>
               </ul>
               <p style={{ marginTop: 12, color: '#ff4d4f' }}>
                 기존 데이터를 삭제하고 새로 다운로드하시겠습니까?
@@ -479,19 +487,34 @@ const DownloadPage: React.FC = () => {
           cancelText: '취소',
           onOk: async () => {
             try {
-              const clearResponse = await fetch('/api/download/clear-path', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ outputDir }),
-              });
+              let clearResult: { success?: boolean } | Response;
 
-              if (clearResponse.ok) {
-                message.success('기존 데이터 삭제 완료');
-                addLog('info', '기존 데이터 삭제', outputDir);
-                resolve(true);
+              // Electron 환경에서는 IPC API 사용, 개발 환경에서는 HTTP API 사용
+              if (!isDevelopment && window.electronAPI?.download?.clearPath) {
+                clearResult = await window.electronAPI.download.clearPath(outputDir);
+                if (clearResult.success) {
+                  message.success('기존 데이터 삭제 완료');
+                  addLog('info', '기존 데이터 삭제', outputDir);
+                  resolve(true);
+                } else {
+                  message.error('데이터 삭제 실패');
+                  resolve(false);
+                }
               } else {
-                message.error('데이터 삭제 실패');
-                resolve(false);
+                const clearResponse = await fetch('/api/download/clear-path', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ outputDir }),
+                });
+
+                if (clearResponse.ok) {
+                  message.success('기존 데이터 삭제 완료');
+                  addLog('info', '기존 데이터 삭제', outputDir);
+                  resolve(true);
+                } else {
+                  message.error('데이터 삭제 실패');
+                  resolve(false);
+                }
               }
             } catch (error) {
               message.error('데이터 삭제 중 오류 발생');
@@ -552,6 +575,8 @@ const DownloadPage: React.FC = () => {
           downloadUrl: item.downloadUrl,
           repository: item.repository,
           location: item.location,
+          // Docker 레지스트리 등 추가 메타데이터
+          metadata: item.metadata,
         }));
 
         const options = {

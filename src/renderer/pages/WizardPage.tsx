@@ -182,6 +182,9 @@ const WizardPage: React.FC = () => {
   // Step 5: 아키텍처
   const [architecture, setArchitecture] = useState<Architecture>('x86_64');
 
+  // 드롭다운 hover 상태 (Windows Electron 스크롤 문제 해결용)
+  const [isOverDropdown, setIsOverDropdown] = useState(false);
+
   const { addItem, hasItem } = useCartStore();
   const {
     languageVersions,
@@ -620,7 +623,17 @@ const WizardPage: React.FC = () => {
         }));
       } else if (window.electronAPI?.search?.packages) {
         // 일반 패키지: electronAPI.search.packages 사용
-        const searchOptions = packageType === 'conda' ? { channel: condaChannel } : undefined;
+        let searchOptions: { channel?: string; registry?: string } | undefined;
+
+        if (packageType === 'conda') {
+          searchOptions = { channel: condaChannel };
+        } else if (packageType === 'docker') {
+          const registryValue = dockerRegistry === 'custom' && customRegistryUrl
+            ? customRegistryUrl
+            : dockerRegistry;
+          searchOptions = { registry: registryValue };
+        }
+
         const response = await window.electronAPI.search.packages(packageType, query, searchOptions);
         results = response.results;
       } else {
@@ -674,8 +687,18 @@ const WizardPage: React.FC = () => {
 
     try {
       if (window.electronAPI?.search?.versions) {
-        // conda일 때 채널 옵션 전달
-        const searchOptions = packageType === 'conda' ? { channel: condaChannel } : undefined;
+        // 패키지 타입별 옵션 전달
+        let searchOptions: { channel?: string; registry?: string } | undefined;
+
+        if (packageType === 'conda') {
+          searchOptions = { channel: condaChannel };
+        } else if (packageType === 'docker') {
+          const registryValue = dockerRegistry === 'custom' && customRegistryUrl
+            ? customRegistryUrl
+            : dockerRegistry;
+          searchOptions = { registry: registryValue };
+        }
+
         const response = await window.electronAPI.search.versions(packageType, record.name, searchOptions);
         if (response.versions && response.versions.length > 0) {
           setAvailableVersions(response.versions);
@@ -990,6 +1013,8 @@ const WizardPage: React.FC = () => {
             <div
               style={{ padding: '8px 0', cursor: 'pointer' }}
               onClick={() => handleSuggestionSelect(item)}
+              onMouseEnter={() => setIsOverDropdown(true)}
+              onMouseLeave={() => setIsOverDropdown(false)}
             >
               <div style={{ fontWeight: 'bold' }}>
                 {item.name}
@@ -1121,6 +1146,14 @@ const WizardPage: React.FC = () => {
               placement="bottomLeft"
               autoAdjustOverflow={false}
               overlayStyle={{ width: '100%', maxWidth: 600 }}
+              dropdownRender={(menu) => (
+                <div
+                  onMouseEnter={() => setIsOverDropdown(true)}
+                  onMouseLeave={() => setIsOverDropdown(false)}
+                >
+                  {menu}
+                </div>
+              )}
             >
               <Input
                 placeholder={packageType === 'docker'
@@ -1130,7 +1163,12 @@ const WizardPage: React.FC = () => {
                 size="large"
                 value={searchQuery}
                 onChange={(e) => handleInputChange(e.target.value)}
-                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                onBlur={() => {
+                  // 드롭다운 위에 마우스가 있으면 blur 무시 (Windows Electron 스크롤 문제 해결)
+                  if (!isOverDropdown) {
+                    setTimeout(() => setShowSuggestions(false), 200);
+                  }
+                }}
                 onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
                 suffix={searching ? <Spin size="small" /> : <SearchOutlined style={{ color: '#999' }} />}
                 style={{ marginBottom: 16 }}
