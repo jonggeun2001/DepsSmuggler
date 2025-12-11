@@ -37,10 +37,10 @@ jobs:
         run: npm run build
 
       - name: Test CLI version
-        run: node dist/cli/index.js --version
+        run: node dist/src/cli/index.js --version
 
       - name: Test CLI help
-        run: node dist/cli/index.js --help
+        run: node dist/src/cli/index.js --help
 
   lint:
     name: Lint

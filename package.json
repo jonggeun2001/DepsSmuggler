@@ -27,7 +27,7 @@
     "test:e2e:report": "playwright show-report"
   },
   "bin": {
-    "depssmuggler": "./dist/cli/index.js"
+    "depssmuggler": "./dist/src/cli/index.js"
   },
   "repository": {
     "type": "git",
