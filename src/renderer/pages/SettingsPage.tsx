@@ -202,7 +202,7 @@ const SettingsPage: React.FC = () => {
     setLoadingDistributions(true);
     try {
       if (window.electronAPI?.os?.getAllDistributions) {
-        const data = await window.electronAPI.os.getAllDistributions();
+        const data = await window.electronAPI.os.getAllDistributions() as OSDistribution[];
         setDistributions(data);
       } else {
         // 개발 환경 - API 호출

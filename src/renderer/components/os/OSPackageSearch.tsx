@@ -61,7 +61,7 @@ export const OSPackageSearch: React.FC<OSPackageSearchProps> = ({
           architecture,
           matchType: state.matchType,
           limit: 50,
-        });
+        }) as { packages: OSPackageInfo[]; totalCount: number };
       } else {
         // 브라우저 환경에서는 HTTP API 사용
         const response = await fetch('/api/os/search', {

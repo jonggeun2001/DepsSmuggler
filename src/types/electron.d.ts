@@ -55,7 +55,17 @@ export interface FileSystemAPI {
 
 export interface CacheAPI {
   getSize: () => Promise<number>;
-  clear: () => Promise<void>;
+  getStats: () => Promise<{
+    totalSize: number;
+    entryCount: number;
+    details: {
+      pip: unknown;
+      npm: unknown;
+      maven: unknown;
+      conda: unknown;
+    };
+  }>;
+  clear: () => Promise<{ success: boolean }>;
 }
 
 export interface SearchOptions {
@@ -116,11 +126,79 @@ export interface DockerAPI {
   };
 }
 
+export interface UpdaterStatus {
+  checking: boolean;
+  available: boolean;
+  downloaded: boolean;
+  downloading: boolean;
+  error: string | null;
+  progress: { percent: number; bytesPerSecond: number; total: number; transferred: number } | null;
+  updateInfo: { version: string; releaseDate: string; releaseNotes?: string } | null;
+}
+
+export interface UpdaterAPI {
+  check: () => Promise<{ success: boolean; result?: unknown; error?: string }>;
+  download: () => Promise<{ success: boolean; error?: string }>;
+  install: () => Promise<{ success: boolean }>;
+  getStatus: () => Promise<UpdaterStatus>;
+  setAutoDownload: (enabled: boolean) => Promise<{ success: boolean }>;
+  onStatusChange: (callback: (status: UpdaterStatus) => void) => () => void;
+}
+
+export interface HistoryAPI {
+  load: () => Promise<unknown[]>;
+  save: (histories: unknown[]) => Promise<{ success: boolean }>;
+  add: (history: unknown) => Promise<{ success: boolean }>;
+  delete: (id: string) => Promise<{ success: boolean }>;
+  clear: () => Promise<{ success: boolean }>;
+}
+
+export interface OSPackageAPI {
+  getDistributions: (osType?: string) => Promise<unknown[]>;
+  getAllDistributions: () => Promise<unknown[]>;
+  getDistribution: (distributionId: string) => Promise<unknown>;
+  search: (options: {
+    query: string;
+    distribution: unknown;
+    architecture: string;
+    matchType?: string;
+    limit?: number;
+  }) => Promise<{ packages: unknown[]; totalCount: number }>;
+  resolveDependencies: (options: {
+    packages: unknown[];
+    distribution: unknown;
+    architecture: string;
+    includeOptional?: boolean;
+    includeRecommends?: boolean;
+  }) => Promise<unknown>;
+  onResolveDependenciesProgress: (
+    callback: (data: { message: string; current: number; total: number }) => void
+  ) => () => void;
+  download: {
+    start: (options: {
+      packages: unknown[];
+      outputDir: string;
+      resolveDependencies?: boolean;
+      includeOptionalDeps?: boolean;
+      verifyGPG?: boolean;
+      concurrency?: number;
+    }) => Promise<unknown>;
+    onProgress: (callback: (progress: unknown) => void) => () => void;
+  };
+  cache: {
+    getStats: () => Promise<unknown>;
+    clear: () => Promise<{ success: boolean }>;
+  };
+}
+
 export interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   getAppPath: () => Promise<string>;
   selectFolder: () => Promise<string | null>;
+  selectDirectory: () => Promise<string | null>;
   saveFile: (defaultPath: string) => Promise<string | null>;
+  openFolder: (folderPath: string) => Promise<void>;
+  testSmtpConnection: (config: unknown) => Promise<{ success: boolean; error?: string }>;
   download: DownloadAPI;
   config: ConfigAPI;
   fs: FileSystemAPI;
@@ -128,6 +206,9 @@ export interface ElectronAPI {
   search: SearchAPI;
   dependency?: DependencyAPI;
   docker?: DockerAPI;
+  updater?: UpdaterAPI;
+  history?: HistoryAPI;
+  os?: OSPackageAPI;
 }
 
 declare global {
