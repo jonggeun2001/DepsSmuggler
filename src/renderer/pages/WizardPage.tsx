@@ -283,8 +283,13 @@ const WizardPage: React.FC = () => {
     try {
       let results: SearchResult[];
       if (window.electronAPI?.search?.packages) {
-        // conda일 때 채널 옵션 전달
-        const searchOptions = packageType === 'conda' ? { channel: condaChannel } : undefined;
+        // 패키지 타입별 검색 옵션 설정
+        let searchOptions: { channel?: string; registry?: string } | undefined;
+        if (packageType === 'conda') {
+          searchOptions = { channel: condaChannel };
+        } else if (packageType === 'docker') {
+          searchOptions = { registry: dockerRegistry };
+        }
         const response = await window.electronAPI.search.packages(packageType, query, searchOptions);
         results = response.results;
       } else {
@@ -299,7 +304,7 @@ const WizardPage: React.FC = () => {
     } finally {
       setSearching(false);
     }
-  }, [packageType, condaChannel]);
+  }, [packageType, condaChannel, dockerRegistry]);
 
   // 입력 변경 핸들러 (디바운스 적용)
   const handleInputChange = useCallback((value: string) => {

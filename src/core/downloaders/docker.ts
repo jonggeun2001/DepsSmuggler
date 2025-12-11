@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import * as fsNative from 'fs';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as crypto from 'crypto';
@@ -209,7 +210,7 @@ export class DockerDownloader implements IDownloader {
     try {
       const registryType = getRegistryType(registry);
 
-      // Docker Hub만 검색 API 지원
+      // Docker Hub 검색 API
       if (registryType === 'docker.io') {
         const response = await this.hubClient.get<DockerSearchResponse>(
           '/search/repositories/',
@@ -229,7 +230,51 @@ export class DockerDownloader implements IDownloader {
         }));
       }
 
-      // 다른 레지스트리는 캐시된 카탈로그 사용
+      // Quay.io 검색 API (인증 불필요)
+      if (registryType === 'quay.io') {
+        const response = await axios.get<{
+          results: Array<{
+            namespace: { name: string };
+            name: string;
+            description: string | null;
+            is_public: boolean;
+          }>;
+        }>('https://quay.io/api/v1/find/repositories', {
+          params: { query },
+          timeout: 30000,
+        });
+
+        return response.data.results
+          .filter(repo => repo.is_public)
+          .slice(0, 50)
+          .map((repo) => ({
+            type: 'docker',
+            name: `${repo.namespace.name}/${repo.name}`,
+            version: 'latest',
+            metadata: {
+              description: repo.description || '',
+              registry: 'quay.io',
+            },
+          }));
+      }
+
+      // ghcr.io, ECR 등은 공개 검색 API가 없음
+      // 검색 대신 직접 이미지 이름 입력 안내
+      if (registryType === 'ghcr.io' || registryType === 'ecr') {
+        logger.info(`${registry}는 검색 API를 지원하지 않습니다. 이미지 이름을 직접 입력해주세요.`);
+        // 입력한 검색어를 그대로 이미지 이름으로 사용할 수 있도록 제안
+        return [{
+          type: 'docker',
+          name: query,
+          version: 'latest',
+          metadata: {
+            description: `"${query}" 이미지를 ${registry}에서 가져옵니다. (검색 미지원 - 정확한 이미지명 입력 필요)`,
+            registry,
+          },
+        }];
+      }
+
+      // 커스텀 레지스트리는 캐시된 카탈로그 사용 시도
       const repositories = await this.getCachedCatalog(registry);
       const filtered = repositories.filter(name =>
         name.toLowerCase().includes(query.toLowerCase())
@@ -463,7 +508,16 @@ export class DockerDownloader implements IDownloader {
 
       return tarPath;
     } catch (error) {
-      logger.error('Docker 이미지 다운로드 실패', { repository, tag, arch, registry, error });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      logger.error('Docker 이미지 다운로드 실패', {
+        repository,
+        tag,
+        arch,
+        registry,
+        errorMessage,
+        errorStack,
+      });
       throw error;
     }
   }
@@ -651,7 +705,7 @@ export class DockerDownloader implements IDownloader {
       headers,
     });
 
-    const writer = fs.createWriteStream(destPath);
+    const writer = fsNative.createWriteStream(destPath);
 
     response.data.on('data', (chunk: Buffer) => {
       if (onChunk) onChunk(chunk.length);
@@ -680,7 +734,7 @@ export class DockerDownloader implements IDownloader {
   private calculateSha256(filePath: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const hash = crypto.createHash('sha256');
-      const stream = fs.createReadStream(filePath);
+      const stream = fsNative.createReadStream(filePath);
 
       stream.on('data', (data) => hash.update(data));
       stream.on('end', () => resolve(hash.digest('hex')));
