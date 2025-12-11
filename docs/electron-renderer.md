@@ -594,6 +594,25 @@ const dockerRegistryOptions = [
 - **커스텀 레지스트리**: 'custom' 선택 시 URL 입력 필드 표시
 - **검색 및 태그 조회**: 선택된 레지스트리에 맞게 API 호출
 
+#### 패키지 검색 옵션 전달
+
+패키지 타입에 따라 검색 옵션이 다르게 전달됨:
+
+```typescript
+// 검색 옵션 설정
+let searchOptions: { channel?: string; registry?: string } | undefined;
+if (packageType === 'conda') {
+  searchOptions = { channel: condaChannel };
+} else if (packageType === 'docker') {
+  searchOptions = { registry: dockerRegistry };  // 선택된 레지스트리 전달
+}
+
+// IPC 호출
+const response = await window.electronAPI.search.packages(packageType, query, searchOptions);
+```
+
+이 변경으로 Docker 검색 시 선택된 레지스트리가 백엔드로 전달되어 해당 레지스트리에서 검색 수행.
+
 #### Maven 버전 조회 (브라우저 환경)
 
 브라우저 환경에서 Maven 패키지 선택 시 Vite 플러그인 API를 통해 버전 목록 조회:

@@ -556,8 +556,22 @@ const ARCH_MAP: Record<string, string> = {
 
 ### 검색 동작
 
-- **Docker Hub**: Search API 사용 (`/search/repositories/`)
-- **기타 레지스트리**: 카탈로그 API(`/_catalog`)에서 캐시된 저장소 목록 필터링
+레지스트리별로 다른 검색 전략을 사용:
+
+| 레지스트리 | 검색 방법 | API 엔드포인트 | 비고 |
+|-----------|----------|---------------|------|
+| **Docker Hub** | Search API | `/search/repositories/` | 공식 검색 API 지원 |
+| **Quay.io** | Find API | `/api/v1/find/repositories` | 공개 저장소만 검색 가능 |
+| **ghcr.io** | 미지원 | - | 정확한 이미지명 직접 입력 필요 |
+| **ECR Public** | 미지원 | - | 정확한 이미지명 직접 입력 필요 |
+| **커스텀** | 카탈로그 | `/_catalog` | 캐시된 저장소 목록 필터링 |
+
+#### 검색 미지원 레지스트리 처리
+
+ghcr.io, ECR 등 공개 검색 API가 없는 레지스트리의 경우:
+- 입력한 검색어를 이미지 이름으로 제안
+- 사용자가 정확한 이미지명을 알고 있어야 함
+- 예: `ghcr.io/owner/image-name` 형식으로 직접 입력
 
 ### 타입 정의
 
@@ -598,6 +612,41 @@ const tarPath = await downloader.downloadImage(
   (progress) => console.log(`${progress.progress}%`),
   'docker.io'
 );
+```
+
+### 기술적 주의사항
+
+#### fs 모듈 분리 사용
+
+Vite 번들링 환경에서 `fs-extra`의 스트림 메서드(`createWriteStream`, `createReadStream`)가 정상 동작하지 않는 ESM 호환성 문제가 있음:
+
+```typescript
+// 문제: fs-extra 네임스페이스 import 시 스트림 메서드 누락
+import * as fs from 'fs-extra';
+fs.createWriteStream(path);  // ❌ 오류 발생
+
+// 해결: Node.js 기본 fs 모듈을 별도로 import
+import * as fsNative from 'fs';
+import * as fs from 'fs-extra';
+
+fsNative.createWriteStream(path);  // ✅ 정상 동작
+fs.ensureDir(dir);  // ✅ fs-extra 메서드는 그대로 사용
+```
+
+#### 에러 로깅 개선
+
+Error 객체는 JSON 직렬화 시 빈 객체(`{}`)로 변환되므로, 명시적으로 메시지와 스택을 추출:
+
+```typescript
+catch (error) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const errorStack = error instanceof Error ? error.stack : undefined;
+  logger.error('Docker 이미지 다운로드 실패', {
+    repository, tag, arch, registry,
+    errorMessage,
+    errorStack,
+  });
+}
 ```
 
 ---

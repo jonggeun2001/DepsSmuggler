@@ -78,6 +78,24 @@ const result = await packager.createArchive({
 });
 ```
 
+### 기술적 주의사항
+
+#### archiver 모듈 ESM 호환성
+
+Vite 번들링 환경에서 `archiver` 패키지는 네임스페이스 import가 아닌 기본 import를 사용해야 함:
+
+```typescript
+// ❌ 오류 발생: archiver.create is not a function
+import * as archiver from 'archiver';
+const archive = archiver.create('zip', { zlib: { level: 9 } });
+
+// ✅ 정상 동작
+import archiver from 'archiver';
+const archive = archiver('zip', { zlib: { level: 9 } });
+```
+
+이 패턴은 `archivePackager.ts`와 `file-utils.ts` 모두에 적용됨.
+
 ---
 
 ## ScriptGenerator
