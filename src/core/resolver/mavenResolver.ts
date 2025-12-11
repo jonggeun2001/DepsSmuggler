@@ -177,7 +177,8 @@ export class MavenResolver implements IResolver {
     this.processDependencyManagement(rootPom, rootPom.properties);
 
     // 루트의 직접 의존성을 큐에 추가
-    const rootDependencies = this.extractDependencies(rootPom, rootCoordinate);
+    // isRoot=true로 설정하여 dependencies가 없는 pom 타입도 dependencyManagement에서 의존성 추출
+    const rootDependencies = this.extractDependencies(rootPom, rootCoordinate, true);
 
     // 좌표 할당 (루트)
     this.skipper.getCoordinateManager().createCoordinate(rootCoordinate, 0);
@@ -442,11 +443,44 @@ export class MavenResolver implements IResolver {
 
   /**
    * POM에서 의존성 목록 추출
+   * dependencies가 없는 pom 타입(parent/BOM)의 경우 dependencyManagement의 의존성 반환
    */
-  private extractDependencies(pom: PomProject, coordinate: MavenCoordinate): PomDependency[] {
+  private extractDependencies(pom: PomProject, coordinate: MavenCoordinate, isRoot = false): PomDependency[] {
     const deps = pom.dependencies?.dependency;
-    if (!deps) return [];
-    return Array.isArray(deps) ? deps : [deps];
+    if (deps) {
+      return Array.isArray(deps) ? deps : [deps];
+    }
+
+    // 루트 패키지이고 dependencies가 없는 경우 (parent POM, BOM 등)
+    // dependencyManagement의 의존성을 반환 (parent로부터 상속받은 것 포함)
+    if (isRoot) {
+      // 1. 먼저 현재 POM의 dependencyManagement 확인
+      const managed = pom.dependencyManagement?.dependencies?.dependency;
+      if (managed) {
+        const managedDeps = Array.isArray(managed) ? managed : [managed];
+        // import 타입(BOM)이 아닌 실제 의존성만 반환
+        return managedDeps.filter(dep => dep.scope !== 'import' || dep.type !== 'pom');
+      }
+
+      // 2. 현재 POM에 없으면 상속받은 dependencyManagement 사용 (this.dependencyManagement)
+      if (this.dependencyManagement.size > 0) {
+        const inheritedDeps: PomDependency[] = [];
+        for (const [key, version] of this.dependencyManagement.entries()) {
+          const [groupId, artifactId] = key.split(':');
+          if (groupId && artifactId) {
+            inheritedDeps.push({
+              groupId,
+              artifactId,
+              version,
+              scope: 'compile',
+            });
+          }
+        }
+        return inheritedDeps;
+      }
+    }
+
+    return [];
   }
 
   /**
@@ -572,7 +606,8 @@ export class MavenResolver implements IResolver {
   private resolveProperty(value: string, properties?: Record<string, string>): string {
     if (!value) return value;
 
-    let resolved = value;
+    // value가 문자열이 아닌 경우 문자열로 변환
+    let resolved = typeof value === 'string' ? value : String(value);
     let iterations = 0;
     const maxIterations = 10; // 무한 루프 방지
 
