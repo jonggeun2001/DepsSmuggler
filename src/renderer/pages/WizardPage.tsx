@@ -1148,6 +1148,10 @@ const WizardPage: React.FC = () => {
               overlayStyle={{ width: '100%', maxWidth: 600 }}
               dropdownRender={(menu) => (
                 <div
+                  onMouseDown={(e) => {
+                    // blur 이벤트 방지 (Windows Electron 스크롤 문제 해결)
+                    e.preventDefault();
+                  }}
                   onMouseEnter={() => setIsOverDropdown(true)}
                   onMouseLeave={() => setIsOverDropdown(false)}
                 >
