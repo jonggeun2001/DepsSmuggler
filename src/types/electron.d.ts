@@ -87,8 +87,17 @@ export interface DependencyResolveResult {
   failedPackages?: Array<{ name: string; version: string; error: string }>;
 }
 
+export interface DependencyResolveOptions {
+  targetOS?: string;
+  architecture?: string;
+  pythonVersion?: string;
+}
+
 export interface DependencyAPI {
-  resolve: (packages: unknown[]) => Promise<DependencyResolveResult>;
+  resolve: (data: {
+    packages: unknown[];
+    options?: DependencyResolveOptions;
+  }) => Promise<DependencyResolveResult>;
 }
 
 export interface DockerCacheStatusItem {

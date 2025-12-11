@@ -715,41 +715,9 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
   downloadCancelled = false;
   downloadPaused = false;
 
-  // 의존성 해결 상태 전송
-  mainWindow?.webContents.send('download:status', {
-    phase: 'resolving',
-    message: '의존성 분석 중...',
-  });
-
-  // 의존성 해결
-  let allPackages: DownloadPackage[] = packages;
-
-  // includeDependencies가 false면 의존성 해결 건너뛰기
-  if (includeDependencies === false) {
-    downloadLog.info('의존성 해결 건너뛰기 (설정에서 비활성화됨)');
-  } else {
-    try {
-      const resolved = await resolveAllDependencies(packages, {
-        targetOS: targetOS || 'any',
-        architecture: architecture || 'x86_64',
-        pythonVersion,
-      });
-      allPackages = resolved.allPackages;
-
-      downloadLog.info(`의존성 해결 완료: ${packages.length}개 → ${allPackages.length}개 패키지`);
-
-      // 의존성 해결 완료 이벤트 전송
-      mainWindow?.webContents.send('download:deps-resolved', {
-        originalPackages: packages,
-        allPackages: allPackages,
-        dependencyTrees: resolved.dependencyTrees,
-        failedPackages: resolved.failedPackages,
-      });
-    } catch (error) {
-      downloadLog.warn('의존성 해결 실패, 원본 패키지만 다운로드합니다:', error);
-      // 실패 시 원본 패키지만 사용
-    }
-  }
+  // 의존성 해결은 dependency:resolve IPC에서 미리 수행됨
+  // download:start에서는 전달받은 패키지 목록을 그대로 다운로드
+  const allPackages: DownloadPackage[] = packages;
 
   // 다운로드 시작 상태 전송
   mainWindow?.webContents.send('download:status', {
@@ -1123,12 +1091,24 @@ ipcMain.handle('download:clear-path', async (_, outputDir: string) => {
 // 의존성 해결 관련 핸들러
 // =====================================================
 
-// 의존성 해결 핸들러 (장바구니에서 의존성 트리 미리보기용)
-ipcMain.handle('dependency:resolve', async (_, packages: DownloadPackage[]) => {
-  downloadLog.info(`Resolving dependencies for ${packages.length} packages`);
+// 의존성 해결 핸들러 (장바구니에서 의존성 트리 미리보기용, 다운로드 페이지 의존성 확인용)
+ipcMain.handle('dependency:resolve', async (_, data: {
+  packages: DownloadPackage[];
+  options?: {
+    targetOS?: string;
+    architecture?: string;
+    pythonVersion?: string;
+  };
+}) => {
+  const { packages, options } = data;
+  downloadLog.info(`Resolving dependencies for ${packages.length} packages (targetOS: ${options?.targetOS || 'any'}, python: ${options?.pythonVersion || 'any'})`);
 
   try {
-    const resolved = await resolveAllDependencies(packages);
+    const resolved = await resolveAllDependencies(packages, {
+      targetOS: options?.targetOS as 'any' | 'windows' | 'macos' | 'linux' | undefined,
+      architecture: options?.architecture,
+      pythonVersion: options?.pythonVersion,
+    });
     downloadLog.info(`Dependencies resolved: ${packages.length} → ${resolved.allPackages.length} packages`);
 
     return {

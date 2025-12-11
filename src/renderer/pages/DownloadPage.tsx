@@ -567,8 +567,23 @@ const DownloadPage: React.FC = () => {
         pythonVersion: languageVersions.python,
       };
 
-      // HTTP API를 사용하여 의존성 해결 (개발/프로덕션 모두)
-      {
+      // 응답 데이터 타입 정의
+      type DependencyResolveResponse = {
+        originalPackages: Array<{ id: string; name: string; version: string; type: string }>;
+        allPackages: Array<{ id: string; name: string; version: string; type: string }>;
+        dependencyTrees: Array<{
+          root: {
+            package: { name: string; version: string; type?: string };
+            dependencies: Array<unknown>;
+          };
+        }>;
+        failedPackages: Array<{ name: string; version: string; error: string }>;
+      };
+
+      let data: DependencyResolveResponse;
+
+      // 개발 환경: HTTP API 사용, 프로덕션: Electron IPC 사용
+      if (isDevelopment) {
         const response = await fetch('/api/dependency/resolve', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -579,100 +594,95 @@ const DownloadPage: React.FC = () => {
           throw new Error('의존성 해결 실패');
         }
 
-        const data = await response.json() as {
-          originalPackages: Array<{ id: string; name: string; version: string; type: string }>;
-          allPackages: Array<{ id: string; name: string; version: string; type: string }>;
-          dependencyTrees: Array<{
-            root: {
-              package: { name: string; version: string; type?: string };
-              dependencies: Array<unknown>;
-            };
-          }>;
-          failedPackages: Array<{ name: string; version: string; error: string }>;
-        };
-
-        const originalCount = data.originalPackages.length;
-        const totalCount = data.allPackages.length;
-
-        addLog('info', `의존성 해결 완료: ${originalCount}개 → ${totalCount}개 패키지`);
-
-        // 의존성 관계 맵 생성 (name-version 키 사용)
-        interface DependencyNodeData {
-          package: { name: string; version: string; type?: string };
-          dependencies: DependencyNodeData[];
-        }
-
-        // name-version 조합으로 의존성 관계 매핑
-        const dependencyMap = new Map<string, { parentId: string; parentName: string }>();
-        const originalNames = new Set(data.originalPackages.map(p => `${p.name}-${p.version}`));
-
-        // 원본 패키지의 name -> 실제 id 매핑 (버전이 다를 수 있으므로 이름으로만 매핑)
-        const originalIdByName = new Map<string, string>();
-        data.originalPackages.forEach(p => {
-          originalIdByName.set(p.name, p.id);
-        });
-
-        if (data.dependencyTrees) {
-          data.dependencyTrees.forEach((tree) => {
-            const rootPkg = tree.root.package;
-            // 원본 패키지의 실제 id 사용 (이름으로 찾기 - latest 등 버전이 실제 버전으로 해결될 수 있음)
-            const rootId = originalIdByName.get(rootPkg.name) || `${rootPkg.type || 'pip'}-${rootPkg.name}-${rootPkg.version}`;
-            const rootName = rootPkg.name;
-
-            const extractDeps = (node: DependencyNodeData, parentId: string, parentName: string) => {
-              node.dependencies.forEach((dep) => {
-                const depPkg = dep.package;
-                const depKey = `${depPkg.name}-${depPkg.version}`;
-
-                // 원본 패키지가 아닌 경우에만 의존성으로 표시
-                if (!originalNames.has(depKey)) {
-                  dependencyMap.set(depKey, { parentId, parentName });
-                }
-
-                // 재귀 호출 - 항상 루트 패키지를 부모로 유지
-                extractDeps(dep, rootId, rootName);
-              });
-            };
-
-            extractDeps(tree.root as DependencyNodeData, rootId, rootName);
-          });
-        }
-
-        // 의존성 포함된 새로운 아이템 목록으로 업데이트
-        const newItems: DownloadItem[] = data.allPackages.map((pkg) => {
-          const pkgKey = `${pkg.name}-${pkg.version}`;
-          const depInfo = dependencyMap.get(pkgKey);
-          const isOriginal = originalNames.has(pkgKey);
-
-          return {
-            id: pkg.id,
-            name: pkg.name,
-            version: pkg.version,
-            type: pkg.type,
-            status: 'pending' as DownloadStatus,
-            progress: 0,
-            downloadedBytes: 0,
-            totalBytes: 0,
-            speed: 0,
-            isDependency: !isOriginal,
-            parentId: depInfo?.parentId,
-            dependencyOf: depInfo?.parentName,
-          };
-        });
-
-        setItems(newItems);
-        downloadItemsRef.current = newItems;
-
-        // 실패한 의존성 해결 경고 표시
-        if (data.failedPackages && data.failedPackages.length > 0) {
-          data.failedPackages.forEach((failed) => {
-            addLog('warn', `의존성 해결 실패: ${failed.name} (v${failed.version})`, failed.error);
-          });
-        }
-
-        setDepsResolved(true);
-        message.success(`의존성 확인 완료: ${totalCount}개 패키지`);
+        data = await response.json() as DependencyResolveResponse;
+      } else if (window.electronAPI?.dependency?.resolve) {
+        // 프로덕션 Electron 환경: IPC 사용
+        data = await window.electronAPI.dependency.resolve({ packages, options }) as DependencyResolveResponse;
+      } else {
+        throw new Error('의존성 해결 API를 사용할 수 없습니다');
       }
+
+      const originalCount = data.originalPackages.length;
+      const totalCount = data.allPackages.length;
+
+      addLog('info', `의존성 해결 완료: ${originalCount}개 → ${totalCount}개 패키지`);
+
+      // 의존성 관계 맵 생성 (name-version 키 사용)
+      interface DependencyNodeData {
+        package: { name: string; version: string; type?: string };
+        dependencies: DependencyNodeData[];
+      }
+
+      // name-version 조합으로 의존성 관계 매핑
+      const dependencyMap = new Map<string, { parentId: string; parentName: string }>();
+      const originalNames = new Set(data.originalPackages.map(p => `${p.name}-${p.version}`));
+
+      // 원본 패키지의 name -> 실제 id 매핑 (버전이 다를 수 있으므로 이름으로만 매핑)
+      const originalIdByName = new Map<string, string>();
+      data.originalPackages.forEach(p => {
+        originalIdByName.set(p.name, p.id);
+      });
+
+      if (data.dependencyTrees) {
+        data.dependencyTrees.forEach((tree) => {
+          const rootPkg = tree.root.package;
+          // 원본 패키지의 실제 id 사용 (이름으로 찾기 - latest 등 버전이 실제 버전으로 해결될 수 있음)
+          const rootId = originalIdByName.get(rootPkg.name) || `${rootPkg.type || 'pip'}-${rootPkg.name}-${rootPkg.version}`;
+          const rootName = rootPkg.name;
+
+          const extractDeps = (node: DependencyNodeData, parentId: string, parentName: string) => {
+            node.dependencies.forEach((dep) => {
+              const depPkg = dep.package;
+              const depKey = `${depPkg.name}-${depPkg.version}`;
+
+              // 원본 패키지가 아닌 경우에만 의존성으로 표시
+              if (!originalNames.has(depKey)) {
+                dependencyMap.set(depKey, { parentId, parentName });
+              }
+
+              // 재귀 호출 - 항상 루트 패키지를 부모로 유지
+              extractDeps(dep, rootId, rootName);
+            });
+          };
+
+          extractDeps(tree.root as DependencyNodeData, rootId, rootName);
+        });
+      }
+
+      // 의존성 포함된 새로운 아이템 목록으로 업데이트
+      const newItems: DownloadItem[] = data.allPackages.map((pkg) => {
+        const pkgKey = `${pkg.name}-${pkg.version}`;
+        const depInfo = dependencyMap.get(pkgKey);
+        const isOriginal = originalNames.has(pkgKey);
+
+        return {
+          id: pkg.id,
+          name: pkg.name,
+          version: pkg.version,
+          type: pkg.type,
+          status: 'pending' as DownloadStatus,
+          progress: 0,
+          downloadedBytes: 0,
+          totalBytes: 0,
+          speed: 0,
+          isDependency: !isOriginal,
+          parentId: depInfo?.parentId,
+          dependencyOf: depInfo?.parentName,
+        };
+      });
+
+      setItems(newItems);
+      downloadItemsRef.current = newItems;
+
+      // 실패한 의존성 해결 경고 표시
+      if (data.failedPackages && data.failedPackages.length > 0) {
+        data.failedPackages.forEach((failed) => {
+          addLog('warn', `의존성 해결 실패: ${failed.name} (v${failed.version})`, failed.error);
+        });
+      }
+
+      setDepsResolved(true);
+      message.success(`의존성 확인 완료: ${totalCount}개 패키지`);
     } catch (error) {
       addLog('error', '의존성 확인 실패', String(error));
       message.error('의존성 확인 중 오류가 발생했습니다');

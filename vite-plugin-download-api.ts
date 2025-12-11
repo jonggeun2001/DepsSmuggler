@@ -658,24 +658,17 @@ export function downloadApiPlugin(): Plugin {
         req.on('data', (chunk) => (body += chunk));
         req.on('end', async () => {
           try {
-            const requestBody = JSON.parse(body);
-            // 하위 호환성: 배열인 경우 기존 방식, 객체인 경우 새 방식
-            let packages: DownloadPackage[];
-            let resolverOptions: { targetOS?: string; architecture?: string; pythonVersion?: string } = {};
+            const { packages, options } = JSON.parse(body) as {
+              packages: DownloadPackage[];
+              options?: { targetOS?: string; architecture?: string; pythonVersion?: string };
+            };
 
-            if (Array.isArray(requestBody)) {
-              packages = requestBody as DownloadPackage[];
-            } else {
-              packages = requestBody.packages as DownloadPackage[];
-              resolverOptions = requestBody.options || {};
-            }
-
-            console.log(`Resolving dependencies for ${packages.length} packages (targetOS: ${resolverOptions.targetOS || 'any'}, python: ${resolverOptions.pythonVersion || 'any'})`);
+            console.log(`Resolving dependencies for ${packages.length} packages (targetOS: ${options?.targetOS || 'any'}, python: ${options?.pythonVersion || 'any'})`);
 
             const resolved = await resolveAllDependencies(packages, {
-              targetOS: resolverOptions.targetOS as 'any' | 'windows' | 'macos' | 'linux' | undefined,
-              architecture: resolverOptions.architecture,
-              pythonVersion: resolverOptions.pythonVersion,
+              targetOS: options?.targetOS as 'any' | 'windows' | 'macos' | 'linux' | undefined,
+              architecture: options?.architecture,
+              pythonVersion: options?.pythonVersion,
             });
             console.log(`Dependencies resolved: ${packages.length} → ${resolved.allPackages.length} packages`);
 

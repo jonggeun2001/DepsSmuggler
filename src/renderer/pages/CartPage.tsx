@@ -137,7 +137,7 @@ const CartPage: React.FC = () => {
 
       if (window.electronAPI?.dependency?.resolve) {
         // Electron 환경
-        result = await window.electronAPI.dependency.resolve(packages, resolverOptions);
+        result = await window.electronAPI.dependency.resolve({ packages, options: resolverOptions });
       } else {
         // Vite dev 서버 환경
         const response = await fetch('/api/dependency/resolve', {

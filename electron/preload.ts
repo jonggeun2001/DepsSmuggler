@@ -185,12 +185,19 @@ const electronAPI = {
 
   // 의존성 해결 관련
   dependency: {
-    resolve: (packages: unknown[]): Promise<{
+    resolve: (data: {
+      packages: unknown[];
+      options?: {
+        targetOS?: string;
+        architecture?: string;
+        pythonVersion?: string;
+      };
+    }): Promise<{
       originalPackages: unknown[];
       allPackages: unknown[];
       dependencyTrees?: unknown[];
       failedPackages?: unknown[];
-    }> => ipcRenderer.invoke('dependency:resolve', packages),
+    }> => ipcRenderer.invoke('dependency:resolve', data),
   },
 
   // Docker 카탈로그 캐시 관련
