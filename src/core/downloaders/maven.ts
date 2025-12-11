@@ -260,10 +260,14 @@ export class MavenDownloader implements IDownloader {
     try {
       const downloadUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType);
       const fileName = this.buildFileName(artifactId, version, artifactType);
-      const filePath = path.join(destPath, fileName);
+      
+      // .m2 형식의 디렉토리 구조 생성
+      const m2SubPath = this.buildM2Path(groupId, artifactId, version);
+      const artifactDir = path.join(destPath, m2SubPath);
+      const filePath = path.join(artifactDir, fileName);
 
       // 디렉토리 생성
-      await fs.ensureDir(destPath);
+      await fs.ensureDir(artifactDir);
 
       // SHA-1 체크섬 조회
       let expectedSha1: string | undefined;
@@ -404,6 +408,16 @@ export class MavenDownloader implements IDownloader {
     return `${this.repoUrl}/${groupPath}/${artifactId}/${version}/${fileName}`;
   }
 
+
+  /**
+   * .m2 저장소 형식의 경로 생성
+   * 예: com/crealytics/spark-excel_2.12/3.5.1_0.20.4/
+   */
+  private buildM2Path(groupId: string, artifactId: string, version: string): string {
+    const groupPath = groupId.replace(/\./g, '/');
+    return path.join(groupPath, artifactId, version);
+  }
+
   /**
    * 파일명 생성
    */
@@ -443,10 +457,17 @@ export class MavenDownloader implements IDownloader {
     const baseUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType);
     const baseFileName = this.buildFileName(artifactId, version, artifactType);
 
+    // .m2 형식의 디렉토리 구조
+    const m2SubPath = this.buildM2Path(groupId, artifactId, version);
+    const artifactDir = path.join(destPath, m2SubPath);
+
     try {
       const checksumUrl = `${baseUrl}.sha1`;
       const checksumFileName = `${baseFileName}.sha1`;
-      const checksumFilePath = path.join(destPath, checksumFileName);
+      const checksumFilePath = path.join(artifactDir, checksumFileName);
+
+      // 디렉토리 확인 (이미 downloadArtifact에서 생성되었을 것이지만 안전을 위해)
+      await fs.ensureDir(artifactDir);
 
       const response = await this.client.get<string>(checksumUrl, {
         responseType: 'text',
