@@ -782,18 +782,27 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         const parts = pkg.name.split(':');
         if (parts.length >= 2) {
           try {
+            const groupId = parts[0];
+            const artifactId = parts[1];
             let mavenTotalBytes = 0;
+
+            // .m2 구조로 m2repo 디렉토리에 다운로드
+            const m2RepoDir = path.join(packagesDir, 'm2repo');
+            if (!fs.existsSync(m2RepoDir)) {
+              fs.mkdirSync(m2RepoDir, { recursive: true });
+            }
+
             const jarPath = await mavenDownloader.downloadPackage(
               {
                 type: 'maven',
                 name: pkg.name,
                 version: pkg.version,
                 metadata: {
-                  groupId: parts[0],
-                  artifactId: parts[1],
+                  groupId,
+                  artifactId,
                 },
               },
-              packagesDir,
+              m2RepoDir,
               (progress) => {
                 mavenTotalBytes = progress.totalBytes;
                 mainWindow?.webContents.send('download:progress', {
@@ -806,6 +815,13 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
                 });
               }
             );
+
+            // flat 구조로도 복사 (packagesDir 루트에 jar 파일)
+            const flatFileName = `${artifactId}-${pkg.version}.jar`;
+            const flatDestPath = path.join(packagesDir, flatFileName);
+            if (jarPath && fs.existsSync(jarPath)) {
+              fs.copyFileSync(jarPath, flatDestPath);
+            }
 
             // 완료 상태 전송
             mainWindow?.webContents.send('download:progress', {
