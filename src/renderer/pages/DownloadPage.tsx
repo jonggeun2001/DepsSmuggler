@@ -42,6 +42,7 @@ import {
   WarningOutlined,
   BranchesOutlined,
   RightOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { useCartStore } from '../stores/cartStore';
 import {
@@ -134,6 +135,9 @@ const DownloadPage: React.FC = () => {
   const [outputDir, setOutputDir] = useState(outputPath || defaultDownloadPath || '');
   const [errorModalOpen, setErrorModalOpen] = useState(false);
   const [errorItem, setErrorItem] = useState<DownloadItem | null>(null);
+  // 의존성 확인 관련 상태
+  const [isResolvingDeps, setIsResolvingDeps] = useState(false);
+  const [depsResolved, setDepsResolved] = useState(false);
   const downloadCancelledRef = useRef(false);
   const downloadPausedRef = useRef(false);
   // 다운로드 아이템 목록을 ref로 유지 (SSE 이벤트 핸들러에서 최신 상태 참조용)
@@ -530,10 +534,169 @@ const DownloadPage: React.FC = () => {
     }
   };
 
+  // 의존성 확인
+  const handleResolveDependencies = async () => {
+    if (!outputDir) {
+      message.warning('출력 폴더를 선택하세요');
+      return;
+    }
+
+    setIsResolvingDeps(true);
+    setDepsResolved(false);
+    addLog('info', '의존성 확인 시작', `${cartItems.length}개 패키지`);
+
+    const isDevelopment = import.meta.env.DEV;
+
+    try {
+      const packages = cartItems.map((item) => ({
+        id: item.id,
+        type: item.type,
+        name: item.name,
+        version: item.version,
+        architecture: item.arch,
+        downloadUrl: item.downloadUrl,
+        repository: item.repository,
+        location: item.location,
+        metadata: item.metadata,
+      }));
+
+      const options = {
+        targetOS: defaultTargetOS,
+        architecture: defaultArchitecture,
+        includeDependencies,
+        pythonVersion: languageVersions.python,
+      };
+
+      // 개발 환경 또는 브라우저: HTTP API 사용
+      if (isDevelopment || !window.electronAPI?.download?.resolveDeps) {
+        const response = await fetch('/api/dependency/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packages, options }),
+        });
+
+        if (!response.ok) {
+          throw new Error('의존성 해결 실패');
+        }
+
+        const data = await response.json() as {
+          originalPackages: Array<{ id: string; name: string; version: string; type: string }>;
+          allPackages: Array<{ id: string; name: string; version: string; type: string }>;
+          dependencyTrees: Array<{
+            root: {
+              package: { name: string; version: string; type?: string };
+              dependencies: Array<unknown>;
+            };
+          }>;
+          failedPackages: Array<{ name: string; version: string; error: string }>;
+        };
+
+        const originalCount = data.originalPackages.length;
+        const totalCount = data.allPackages.length;
+
+        addLog('info', `의존성 해결 완료: ${originalCount}개 → ${totalCount}개 패키지`);
+
+        // 의존성 관계 맵 생성 (name-version 키 사용)
+        interface DependencyNodeData {
+          package: { name: string; version: string; type?: string };
+          dependencies: DependencyNodeData[];
+        }
+
+        // name-version 조합으로 의존성 관계 매핑
+        const dependencyMap = new Map<string, { parentId: string; parentName: string }>();
+        const originalNames = new Set(data.originalPackages.map(p => `${p.name}-${p.version}`));
+
+        // 원본 패키지의 name -> 실제 id 매핑 (버전이 다를 수 있으므로 이름으로만 매핑)
+        const originalIdByName = new Map<string, string>();
+        data.originalPackages.forEach(p => {
+          originalIdByName.set(p.name, p.id);
+        });
+
+        if (data.dependencyTrees) {
+          data.dependencyTrees.forEach((tree) => {
+            const rootPkg = tree.root.package;
+            // 원본 패키지의 실제 id 사용 (이름으로 찾기 - latest 등 버전이 실제 버전으로 해결될 수 있음)
+            const rootId = originalIdByName.get(rootPkg.name) || `${rootPkg.type || 'pip'}-${rootPkg.name}-${rootPkg.version}`;
+            const rootName = rootPkg.name;
+
+            const extractDeps = (node: DependencyNodeData, parentId: string, parentName: string) => {
+              node.dependencies.forEach((dep) => {
+                const depPkg = dep.package;
+                const depKey = `${depPkg.name}-${depPkg.version}`;
+
+                // 원본 패키지가 아닌 경우에만 의존성으로 표시
+                if (!originalNames.has(depKey)) {
+                  dependencyMap.set(depKey, { parentId, parentName });
+                }
+
+                // 재귀 호출 - 항상 루트 패키지를 부모로 유지
+                extractDeps(dep, rootId, rootName);
+              });
+            };
+
+            extractDeps(tree.root as DependencyNodeData, rootId, rootName);
+          });
+        }
+
+        // 의존성 포함된 새로운 아이템 목록으로 업데이트
+        const newItems: DownloadItem[] = data.allPackages.map((pkg) => {
+          const pkgKey = `${pkg.name}-${pkg.version}`;
+          const depInfo = dependencyMap.get(pkgKey);
+          const isOriginal = originalNames.has(pkgKey);
+
+          return {
+            id: pkg.id,
+            name: pkg.name,
+            version: pkg.version,
+            type: pkg.type,
+            status: 'pending' as DownloadStatus,
+            progress: 0,
+            downloadedBytes: 0,
+            totalBytes: 0,
+            speed: 0,
+            isDependency: !isOriginal,
+            parentId: depInfo?.parentId,
+            dependencyOf: depInfo?.parentName,
+          };
+        });
+
+        setItems(newItems);
+        downloadItemsRef.current = newItems;
+
+        // 실패한 의존성 해결 경고 표시
+        if (data.failedPackages && data.failedPackages.length > 0) {
+          data.failedPackages.forEach((failed) => {
+            addLog('warn', `의존성 해결 실패: ${failed.name} (v${failed.version})`, failed.error);
+          });
+        }
+
+        setDepsResolved(true);
+        message.success(`의존성 확인 완료: ${totalCount}개 패키지`);
+      } else {
+        // 프로덕션 Electron 환경: IPC 사용
+        const result = await window.electronAPI.download.resolveDeps?.({ packages, options });
+        if (result) {
+          setDepsResolved(true);
+          message.success('의존성 확인 완료');
+        }
+      }
+    } catch (error) {
+      addLog('error', '의존성 확인 실패', String(error));
+      message.error('의존성 확인 중 오류가 발생했습니다');
+    } finally {
+      setIsResolvingDeps(false);
+    }
+  };
+
   // 다운로드 시작
   const handleStartDownload = async () => {
     if (!outputDir) {
       message.warning('출력 폴더를 선택하세요');
+      return;
+    }
+
+    if (!depsResolved) {
+      message.warning('먼저 의존성 확인을 진행하세요');
       return;
     }
 
@@ -824,7 +987,8 @@ const DownloadPage: React.FC = () => {
 
       // 실패 없이 모두 완료되면 장바구니 자동 비우기
       if (failedCount === 0) {
-        clearCart();
+        // 클로저 문제 방지를 위해 스토어에서 직접 호출
+        useCartStore.getState().clearCart();
       }
 
       eventSource.close();
@@ -850,17 +1014,25 @@ const DownloadPage: React.FC = () => {
 
     // 다운로드 시작 요청
     try {
-      const packages = cartItems.map((item) => ({
-        id: item.id,
-        type: item.type,
-        name: item.name,
-        version: item.version,
-        architecture: item.arch,
-        // OS 패키지용 필드
-        downloadUrl: item.downloadUrl,
-        repository: item.repository,
-        location: item.location,
-      }));
+      // 이미 의존성 확인에서 해결된 패키지 목록 사용 (downloadItems)
+      const packages = downloadItems.map((item) => {
+        // 원본 장바구니에서 추가 정보 가져오기
+        const cartItem = cartItems.find(c => c.id === item.id);
+        return {
+          id: item.id,
+          type: item.type,
+          name: item.name,
+          version: item.version,
+          architecture: cartItem?.arch,
+          // OS 패키지용 필드
+          downloadUrl: cartItem?.downloadUrl,
+          repository: cartItem?.repository,
+          location: cartItem?.location,
+          // 의존성 정보
+          isDependency: item.isDependency,
+          parentId: item.parentId,
+        };
+      });
 
       const options = {
         outputDir,
@@ -868,9 +1040,12 @@ const DownloadPage: React.FC = () => {
         includeScripts: includeInstallScripts,
         targetOS: defaultTargetOS,
         architecture: defaultArchitecture,
-        includeDependencies,
+        // 의존성은 이미 해결됨 - 다운로드 시에는 해결 안 함
+        includeDependencies: false,
         pythonVersion: languageVersions.python,
         concurrency: concurrentDownloads,
+        // 의존성이 이미 해결되었음을 표시
+        skipDependencyResolution: true,
       };
 
       const response = await fetch('/api/download/start', {
@@ -987,6 +1162,7 @@ const DownloadPage: React.FC = () => {
   // 완료 후 초기화 (장바구니는 유지, 다운로드 상태만 초기화)
   const handleComplete = () => {
     reset();
+    setDepsResolved(false);
     navigate('/');
   };
 
@@ -1377,14 +1553,15 @@ const DownloadPage: React.FC = () => {
           </div>
         )}
 
-        {/* 의존성이 있는 경우 Collapse 구조로, 없는 경우 기존 Table로 표시 */}
-        {dependencyPackages.length > 0 ? (
+        {/* 의존성 확인 완료 후 Collapse 트리 구조로, 미완료 시 기본 Table로 표시 */}
+        {depsResolved ? (
           <Collapse
             bordered={false}
             expandIcon={({ isActive }) => (
               <RightOutlined rotate={isActive ? 90 : 0} style={{ fontSize: 12 }} />
             )}
             style={{ background: 'transparent' }}
+            defaultActiveKey={originalPackages.map(p => p.id)}
           >
             {originalPackages.map((pkg) => {
               const deps = getPackageDependencies(pkg.id);
@@ -1430,67 +1607,57 @@ const DownloadPage: React.FC = () => {
                     </div>
                   }
                 >
-                  {/* 자신의 다운로드 상태 */}
-                  <div style={{ marginBottom: 16, padding: '12px', background: '#fafafa', borderRadius: 6 }}>
-                    <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                      <Space>
-                        {statusIcons[pkg.status]}
-                        <Text strong>{pkg.name}</Text>
-                        <Text type="secondary">{pkg.version}</Text>
-                        <Tag color={statusColors[pkg.status]}>{statusLabels[pkg.status]}</Tag>
-                      </Space>
-                      <Space>
-                        <Progress
-                          percent={Math.round(pkg.progress)}
-                          size="small"
-                          style={{ width: 150, marginBottom: 0 }}
-                          status={
-                            pkg.status === 'failed'
-                              ? 'exception'
-                              : pkg.status === 'completed'
-                              ? 'success'
-                              : 'active'
-                          }
-                        />
-                        {pkg.status === 'downloading' && pkg.speed > 0 && (
-                          <Text type="secondary" style={{ minWidth: 80 }}>
-                            {pkg.speed > 1024 * 1024
-                              ? `${(pkg.speed / 1024 / 1024).toFixed(1)} MB/s`
-                              : `${(pkg.speed / 1024).toFixed(1)} KB/s`}
-                          </Text>
-                        )}
-                        {pkg.status === 'failed' && (
-                          <Button
-                            type="link"
-                            size="small"
-                            icon={<ReloadOutlined />}
-                            onClick={() => {
-                              retryItem(pkg.id);
-                              addLog('info', `재시도 예약: ${pkg.name}`);
-                            }}
-                          >
-                            재시도
-                          </Button>
-                        )}
-                      </Space>
-                    </Space>
-                  </div>
-
                   {/* 의존성 목록 */}
-                  {deps.length > 0 && (
-                    <div>
-                      <Text type="secondary" style={{ marginBottom: 8, display: 'block' }}>
-                        <BranchesOutlined /> 의존성 패키지 ({deps.length}개)
-                      </Text>
-                      <Table
-                        columns={columns}
-                        dataSource={deps}
-                        rowKey="id"
-                        pagination={deps.length > 5 ? { pageSize: 5, size: 'small' } : false}
-                        size="small"
-                        style={{ marginTop: 8 }}
-                      />
-                    </div>
+                  {deps.length > 0 ? (
+                    <List
+                      size="small"
+                      dataSource={deps}
+                      renderItem={(dep) => (
+                        <List.Item
+                          style={{ padding: '8px 12px' }}
+                          extra={
+                            <Space>
+                              <Progress
+                                percent={Math.round(dep.progress)}
+                                size="small"
+                                style={{ width: 100, marginBottom: 0 }}
+                                status={
+                                  dep.status === 'failed'
+                                    ? 'exception'
+                                    : dep.status === 'completed'
+                                    ? 'success'
+                                    : 'active'
+                                }
+                              />
+                              {dep.status === 'failed' && (
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  icon={<ReloadOutlined />}
+                                  onClick={() => {
+                                    retryItem(dep.id);
+                                    addLog('info', `재시도 예약: ${dep.name}`);
+                                  }}
+                                >
+                                  재시도
+                                </Button>
+                              )}
+                            </Space>
+                          }
+                        >
+                          <Space>
+                            {statusIcons[dep.status]}
+                            <Text>{dep.name}</Text>
+                            <Text type="secondary">{dep.version}</Text>
+                            <Tag color={statusColors[dep.status]} style={{ marginLeft: 4 }}>
+                              {statusLabels[dep.status]}
+                            </Tag>
+                          </Space>
+                        </List.Item>
+                      )}
+                    />
+                  ) : (
+                    <Text type="secondary">의존성 없음</Text>
                   )}
                 </Panel>
               );
@@ -1510,16 +1677,53 @@ const DownloadPage: React.FC = () => {
       {/* 액션 버튼 */}
       <Card style={{ marginBottom: 24 }}>
         <Space>
-          {!isDownloading && !allCompleted && (
+          {!isDownloading && !allCompleted && !depsResolved && (
             <Button
               type="primary"
-              icon={<DownloadOutlined />}
+              icon={isResolvingDeps ? <LoadingOutlined /> : <SearchOutlined />}
               size="large"
-              onClick={handleStartDownload}
-              disabled={!outputDir}
+              onClick={handleResolveDependencies}
+              disabled={!outputDir || isResolvingDeps}
+              loading={isResolvingDeps}
             >
-              다운로드 시작
+              {isResolvingDeps ? '의존성 확인 중...' : '의존성 확인'}
             </Button>
+          )}
+          {!isDownloading && !allCompleted && depsResolved && (
+            <>
+              <Button
+                icon={<SearchOutlined />}
+                size="large"
+                onClick={() => {
+                  setDepsResolved(false);
+                  // 기존 아이템을 원본 장바구니로 초기화
+                  const items: DownloadItem[] = cartItems.map((item) => ({
+                    id: item.id,
+                    name: item.name,
+                    version: item.version,
+                    type: item.type,
+                    status: 'pending' as DownloadStatus,
+                    progress: 0,
+                    downloadedBytes: 0,
+                    totalBytes: 0,
+                    speed: 0,
+                  }));
+                  setItems(items);
+                  addLog('info', '의존성 확인 초기화');
+                }}
+              >
+                다시 확인
+              </Button>
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                size="large"
+                onClick={handleStartDownload}
+                disabled={!outputDir}
+              >
+                다운로드 시작
+              </Button>
+            </>
           )}
           {isDownloading && (
             <>
