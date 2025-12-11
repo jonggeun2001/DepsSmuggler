@@ -54,6 +54,7 @@ import {
 import { useSettingsStore } from '../stores/settingsStore';
 import { useHistoryStore } from '../stores/historyStore';
 import type { HistoryPackageItem, HistorySettings, HistoryStatus } from '../../types';
+import type { DependencyAPI } from '../../types/electron';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -597,7 +598,7 @@ const DownloadPage: React.FC = () => {
         data = await response.json() as DependencyResolveResponse;
       } else {
         // 프로덕션 Electron 환경: IPC 사용
-        const dependencyAPI = window.electronAPI?.dependency;
+        const dependencyAPI = window.electronAPI?.dependency as DependencyAPI | undefined;
         if (!dependencyAPI?.resolve) {
           throw new Error('의존성 해결 API를 사용할 수 없습니다');
         }

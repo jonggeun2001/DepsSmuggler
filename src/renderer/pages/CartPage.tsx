@@ -38,6 +38,7 @@ import { useCartStore, CartItem, PackageType } from '../stores/cartStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { DependencyTree } from '../components';
 import { DependencyResolutionResult, DependencyNode, PackageType as CorePackageType } from '../../types';
+import type { DependencyAPI } from '../../types/electron';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -135,7 +136,7 @@ const CartPage: React.FC = () => {
         targetOS: settings.defaultTargetOS || 'any',
       };
 
-      const dependencyAPI = window.electronAPI?.dependency;
+      const dependencyAPI = window.electronAPI?.dependency as DependencyAPI | undefined;
       if (dependencyAPI?.resolve) {
         // Electron 환경
         result = await dependencyAPI.resolve({ packages, options: resolverOptions });
