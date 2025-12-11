@@ -155,6 +155,46 @@ if (process.env.DEPSSMUGGLER_STRICT_SSL !== 'true') {
 | `download:pause` | 다운로드 일시정지 |
 | `download:resume` | 다운로드 재개 |
 | `download:cancel` | 다운로드 취소 |
+| `download:check-path` | 출력 폴더 검사 |
+| `download:clear-path` | 출력 폴더 내용 삭제 |
+
+### 설정 IPC 핸들러
+
+앱 설정 파일(`~/.depssmuggler/settings.json`)을 읽고 쓰는 핸들러
+
+| 채널 | 파라미터 | 반환값 | 설명 |
+|------|----------|--------|------|
+| `config:get` | - | object \| null | 설정 파일 로드 (없으면 null) |
+| `config:set` | config: object | { success, error? } | 설정 저장 |
+| `config:reset` | - | { success, error? } | 설정 파일 삭제 (초기화) |
+| `config:getPath` | - | string | 설정 파일 경로 반환 |
+
+설정 파일 위치 (플랫폼별):
+- **Windows**: `C:\Users\{username}\.depssmuggler\settings.json`
+- **macOS/Linux**: `~/.depssmuggler/settings.json`
+
+### 다운로드 폴더 IPC 핸들러
+
+다운로드 전 출력 폴더 상태를 확인하고 정리하는 핸들러
+
+| 채널 | 파라미터 | 반환값 | 설명 |
+|------|----------|--------|------|
+| `download:check-path` | outputDir: string | { exists, files, fileCount, totalSize } | 폴더 존재 및 내용 확인 |
+| `download:clear-path` | outputDir: string | { success, deleted } | 폴더 내용 삭제 (폴더는 유지) |
+
+#### 사용 예시
+
+```typescript
+// DownloadPage에서 다운로드 시작 전 폴더 검사
+const checkResult = await window.electronAPI.download.checkPath(outputDir);
+if (checkResult.exists && checkResult.fileCount > 0) {
+  // 사용자에게 기존 데이터 삭제 여부 확인
+  const confirmed = await showConfirmDialog();
+  if (confirmed) {
+    await window.electronAPI.download.clearPath(outputDir);
+  }
+}
+```
 
 ### 히스토리 IPC 핸들러
 
@@ -178,6 +218,28 @@ if (process.env.DEPSSMUGGLER_STRICT_SSL !== 'true') {
 |------|----------|--------|------|
 | `cache:stats` | - | CacheStatsResult | 통합 캐시 통계 조회 |
 | `cache:clear` | - | { success: boolean } | 전체 캐시 삭제 |
+
+### Docker 카탈로그 캐시 IPC 핸들러
+
+Docker 레지스트리의 카탈로그(이미지 목록) 캐시를 관리하는 핸들러
+
+| 채널 | 파라미터 | 반환값 | 설명 |
+|------|----------|--------|------|
+| `docker:cache:refresh` | registry?: string | { success: boolean } | 특정 레지스트리 캐시 갱신 |
+| `docker:cache:status` | - | DockerCacheStatusItem[] | 캐시 상태 조회 |
+| `docker:cache:clear` | - | { success: boolean } | 카탈로그 캐시 삭제 |
+
+#### DockerCacheStatusItem 타입
+
+```typescript
+interface DockerCacheStatusItem {
+  registry: string;        // 레지스트리 URL
+  repositoryCount: number; // 캐시된 저장소 수
+  fetchedAt: number;       // 캐시 생성 시간 (timestamp)
+  expiresAt: number;       // 캐시 만료 시간 (timestamp)
+  isExpired: boolean;      // 만료 여부
+}
+```
 
 #### CacheStatsResult 타입
 
@@ -375,6 +437,16 @@ interface ElectronAPI {
     pause(): Promise<void>;
     resume(): Promise<void>;
     cancel(): Promise<void>;
+    checkPath(outputDir: string): Promise<{
+      exists: boolean;
+      files?: string[];
+      fileCount?: number;
+      totalSize?: number;
+    }>;
+    clearPath(outputDir: string): Promise<{
+      success: boolean;
+      deleted?: boolean;
+    }>;
     onProgress(callback: (progress: unknown) => void): () => void;
     onComplete(callback: (result: unknown) => void): () => void;
     onError(callback: (error: unknown) => void): () => void;
@@ -387,11 +459,12 @@ interface ElectronAPI {
     }) => void): () => void;
   };
 
-  // 설정 관련
+  // 설정 관련 (파일 기반 저장)
   config: {
     get(): Promise<unknown>;
-    set(config: unknown): Promise<void>;
-    reset(): Promise<void>;
+    set(config: unknown): Promise<{ success: boolean; error?: string }>;
+    reset(): Promise<{ success: boolean; error?: string }>;
+    getPath(): Promise<string>;  // 설정 파일 경로 반환
   };
 
   // 파일 시스템
@@ -418,11 +491,20 @@ interface ElectronAPI {
 
   // 패키지 검색
   search: {
-    packages(type: string, query: string): Promise<{
-      packages: Array<{ name: string; version: string; description?: string }>;
+    packages(type: string, query: string, options?: { channel?: string; registry?: string }): Promise<{
+      results: Array<{ name: string; version: string; description?: string; registry?: string }>;
     }>;
-    suggest(type: string, query: string): Promise<string[]>;
-    versions(type: string, packageName: string): Promise<{ versions: string[] }>;
+    suggest(type: string, query: string, options?: { channel?: string }): Promise<string[]>;
+    versions(type: string, packageName: string, options?: { channel?: string; registry?: string }): Promise<{ versions: string[] }>;
+  };
+
+  // Docker 카탈로그 캐시
+  docker: {
+    cache: {
+      refresh(registry?: string): Promise<{ success: boolean }>;
+      status(): Promise<DockerCacheStatusItem[]>;
+      clear(): Promise<{ success: boolean }>;
+    };
   };
 
   // 의존성 해결
@@ -754,7 +836,50 @@ const useDownloadStore = create<DownloadState>(...);
 
 ### SettingsStore (`stores/settingsStore.ts`)
 
-앱 설정 상태 관리
+앱 설정 상태 관리 - **파일 기반 영속성 지원**
+
+#### 저장 방식
+
+- **Electron 환경**: IPC를 통해 `~/.depssmuggler/settings.json` 파일에 저장
+- **브라우저 환경**: localStorage 사용 (백업용)
+
+```typescript
+// Electron IPC 기반 커스텀 스토리지
+const electronStorage: StateStorage = {
+  getItem: async (name) => {
+    // window.electronAPI.config.get()으로 파일에서 읽기
+  },
+  setItem: async (name, value) => {
+    // window.electronAPI.config.set()으로 파일에 저장
+  },
+  removeItem: async (name) => {
+    // window.electronAPI.config.reset()으로 파일 삭제
+  },
+};
+
+const useSettingsStore = create<SettingsState>()(
+  persist(
+    (set, get) => ({ ... }),
+    {
+      name: 'depssmuggler-settings',
+      storage: createJSONStorage(() => electronStorage),
+    }
+  )
+);
+```
+
+#### 앱 시작 시 초기화
+
+```typescript
+// 앱 시작 시 자동으로 파일에서 설정 로드
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    useSettingsStore.getState().initializeFromFile();
+  }, 100);
+}
+```
+
+#### 인터페이스
 
 ```typescript
 interface LanguageVersions {
@@ -776,9 +901,9 @@ interface SettingsState {
   languageVersions: LanguageVersions;
 
   // 캐시 설정
-  cacheEnabled: boolean;
-  cacheDir: string;
-  maxCacheSize: number; // GB
+  enableCache: boolean;      // 캐시 사용 여부 (필드명 변경: cacheEnabled → enableCache)
+  cachePath: string;         // 캐시 경로 (필드명 변경: cacheDir → cachePath)
+  maxCacheSize: number;      // GB
 
   // 출력 설정
   defaultOutputFormat: 'zip' | 'tar.gz' | 'mirror';
@@ -795,29 +920,40 @@ interface SettingsState {
   smtpUser: string;
   smtpPassword: string;
 
-  // OS 배포판 설정 (신규)
-  yumDistribution: { id: string; architecture: string };   // 예: { id: 'rocky-9', architecture: 'x86_64' }
-  aptDistribution: { id: string; architecture: string };   // 예: { id: 'ubuntu-22.04', architecture: 'amd64' }
-  apkDistribution: { id: string; architecture: string };   // 예: { id: 'alpine-3.18', architecture: 'x86_64' }
+  // OS 배포판 설정
+  yumDistribution: { id: string; architecture: string };
+  aptDistribution: { id: string; architecture: string };
+  apkDistribution: { id: string; architecture: string };
 
-  // Docker 설정 (신규)
-  dockerRegistry: DockerRegistry;           // 기본 레지스트리
-  dockerCustomRegistry: string;             // 커스텀 레지스트리 URL
-  dockerArchitecture: string;               // Docker 이미지 아키텍처 (예: 'amd64')
-  dockerLayerCompression: boolean;          // 레이어 압축 여부
-  dockerRetryStrategy: 'none' | 'linear' | 'exponential';  // 재시도 전략
-  dockerIncludeLoadScript: boolean;         // docker load 스크립트 포함 여부
+  // Docker 설정
+  dockerRegistry: DockerRegistry;
+  dockerCustomRegistry: string;
+  dockerArchitecture: string;
+  dockerLayerCompression: boolean;
+  dockerRetryStrategy: 'none' | 'linear' | 'exponential';
+  dockerIncludeLoadScript: boolean;
+
+  // 자동 업데이트 설정
+  autoUpdate: boolean;
+  autoDownloadUpdate: boolean;
+
+  // 내부 상태
+  _initialized: boolean;
 
   // Actions
-  setSetting<K extends keyof SettingsState>(key: K, value: SettingsState[K]): void;
   updateSettings(updates: Partial<SettingsState>): void;
   resetSettings(): void;
-  loadSettings(): Promise<void>;
-  saveSettings(): Promise<void>;
+  initializeFromFile(): Promise<void>;  // 파일에서 설정 로드
 }
 
 const useSettingsStore = create<SettingsState>(...);
 ```
+
+#### CLI와의 설정 통합
+
+CLI(`src/core/config.ts`)와 GUI가 동일한 설정 파일을 사용합니다:
+- 파일 위치: `~/.depssmuggler/settings.json`
+- 필드명 호환성: `enableCache`/`cachingEnabled` 둘 다 인식
 
 ---
 
