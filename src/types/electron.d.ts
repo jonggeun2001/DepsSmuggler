@@ -22,6 +22,16 @@ export interface DownloadAPI {
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   cancel: () => Promise<void>;
+  checkPath: (outputDir: string) => Promise<{
+    exists: boolean;
+    files?: string[];
+    fileCount?: number;
+    totalSize?: number;
+  }>;
+  clearPath: (outputDir: string) => Promise<{
+    success: boolean;
+    deleted?: boolean;
+  }>;
   onProgress: (callback: (progress: unknown) => void) => () => void;
   onComplete: (callback: (result: unknown) => void) => () => void;
   onError: (callback: (error: unknown) => void) => () => void;

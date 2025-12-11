@@ -487,11 +487,9 @@ const DownloadPage: React.FC = () => {
           cancelText: '취소',
           onOk: async () => {
             try {
-              let clearResult: { success?: boolean } | Response;
-
               // Electron 환경에서는 IPC API 사용, 개발 환경에서는 HTTP API 사용
               if (!isDevelopment && window.electronAPI?.download?.clearPath) {
-                clearResult = await window.electronAPI.download.clearPath(outputDir);
+                const clearResult = await window.electronAPI.download.clearPath(outputDir);
                 if (clearResult.success) {
                   message.success('기존 데이터 삭제 완료');
                   addLog('info', '기존 데이터 삭제', outputDir);
