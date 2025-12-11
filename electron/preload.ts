@@ -21,6 +21,18 @@ const electronAPI = {
     pause: (): Promise<void> => ipcRenderer.invoke('download:pause'),
     resume: (): Promise<void> => ipcRenderer.invoke('download:resume'),
     cancel: (): Promise<void> => ipcRenderer.invoke('download:cancel'),
+    // 출력 폴더 검사
+    checkPath: (outputDir: string): Promise<{
+      exists: boolean;
+      files?: string[];
+      fileCount?: number;
+      totalSize?: number;
+    }> => ipcRenderer.invoke('download:check-path', outputDir),
+    // 출력 폴더 삭제
+    clearPath: (outputDir: string): Promise<{
+      success: boolean;
+      deleted?: boolean;
+    }> => ipcRenderer.invoke('download:clear-path', outputDir),
     onProgress: (callback: (progress: unknown) => void): () => void => {
       const handler = (_event: Electron.IpcRendererEvent, progress: unknown) =>
         callback(progress);
@@ -67,11 +79,12 @@ const electronAPI = {
     },
   },
 
-  // 설정 관련 (향후 구현)
+  // 설정 관련
   config: {
     get: (): Promise<unknown> => ipcRenderer.invoke('config:get'),
-    set: (config: unknown): Promise<void> => ipcRenderer.invoke('config:set', config),
-    reset: (): Promise<void> => ipcRenderer.invoke('config:reset'),
+    set: (config: unknown): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('config:set', config),
+    reset: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('config:reset'),
+    getPath: (): Promise<string> => ipcRenderer.invoke('config:getPath'),
   },
 
   // 파일 시스템 관련 (향후 구현)
@@ -151,12 +164,13 @@ const electronAPI = {
     packages: (
       type: string,
       query: string,
-      options?: { channel?: string }
+      options?: { channel?: string; registry?: string }
     ): Promise<{
       results: Array<{
         name: string;
         version: string;
         description?: string;
+        registry?: string;
       }>;
     }> => ipcRenderer.invoke('search:packages', type, query, options),
     suggest: (type: string, query: string, options?: { channel?: string }): Promise<string[]> =>
@@ -164,7 +178,7 @@ const electronAPI = {
     versions: (
       type: string,
       packageName: string,
-      options?: { channel?: string }
+      options?: { channel?: string; registry?: string }
     ): Promise<{ versions: string[] }> =>
       ipcRenderer.invoke('search:versions', type, packageName, options),
   },
@@ -177,6 +191,23 @@ const electronAPI = {
       dependencyTrees?: unknown[];
       failedPackages?: unknown[];
     }> => ipcRenderer.invoke('dependency:resolve', packages),
+  },
+
+  // Docker 카탈로그 캐시 관련
+  docker: {
+    cache: {
+      refresh: (registry?: string): Promise<{ success: boolean }> =>
+        ipcRenderer.invoke('docker:cache:refresh', registry),
+      status: (): Promise<Array<{
+        registry: string;
+        repositoryCount: number;
+        fetchedAt: number;
+        expiresAt: number;
+        isExpired: boolean;
+      }>> => ipcRenderer.invoke('docker:cache:status'),
+      clear: (): Promise<{ success: boolean }> =>
+        ipcRenderer.invoke('docker:cache:clear'),
+    },
   },
 
   // OS 패키지 관련

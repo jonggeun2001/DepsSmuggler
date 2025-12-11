@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 
 // 언어 버전 타입 정의
 export interface LanguageVersions {
@@ -88,9 +88,13 @@ interface SettingsState {
   autoUpdate: boolean;                      // 자동 업데이트 활성화
   autoDownloadUpdate: boolean;              // 자동 다운로드 (알림 없이)
 
+  // 초기화 상태
+  _initialized: boolean;
+
   // 액션
   updateSettings: (updates: Partial<SettingsState>) => void;
   resetSettings: () => void;
+  initializeFromFile: () => Promise<void>;
 }
 
 const defaultSettings = {
@@ -139,19 +143,113 @@ const defaultSettings = {
   // 자동 업데이트 기본값
   autoUpdate: true,
   autoDownloadUpdate: false,
+
+  _initialized: false,
+};
+
+// Electron IPC를 통한 파일 기반 스토리지 (Windows, macOS, Linux 지원)
+// 설정 파일 위치: ~/.depssmuggler/settings.json
+const electronStorage: StateStorage = {
+  getItem: async (name: string): Promise<string | null> => {
+    // Electron 환경에서는 IPC를 통해 파일에서 읽기
+    if (typeof window !== 'undefined' && window.electronAPI?.config?.get) {
+      try {
+        const config = await window.electronAPI.config.get();
+        if (config) {
+          // persist middleware가 기대하는 형식으로 반환
+          return JSON.stringify({ state: config, version: 0 });
+        }
+      } catch (error) {
+        console.error('설정 로드 실패:', error);
+      }
+    }
+    // 브라우저 환경 또는 Electron IPC 실패 시 localStorage 사용
+    return localStorage.getItem(name);
+  },
+  setItem: async (name: string, value: string): Promise<void> => {
+    // localStorage에도 저장 (백업 및 브라우저 환경 지원)
+    localStorage.setItem(name, value);
+
+    // Electron 환경에서는 IPC를 통해 파일에 저장
+    if (typeof window !== 'undefined' && window.electronAPI?.config?.set) {
+      try {
+        const parsed = JSON.parse(value);
+        const state = parsed.state;
+        // 액션 함수와 내부 상태는 제외하고 저장
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { updateSettings, resetSettings, initializeFromFile, _initialized, ...settingsToSave } = state;
+        await window.electronAPI.config.set(settingsToSave);
+      } catch (error) {
+        console.error('설정 저장 실패:', error);
+      }
+    }
+  },
+  removeItem: async (name: string): Promise<void> => {
+    localStorage.removeItem(name);
+    // Electron 환경에서는 파일도 삭제
+    if (typeof window !== 'undefined' && window.electronAPI?.config?.reset) {
+      try {
+        await window.electronAPI.config.reset();
+      } catch (error) {
+        console.error('설정 초기화 실패:', error);
+      }
+    }
+  },
 };
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       ...defaultSettings,
 
       updateSettings: (updates) => set((state) => ({ ...state, ...updates })),
 
-      resetSettings: () => set(defaultSettings),
+      resetSettings: () => {
+        // 파일도 함께 초기화
+        if (typeof window !== 'undefined' && window.electronAPI?.config?.reset) {
+          window.electronAPI.config.reset().catch(console.error);
+        }
+        set({ ...defaultSettings, _initialized: true });
+      },
+
+      // 앱 시작 시 파일에서 설정 로드
+      initializeFromFile: async () => {
+        if (get()._initialized) return;
+
+        if (typeof window !== 'undefined' && window.electronAPI?.config?.get) {
+          try {
+            const fileConfig = await window.electronAPI.config.get();
+            if (fileConfig && typeof fileConfig === 'object') {
+              // 파일에 저장된 설정을 현재 상태와 병합 (새 설정 항목 대응)
+              const mergedConfig = { ...defaultSettings, ...fileConfig, _initialized: true };
+              set(mergedConfig);
+              console.log('설정 파일에서 로드 완료');
+              return;
+            }
+          } catch (error) {
+            console.error('설정 파일 로드 실패:', error);
+          }
+        }
+        set({ _initialized: true });
+      },
     }),
     {
       name: 'depssmuggler-settings',
+      storage: createJSONStorage(() => electronStorage),
+      // 저장할 때 액션 함수 제외
+      partialize: (state) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { updateSettings, resetSettings, initializeFromFile, ...rest } = state;
+        return rest;
+      },
     }
   )
 );
+
+// 앱 시작 시 자동으로 파일에서 설정 로드
+if (typeof window !== 'undefined') {
+  // Electron 환경인지 확인 후 초기화
+  setTimeout(() => {
+    useSettingsStore.getState().initializeFromFile();
+  }, 100);
+}

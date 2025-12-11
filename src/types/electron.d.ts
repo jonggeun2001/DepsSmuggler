@@ -32,8 +32,9 @@ export interface DownloadAPI {
 
 export interface ConfigAPI {
   get: () => Promise<unknown>;
-  set: (config: unknown) => Promise<void>;
-  reset: () => Promise<void>;
+  set: (config: unknown) => Promise<{ success: boolean; error?: string }>;
+  reset: () => Promise<{ success: boolean; error?: string }>;
+  getPath: () => Promise<string>;
 }
 
 export interface FileSystemAPI {
@@ -49,6 +50,7 @@ export interface CacheAPI {
 
 export interface SearchOptions {
   channel?: string;
+  registry?: string;
 }
 
 export interface SearchAPI {
@@ -61,6 +63,7 @@ export interface SearchAPI {
       name: string;
       version: string;
       description?: string;
+      registry?: string;
     }>;
   }>;
   suggest: (type: string, query: string, options?: SearchOptions) => Promise<string[]>;
@@ -78,6 +81,22 @@ export interface DependencyAPI {
   resolve: (packages: unknown[]) => Promise<DependencyResolveResult>;
 }
 
+export interface DockerCacheStatusItem {
+  registry: string;
+  repositoryCount: number;
+  fetchedAt: number;
+  expiresAt: number;
+  isExpired: boolean;
+}
+
+export interface DockerAPI {
+  cache: {
+    refresh: (registry?: string) => Promise<{ success: boolean }>;
+    status: () => Promise<DockerCacheStatusItem[]>;
+    clear: () => Promise<{ success: boolean }>;
+  };
+}
+
 export interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   getAppPath: () => Promise<string>;
@@ -89,6 +108,7 @@ export interface ElectronAPI {
   cache: CacheAPI;
   search: SearchAPI;
   dependency?: DependencyAPI;
+  docker?: DockerAPI;
 }
 
 declare global {

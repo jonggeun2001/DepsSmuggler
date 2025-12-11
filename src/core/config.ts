@@ -51,7 +51,7 @@ export class ConfigManager {
 
   constructor() {
     this.configDir = path.join(os.homedir(), '.depssmuggler');
-    this.configPath = path.join(this.configDir, 'config.json');
+    this.configPath = path.join(this.configDir, 'settings.json');  // config.json → settings.json으로 통합
     this.logsDir = path.join(this.configDir, 'logs');
     this.cacheDir = path.join(this.configDir, 'cache');
   }
@@ -151,6 +151,7 @@ export class ConfigManager {
 
   /**
    * 설정을 동기적으로 로드합니다 (CLI용).
+   * settings.json의 필드명에 맞춤 (enableCache, cachePath)
    */
   getConfig(): CLIConfig {
     try {
@@ -159,8 +160,9 @@ export class ConfigManager {
         const rawConfig = fs.readJsonSync(this.configPath);
         return {
           concurrentDownloads: rawConfig.concurrentDownloads || DEFAULT_CONFIG.concurrentDownloads,
-          cacheEnabled: rawConfig.cachingEnabled ?? DEFAULT_CONFIG.cachingEnabled,
-          cachePath: this.cacheDir,
+          // settings.json은 enableCache 사용, 기존 cachingEnabled도 호환
+          cacheEnabled: rawConfig.enableCache ?? rawConfig.cachingEnabled ?? DEFAULT_CONFIG.cachingEnabled,
+          cachePath: rawConfig.cachePath || this.cacheDir,
           maxCacheSize: 10 * 1024 * 1024 * 1024, // 10GB
           logLevel: rawConfig.logLevel || 'info',
         };

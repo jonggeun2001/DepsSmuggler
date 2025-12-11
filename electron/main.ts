@@ -193,6 +193,72 @@ ipcMain.handle('get-app-path', () => {
   return app.getPath('userData');
 });
 
+// 설정 파일 경로 (Windows, macOS, Linux 모두 지원)
+// Windows: C:\Users\{username}\.depssmuggler\settings.json
+// macOS/Linux: ~/.depssmuggler/settings.json
+const getSettingsPath = () => {
+  const homeDir = os.homedir();
+  const configDir = path.join(homeDir, '.depssmuggler');
+  return path.join(configDir, 'settings.json');
+};
+
+const ensureSettingsDir = () => {
+  const settingsPath = getSettingsPath();
+  const dir = path.dirname(settingsPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return settingsPath;
+};
+
+// 설정 로드 IPC
+ipcMain.handle('config:get', async () => {
+  try {
+    const settingsPath = getSettingsPath();
+    if (fs.existsSync(settingsPath)) {
+      const data = fs.readFileSync(settingsPath, 'utf-8');
+      return JSON.parse(data);
+    }
+    return null; // 파일이 없으면 null 반환 (기본값 사용)
+  } catch (error) {
+    log.error('설정 로드 실패:', error);
+    return null;
+  }
+});
+
+// 설정 저장 IPC
+ipcMain.handle('config:set', async (_event, config: unknown) => {
+  try {
+    const settingsPath = ensureSettingsDir();
+    fs.writeFileSync(settingsPath, JSON.stringify(config, null, 2), 'utf-8');
+    log.info('설정 저장 완료:', settingsPath);
+    return { success: true };
+  } catch (error) {
+    log.error('설정 저장 실패:', error);
+    return { success: false, error: String(error) };
+  }
+});
+
+// 설정 초기화 IPC
+ipcMain.handle('config:reset', async () => {
+  try {
+    const settingsPath = getSettingsPath();
+    if (fs.existsSync(settingsPath)) {
+      fs.unlinkSync(settingsPath);
+    }
+    log.info('설정 초기화 완료');
+    return { success: true };
+  } catch (error) {
+    log.error('설정 초기화 실패:', error);
+    return { success: false, error: String(error) };
+  }
+});
+
+// 설정 경로 반환 IPC
+ipcMain.handle('config:getPath', () => {
+  return getSettingsPath();
+});
+
 // 폴더 선택 다이얼로그
 ipcMain.handle('select-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow!, {
@@ -436,11 +502,11 @@ async function getMavenVersions(packageName: string): Promise<string[]> {
 }
 
 // 패키지 검색 핸들러 (실제 API 호출)
-ipcMain.handle('search:packages', async (_, type: string, query: string, options?: { channel?: string }) => {
+ipcMain.handle('search:packages', async (_, type: string, query: string, options?: { channel?: string; registry?: string }) => {
   searchLog.debug(`Searching ${type} packages: ${query}`, options);
 
   try {
-    let results: Array<{ name: string; version: string; description: string }> = [];
+    let results: Array<{ name: string; version: string; description: string; registry?: string }> = [];
 
     switch (type) {
       case 'pip':
@@ -475,11 +541,13 @@ ipcMain.handle('search:packages', async (_, type: string, query: string, options
         break;
       case 'docker':
         const dockerDownloader = getDockerDownloader();
-        const dockerResults = await dockerDownloader.searchPackages(query);
+        const dockerRegistry = options?.registry || 'docker.io';
+        const dockerResults = await dockerDownloader.searchPackages(query, dockerRegistry);
         results = dockerResults.map(pkg => ({
           name: pkg.name,
           version: pkg.version || 'latest',
           description: pkg.metadata?.description || '',
+          registry: dockerRegistry,
         }));
         break;
       default:
@@ -495,7 +563,7 @@ ipcMain.handle('search:packages', async (_, type: string, query: string, options
 });
 
 // 패키지 버전 목록 조회 핸들러
-ipcMain.handle('search:versions', async (_, type: string, packageName: string, options?: { channel?: string }) => {
+ipcMain.handle('search:versions', async (_, type: string, packageName: string, options?: { channel?: string; registry?: string }) => {
   searchLog.debug(`Getting versions for ${type} package: ${packageName}`, options);
 
   try {
@@ -520,7 +588,8 @@ ipcMain.handle('search:versions', async (_, type: string, packageName: string, o
         break;
       case 'docker':
         const dockerDownloaderForVersions = getDockerDownloader();
-        versions = await dockerDownloaderForVersions.getVersions(packageName);
+        const dockerRegistryForVersions = options?.registry || 'docker.io';
+        versions = await dockerDownloaderForVersions.getVersions(packageName, dockerRegistryForVersions);
         break;
       default:
         versions = [];
@@ -917,6 +986,89 @@ ipcMain.handle('download:cancel', async () => {
   return { success: true };
 });
 
+// 출력 폴더 검사
+ipcMain.handle('download:check-path', async (_, outputDir: string) => {
+  downloadLog.debug(`Checking output path: ${outputDir}`);
+
+  try {
+    if (!outputDir) {
+      return { exists: false, files: [], fileCount: 0, totalSize: 0 };
+    }
+
+    // 폴더 존재 여부 확인
+    if (!fs.existsSync(outputDir)) {
+      return { exists: false, files: [], fileCount: 0, totalSize: 0 };
+    }
+
+    // 폴더 내용 검사
+    const files: string[] = [];
+    let totalSize = 0;
+
+    const scanDir = (dir: string) => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          scanDir(fullPath);
+        } else {
+          files.push(path.relative(outputDir, fullPath));
+          totalSize += fs.statSync(fullPath).size;
+        }
+      }
+    };
+
+    scanDir(outputDir);
+
+    return {
+      exists: true,
+      files,
+      fileCount: files.length,
+      totalSize,
+    };
+  } catch (error) {
+    downloadLog.error('Failed to check output path:', error);
+    return { exists: false, files: [], fileCount: 0, totalSize: 0 };
+  }
+});
+
+// 출력 폴더 삭제
+ipcMain.handle('download:clear-path', async (_, outputDir: string) => {
+  downloadLog.info(`Clearing output path: ${outputDir}`);
+
+  try {
+    if (!outputDir) {
+      return { success: false, deleted: false };
+    }
+
+    // 폴더가 없으면 성공으로 처리
+    if (!fs.existsSync(outputDir)) {
+      return { success: true, deleted: false };
+    }
+
+    // 폴더 내용 삭제 (폴더 자체는 유지)
+    const deleteContents = (dir: string) => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          deleteContents(fullPath);
+          fs.rmdirSync(fullPath);
+        } else {
+          fs.unlinkSync(fullPath);
+        }
+      }
+    };
+
+    deleteContents(outputDir);
+    downloadLog.info('Output path cleared successfully');
+
+    return { success: true, deleted: true };
+  } catch (error) {
+    downloadLog.error('Failed to clear output path:', error);
+    return { success: false, deleted: false };
+  }
+});
+
 // =====================================================
 // 의존성 해결 관련 핸들러
 // =====================================================
@@ -1098,4 +1250,24 @@ ipcMain.handle('cache:clear', async () => {
     cacheLog.error('Failed to clear caches:', error);
     throw error;
   }
+});
+
+// Docker 카탈로그 캐시 갱신
+ipcMain.handle('docker:cache:refresh', async (_event, registry: string = 'docker.io') => {
+  const dockerDownloader = getDockerDownloader();
+  await dockerDownloader.refreshCatalogCache(registry);
+  return { success: true };
+});
+
+// Docker 카탈로그 캐시 상태 조회
+ipcMain.handle('docker:cache:status', async () => {
+  const dockerDownloader = getDockerDownloader();
+  return dockerDownloader.getCatalogCacheStatus();
+});
+
+// Docker 카탈로그 캐시 삭제
+ipcMain.handle('docker:cache:clear', async () => {
+  const dockerDownloader = getDockerDownloader();
+  dockerDownloader.clearCatalogCache();
+  return { success: true };
 });
