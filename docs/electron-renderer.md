@@ -866,7 +866,7 @@ const resolvedPackages = await Promise.all(
 - 의존성 확인 단계에서 모든 패키지의 전이 의존성 해결
 - **의존성 해결 진행 상황 표시**: 각 패키지별 실시간 진행 로그
 - Collapse 트리 구조로 패키지별 의존성 목록 표시
-- **진행률 업데이트 쓰로틀링**: 100ms 간격으로 UI 업데이트 (성능 최적화)
+- **진행률 업데이트 쓰로틀링**: 300ms 간격으로 UI 업데이트 (성능 최적화)
 - 실시간 진행률 표시 (패키지별, 전체)
 - 다운로드 속도 및 남은 시간 표시
 - 패키지별 상태 (대기/다운로드 중/일시정지/완료/실패)
@@ -908,12 +908,12 @@ unsubscribe?.();
 
 #### 진행률 업데이트 쓰로틀링
 
-다운로드 중 진행률 업데이트가 너무 빈번하면 UI 성능이 저하되므로 100ms 간격으로 제한합니다:
+다운로드 중 진행률 업데이트가 너무 빈번하면 UI 성능이 저하되므로 300ms 간격으로 제한합니다:
 
 ```tsx
 // progress 업데이트 쓰로틀링 (UI 반응성 향상)
 const progressThrottleMap = new Map<string, number>();
-const THROTTLE_MS = 100; // 100ms 간격으로 제한
+const THROTTLE_MS = 300; // 300ms 간격으로 제한
 
 const unsubProgress = window.electronAPI.download.onProgress((progress) => {
   if (p.status === 'completed' || p.status === 'failed') {

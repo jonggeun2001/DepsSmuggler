@@ -791,3 +791,97 @@ maven-resolver-impl/src/main/java/org/eclipse/aether/internal/impl/collect/
 ### GitHub 저장소
 
 - https://github.com/apache/maven-resolver
+
+---
+
+## 12. DepsSmuggler 구현 세부사항
+
+### 12.1 패키지 크기 조회 (병렬 HEAD 요청)
+
+MavenResolver는 의존성 해결 후 모든 패키지의 크기를 병렬로 조회합니다.
+
+```typescript
+// MavenResolver의 fetchPackageSizes 메서드
+private async fetchPackageSizes(packages: PackageInfo[]): Promise<PackageInfo[]> {
+  const limit = pLimit(15); // 동시 15개 요청
+
+  const results = await Promise.all(
+    packages.map((pkg) =>
+      limit(async () => {
+        const [groupId, artifactId] = pkg.name.split(':');
+        const type = (pkg.metadata?.type as string) || 'jar';
+
+        // POM-only 패키지는 pom 파일 크기 조회
+        const extension = type === 'pom' ? 'pom' : 'jar';
+        const url = `${repoUrl}/${groupPath}/${artifactId}/${version}/${fileName}.${extension}`;
+
+        const response = await axios.head(url, { timeout: 5000 });
+        const size = parseInt(response.headers['content-length'] || '0', 10);
+
+        return { ...pkg, metadata: { ...pkg.metadata, size } };
+      })
+    )
+  );
+
+  return results;
+}
+```
+
+**특징**:
+- `p-limit`으로 동시 요청 15개 제한
+- HEAD 요청으로 `Content-Length` 헤더에서 크기 추출
+- POM-only 패키지는 `.pom` 파일 크기 조회
+- 조회 실패 시 크기를 0으로 설정 (다운로드에는 영향 없음)
+- `totalSize` 계산하여 결과에 포함
+
+### 12.2 Parent POM / BOM의 dependencyManagement 처리
+
+**중요**: Parent POM이나 BOM(Bill of Materials)의 `<dependencyManagement>` 섹션은 **버전 관리 전용**입니다. 실제 다운로드 대상 의존성으로 처리하면 안 됩니다.
+
+```typescript
+// extractDependencies에서의 처리
+private extractDependencies(pom: PomProject, ...): PomDependency[] {
+  // 실제 <dependencies> 섹션만 반환
+  const deps = pom.dependencies?.dependency;
+  if (deps) {
+    return Array.isArray(deps) ? deps : [deps];
+  }
+
+  // <dependencies>가 없으면 빈 배열 반환
+  // dependencyManagement의 630개 이상 항목을 모두 다운로드하면
+  // 스택 오버플로우 및 불필요한 다운로드 발생
+  if (isRoot && pom.packaging === 'pom') {
+    logger.info(`Parent/BOM POM 감지: ${coordinate} - 실제 의존성 없음`);
+  }
+
+  return [];
+}
+```
+
+**이유**:
+- Spring Boot BOM 같은 패키지는 `dependencyManagement`에 600개 이상의 항목을 포함
+- 이를 모두 의존성으로 처리하면 불필요한 다운로드 및 메모리 문제 발생
+- `dependencyManagement`는 버전 해결용으로만 사용
+
+### 12.3 POM-only 패키지의 packaging 타입 조회
+
+Search API는 BOM 같은 POM-only 패키지의 `packaging` 정보를 제대로 반환하지 않습니다. 따라서 POM 파일을 직접 조회하여 패키징 타입을 확인합니다.
+
+```typescript
+// MavenDownloader의 downloadPackage 메서드
+if (!packaging) {
+  try {
+    const pomUrl = this.buildDownloadUrl(groupId, artifactId, version, 'pom');
+    const pomResponse = await this.client.get<string>(pomUrl);
+    const pomXml = pomResponse.data;
+
+    // POM에서 <packaging> 태그 파싱
+    const packagingMatch = pomXml.match(/<packaging>([^<]+)<\/packaging>/);
+    packaging = packagingMatch ? packagingMatch[1].trim() : 'jar';
+  } catch {
+    packaging = 'jar'; // 조회 실패 시 기본값
+  }
+}
+```
+
+**적용 시점**: `downloadPackage` 호출 시 `metadata.packaging`이 없는 경우

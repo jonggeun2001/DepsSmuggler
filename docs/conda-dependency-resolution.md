@@ -460,7 +460,59 @@ function getPackageUrl(
 }
 ```
 
-## 7. 참고 자료
+## 7. DepsSmuggler 구현 세부사항
+
+### 7.1 패키지 크기 정보 추출
+
+CondaResolver는 repodata.json에서 패키지 크기(`size` 필드)를 추출하여 전달합니다.
+
+```typescript
+interface PackageCandidate {
+  name: string;
+  version: string;
+  filename: string;
+  buildNumber: number;
+  depends: string[];
+  subdir: string;
+  size: number;  // repodata.json의 size 필드
+}
+
+// repodata에서 패키지 정보 추출 시 size 포함
+candidates.push({
+  name: pkg.name,
+  version: pkg.version,
+  filename: pkg.filename,
+  buildNumber: pkg.build_number,
+  depends: pkg.depends || [],
+  subdir: pkg.subdir || repodata.info?.subdir || 'noarch',
+  size: pkg.size || 0,  // 크기 정보 추가
+});
+```
+
+### 7.2 총 크기 계산
+
+의존성 해결 완료 후 전체 패키지의 총 크기를 계산하여 반환합니다.
+
+```typescript
+const flatList = this.flattenDependencies(root);
+const totalSize = flatList.reduce(
+  (sum, pkg) => sum + ((pkg.metadata?.size as number) || 0),
+  0
+);
+
+return {
+  root,
+  flatList,
+  conflicts: this.conflicts,
+  totalSize,  // 총 크기 반환
+};
+```
+
+**활용**:
+- UI에서 다운로드 전 예상 크기 표시
+- 다운로드 완료 시 총 크기 로깅
+
+## 8. 참고 자료
 
 - [conda Deep Dive: Solvers](https://docs.conda.io/projects/conda/en/4.13.x/dev-guide/deep-dive-solvers.html)
 - [conda Package Specification](https://conda.io/projects/conda/en/latest/user-guide/concepts/pkg-specs.html)

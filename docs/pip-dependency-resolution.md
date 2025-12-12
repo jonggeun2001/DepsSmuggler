@@ -252,7 +252,47 @@ interface ResolverState {
 }
 ```
 
-### 7.3 참고 링크
+### 7.3 패키지 크기 추출
+
+PipResolver는 PyPI JSON API에서 패키지 크기를 추출합니다.
+
+```typescript
+// PyPI JSON API 응답 구조
+// https://pypi.org/pypi/{package}/{version}/json
+{
+  "info": { "name": "requests", "version": "2.31.0", ... },
+  "urls": [
+    {
+      "packagetype": "bdist_wheel",
+      "filename": "requests-2.31.0-py3-none-any.whl",
+      "size": 62574,
+      ...
+    },
+    {
+      "packagetype": "sdist",
+      "filename": "requests-2.31.0.tar.gz",
+      "size": 110346,
+      ...
+    }
+  ]
+}
+
+// 크기 추출 로직
+let packageSize = 0;
+if (urls && urls.length > 0) {
+  // wheel 파일 우선, 없으면 sdist
+  const wheel = urls.find((u) => u.packagetype === 'bdist_wheel');
+  const sdist = urls.find((u) => u.packagetype === 'sdist');
+  packageSize = (wheel || sdist || urls[0]).size || 0;
+}
+```
+
+**우선순위**:
+1. `bdist_wheel` (wheel 파일) - 설치가 빠르고 일반적으로 크기가 작음
+2. `sdist` (소스 배포) - wheel이 없는 경우 폴백
+3. 첫 번째 URL - 둘 다 없는 경우
+
+### 7.4 참고 링크
 
 - [resolvelib GitHub](https://github.com/sarugaku/resolvelib)
 - [pip GitHub](https://github.com/pypa/pip)
