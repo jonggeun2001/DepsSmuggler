@@ -168,6 +168,10 @@ const DownloadPage: React.FC = () => {
   useEffect(() => {
     if (!window.electronAPI?.download) return;
 
+    // progress 업데이트 쓰로틀링 (UI 반응성 향상)
+    const progressThrottleMap = new Map<string, number>();
+    const THROTTLE_MS = 100; // 100ms 간격으로 제한
+
     const unsubProgress = window.electronAPI.download.onProgress((progress: unknown) => {
       const p = progress as {
         packageId: string;
@@ -181,6 +185,7 @@ const DownloadPage: React.FC = () => {
 
       // status에 따라 처리
       if (p.status === 'completed') {
+        progressThrottleMap.delete(p.packageId); // 완료 시 쓰로틀 제거
         updateItem(p.packageId, {
           status: 'completed',
           progress: 100,
@@ -193,6 +198,7 @@ const DownloadPage: React.FC = () => {
           : p.packageId;
         addLog('success', `다운로드 완료: ${displayName}`);
       } else if (p.status === 'failed') {
+        progressThrottleMap.delete(p.packageId);
         const item = downloadItemsRef.current.find(i => i.id === p.packageId);
         if (item) {
           updateItem(p.packageId, { status: 'failed', error: p.error });
@@ -200,14 +206,19 @@ const DownloadPage: React.FC = () => {
           addLog('error', `다운로드 실패: ${displayName}`, p.error);
         }
       } else {
-        // downloading 상태
-        updateItem(p.packageId, {
-          status: 'downloading',
-          progress: p.progress,
-          downloadedBytes: p.downloadedBytes,
-          totalBytes: p.totalBytes,
-          speed: p.speed || 0,
-        });
+        // downloading/paused 상태 - 쓰로틀링 적용
+        const now = Date.now();
+        const lastUpdate = progressThrottleMap.get(p.packageId) || 0;
+        if (now - lastUpdate >= THROTTLE_MS) {
+          progressThrottleMap.set(p.packageId, now);
+          updateItem(p.packageId, {
+            status: p.status as 'downloading' | 'paused',
+            progress: p.progress,
+            downloadedBytes: p.downloadedBytes,
+            totalBytes: p.totalBytes,
+            speed: p.speed || 0,
+          });
+        }
       }
     });
 
@@ -497,19 +508,26 @@ const DownloadPage: React.FC = () => {
           okType: 'danger',
           cancelText: '취소',
           onOk: async () => {
+            const onOkStartTime = Date.now();
+            window.electronAPI?.log?.('info', '[TIMING] Modal onOk started');
             // Electron IPC 사용 (개발/프로덕션 모두)
             if (!window.electronAPI?.download?.clearPath) {
-              throw new Error('폴더 삭제 API를 사용할 수 없습니다');
+              message.error('폴더 삭제 API를 사용할 수 없습니다');
+              resolve(false);
+              return;
             }
+            window.electronAPI?.log?.('info', '[TIMING] Calling clearPath IPC...');
             const clearResult = await window.electronAPI.download.clearPath(outputDir);
+            window.electronAPI?.log?.('info', `[TIMING] clearPath IPC returned after ${Date.now() - onOkStartTime}ms`);
             if (clearResult.success) {
               message.success('기존 데이터 삭제 완료');
               addLog('info', '기존 데이터 삭제', outputDir);
+              window.electronAPI?.log?.('info', `[TIMING] About to resolve(true) at ${Date.now() - onOkStartTime}ms`);
               resolve(true);
+              window.electronAPI?.log?.('info', `[TIMING] resolve(true) called at ${Date.now() - onOkStartTime}ms`);
             } else {
               message.error('데이터 삭제 실패');
               resolve(false);
-              throw new Error('삭제 실패'); // 모달 닫힘 방지
             }
           },
           onCancel: () => {
@@ -533,6 +551,22 @@ const DownloadPage: React.FC = () => {
     setIsResolvingDeps(true);
     setDepsResolved(false);
     addLog('info', '의존성 확인 시작', `${cartItems.length}개 패키지`);
+
+    // 진행 상황 리스너 등록
+    const dependencyAPI = window.electronAPI?.dependency as DependencyAPI | undefined;
+    let unsubscribe: (() => void) | undefined;
+
+    if (dependencyAPI?.onProgress) {
+      unsubscribe = dependencyAPI.onProgress((progress) => {
+        if (progress.status === 'start') {
+          addLog('info', `[${progress.current}/${progress.total}] 의존성 확인 중: ${progress.packageType}/${progress.packageName}`);
+        } else if (progress.status === 'success') {
+          addLog('info', `[${progress.current}/${progress.total}] 완료: ${progress.packageName} (${progress.dependencyCount}개 의존성)`);
+        } else if (progress.status === 'error') {
+          addLog('error', `[${progress.current}/${progress.total}] 실패: ${progress.packageName}`, progress.error);
+        }
+      });
+    }
 
     try {
       const packages = cartItems.map((item) => ({
@@ -570,7 +604,6 @@ const DownloadPage: React.FC = () => {
       let data: DependencyResolveResponse;
 
       // Electron IPC 사용 (개발/프로덕션 모두)
-      const dependencyAPI = window.electronAPI?.dependency as DependencyAPI | undefined;
       if (!dependencyAPI?.resolve) {
         throw new Error('의존성 해결 API를 사용할 수 없습니다');
       }
@@ -661,12 +694,17 @@ const DownloadPage: React.FC = () => {
       addLog('error', '의존성 확인 실패', String(error));
       message.error('의존성 확인 중 오류가 발생했습니다');
     } finally {
+      // 진행 상황 리스너 정리
+      unsubscribe?.();
       setIsResolvingDeps(false);
     }
   };
 
   // 다운로드 시작
   const handleStartDownload = async () => {
+    const handleStartTime = Date.now();
+    window.electronAPI?.log?.('info', '[TIMING] handleStartDownload started');
+
     if (!outputDir) {
       message.warning('출력 폴더를 선택하세요');
       return;
@@ -677,17 +715,24 @@ const DownloadPage: React.FC = () => {
       return;
     }
 
-    // 출력 폴더 검사
-    const canProceed = await checkOutputPath();
-    if (!canProceed) {
-      return;
-    }
-
+    // 다운로드 상태 먼저 설정 (취소 버튼 즉시 표시)
     setIsDownloading(true);
     setIsPaused(false);
     setStartTime(Date.now());
     downloadCancelledRef.current = false;
     downloadPausedRef.current = false;
+
+    // 출력 폴더 검사
+    window.electronAPI?.log?.('info', '[TIMING] Calling checkOutputPath...');
+    const canProceed = await checkOutputPath();
+    window.electronAPI?.log?.('info', `[TIMING] checkOutputPath returned after ${Date.now() - handleStartTime}ms, canProceed=${canProceed}`);
+    if (!canProceed) {
+      // 진행 취소 시 상태 복원
+      setIsDownloading(false);
+      return;
+    }
+
+    window.electronAPI?.log?.('info', `[TIMING] Proceeding with download at ${Date.now() - handleStartTime}ms`);
     // 히스토리 저장용 장바구니 스냅샷 저장
     cartSnapshotRef.current = [...cartItems];
 
@@ -727,7 +772,9 @@ const DownloadPage: React.FC = () => {
         concurrency: concurrentDownloads,
       };
 
+      window.electronAPI?.log?.('info', `[TIMING] Calling download.start IPC at ${Date.now() - handleStartTime}ms`);
       await window.electronAPI.download.start({ packages, options });
+      window.electronAPI?.log?.('info', `[TIMING] download.start IPC returned at ${Date.now() - handleStartTime}ms`);
     } catch (error) {
       addLog('error', '다운로드 시작 실패', String(error));
       setIsDownloading(false);
@@ -735,14 +782,22 @@ const DownloadPage: React.FC = () => {
   };
 
   // 일시정지/재개
-  const handlePauseResume = () => {
+  const handlePauseResume = async () => {
     if (isPaused) {
       downloadPausedRef.current = false;
       setIsPaused(false);
+      // IPC로 메인 프로세스에 재개 요청
+      if (window.electronAPI?.download?.resume) {
+        await window.electronAPI.download.resume();
+      }
       addLog('info', '다운로드 재개');
     } else {
       downloadPausedRef.current = true;
       setIsPaused(true);
+      // IPC로 메인 프로세스에 일시정지 요청
+      if (window.electronAPI?.download?.pause) {
+        await window.electronAPI.download.pause();
+      }
       addLog('info', '다운로드 일시정지');
     }
   };
