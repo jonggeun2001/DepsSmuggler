@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as https from 'https';
 import axios from 'axios';
@@ -186,6 +187,19 @@ app.on('window-all-closed', () => {
 });
 
 // IPC 핸들러
+
+// 렌더러 로그를 메인 프로세스 로그 파일로 전달
+const rendererLog = createScopedLogger('Renderer');
+ipcMain.on('renderer:log', (_, data: { level: string; message: string; args: unknown[] }) => {
+  const { level, message, args } = data;
+  const logFn = rendererLog[level as keyof typeof rendererLog] || rendererLog.info;
+  if (args.length > 0) {
+    logFn(message, ...args);
+  } else {
+    logFn(message);
+  }
+});
+
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });
@@ -705,9 +719,13 @@ type DownloadOptions = SharedDownloadOptions;
 
 let downloadCancelled = false;
 let downloadPaused = false;
+let downloadAbortController: AbortController | null = null;
 
 // 다운로드 시작 핸들러 (동시 다운로드 지원)
 ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage[]; options: DownloadOptions }) => {
+  const handlerStartTime = Date.now();
+  downloadLog.info(`[TIMING] download:start handler entered`);
+
   const { packages, options } = data;
   const { outputDir, outputFormat, includeScripts, targetOS, architecture, includeDependencies, pythonVersion, concurrency = 3 } = options;
 
@@ -715,6 +733,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
 
   downloadCancelled = false;
   downloadPaused = false;
+  downloadAbortController = new AbortController();
 
   // 의존성 해결은 dependency:resolve IPC에서 미리 수행됨
   // download:start에서는 전달받은 패키지 목록을 그대로 다운로드
@@ -726,28 +745,38 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
     message: '다운로드 중...',
   });
 
-  // 출력 디렉토리 생성
-  const packagesDir = path.join(outputDir, 'packages');
-  if (!fs.existsSync(packagesDir)) {
-    fs.mkdirSync(packagesDir, { recursive: true });
-  }
+  // 즉시 반환하고, 다운로드 준비와 실행은 다음 이벤트 루프에서 시작 (UI 블로킹 방지)
+  setImmediate(async () => {
+    // 출력 디렉토리 생성 (비동기)
+    const packagesDir = path.join(outputDir, 'packages');
+    await fse.ensureDir(packagesDir);
 
-  // p-limit을 사용한 동시 다운로드 제어
-  const limit = pLimit(concurrency);
+    // p-limit을 사용한 동시 다운로드 제어
+    const limit = pLimit(concurrency);
 
-  // 단일 패키지 다운로드 함수
-  const downloadPackage = async (pkg: DownloadPackage): Promise<{ id: string; success: boolean; error?: string }> => {
+    // 단일 패키지 다운로드 함수
+    const downloadPackage = async (pkg: DownloadPackage): Promise<{ id: string; success: boolean; error?: string }> => {
+    // 이벤트 루프에 양보하여 UI 블로킹 방지
+    await new Promise(resolve => setImmediate(resolve));
+
+    downloadLog.debug(`[PKG:${pkg.name}] Starting - cancelled=${downloadCancelled}, paused=${downloadPaused}`);
+
     // 취소 체크
     if (downloadCancelled) {
+      downloadLog.info(`[PKG:${pkg.name}] Skipped - download was cancelled`);
       return { id: pkg.id, success: false, error: 'cancelled' };
     }
 
     // 일시정지 대기
+    if (downloadPaused) {
+      downloadLog.info(`[PKG:${pkg.name}] Waiting - download is paused`);
+    }
     while (downloadPaused && !downloadCancelled) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     if (downloadCancelled) {
+      downloadLog.info(`[PKG:${pkg.name}] Skipped after pause - download was cancelled`);
       return { id: pkg.id, success: false, error: 'cancelled' };
     }
 
@@ -765,7 +794,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
       let downloadUrl: { url: string; filename: string } | null = null;
 
       // 패키지 타입에 따라 다운로드 URL 가져오기
-      if (pkg.type === 'pip' || pkg.type === 'conda') {
+      if (pkg.type === 'pip') {
         downloadUrl = await getPyPIDownloadUrl(
           pkg.name,
           pkg.version,
@@ -773,6 +802,36 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
           targetOS,
           pythonVersion
         );
+      } else if (pkg.type === 'conda') {
+        // Conda 패키지: CondaDownloader를 통해 직접 다운로드
+        const condaDownloader = getCondaDownloader();
+        const channel = (pkg.metadata?.repository as string)?.split('/')[0] || 'conda-forge';
+
+        // 1. 이미 downloadUrl이 있으면 사용
+        let condaDownloadUrl = pkg.metadata?.downloadUrl as string | undefined;
+
+        // 2. 없으면 메타데이터 조회
+        if (!condaDownloadUrl) {
+          // subdir 정보 활용 (resolver에서 저장됨)
+          const subdir = pkg.metadata?.subdir as string | undefined;
+          const filename = pkg.metadata?.filename as string | undefined;
+
+          if (subdir && filename) {
+            // subdir, filename이 있으면 URL 직접 생성
+            condaDownloadUrl = `https://conda.anaconda.org/${channel}/${subdir}/${filename}`;
+          } else {
+            // 없으면 메타데이터 다시 조회 (이벤트 루프 양보 후)
+            await new Promise(resolve => setImmediate(resolve));
+            const arch = (pkg.architecture || architecture || 'x86_64') as Architecture;
+            const metadata = await condaDownloader.getPackageMetadata(pkg.name, pkg.version, channel, arch);
+            condaDownloadUrl = metadata.metadata?.downloadUrl as string | undefined;
+          }
+        }
+
+        if (condaDownloadUrl) {
+          const filename = path.basename(new URL(condaDownloadUrl).pathname);
+          downloadUrl = { url: condaDownloadUrl, filename };
+        }
       } else if (pkg.type === 'npm') {
         // npm 패키지: npm downloader를 통해 메타데이터 조회
         const npmDownloader = getNpmDownloader();
@@ -912,6 +971,19 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         const elapsed = (now - lastProgressUpdate) / 1000;
         finalTotalBytes = total;
 
+        // 일시정지 상태일 때 UI 업데이트
+        if (downloadPaused) {
+          mainWindow?.webContents.send('download:progress', {
+            packageId: pkg.id,
+            status: 'paused',
+            progress: total > 0 ? Math.round((downloaded / total) * 100) : 0,
+            downloadedBytes: downloaded,
+            totalBytes: total,
+            speed: 0,
+          });
+          return; // 일시정지 시 일반 업데이트 스킵
+        }
+
         if (elapsed >= 0.3) { // 0.3초마다 업데이트 (동시 다운로드 시 더 빈번하게)
           const speed = (downloaded - lastBytes) / elapsed;
           const progress = total > 0 ? Math.round((downloaded / total) * 100) : 0;
@@ -928,6 +1000,9 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
           lastProgressUpdate = now;
           lastBytes = downloaded;
         }
+      }, {
+        signal: downloadAbortController?.signal,
+        shouldPause: () => downloadPaused,  // 일시정지 콜백 전달
       });
 
       // 완료 상태 전송
@@ -952,64 +1027,92 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
 
       return { id: pkg.id, success: false, error: errorMessage };
     }
-  };
+    };
 
-  // 동시 다운로드 실행
-  const downloadPromises = allPackages.map((pkg) => limit(() => downloadPackage(pkg)));
-  const downloadResults = await Promise.all(downloadPromises);
+    // 동시 다운로드 실행
+    const downloadPromises = allPackages.map((pkg) => limit(() => downloadPackage(pkg)));
 
-  // 취소된 항목 제외하고 결과 수집
-  const results = downloadResults.filter(r => r.error !== 'cancelled');
+    // 백그라운드에서 다운로드 진행
+    Promise.all(downloadPromises).then(async (downloadResults) => {
+      // 취소된 항목 제외하고 결과 수집
+      const results = downloadResults.filter(r => r.error !== 'cancelled');
 
-  if (!downloadCancelled) {
-    // 설치 스크립트 생성 (의존성 포함)
-    if (includeScripts) {
-      generateInstallScripts(outputDir, allPackages);
-    }
+      if (!downloadCancelled) {
+        // 설치 스크립트 생성 (의존성 포함)
+        if (includeScripts) {
+          generateInstallScripts(outputDir, allPackages);
+        }
 
-    // ZIP 압축 (outputFormat이 zip인 경우)
-    if (outputFormat === 'zip') {
-      try {
-        const zipPath = `${outputDir}.zip`;
-        await createZipArchive(outputDir, zipPath);
-        downloadLog.info(`Created ZIP archive: ${zipPath}`);
-      } catch (error) {
-        downloadLog.error('Failed to create ZIP archive:', error);
+        // ZIP 압축 (outputFormat이 zip인 경우)
+        if (outputFormat === 'zip') {
+          try {
+            const zipPath = `${outputDir}.zip`;
+            await createZipArchive(outputDir, zipPath);
+            downloadLog.info(`Created ZIP archive: ${zipPath}`);
+          } catch (error) {
+            downloadLog.error('Failed to create ZIP archive:', error);
+          }
+        }
+
+        // 전체 완료 이벤트 전송
+        mainWindow?.webContents.send('download:all-complete', {
+          success: true,
+          outputPath: outputDir,
+          results,
+        });
+      } else {
+        // 취소됨
+        mainWindow?.webContents.send('download:all-complete', {
+          success: false,
+          cancelled: true,
+          outputPath: outputDir,
+        });
       }
-    }
-
-    // 전체 완료 이벤트 전송
-    mainWindow?.webContents.send('download:all-complete', {
-      success: true,
-      outputPath: outputDir,
+    }).catch((error) => {
+      downloadLog.error('Download failed:', error);
+      mainWindow?.webContents.send('download:all-complete', {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
-  }
+  });
 
-  return { success: !downloadCancelled, results };
+  // 즉시 반환하여 UI 블로킹 방지
+  downloadLog.info(`[TIMING] download:start returning after ${Date.now() - handlerStartTime}ms`);
+  return { success: true, started: true };
 });
 
-// 다운로드 일시정지
+// 다운로드 일시정지 (HTTP 스트림도 pause() 호출)
 ipcMain.handle('download:pause', async () => {
+  downloadLog.info(`[PAUSE] Called - current state: paused=${downloadPaused}, cancelled=${downloadCancelled}`);
   downloadPaused = true;
-  downloadLog.info('Download paused');
+  downloadLog.info('[PAUSE] Set downloadPaused=true - HTTP streams will pause on next data chunk');
   return { success: true };
 });
 
 // 다운로드 재개
 ipcMain.handle('download:resume', async () => {
+  downloadLog.info(`[RESUME] Called - current state: paused=${downloadPaused}, cancelled=${downloadCancelled}`);
   downloadPaused = false;
-  downloadLog.info('Download resumed');
+  downloadLog.info('[RESUME] Set downloadPaused=false');
   return { success: true };
 });
 
 // 다운로드 취소
 ipcMain.handle('download:cancel', async () => {
+  downloadLog.info(`[CANCEL] Called - current state: paused=${downloadPaused}, cancelled=${downloadCancelled}, hasController=${!!downloadAbortController}`);
   downloadCancelled = true;
-  downloadLog.info('Download cancelled');
+  // 진행 중인 모든 다운로드 즉시 중단
+  if (downloadAbortController) {
+    downloadAbortController.abort();
+    downloadLog.info('[CANCEL] AbortController.abort() called');
+  } else {
+    downloadLog.warn('[CANCEL] No AbortController available!');
+  }
   return { success: true };
 });
 
-// 출력 폴더 검사
+// 출력 폴더 검사 (비동기)
 ipcMain.handle('download:check-path', async (_, outputDir: string) => {
   downloadLog.debug(`Checking output path: ${outputDir}`);
 
@@ -1019,28 +1122,30 @@ ipcMain.handle('download:check-path', async (_, outputDir: string) => {
     }
 
     // 폴더 존재 여부 확인
-    if (!fs.existsSync(outputDir)) {
+    const exists = await fse.pathExists(outputDir);
+    if (!exists) {
       return { exists: false, files: [], fileCount: 0, totalSize: 0 };
     }
 
-    // 폴더 내용 검사
+    // 폴더 내용 검사 (비동기)
     const files: string[] = [];
     let totalSize = 0;
 
-    const scanDir = (dir: string) => {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const scanDir = async (dir: string): Promise<void> => {
+      const entries = await fse.readdir(dir, { withFileTypes: true });
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
-          scanDir(fullPath);
+          await scanDir(fullPath);
         } else {
           files.push(path.relative(outputDir, fullPath));
-          totalSize += fs.statSync(fullPath).size;
+          const stat = await fse.stat(fullPath);
+          totalSize += stat.size;
         }
       }
     };
 
-    scanDir(outputDir);
+    await scanDir(outputDir);
 
     return {
       exists: true,
@@ -1054,9 +1159,10 @@ ipcMain.handle('download:check-path', async (_, outputDir: string) => {
   }
 });
 
-// 출력 폴더 삭제
+// 출력 폴더 삭제 (비동기)
 ipcMain.handle('download:clear-path', async (_, outputDir: string) => {
-  downloadLog.info(`Clearing output path: ${outputDir}`);
+  const startTime = Date.now();
+  downloadLog.info(`[TIMING] Clearing output path started: ${outputDir}`);
 
   try {
     if (!outputDir) {
@@ -1064,30 +1170,20 @@ ipcMain.handle('download:clear-path', async (_, outputDir: string) => {
     }
 
     // 폴더가 없으면 성공으로 처리
-    if (!fs.existsSync(outputDir)) {
+    const exists = await fse.pathExists(outputDir);
+    if (!exists) {
+      downloadLog.info(`[TIMING] Path does not exist, took ${Date.now() - startTime}ms`);
       return { success: true, deleted: false };
     }
 
-    // 폴더 내용 삭제 (폴더 자체는 유지)
-    const deleteContents = (dir: string) => {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          deleteContents(fullPath);
-          fs.rmdirSync(fullPath);
-        } else {
-          fs.unlinkSync(fullPath);
-        }
-      }
-    };
-
-    deleteContents(outputDir);
-    downloadLog.info('Output path cleared successfully');
+    // 폴더 내용 삭제 (폴더 자체는 유지) - 비동기 방식
+    downloadLog.info(`[TIMING] Starting fse.emptyDir...`);
+    await fse.emptyDir(outputDir);
+    downloadLog.info(`[TIMING] Output path cleared successfully, took ${Date.now() - startTime}ms`);
 
     return { success: true, deleted: true };
   } catch (error) {
-    downloadLog.error('Failed to clear output path:', error);
+    downloadLog.error(`[TIMING] Failed to clear output path (${Date.now() - startTime}ms):`, error);
     return { success: false, deleted: false };
   }
 });
@@ -1097,7 +1193,7 @@ ipcMain.handle('download:clear-path', async (_, outputDir: string) => {
 // =====================================================
 
 // 의존성 해결 핸들러 (장바구니에서 의존성 트리 미리보기용, 다운로드 페이지 의존성 확인용)
-ipcMain.handle('dependency:resolve', async (_, data: {
+ipcMain.handle('dependency:resolve', async (event, data: {
   packages: DownloadPackage[];
   options?: {
     targetOS?: string;
@@ -1113,6 +1209,10 @@ ipcMain.handle('dependency:resolve', async (_, data: {
       targetOS: options?.targetOS as 'any' | 'windows' | 'macos' | 'linux' | undefined,
       architecture: options?.architecture,
       pythonVersion: options?.pythonVersion,
+      // 진행 상황을 렌더러로 전송
+      onProgress: (progress) => {
+        event.sender.send('dependency:progress', progress);
+      },
     });
     downloadLog.info(`Dependencies resolved: ${packages.length} → ${resolved.allPackages.length} packages`);
 
@@ -1135,15 +1235,13 @@ const historyLog = createScopedLogger('History');
 const HISTORY_DIR = path.join(os.homedir(), '.depssmuggler');
 const HISTORY_FILE = path.join(HISTORY_DIR, 'history.json');
 
-// 히스토리 디렉토리 및 파일 초기화
+// 히스토리 디렉토리 및 파일 초기화 (비동기)
 async function ensureHistoryFile(): Promise<void> {
   try {
-    if (!fs.existsSync(HISTORY_DIR)) {
-      fs.mkdirSync(HISTORY_DIR, { recursive: true });
-      historyLog.info(`Created history directory: ${HISTORY_DIR}`);
-    }
-    if (!fs.existsSync(HISTORY_FILE)) {
-      fs.writeFileSync(HISTORY_FILE, JSON.stringify([], null, 2), 'utf-8');
+    await fse.ensureDir(HISTORY_DIR);
+    const exists = await fse.pathExists(HISTORY_FILE);
+    if (!exists) {
+      await fse.writeJson(HISTORY_FILE, [], { spaces: 2 });
       historyLog.info(`Created history file: ${HISTORY_FILE}`);
     }
   } catch (error) {
@@ -1152,13 +1250,12 @@ async function ensureHistoryFile(): Promise<void> {
   }
 }
 
-// 히스토리 로드
+// 히스토리 로드 (비동기)
 ipcMain.handle('history:load', async () => {
   historyLog.info('Loading history...');
   try {
     await ensureHistoryFile();
-    const data = fs.readFileSync(HISTORY_FILE, 'utf-8');
-    const histories = JSON.parse(data);
+    const histories = await fse.readJson(HISTORY_FILE);
     historyLog.info(`Loaded ${histories.length} history items`);
     return histories;
   } catch (error) {
@@ -1167,12 +1264,12 @@ ipcMain.handle('history:load', async () => {
   }
 });
 
-// 히스토리 저장 (전체 덮어쓰기)
+// 히스토리 저장 (전체 덮어쓰기, 비동기)
 ipcMain.handle('history:save', async (_, histories: unknown[]) => {
   historyLog.info(`Saving ${histories.length} history items...`);
   try {
     await ensureHistoryFile();
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(histories, null, 2), 'utf-8');
+    await fse.writeJson(HISTORY_FILE, histories, { spaces: 2 });
     historyLog.info('History saved successfully');
     return { success: true };
   } catch (error) {
@@ -1181,19 +1278,18 @@ ipcMain.handle('history:save', async (_, histories: unknown[]) => {
   }
 });
 
-// 히스토리 항목 추가
+// 히스토리 항목 추가 (비동기)
 ipcMain.handle('history:add', async (_, history: unknown) => {
   historyLog.info('Adding new history item...');
   try {
     await ensureHistoryFile();
-    const data = fs.readFileSync(HISTORY_FILE, 'utf-8');
-    const histories = JSON.parse(data);
+    const histories = await fse.readJson(HISTORY_FILE);
     histories.unshift(history); // 최신 항목을 앞에 추가
     // 최대 100개 유지
     if (histories.length > 100) {
       histories.splice(100);
     }
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(histories, null, 2), 'utf-8');
+    await fse.writeJson(HISTORY_FILE, histories, { spaces: 2 });
     historyLog.info('History item added successfully');
     return { success: true };
   } catch (error) {
@@ -1202,15 +1298,14 @@ ipcMain.handle('history:add', async (_, history: unknown) => {
   }
 });
 
-// 특정 히스토리 항목 삭제
+// 특정 히스토리 항목 삭제 (비동기)
 ipcMain.handle('history:delete', async (_, id: string) => {
   historyLog.info(`Deleting history item: ${id}`);
   try {
     await ensureHistoryFile();
-    const data = fs.readFileSync(HISTORY_FILE, 'utf-8');
-    const histories = JSON.parse(data);
+    const histories = await fse.readJson(HISTORY_FILE);
     const filteredHistories = histories.filter((h: { id: string }) => h.id !== id);
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(filteredHistories, null, 2), 'utf-8');
+    await fse.writeJson(HISTORY_FILE, filteredHistories, { spaces: 2 });
     historyLog.info(`History item ${id} deleted successfully`);
     return { success: true };
   } catch (error) {
@@ -1219,12 +1314,12 @@ ipcMain.handle('history:delete', async (_, id: string) => {
   }
 });
 
-// 전체 히스토리 삭제
+// 전체 히스토리 삭제 (비동기)
 ipcMain.handle('history:clear', async () => {
   historyLog.info('Clearing all history...');
   try {
     await ensureHistoryFile();
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify([], null, 2), 'utf-8');
+    await fse.writeJson(HISTORY_FILE, [], { spaces: 2 });
     historyLog.info('All history cleared');
     return { success: true };
   } catch (error) {

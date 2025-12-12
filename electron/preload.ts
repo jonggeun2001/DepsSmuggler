@@ -2,6 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 // 렌더러 프로세스에 노출할 API 정의
 const electronAPI = {
+  // 렌더러 로그를 메인 프로세스로 전달
+  log: (level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]): void => {
+    ipcRenderer.send('renderer:log', { level, message, args });
+  },
+
   // 앱 정보
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('get-app-version'),
   getAppPath: (): Promise<string> => ipcRenderer.invoke('get-app-path'),
@@ -198,6 +203,19 @@ const electronAPI = {
       dependencyTrees?: unknown[];
       failedPackages?: unknown[];
     }> => ipcRenderer.invoke('dependency:resolve', data),
+    onProgress: (callback: (progress: {
+      current: number;
+      total: number;
+      packageName: string;
+      packageType: string;
+      status: 'start' | 'success' | 'error';
+      dependencyCount?: number;
+      error?: string;
+    }) => void): (() => void) => {
+      const handler = (_: unknown, progress: Parameters<typeof callback>[0]) => callback(progress);
+      ipcRenderer.on('dependency:progress', handler);
+      return () => ipcRenderer.removeListener('dependency:progress', handler);
+    },
   },
 
   // Docker 카탈로그 캐시 관련

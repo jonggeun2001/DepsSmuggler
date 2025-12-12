@@ -103,11 +103,22 @@ export interface DependencyResolveOptions {
   pythonVersion?: string;
 }
 
+export interface DependencyProgressInfo {
+  current: number;
+  total: number;
+  packageName: string;
+  packageType: string;
+  status: 'start' | 'success' | 'error';
+  dependencyCount?: number;
+  error?: string;
+}
+
 export interface DependencyAPI {
   resolve: (data: {
     packages: unknown[];
     options?: DependencyResolveOptions;
   }) => Promise<DependencyResolveResult>;
+  onProgress?: (callback: (progress: DependencyProgressInfo) => void) => () => void;
 }
 
 export interface DockerCacheStatusItem {
@@ -192,6 +203,8 @@ export interface OSPackageAPI {
 }
 
 export interface ElectronAPI {
+  // 렌더러 로그를 메인 프로세스로 전달
+  log?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]) => void;
   getAppVersion: () => Promise<string>;
   getAppPath: () => Promise<string>;
   selectFolder: () => Promise<string | null>;
