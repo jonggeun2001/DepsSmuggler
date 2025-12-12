@@ -151,7 +151,8 @@ pywin32>=300; sys_platform == 'win32'
 | `defaultChannel` | string | 기본 채널 (conda-forge) |
 | `visited` | Map | 방문 캐시 |
 | `conflicts` | DependencyConflict[] | 충돌 목록 |
-| `repodataCache` | Map<string, RepoData> | repodata 캐시 |
+| `repodataCache` | Map<string, RepoData> | repodata 메모리 캐시 |
+| `packageIndex` | Map<string, Map<string, Array>> | 패키지 이름별 인덱스 캐시 (O(1) 조회용) |
 | `targetSubdir` | string | 타겟 subdir (예: 'linux-64') |
 | `pythonVersion` | string | 타겟 Python 버전 |
 
@@ -163,6 +164,67 @@ pywin32>=300; sys_platform == 'win32'
 - **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
 - **시스템 패키지 제외**: libc, libgcc 등 시스템 패키지 자동 제외
 - **Anaconda API fallback**: RC 버전 등 특수 라벨 패키지 지원
+
+### 성능 최적화
+
+#### 패키지 인덱스 캐시
+
+repodata 로드 시 패키지 이름별 인덱스를 생성하여 O(n) 전체 순회를 O(1) 해시맵 조회로 최적화합니다.
+
+```typescript
+// 인덱스 구조: Map<cacheKey, Map<packageName, Array<{filename, pkg}>>>
+private packageIndex: Map<string, Map<string, Array<{ filename: string; pkg: RepoDataPackage }>>> = new Map();
+
+// repodata 로드 시 인덱스 생성
+private buildPackageIndex(cacheKey: string, repodata: RepoData): Map<...> {
+  const index = new Map();
+  for (const [filename, pkg] of Object.entries(allPackages)) {
+    const normalizedName = pkg.name.toLowerCase();
+    if (!index.has(normalizedName)) {
+      index.set(normalizedName, []);
+    }
+    index.get(normalizedName)!.push({ filename, pkg });
+  }
+  return index;
+}
+```
+
+#### 다운로드 URL 사전 생성
+
+resolver에서 패키지 정보를 해결할 때 `downloadUrl`, `subdir`, `filename`을 metadata에 저장하여 다운로드 시 중복 조회를 방지합니다.
+
+```typescript
+// resolver에서 저장
+const packageInfo: PackageInfo = {
+  type: 'conda',
+  name,
+  version: resolvedVersion,
+  metadata: {
+    repository: `${channel}/${name}`,
+    subdir: resolvedSubdir,      // 예: 'linux-64'
+    filename: resolvedFilename,  // 예: 'numpy-1.26.0-py312h8753938_0.conda'
+    downloadUrl,                 // 전체 URL
+  },
+};
+
+// downloader에서 재사용
+let downloadUrl = info.metadata?.downloadUrl as string | undefined;
+if (!downloadUrl) {
+  // fallback: 메타데이터 다시 조회
+}
+```
+
+#### 로깅 개선
+
+의존성 해결 시간과 진행 상황을 상세히 로그로 출력합니다:
+
+```
+[INFO] repodata 로드 시작: conda-forge/linux-64 (처음 로드 시 시간이 걸릴 수 있습니다)
+[INFO] repodata 다운로드 중: conda-forge/linux-64 (20.5MB / 102.3MB, 20%, 5.2초)
+[INFO] repodata 로드 완료: conda-forge/linux-64 (fromCache: 네트워크, packages: 285000)
+[INFO] 패키지 인덱스 생성 완료: conda-forge/linux-64 (45000개 패키지명, 850ms)
+[INFO] Conda 의존성 해결 완료: numpy@1.26.0 (15개 패키지, 2.3초)
+```
 
 ### Subdir 매핑
 

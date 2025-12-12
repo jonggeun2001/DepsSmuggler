@@ -167,10 +167,14 @@ PyPI API 응답
 ```typescript
 interface PyPIResponse {
   info: PyPIInfo;
-  releases: Record<string, PyPIRelease[]>;
-  urls: PyPIRelease[];
+  releases?: Record<string, PyPIRelease[]>;  // 특정 버전 조회 시 없을 수 있음
+  urls?: PyPIRelease[];  // 특정 버전 조회 시 포함
 }
 ```
+
+> **참고**: PyPI API는 버전 지정 여부에 따라 응답 구조가 다릅니다:
+> - 버전 없이 조회 (`/pypi/{package}/json`): `releases` 포함
+> - 버전 지정 조회 (`/pypi/{package}/{version}/json`): `urls` 포함, `releases` 없음
 
 ### WheelTags
 
@@ -482,7 +486,42 @@ interface DependencyResolverOptions {
   architecture?: string;    // 아키텍처 (기본: 'x86_64')
   pythonVersion?: string;   // Python 버전 (예: '3.12')
   targetOS?: string;        // 타겟 OS (예: 'linux')
+  onProgress?: DependencyProgressCallback;  // 진행 상황 콜백
 }
+```
+
+### DependencyProgressCallback
+
+의존성 해결 진행 상황을 실시간으로 전달하는 콜백
+
+```typescript
+interface DependencyProgressCallback {
+  (info: {
+    current: number;       // 현재 처리 중인 패키지 인덱스 (1부터 시작)
+    total: number;         // 전체 패키지 수
+    packageName: string;   // 패키지명
+    packageType: string;   // 패키지 타입 (pip, conda, maven 등)
+    status: 'start' | 'success' | 'error';  // 상태
+    dependencyCount?: number;  // 해결된 의존성 수 (success 시)
+    error?: string;        // 에러 메시지 (error 시)
+  }): void;
+}
+```
+
+### 진행 상황 콜백 사용 예시
+
+```typescript
+const result = await resolveAllDependencies(packages, {
+  onProgress: (info) => {
+    if (info.status === 'start') {
+      console.log(`[${info.current}/${info.total}] 의존성 해결 시작: ${info.packageType}/${info.packageName}`);
+    } else if (info.status === 'success') {
+      console.log(`[${info.current}/${info.total}] 완료: ${info.packageName} (${info.dependencyCount}개 의존성)`);
+    } else if (info.status === 'error') {
+      console.error(`[${info.current}/${info.total}] 실패: ${info.packageName}`, info.error);
+    }
+  },
+});
 ```
 
 ### 사용 예시
@@ -512,18 +551,93 @@ console.log(`총 ${result.allPackages.length}개 패키지 (의존성 포함)`);
 
 ### downloadFile
 
-파일 다운로드 (진행률 콜백 지원)
+파일 다운로드 (진행률 콜백 지원, 취소/일시정지 기능)
 
 ```typescript
 async function downloadFile(
   url: string,
   destPath: string,
-  onProgress: (downloaded: number, total: number) => void
+  onProgress: (downloaded: number, total: number) => void,
+  options?: DownloadOptions
 ): Promise<void>
 ```
 
 - HTTP/HTTPS 모두 지원
 - 리다이렉트 자동 처리
+- AbortSignal을 통한 다운로드 취소
+- shouldPause 콜백을 통한 일시정지/재개
+
+### DownloadOptions
+
+```typescript
+interface DownloadOptions {
+  signal?: AbortSignal;           // 취소 시그널 (AbortController.signal)
+  shouldPause?: () => boolean;    // 일시정지 여부 콜백 (true면 pause)
+}
+```
+
+### 일시정지/재개 동작
+
+```typescript
+// 일시정지 콜백이 true를 반환하면 스트림 pause
+if (options?.shouldPause?.() && !isPaused) {
+  isPaused = true;
+  response.pause();
+
+  // 100ms마다 재개 여부 체크
+  pauseCheckInterval = setInterval(() => {
+    if (!options?.shouldPause?.()) {
+      isPaused = false;
+      response.resume();
+    }
+  }, 100);
+}
+```
+
+### 취소 처리
+
+```typescript
+// AbortSignal 등록
+if (options?.signal) {
+  options.signal.addEventListener('abort', () => {
+    cleanup();
+    request.destroy();
+    file.close();
+    fs.unlink(destPath, () => {});
+    reject(new Error('Download aborted'));
+  });
+}
+```
+
+### 사용 예시
+
+```typescript
+import { downloadFile } from './file-utils';
+
+const controller = new AbortController();
+let paused = false;
+
+await downloadFile(
+  'https://example.com/file.zip',
+  '/path/to/file.zip',
+  (downloaded, total) => {
+    console.log(`${downloaded}/${total} bytes`);
+  },
+  {
+    signal: controller.signal,
+    shouldPause: () => paused,
+  }
+);
+
+// 일시정지
+paused = true;
+
+// 재개
+paused = false;
+
+// 취소
+controller.abort();
+```
 
 ### createZipArchive
 
@@ -1380,6 +1494,34 @@ console.log(`메모리: ${stats.memoryEntries}개`);
 repodata.json 캐싱 및 조회 시스템 (**디스크 캐시 전용** - 메모리 캐시 미사용)
 
 > **참고**: Conda repodata.json 파일은 350MB+ 크기이므로 메모리 캐시를 사용하지 않고 디스크 캐시만 사용합니다.
+
+### 다운로드 진행 상황 로깅
+
+repodata 다운로드 시 진행 상황을 20% 단위로 로그 출력:
+
+```typescript
+onDownloadProgress: (progressEvent) => {
+  const { loaded, total } = progressEvent;
+  if (total) {
+    const percent = Math.floor((loaded / total) * 100);
+    // 20% 단위로 로그 출력 (너무 많은 로그 방지)
+    if (percent >= lastLoggedPercent + 20) {
+      lastLoggedPercent = percent;
+      logger.info(`repodata 다운로드 중: ${channel}/${subdir} (${loadedMB}MB / ${totalMB}MB, ${percent}%, ${elapsed}초)`);
+    }
+  }
+}
+```
+
+로그 출력 예시:
+```
+[INFO] repodata 다운로드 시작: conda-forge/linux-64
+[INFO] repodata 다운로드 중: conda-forge/linux-64 (20.5MB / 102.3MB, 20%, 5.2초)
+[INFO] repodata 다운로드 중: conda-forge/linux-64 (41.0MB / 102.3MB, 40%, 10.1초)
+[INFO] repodata 다운로드 중: conda-forge/linux-64 (61.4MB / 102.3MB, 60%, 15.3초)
+[INFO] repodata 다운로드 중: conda-forge/linux-64 (81.8MB / 102.3MB, 80%, 20.5초)
+[INFO] repodata 다운로드 완료: conda-forge/linux-64 (25.8초)
+```
 
 ### 주요 함수
 

@@ -179,13 +179,15 @@ if (process.env.DEPSSMUGGLER_STRICT_SSL !== 'true') {
 | `search:packages` | 패키지 검색 (pip, conda, maven, npm, docker) |
 | `search:suggest` | 자동완성 제안 (pip, conda, maven, npm, docker, yum) |
 | `search:versions` | 패키지 버전 목록 조회 (pip, conda, maven, npm, docker) |
+| `renderer:log` | 렌더러 로그를 메인 프로세스 로그로 전달 (send) |
 | `dependency:resolve` | 의존성 해결 |
-| `download:start` | 다운로드 시작 |
-| `download:pause` | 다운로드 일시정지 |
-| `download:resume` | 다운로드 재개 |
-| `download:cancel` | 다운로드 취소 |
-| `download:check-path` | 출력 폴더 검사 |
-| `download:clear-path` | 출력 폴더 내용 삭제 |
+| `dependency:progress` | 의존성 해결 진행 상황 이벤트 (event) |
+| `download:start` | 다운로드 시작 (비동기 반환) |
+| `download:pause` | 다운로드 일시정지 (HTTP 스트림 pause) |
+| `download:resume` | 다운로드 재개 (HTTP 스트림 resume) |
+| `download:cancel` | 다운로드 취소 (AbortController abort) |
+| `download:check-path` | 출력 폴더 검사 (비동기) |
+| `download:clear-path` | 출력 폴더 내용 삭제 (비동기)
 
 ### 설정 IPC 핸들러
 
@@ -204,12 +206,20 @@ if (process.env.DEPSSMUGGLER_STRICT_SSL !== 'true') {
 
 ### 다운로드 폴더 IPC 핸들러
 
-다운로드 전 출력 폴더 상태를 확인하고 정리하는 핸들러
+다운로드 전 출력 폴더 상태를 확인하고 정리하는 핸들러 (비동기 파일 작업으로 UI 블로킹 방지)
 
 | 채널 | 파라미터 | 반환값 | 설명 |
 |------|----------|--------|------|
-| `download:check-path` | outputDir: string | { exists, files, fileCount, totalSize } | 폴더 존재 및 내용 확인 |
-| `download:clear-path` | outputDir: string | { success, deleted } | 폴더 내용 삭제 (폴더는 유지) |
+| `download:check-path` | outputDir: string | { exists, files, fileCount, totalSize } | 폴더 존재 및 내용 확인 (비동기) |
+| `download:clear-path` | outputDir: string | { success, deleted } | 폴더 내용 삭제 (fs-extra 사용, 비동기) |
+
+#### 비동기 파일 작업
+
+`fs-extra` 라이브러리를 사용하여 동기 파일 작업을 비동기로 전환:
+- `fse.pathExists()`: 폴더 존재 여부 확인
+- `fse.readdir()`: 디렉토리 스캔
+- `fse.stat()`: 파일 크기 확인
+- `fse.emptyDir()`: 폴더 내용 삭제
 
 #### 사용 예시
 
@@ -227,17 +237,24 @@ if (checkResult.exists && checkResult.fileCount > 0) {
 
 ### 히스토리 IPC 핸들러
 
-다운로드 히스토리 관리를 위한 IPC 핸들러
+다운로드 히스토리 관리를 위한 IPC 핸들러 (fs-extra 비동기 처리)
 
 | 채널 | 파라미터 | 반환값 | 설명 |
 |------|----------|--------|------|
-| `history:load` | - | DownloadHistory[] | 파일에서 히스토리 로드 |
-| `history:save` | histories: unknown[] | { success: boolean } | 전체 히스토리 저장 |
-| `history:add` | history: unknown | { success: boolean } | 히스토리 항목 추가 |
-| `history:delete` | id: string | { success: boolean } | 특정 히스토리 삭제 |
-| `history:clear` | - | { success: boolean } | 전체 히스토리 삭제 |
+| `history:load` | - | DownloadHistory[] | 파일에서 히스토리 로드 (비동기) |
+| `history:save` | histories: unknown[] | { success: boolean } | 전체 히스토리 저장 (비동기) |
+| `history:add` | history: unknown | { success: boolean } | 히스토리 항목 추가 (비동기) |
+| `history:delete` | id: string | { success: boolean } | 특정 히스토리 삭제 (비동기) |
+| `history:clear` | - | { success: boolean } | 전체 히스토리 삭제 (비동기) |
 
 히스토리 파일 위치: `~/.depssmuggler/history.json`
+
+#### 비동기 파일 작업
+
+`fs-extra` 라이브러리를 사용한 비동기 처리:
+- `fse.ensureDir()`: 디렉토리 생성 보장
+- `fse.readJson()`: JSON 파일 읽기
+- `fse.writeJson()`: JSON 파일 쓰기 (spaces: 2 포맷팅)
 
 ### 캐시 IPC 핸들러
 
@@ -321,6 +338,112 @@ interface UpdateStatus {
 
 - `electron/updater.ts`: 자동 업데이트 모듈
 - `src/renderer/components/UpdateNotification.tsx`: 업데이트 알림 UI
+
+### 다운로드 처리 흐름
+
+#### 비동기 다운로드 아키텍처
+
+`download:start` 핸들러는 즉시 반환하고, 실제 다운로드는 `setImmediate`로 다음 이벤트 루프에서 실행하여 UI 블로킹을 방지합니다.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      download:start                          │
+│  1. 상태 초기화 (downloadCancelled, downloadPaused)         │
+│  2. AbortController 생성                                     │
+│  3. 즉시 { success: true, started: true } 반환              │
+│  4. setImmediate로 다운로드 로직 스케줄링                    │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  setImmediate 콜백                           │
+│  1. 출력 디렉토리 생성 (fse.ensureDir)                      │
+│  2. p-limit으로 동시 다운로드 제어                           │
+│  3. 각 패키지 다운로드 (downloadPackage)                    │
+│  4. Promise.all로 병렬 처리                                  │
+│  5. 완료 시 download:all-complete 이벤트 전송               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### 다운로드 제어 플래그
+
+```typescript
+let downloadCancelled = false;      // 취소 플래그
+let downloadPaused = false;         // 일시정지 플래그
+let downloadAbortController: AbortController | null = null;  // HTTP 취소 컨트롤러
+```
+
+#### 일시정지/재개 동작
+
+1. **일시정지 (download:pause)**
+   - `downloadPaused = true` 설정
+   - HTTP 스트림의 `response.pause()` 호출
+   - 100ms 간격으로 재개 여부 체크
+
+2. **재개 (download:resume)**
+   - `downloadPaused = false` 설정
+   - HTTP 스트림의 `response.resume()` 호출
+
+3. **취소 (download:cancel)**
+   - `downloadCancelled = true` 설정
+   - `AbortController.abort()` 호출로 진행 중인 HTTP 요청 즉시 중단
+
+#### 이벤트 루프 양보
+
+각 패키지 다운로드 시작 전 `setImmediate`로 이벤트 루프에 양보하여 UI가 응답할 수 있도록 합니다:
+
+```typescript
+const downloadPackage = async (pkg: DownloadPackage) => {
+  // 이벤트 루프에 양보하여 UI 블로킹 방지
+  await new Promise(resolve => setImmediate(resolve));
+  // ... 다운로드 로직
+};
+```
+
+### 의존성 해결 진행 상황
+
+`dependency:resolve` 핸들러는 진행 상황을 `dependency:progress` 이벤트로 전송합니다.
+
+#### DependencyProgressInfo
+
+```typescript
+interface DependencyProgressInfo {
+  current: number;       // 현재 처리 중인 패키지 인덱스
+  total: number;         // 전체 패키지 수
+  packageName: string;   // 패키지명
+  packageType: string;   // 패키지 타입 (pip, conda, maven 등)
+  status: 'start' | 'success' | 'error';  // 상태
+  dependencyCount?: number;  // 해결된 의존성 수 (success 시)
+  error?: string;        // 에러 메시지 (error 시)
+}
+```
+
+#### 사용 예시
+
+```typescript
+// preload.ts에서 등록된 API
+window.electronAPI.dependency.onProgress((progress) => {
+  if (progress.status === 'start') {
+    console.log(`[${progress.current}/${progress.total}] 의존성 확인 중: ${progress.packageName}`);
+  } else if (progress.status === 'success') {
+    console.log(`완료: ${progress.dependencyCount}개 의존성`);
+  }
+});
+```
+
+### 렌더러 로그 통합
+
+렌더러 프로세스의 로그를 메인 프로세스의 로그 파일로 전달합니다.
+
+```typescript
+// preload.ts
+log: (level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]) => {
+  ipcRenderer.send('renderer:log', { level, message, args });
+}
+
+// 사용 예시 (렌더러)
+window.electronAPI?.log?.('info', '[TIMING] 다운로드 시작');
+```
 
 ### OS 패키지 IPC 핸들러
 
@@ -741,10 +864,14 @@ const resolvedPackages = await Promise.all(
 #### 주요 기능
 - **2단계 다운로드 프로세스**: 의존성 확인 → 다운로드 시작
 - 의존성 확인 단계에서 모든 패키지의 전이 의존성 해결
+- **의존성 해결 진행 상황 표시**: 각 패키지별 실시간 진행 로그
 - Collapse 트리 구조로 패키지별 의존성 목록 표시
+- **진행률 업데이트 쓰로틀링**: 100ms 간격으로 UI 업데이트 (성능 최적화)
 - 실시간 진행률 표시 (패키지별, 전체)
 - 다운로드 속도 및 남은 시간 표시
-- 패키지별 상태 (대기/다운로드 중/완료/실패)
+- 패키지별 상태 (대기/다운로드 중/일시정지/완료/실패)
+- **일시정지/재개**: HTTP 스트림 pause/resume으로 즉시 반응
+- **취소**: AbortController로 진행 중인 다운로드 즉시 중단
 - 에러 발생 시 재시도/건너뛰기/취소 선택
 - 완료 후 폴더 열기 (Finder/Explorer)
 - 다운로드 완료 시 히스토리 자동 저장
@@ -754,24 +881,76 @@ const resolvedPackages = await Promise.all(
 다운로드 전 의존성을 먼저 확인하여 사용자에게 전체 패키지 목록을 보여줍니다:
 
 1. **의존성 확인 버튼**: 출력 폴더 선택 후 "의존성 확인" 버튼 클릭
-2. **의존성 해결**: `/api/dependency/resolve` API 호출
-3. **트리 구조 표시**: 원본 패키지별로 의존성 Collapse 패널 표시
-4. **다운로드 시작**: 의존성 확인 완료 후 "다운로드 시작" 버튼 활성화
+2. **의존성 해결**: `dependency:resolve` IPC 호출
+3. **진행 상황 표시**: `dependency:progress` 이벤트로 실시간 로그 표시
+4. **트리 구조 표시**: 원본 패키지별로 의존성 Collapse 패널 표시
+5. **다운로드 시작**: 의존성 확인 완료 후 "다운로드 시작" 버튼 활성화
 
 ```tsx
 // 의존성 확인 상태 관리
 const [isResolvingDeps, setIsResolvingDeps] = useState(false);
 const [depsResolved, setDepsResolved] = useState(false);
 
-// 의존성 확인 버튼 (depsResolved가 false일 때만 표시)
-<Button onClick={handleResolveDependencies} disabled={!outputDir}>
-  {isResolvingDeps ? '의존성 확인 중...' : '의존성 확인'}
-</Button>
+// 진행 상황 리스너 등록
+const unsubscribe = window.electronAPI.dependency.onProgress((progress) => {
+  if (progress.status === 'start') {
+    addLog('info', `[${progress.current}/${progress.total}] 의존성 확인 중: ${progress.packageType}/${progress.packageName}`);
+  } else if (progress.status === 'success') {
+    addLog('info', `[${progress.current}/${progress.total}] 완료: ${progress.packageName} (${progress.dependencyCount}개 의존성)`);
+  } else if (progress.status === 'error') {
+    addLog('error', `[${progress.current}/${progress.total}] 실패: ${progress.packageName}`, progress.error);
+  }
+});
 
-// 다운로드 시작 버튼 (depsResolved가 true일 때만 표시)
-<Button onClick={handleStartDownload} disabled={!depsResolved}>
-  다운로드 시작
-</Button>
+// 정리
+unsubscribe?.();
+```
+
+#### 진행률 업데이트 쓰로틀링
+
+다운로드 중 진행률 업데이트가 너무 빈번하면 UI 성능이 저하되므로 100ms 간격으로 제한합니다:
+
+```tsx
+// progress 업데이트 쓰로틀링 (UI 반응성 향상)
+const progressThrottleMap = new Map<string, number>();
+const THROTTLE_MS = 100; // 100ms 간격으로 제한
+
+const unsubProgress = window.electronAPI.download.onProgress((progress) => {
+  if (p.status === 'completed' || p.status === 'failed') {
+    progressThrottleMap.delete(p.packageId); // 완료/실패 시 쓰로틀 제거
+    updateItem(p.packageId, { status: p.status, ... });
+  } else {
+    // downloading/paused 상태 - 쓰로틀링 적용
+    const now = Date.now();
+    const lastUpdate = progressThrottleMap.get(p.packageId) || 0;
+    if (now - lastUpdate >= THROTTLE_MS) {
+      progressThrottleMap.set(p.packageId, now);
+      updateItem(p.packageId, { status: p.status, progress: p.progress, ... });
+    }
+  }
+});
+```
+
+#### 일시정지/재개 IPC 연동
+
+렌더러에서 일시정지/재개 시 메인 프로세스의 IPC 핸들러를 호출합니다:
+
+```tsx
+const handlePauseResume = async () => {
+  if (isPaused) {
+    downloadPausedRef.current = false;
+    setIsPaused(false);
+    // IPC로 메인 프로세스에 재개 요청
+    await window.electronAPI.download.resume();
+    addLog('info', '다운로드 재개');
+  } else {
+    downloadPausedRef.current = true;
+    setIsPaused(true);
+    // IPC로 메인 프로세스에 일시정지 요청
+    await window.electronAPI.download.pause();
+    addLog('info', '다운로드 일시정지');
+  }
+};
 ```
 
 #### 출력 설정 통합
