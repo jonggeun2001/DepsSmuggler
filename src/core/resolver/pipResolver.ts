@@ -169,10 +169,13 @@ export class PipResolver implements IResolver {
               node.dependencies.push(childNode);
             }
           } catch (error) {
+            const errorInfo = error instanceof Error
+              ? { message: error.message, name: error.name }
+              : { message: String(error) };
             logger.warn('의존성 패키지 조회 실패', {
               parent: name,
               dependency: dep.name,
-              error,
+              error: errorInfo,
             });
           }
         }
@@ -180,7 +183,10 @@ export class PipResolver implements IResolver {
 
       return node;
     } catch (error) {
-      logger.error('패키지 정보 조회 실패', { name, version: actualVersion, error });
+      const errorInfo = error instanceof Error
+        ? { message: error.message, name: error.name }
+        : { message: String(error) };
+      logger.error('패키지 정보 조회 실패', { name, version: actualVersion, error: errorInfo });
       throw error;
     }
   }
@@ -301,13 +307,15 @@ export class PipResolver implements IResolver {
     versionSpec?: string
   ): Promise<string | null> {
     try {
-      // 캐시에서 패키지 메타데이터 조회
+      // 캐시에서 패키지 메타데이터 조회 (버전 없이 조회해야 releases 포함)
       const cacheResult = await fetchPackageMetadata(name, undefined, this.cacheOptions);
       if (!cacheResult) return null;
 
       const { data } = cacheResult;
+      if (!data.releases) return null;
+
       const versions = Object.keys(data.releases).filter(
-        (v) => data.releases[v].length > 0 // 실제 릴리스가 있는 버전만
+        (v) => data.releases![v].length > 0 // 실제 릴리스가 있는 버전만
       );
 
       if (versions.length === 0) return null;

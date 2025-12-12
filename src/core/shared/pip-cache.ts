@@ -34,7 +34,8 @@ export interface PyPIRelease {
 
 export interface PyPIResponse {
   info: PyPIPackageInfo;
-  releases: Record<string, PyPIRelease[]>;
+  releases?: Record<string, PyPIRelease[]>;  // 특정 버전 조회 시 없을 수 있음
+  urls?: PyPIRelease[];  // 특정 버전 조회 시 포함
 }
 
 /**
@@ -299,7 +300,7 @@ export async function fetchPackageMetadata(
       logger.debug('PyPI API 응답 캐시 저장', {
         package: packageName,
         version,
-        releases: Object.keys(data.releases).length,
+        releases: data.releases ? Object.keys(data.releases).length : 0,
       });
 
       return data;
@@ -307,7 +308,17 @@ export async function fetchPackageMetadata(
       if (axios.isAxiosError(error) && error.response?.status === 404) {
         logger.debug('PyPI 패키지 없음', { package: packageName, version });
       } else {
-        logger.warn('PyPI API 요청 실패', { package: packageName, version, error });
+        const errorInfo = axios.isAxiosError(error)
+          ? {
+              message: error.message,
+              code: error.code,
+              status: error.response?.status,
+              statusText: error.response?.statusText,
+            }
+          : error instanceof Error
+            ? { message: error.message, name: error.name }
+            : { message: String(error) };
+        logger.warn('PyPI API 요청 실패', { package: packageName, version, error: errorInfo });
       }
       return null;
     } finally {
