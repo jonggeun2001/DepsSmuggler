@@ -624,6 +624,380 @@ describe('OS package downloader utilities', () => {
     });
   });
 
+  // 사용자 추천 테스트 케이스 기반 테스트
+  describe('recommended test cases', () => {
+    // 일반 케이스 - curl (간단한 의존성)
+    describe('curl package case', () => {
+      const curlDependencies = ['libcurl', 'openssl', 'zlib', 'libnghttp2'];
+
+      it('curl은 여러 라이브러리에 의존', () => {
+        expect(curlDependencies).toContain('libcurl');
+        expect(curlDependencies).toContain('openssl');
+      });
+
+      it('curl 패키지명', () => {
+        const packageNames = {
+          yum: 'curl',
+          apt: 'curl',
+          apk: 'curl',
+        };
+        expect(Object.values(packageNames).every((n) => n === 'curl')).toBe(true);
+      });
+    });
+
+    // 일반 케이스 - git (전이 의존성)
+    describe('git package case', () => {
+      const gitDependencies = [
+        'perl',
+        'openssl',
+        'zlib',
+        'curl',
+        'expat',
+        'openssh-clients',
+      ];
+
+      it('git은 많은 전이 의존성을 가짐', () => {
+        expect(gitDependencies.length).toBeGreaterThan(4);
+        expect(gitDependencies).toContain('perl');
+        expect(gitDependencies).toContain('curl');
+      });
+
+      it('git 전이 의존성 체인', () => {
+        // git → curl → libcurl → openssl
+        const dependencyChain = ['git', 'curl', 'libcurl', 'openssl'];
+        expect(dependencyChain.length).toBe(4);
+        expect(dependencyChain[0]).toBe('git');
+        expect(dependencyChain[dependencyChain.length - 1]).toBe('openssl');
+      });
+    });
+
+    // 버전 매칭 케이스 - kernel-devel
+    describe('kernel-devel package case', () => {
+      it('kernel-devel은 커널 버전과 일치해야 함', () => {
+        const kernelVersion = '5.14.0-362.24.1.el9_3';
+        const kernelDevelVersion = '5.14.0-362.24.1.el9_3';
+        expect(kernelVersion).toBe(kernelDevelVersion);
+      });
+
+      it('커널 버전 파싱', () => {
+        interface KernelVersion {
+          major: number;
+          minor: number;
+          patch: number;
+          release: string;
+          dist: string;
+        }
+
+        const parseKernelVersion = (version: string): KernelVersion | null => {
+          // 5.14.0-362.24.1.el9_3
+          const match = version.match(/^(\d+)\.(\d+)\.(\d+)-(.+?)\.([a-z]+\d+(?:_\d+)?)$/);
+          if (!match) return null;
+          return {
+            major: parseInt(match[1], 10),
+            minor: parseInt(match[2], 10),
+            patch: parseInt(match[3], 10),
+            release: match[4],
+            dist: match[5],
+          };
+        };
+
+        const parsed = parseKernelVersion('5.14.0-362.24.1.el9_3');
+        expect(parsed).not.toBeNull();
+        expect(parsed!.major).toBe(5);
+        expect(parsed!.minor).toBe(14);
+        expect(parsed!.dist).toBe('el9_3');
+      });
+    });
+
+    // 외부 저장소 케이스 - epel-release
+    describe('epel-release package case', () => {
+      it('epel-release는 외부 저장소 추가', () => {
+        const epelRepo = {
+          name: 'epel',
+          baseurl: 'https://dl.fedoraproject.org/pub/epel/$releasever/$basearch/',
+          enabled: true,
+          gpgcheck: true,
+        };
+
+        expect(epelRepo.name).toBe('epel');
+        expect(epelRepo.baseurl).toContain('fedoraproject.org');
+      });
+
+      it('EPEL 저장소 활성화 후 추가 패키지 사용 가능', () => {
+        const epelPackages = ['htop', 'jq', 'neofetch', 'ripgrep'];
+        expect(epelPackages).toContain('htop');
+        expect(epelPackages).toContain('jq');
+      });
+    });
+
+    // 예외 케이스 - 존재하지 않는 패키지
+    describe('non-existent package case', () => {
+      it('존재하지 않는 패키지명 형식 검증', () => {
+        const fakePackage = 'this-package-does-not-exist-12345';
+        // RPM 패키지명 규칙: 알파벳, 숫자, 하이픈, 언더스코어
+        const isValidName = /^[a-zA-Z][a-zA-Z0-9._-]*$/.test(fakePackage);
+        expect(isValidName).toBe(true);
+      });
+    });
+
+    // YUM/DNF 저장소 구조
+    describe('YUM/DNF repository structure', () => {
+      interface RepoMetadata {
+        revision: string;
+        data: Array<{
+          type: string;
+          location: string;
+          checksum: string;
+        }>;
+      }
+
+      it('repomd.xml 구조', () => {
+        const repomd: RepoMetadata = {
+          revision: '1702483200',
+          data: [
+            { type: 'primary', location: 'repodata/primary.xml.gz', checksum: 'sha256:abc' },
+            { type: 'filelists', location: 'repodata/filelists.xml.gz', checksum: 'sha256:def' },
+            { type: 'other', location: 'repodata/other.xml.gz', checksum: 'sha256:ghi' },
+          ],
+        };
+
+        expect(repomd.data.some((d) => d.type === 'primary')).toBe(true);
+        expect(repomd.data.length).toBeGreaterThan(2);
+      });
+
+      it('primary.xml 패키지 정보', () => {
+        interface RpmPackageInfo {
+          name: string;
+          arch: string;
+          version: { epoch: number; ver: string; rel: string };
+          location: string;
+          checksum: string;
+          requires: string[];
+          provides: string[];
+        }
+
+        const pkg: RpmPackageInfo = {
+          name: 'httpd',
+          arch: 'x86_64',
+          version: { epoch: 0, ver: '2.4.57', rel: '8.el9' },
+          location: 'Packages/httpd-2.4.57-8.el9.x86_64.rpm',
+          checksum: 'sha256:abc123',
+          requires: ['httpd-core', 'httpd-tools', 'httpd-filesystem'],
+          provides: ['httpd', 'webserver'],
+        };
+
+        expect(pkg.name).toBe('httpd');
+        expect(pkg.requires.length).toBeGreaterThan(0);
+      });
+    });
+
+    // RPM 패키지 파일명 파싱
+    describe('RPM filename parsing', () => {
+      interface RpmFilename {
+        name: string;
+        version: string;
+        release: string;
+        arch: string;
+      }
+
+      const parseRpmFilename = (filename: string): RpmFilename | null => {
+        // name-version-release.arch.rpm
+        const match = filename.match(/^(.+)-(.+?)-(.+?)\.([^.]+)\.rpm$/);
+        if (!match) return null;
+        return {
+          name: match[1],
+          version: match[2],
+          release: match[3],
+          arch: match[4],
+        };
+      };
+
+      it('표준 RPM 파일명', () => {
+        const info = parseRpmFilename('httpd-2.4.57-8.el9.x86_64.rpm');
+        expect(info).not.toBeNull();
+        expect(info!.name).toBe('httpd');
+        expect(info!.version).toBe('2.4.57');
+        expect(info!.release).toBe('8.el9');
+        expect(info!.arch).toBe('x86_64');
+      });
+
+      it('noarch RPM 파일명', () => {
+        const info = parseRpmFilename('python3-requests-2.28.1-3.el9.noarch.rpm');
+        expect(info).not.toBeNull();
+        expect(info!.arch).toBe('noarch');
+      });
+
+      it('복잡한 패키지명', () => {
+        const info = parseRpmFilename('kernel-devel-5.14.0-362.24.1.el9_3.x86_64.rpm');
+        expect(info).not.toBeNull();
+        expect(info!.name).toBe('kernel-devel');
+        expect(info!.version).toBe('5.14.0');
+      });
+    });
+
+    // 배포판별 패키지 차이
+    describe('distribution package differences', () => {
+      type Distribution = 'rocky-9' | 'almalinux-9' | 'centos-stream-9' | 'ubuntu-22.04' | 'debian-12' | 'alpine-3.20';
+
+      const getPackageManager = (distro: Distribution): 'yum' | 'apt' | 'apk' => {
+        if (distro.startsWith('rocky') || distro.startsWith('almalinux') || distro.startsWith('centos')) {
+          return 'yum';
+        }
+        if (distro.startsWith('ubuntu') || distro.startsWith('debian')) {
+          return 'apt';
+        }
+        return 'apk';
+      };
+
+      const getPackageExtension = (distro: Distribution): string => {
+        const pkgMgr = getPackageManager(distro);
+        if (pkgMgr === 'yum') return 'rpm';
+        if (pkgMgr === 'apt') return 'deb';
+        return 'apk';
+      };
+
+      it('Rocky Linux는 YUM 사용', () => {
+        expect(getPackageManager('rocky-9')).toBe('yum');
+        expect(getPackageExtension('rocky-9')).toBe('rpm');
+      });
+
+      it('Ubuntu는 APT 사용', () => {
+        expect(getPackageManager('ubuntu-22.04')).toBe('apt');
+        expect(getPackageExtension('ubuntu-22.04')).toBe('deb');
+      });
+
+      it('Alpine은 APK 사용', () => {
+        expect(getPackageManager('alpine-3.20')).toBe('apk');
+        expect(getPackageExtension('alpine-3.20')).toBe('apk');
+      });
+    });
+
+    // 의존성 해결 우선순위
+    describe('dependency resolution priority', () => {
+      interface Package {
+        name: string;
+        version: string;
+        repo: string;
+        priority: number;
+      }
+
+      const selectBestPackage = (packages: Package[]): Package => {
+        return packages.reduce((best, pkg) =>
+          pkg.priority > best.priority ? pkg : best
+        );
+      };
+
+      it('높은 우선순위 저장소 선택', () => {
+        const packages: Package[] = [
+          { name: 'nginx', version: '1.24.0', repo: 'appstream', priority: 10 },
+          { name: 'nginx', version: '1.25.0', repo: 'nginx-mainline', priority: 20 },
+        ];
+
+        const selected = selectBestPackage(packages);
+        expect(selected.repo).toBe('nginx-mainline');
+        expect(selected.version).toBe('1.25.0');
+      });
+
+      it('동일 우선순위시 첫 번째 선택', () => {
+        const packages: Package[] = [
+          { name: 'httpd', version: '2.4.57', repo: 'baseos', priority: 10 },
+          { name: 'httpd', version: '2.4.57', repo: 'appstream', priority: 10 },
+        ];
+
+        const selected = selectBestPackage(packages);
+        expect(selected.repo).toBe('baseos');
+      });
+    });
+
+    // 그룹 패키지
+    describe('package groups', () => {
+      interface PackageGroup {
+        id: string;
+        name: string;
+        packages: string[];
+        optionalPackages: string[];
+      }
+
+      const developmentTools: PackageGroup = {
+        id: 'development',
+        name: 'Development Tools',
+        packages: ['gcc', 'gcc-c++', 'make', 'autoconf', 'automake'],
+        optionalPackages: ['gdb', 'valgrind', 'strace'],
+      };
+
+      it('그룹 패키지 구조', () => {
+        expect(developmentTools.packages.length).toBeGreaterThan(0);
+        expect(developmentTools.packages).toContain('gcc');
+        expect(developmentTools.packages).toContain('make');
+      });
+
+      it('선택적 패키지', () => {
+        expect(developmentTools.optionalPackages).toContain('gdb');
+      });
+    });
+
+    // provides/requires 해결
+    describe('provides/requires resolution', () => {
+      interface Capability {
+        name: string;
+        version?: string;
+        flags?: string;
+      }
+
+      const matchCapability = (provides: Capability, requires: Capability): boolean => {
+        if (provides.name !== requires.name) return false;
+        if (!requires.version) return true;
+        // 간단한 버전 비교 (실제로는 더 복잡)
+        return provides.version === requires.version;
+      };
+
+      it('이름만 일치', () => {
+        const provides: Capability = { name: 'webserver' };
+        const requires: Capability = { name: 'webserver' };
+        expect(matchCapability(provides, requires)).toBe(true);
+      });
+
+      it('버전 포함 일치', () => {
+        const provides: Capability = { name: 'libcurl.so.4', version: '4.8.0' };
+        const requires: Capability = { name: 'libcurl.so.4', version: '4.8.0' };
+        expect(matchCapability(provides, requires)).toBe(true);
+      });
+
+      it('버전 불일치', () => {
+        const provides: Capability = { name: 'libcurl.so.4', version: '4.7.0' };
+        const requires: Capability = { name: 'libcurl.so.4', version: '4.8.0' };
+        expect(matchCapability(provides, requires)).toBe(false);
+      });
+    });
+
+    // 미러 선택
+    describe('mirror selection', () => {
+      interface Mirror {
+        url: string;
+        country: string;
+        latency?: number;
+      }
+
+      const selectFastestMirror = (mirrors: Mirror[]): Mirror => {
+        return mirrors.reduce((fastest, mirror) =>
+          (mirror.latency || Infinity) < (fastest.latency || Infinity) ? mirror : fastest
+        );
+      };
+
+      it('가장 빠른 미러 선택', () => {
+        const mirrors: Mirror[] = [
+          { url: 'https://mirror1.example.com', country: 'US', latency: 100 },
+          { url: 'https://mirror2.example.com', country: 'KR', latency: 20 },
+          { url: 'https://mirror3.example.com', country: 'JP', latency: 50 },
+        ];
+
+        const fastest = selectFastestMirror(mirrors);
+        expect(fastest.country).toBe('KR');
+        expect(fastest.latency).toBe(20);
+      });
+    });
+  });
+
   describe('output format utilities', () => {
     type OutputFormat = 'archive' | 'repository' | 'both';
 

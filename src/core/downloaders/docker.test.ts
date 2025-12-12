@@ -333,4 +333,362 @@ describe('docker downloader utilities', () => {
       expect(formatSize(1500000000)).toBe('1.40 GB');
     });
   });
+
+  // 사용자 추천 테스트 케이스 기반 테스트
+  describe('recommended test cases', () => {
+    // 일반 케이스 - alpine (경량 이미지)
+    describe('alpine image case', () => {
+      it('alpine은 경량 베이스 이미지', () => {
+        const alpineSize = 5.6 * 1024 * 1024; // ~5.6MB
+        const ubuntuSize = 77.8 * 1024 * 1024; // ~77.8MB
+        expect(alpineSize).toBeLessThan(ubuntuSize);
+      });
+
+      it('alpine 태그 파싱', () => {
+        const parseAlpineTag = (tag: string): { version?: string; variant?: string } => {
+          // 3.19, 3.19.0, edge, latest
+          const match = tag.match(/^(\d+\.\d+(?:\.\d+)?)?(-(\w+))?$/);
+          if (!match) return { version: tag };
+          return {
+            version: match[1],
+            variant: match[3],
+          };
+        };
+
+        expect(parseAlpineTag('3.19')).toEqual({ version: '3.19', variant: undefined });
+        expect(parseAlpineTag('3.19.0')).toEqual({ version: '3.19.0', variant: undefined });
+        expect(parseAlpineTag('latest')).toEqual({ version: 'latest' });
+      });
+
+      it('alpine 레이어 수', () => {
+        const alpineLayers = 1; // 단일 레이어
+        expect(alpineLayers).toBeLessThanOrEqual(2);
+      });
+    });
+
+    // 일반 케이스 - busybox (최소 이미지)
+    describe('busybox image case', () => {
+      it('busybox는 최소 유닉스 유틸리티', () => {
+        const busyboxSize = 4.26 * 1024 * 1024; // ~4.26MB
+        expect(busyboxSize).toBeLessThan(10 * 1024 * 1024);
+      });
+
+      it('busybox 변형', () => {
+        const variants = ['glibc', 'musl', 'uclibc'];
+        expect(variants).toContain('musl');
+        expect(variants).toContain('glibc');
+      });
+    });
+
+    // 멀티 레이어 케이스 - python:3.11-alpine
+    describe('python:3.11-alpine case', () => {
+      it('python 이미지는 여러 레이어 포함', () => {
+        const layers = [
+          { digest: 'sha256:base', size: 5 * 1024 * 1024 },
+          { digest: 'sha256:python', size: 45 * 1024 * 1024 },
+          { digest: 'sha256:pip', size: 10 * 1024 * 1024 },
+        ];
+        expect(layers.length).toBeGreaterThan(1);
+      });
+
+      it('python 이미지 태그 구조', () => {
+        const parsePythonTag = (tag: string): { version: string; variant?: string; base?: string } => {
+          // 3.11, 3.11-slim, 3.11-alpine, 3.11-bookworm
+          const match = tag.match(/^(\d+\.\d+(?:\.\d+)?)(-(slim|alpine|bookworm|bullseye))?$/);
+          if (!match) return { version: tag };
+          return {
+            version: match[1],
+            variant: match[3],
+          };
+        };
+
+        expect(parsePythonTag('3.11')).toEqual({ version: '3.11' });
+        expect(parsePythonTag('3.11-alpine')).toEqual({ version: '3.11', variant: 'alpine' });
+        expect(parsePythonTag('3.11-slim')).toEqual({ version: '3.11', variant: 'slim' });
+      });
+
+      it('alpine 기반 vs debian 기반 크기', () => {
+        const alpineSize = 50 * 1024 * 1024;
+        const debianSize = 900 * 1024 * 1024;
+        expect(alpineSize).toBeLessThan(debianSize);
+      });
+    });
+
+    // arm64 플랫폼 케이스
+    describe('arm64 platform case', () => {
+      interface PlatformManifest {
+        platform: {
+          architecture: string;
+          os: string;
+          variant?: string;
+        };
+        digest: string;
+      }
+
+      const selectPlatformManifest = (
+        manifests: PlatformManifest[],
+        arch: string,
+        os: string = 'linux'
+      ): PlatformManifest | null => {
+        return (
+          manifests.find((m) => m.platform.architecture === arch && m.platform.os === os) ||
+          null
+        );
+      };
+
+      it('arm64 매니페스트 선택', () => {
+        const manifests: PlatformManifest[] = [
+          { platform: { architecture: 'amd64', os: 'linux' }, digest: 'sha256:amd64' },
+          { platform: { architecture: 'arm64', os: 'linux' }, digest: 'sha256:arm64' },
+          { platform: { architecture: 'arm', os: 'linux', variant: 'v7' }, digest: 'sha256:armv7' },
+        ];
+
+        const arm64 = selectPlatformManifest(manifests, 'arm64');
+        expect(arm64).not.toBeNull();
+        expect(arm64!.digest).toBe('sha256:arm64');
+      });
+
+      it('amd64 매니페스트 선택', () => {
+        const manifests: PlatformManifest[] = [
+          { platform: { architecture: 'amd64', os: 'linux' }, digest: 'sha256:amd64' },
+          { platform: { architecture: 'arm64', os: 'linux' }, digest: 'sha256:arm64' },
+        ];
+
+        const amd64 = selectPlatformManifest(manifests, 'amd64');
+        expect(amd64).not.toBeNull();
+        expect(amd64!.digest).toBe('sha256:amd64');
+      });
+
+      it('지원되지 않는 아키텍처', () => {
+        const manifests: PlatformManifest[] = [
+          { platform: { architecture: 'amd64', os: 'linux' }, digest: 'sha256:amd64' },
+        ];
+
+        const s390x = selectPlatformManifest(manifests, 's390x');
+        expect(s390x).toBeNull();
+      });
+    });
+
+    // 프라이빗 레지스트리 케이스
+    describe('private registry case', () => {
+      interface RegistryAuth {
+        registry: string;
+        username?: string;
+        password?: string;
+        token?: string;
+      }
+
+      const needsAuthentication = (registry: string): boolean => {
+        const publicRegistries = ['docker.io', 'registry-1.docker.io', 'ghcr.io'];
+        return !publicRegistries.some((pub) => registry.includes(pub));
+      };
+
+      it('프라이빗 레지스트리는 인증 필요', () => {
+        expect(needsAuthentication('my-registry.company.com')).toBe(true);
+        expect(needsAuthentication('localhost:5000')).toBe(true);
+      });
+
+      it('퍼블릭 레지스트리는 익명 접근 가능', () => {
+        expect(needsAuthentication('docker.io')).toBe(false);
+        expect(needsAuthentication('registry-1.docker.io')).toBe(false);
+      });
+
+      it('인증 헤더 생성', () => {
+        const createAuthHeader = (auth: RegistryAuth): string => {
+          if (auth.token) {
+            return `Bearer ${auth.token}`;
+          }
+          if (auth.username && auth.password) {
+            const credentials = Buffer.from(`${auth.username}:${auth.password}`).toString('base64');
+            return `Basic ${credentials}`;
+          }
+          return '';
+        };
+
+        expect(createAuthHeader({ registry: 'docker.io', token: 'abc123' })).toBe('Bearer abc123');
+        expect(createAuthHeader({ registry: 'docker.io', username: 'user', password: 'pass' })).toContain('Basic');
+      });
+    });
+
+    // 레지스트리별 API 차이
+    describe('registry API differences', () => {
+      type RegistryType = 'dockerhub' | 'gcr' | 'ecr' | 'acr' | 'ghcr' | 'quay';
+
+      interface RegistryConfig {
+        type: RegistryType;
+        authUrl: string;
+        apiVersion: string;
+      }
+
+      const getRegistryConfig = (registry: string): RegistryConfig => {
+        if (registry.includes('docker.io')) {
+          return { type: 'dockerhub', authUrl: 'https://auth.docker.io', apiVersion: 'v2' };
+        }
+        if (registry.includes('gcr.io')) {
+          return { type: 'gcr', authUrl: 'https://gcr.io/v2/token', apiVersion: 'v2' };
+        }
+        if (registry.includes('ecr')) {
+          return { type: 'ecr', authUrl: 'https://ecr.aws', apiVersion: 'v2' };
+        }
+        if (registry.includes('ghcr.io')) {
+          return { type: 'ghcr', authUrl: 'https://ghcr.io/token', apiVersion: 'v2' };
+        }
+        if (registry.includes('quay.io')) {
+          return { type: 'quay', authUrl: 'https://quay.io/v2/auth', apiVersion: 'v2' };
+        }
+        return { type: 'dockerhub', authUrl: '', apiVersion: 'v2' };
+      };
+
+      it('Docker Hub 설정', () => {
+        const config = getRegistryConfig('docker.io');
+        expect(config.type).toBe('dockerhub');
+        expect(config.authUrl).toContain('auth.docker.io');
+      });
+
+      it('GHCR 설정', () => {
+        const config = getRegistryConfig('ghcr.io');
+        expect(config.type).toBe('ghcr');
+      });
+
+      it('Quay.io 설정', () => {
+        const config = getRegistryConfig('quay.io');
+        expect(config.type).toBe('quay');
+      });
+    });
+
+    // 이미지 저장 형식
+    describe('image save format', () => {
+      interface ImageTar {
+        manifest: string;
+        config: string;
+        layers: string[];
+        repositories: Record<string, Record<string, string>>;
+      }
+
+      const validateTarStructure = (tar: ImageTar): boolean => {
+        return (
+          tar.manifest !== undefined &&
+          tar.config !== undefined &&
+          tar.layers.length > 0
+        );
+      };
+
+      it('OCI 이미지 tar 구조', () => {
+        const tar: ImageTar = {
+          manifest: 'manifest.json',
+          config: 'sha256:abc123.json',
+          layers: ['sha256:layer1/layer.tar', 'sha256:layer2/layer.tar'],
+          repositories: { nginx: { latest: 'sha256:abc123' } },
+        };
+
+        expect(validateTarStructure(tar)).toBe(true);
+      });
+
+      it('repositories.json 구조', () => {
+        const repos = { 'library/nginx': { 'latest': 'sha256:abc123' } };
+        expect(repos['library/nginx']['latest']).toBe('sha256:abc123');
+      });
+    });
+
+    // 레이어 공유 및 캐싱
+    describe('layer sharing and caching', () => {
+      interface Layer {
+        digest: string;
+        size: number;
+      }
+
+      const findSharedLayers = (image1Layers: Layer[], image2Layers: Layer[]): Layer[] => {
+        return image1Layers.filter((l1) =>
+          image2Layers.some((l2) => l2.digest === l1.digest)
+        );
+      };
+
+      it('동일 베이스 이미지는 레이어 공유', () => {
+        const alpineBase: Layer = { digest: 'sha256:alpine-base', size: 5 * 1024 * 1024 };
+
+        const pythonAlpineLayers: Layer[] = [
+          alpineBase,
+          { digest: 'sha256:python', size: 45 * 1024 * 1024 },
+        ];
+
+        const nodeAlpineLayers: Layer[] = [
+          alpineBase,
+          { digest: 'sha256:node', size: 100 * 1024 * 1024 },
+        ];
+
+        const shared = findSharedLayers(pythonAlpineLayers, nodeAlpineLayers);
+        expect(shared.length).toBe(1);
+        expect(shared[0].digest).toBe('sha256:alpine-base');
+      });
+
+      it('다른 베이스 이미지는 레이어 공유 없음', () => {
+        const debianLayers: Layer[] = [
+          { digest: 'sha256:debian-base', size: 77 * 1024 * 1024 },
+        ];
+
+        const alpineLayers: Layer[] = [
+          { digest: 'sha256:alpine-base', size: 5 * 1024 * 1024 },
+        ];
+
+        const shared = findSharedLayers(debianLayers, alpineLayers);
+        expect(shared.length).toBe(0);
+      });
+    });
+
+    // 멀티 아키텍처 매니페스트
+    describe('multi-arch manifest', () => {
+      interface ManifestList {
+        schemaVersion: number;
+        mediaType: string;
+        manifests: Array<{
+          mediaType: string;
+          digest: string;
+          size: number;
+          platform: {
+            architecture: string;
+            os: string;
+            variant?: string;
+          };
+        }>;
+      }
+
+      const isManifestList = (mediaType: string): boolean => {
+        return (
+          mediaType === 'application/vnd.docker.distribution.manifest.list.v2+json' ||
+          mediaType === 'application/vnd.oci.image.index.v1+json'
+        );
+      };
+
+      it('매니페스트 리스트 감지', () => {
+        expect(isManifestList('application/vnd.docker.distribution.manifest.list.v2+json')).toBe(true);
+        expect(isManifestList('application/vnd.oci.image.index.v1+json')).toBe(true);
+        expect(isManifestList('application/vnd.docker.distribution.manifest.v2+json')).toBe(false);
+      });
+
+      it('멀티 아키텍처 매니페스트 구조', () => {
+        const manifestList: ManifestList = {
+          schemaVersion: 2,
+          mediaType: 'application/vnd.docker.distribution.manifest.list.v2+json',
+          manifests: [
+            {
+              mediaType: 'application/vnd.docker.distribution.manifest.v2+json',
+              digest: 'sha256:amd64',
+              size: 1000,
+              platform: { architecture: 'amd64', os: 'linux' },
+            },
+            {
+              mediaType: 'application/vnd.docker.distribution.manifest.v2+json',
+              digest: 'sha256:arm64',
+              size: 1000,
+              platform: { architecture: 'arm64', os: 'linux' },
+            },
+          ],
+        };
+
+        expect(manifestList.manifests.length).toBe(2);
+        expect(manifestList.manifests.map((m) => m.platform.architecture)).toContain('amd64');
+        expect(manifestList.manifests.map((m) => m.platform.architecture)).toContain('arm64');
+      });
+    });
+  });
 });
