@@ -131,27 +131,16 @@ const CartPage: React.FC = () => {
         failedPackages?: unknown[];
       };
 
-      // Electron 환경 또는 Vite dev 서버 환경에 따라 API 호출
+      // Electron IPC 사용 (개발/프로덕션 모두)
       const resolverOptions = {
         targetOS: settings.defaultTargetOS || 'any',
       };
 
       const dependencyAPI = window.electronAPI?.dependency as DependencyAPI | undefined;
-      if (dependencyAPI?.resolve) {
-        // Electron 환경
-        result = await dependencyAPI.resolve({ packages, options: resolverOptions });
-      } else {
-        // Vite dev 서버 환경
-        const response = await fetch('/api/dependency/resolve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages, options: resolverOptions }),
-        });
-        if (!response.ok) {
-          throw new Error(`의존성 해결 실패: ${response.statusText}`);
-        }
-        result = await response.json();
+      if (!dependencyAPI?.resolve) {
+        throw new Error('의존성 해결 API를 사용할 수 없습니다');
       }
+      result = await dependencyAPI.resolve({ packages, options: resolverOptions });
 
       // 의존성 트리 결과 처리
       const dependencyTrees = result.dependencyTrees as DependencyResolutionResult[] | undefined;

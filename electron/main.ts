@@ -51,6 +51,7 @@ import {
   YumDownloader,
   NpmDownloader,
 } from '../src/core';
+import pLimit from 'p-limit';
 
 // 캐시 모듈 import
 import * as pipCache from '../src/core/shared/pip-cache';
@@ -705,12 +706,12 @@ type DownloadOptions = SharedDownloadOptions;
 let downloadCancelled = false;
 let downloadPaused = false;
 
-// 다운로드 시작 핸들러
+// 다운로드 시작 핸들러 (동시 다운로드 지원)
 ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage[]; options: DownloadOptions }) => {
   const { packages, options } = data;
-  const { outputDir, outputFormat, includeScripts, targetOS, architecture, includeDependencies, pythonVersion } = options;
+  const { outputDir, outputFormat, includeScripts, targetOS, architecture, includeDependencies, pythonVersion, concurrency = 3 } = options;
 
-  downloadLog.info(`Starting download: ${packages.length} packages to ${outputDir}`);
+  downloadLog.info(`Starting download: ${packages.length} packages to ${outputDir} (concurrency: ${concurrency})`);
 
   downloadCancelled = false;
   downloadPaused = false;
@@ -731,19 +732,24 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
     fs.mkdirSync(packagesDir, { recursive: true });
   }
 
-  const results: Array<{ id: string; success: boolean; error?: string }> = [];
+  // p-limit을 사용한 동시 다운로드 제어
+  const limit = pLimit(concurrency);
 
-  for (let i = 0; i < allPackages.length; i++) {
-    if (downloadCancelled) break;
-
-    const pkg = allPackages[i];
+  // 단일 패키지 다운로드 함수
+  const downloadPackage = async (pkg: DownloadPackage): Promise<{ id: string; success: boolean; error?: string }> => {
+    // 취소 체크
+    if (downloadCancelled) {
+      return { id: pkg.id, success: false, error: 'cancelled' };
+    }
 
     // 일시정지 대기
     while (downloadPaused && !downloadCancelled) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    if (downloadCancelled) break;
+    if (downloadCancelled) {
+      return { id: pkg.id, success: false, error: 'cancelled' };
+    }
 
     try {
       // 진행 상태 전송: 시작
@@ -781,69 +787,57 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         const mavenDownloader = getMavenDownloader();
         const parts = pkg.name.split(':');
         if (parts.length >= 2) {
-          try {
-            const groupId = parts[0];
-            const artifactId = parts[1];
-            let mavenTotalBytes = 0;
+          const groupId = parts[0];
+          const artifactId = parts[1];
+          let mavenTotalBytes = 0;
 
-            // .m2 구조로 m2repo 디렉토리에 다운로드
-            const m2RepoDir = path.join(packagesDir, 'm2repo');
-            if (!fs.existsSync(m2RepoDir)) {
-              fs.mkdirSync(m2RepoDir, { recursive: true });
-            }
-
-            const jarPath = await mavenDownloader.downloadPackage(
-              {
-                type: 'maven',
-                name: pkg.name,
-                version: pkg.version,
-                metadata: {
-                  groupId,
-                  artifactId,
-                },
-              },
-              m2RepoDir,
-              (progress) => {
-                mavenTotalBytes = progress.totalBytes;
-                mainWindow?.webContents.send('download:progress', {
-                  packageId: pkg.id,
-                  status: 'downloading',
-                  progress: progress.progress,
-                  downloadedBytes: progress.downloadedBytes,
-                  totalBytes: progress.totalBytes,
-                  speed: progress.speed,
-                });
-              }
-            );
-
-            // flat 구조로도 복사 (packagesDir 루트에 jar 파일)
-            const flatFileName = `${artifactId}-${pkg.version}.jar`;
-            const flatDestPath = path.join(packagesDir, flatFileName);
-            if (jarPath && fs.existsSync(jarPath)) {
-              fs.copyFileSync(jarPath, flatDestPath);
-            }
-
-            // 완료 상태 전송
-            mainWindow?.webContents.send('download:progress', {
-              packageId: pkg.id,
-              status: 'completed',
-              progress: 100,
-              downloadedBytes: mavenTotalBytes,
-              totalBytes: mavenTotalBytes,
-            });
-
-            results.push({ id: pkg.id, success: true });
-            continue; // Maven은 별도 처리 완료, 다음 패키지로
-          } catch (mavenError) {
-            const errorMessage = mavenError instanceof Error ? mavenError.message : String(mavenError);
-            mainWindow?.webContents.send('download:progress', {
-              packageId: pkg.id,
-              status: 'error',
-              error: errorMessage,
-            });
-            results.push({ id: pkg.id, success: false, error: errorMessage });
-            continue;
+          // .m2 구조로 m2repo 디렉토리에 다운로드
+          const m2RepoDir = path.join(packagesDir, 'm2repo');
+          if (!fs.existsSync(m2RepoDir)) {
+            fs.mkdirSync(m2RepoDir, { recursive: true });
           }
+
+          const jarPath = await mavenDownloader.downloadPackage(
+            {
+              type: 'maven',
+              name: pkg.name,
+              version: pkg.version,
+              metadata: {
+                groupId,
+                artifactId,
+              },
+            },
+            m2RepoDir,
+            (progress) => {
+              mavenTotalBytes = progress.totalBytes;
+              mainWindow?.webContents.send('download:progress', {
+                packageId: pkg.id,
+                status: 'downloading',
+                progress: progress.progress,
+                downloadedBytes: progress.downloadedBytes,
+                totalBytes: progress.totalBytes,
+                speed: progress.speed,
+              });
+            }
+          );
+
+          // flat 구조로도 복사 (packagesDir 루트에 jar 파일)
+          const flatFileName = `${artifactId}-${pkg.version}.jar`;
+          const flatDestPath = path.join(packagesDir, flatFileName);
+          if (jarPath && fs.existsSync(jarPath)) {
+            fs.copyFileSync(jarPath, flatDestPath);
+          }
+
+          // 완료 상태 전송
+          mainWindow?.webContents.send('download:progress', {
+            packageId: pkg.id,
+            status: 'completed',
+            progress: 100,
+            downloadedBytes: mavenTotalBytes,
+            totalBytes: mavenTotalBytes,
+          });
+
+          return { id: pkg.id, success: true };
         }
       } else if (pkg.type === 'yum' || pkg.type === 'apt' || pkg.type === 'apk') {
         // OS 패키지는 장바구니에 담긴 URL 정보 사용
@@ -872,48 +866,36 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         const registry = (pkg.metadata?.registry as string) || 'docker.io';
         const arch = (pkg.architecture || 'amd64') as Architecture;
 
-        try {
-          let dockerTotalBytes = 0;
-          const tarPath = await dockerDownloader.downloadImage(
-            pkg.name,
-            pkg.version,
-            arch,
-            packagesDir,
-            (progress) => {
-              dockerTotalBytes = progress.totalBytes;
-              mainWindow?.webContents.send('download:progress', {
-                packageId: pkg.id,
-                status: 'downloading',
-                progress: progress.progress,
-                downloadedBytes: progress.downloadedBytes,
-                totalBytes: progress.totalBytes,
-                speed: progress.speed,
-              });
-            },
-            registry
-          );
+        let dockerTotalBytes = 0;
+        await dockerDownloader.downloadImage(
+          pkg.name,
+          pkg.version,
+          arch,
+          packagesDir,
+          (progress) => {
+            dockerTotalBytes = progress.totalBytes;
+            mainWindow?.webContents.send('download:progress', {
+              packageId: pkg.id,
+              status: 'downloading',
+              progress: progress.progress,
+              downloadedBytes: progress.downloadedBytes,
+              totalBytes: progress.totalBytes,
+              speed: progress.speed,
+            });
+          },
+          registry
+        );
 
-          // 완료 상태 전송
-          mainWindow?.webContents.send('download:progress', {
-            packageId: pkg.id,
-            status: 'completed',
-            progress: 100,
-            downloadedBytes: dockerTotalBytes,
-            totalBytes: dockerTotalBytes,
-          });
+        // 완료 상태 전송
+        mainWindow?.webContents.send('download:progress', {
+          packageId: pkg.id,
+          status: 'completed',
+          progress: 100,
+          downloadedBytes: dockerTotalBytes,
+          totalBytes: dockerTotalBytes,
+        });
 
-          results.push({ id: pkg.id, success: true });
-          continue; // Docker는 별도 처리 완료, 다음 패키지로
-        } catch (dockerError) {
-          const errorMessage = dockerError instanceof Error ? dockerError.message : String(dockerError);
-          mainWindow?.webContents.send('download:progress', {
-            packageId: pkg.id,
-            status: 'error',
-            error: errorMessage,
-          });
-          results.push({ id: pkg.id, success: false, error: errorMessage });
-          continue;
-        }
+        return { id: pkg.id, success: true };
       }
 
       if (!downloadUrl) {
@@ -930,7 +912,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         const elapsed = (now - lastProgressUpdate) / 1000;
         finalTotalBytes = total;
 
-        if (elapsed >= 0.5) { // 0.5초마다 업데이트
+        if (elapsed >= 0.3) { // 0.3초마다 업데이트 (동시 다운로드 시 더 빈번하게)
           const speed = (downloaded - lastBytes) / elapsed;
           const progress = total > 0 ? Math.round((downloaded / total) * 100) : 0;
 
@@ -957,7 +939,7 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         totalBytes: finalTotalBytes,
       });
 
-      results.push({ id: pkg.id, success: true });
+      return { id: pkg.id, success: true };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       downloadLog.error(`Download failed for ${pkg.name}:`, errorMessage);
@@ -968,9 +950,16 @@ ipcMain.handle('download:start', async (event, data: { packages: DownloadPackage
         error: errorMessage,
       });
 
-      results.push({ id: pkg.id, success: false, error: errorMessage });
+      return { id: pkg.id, success: false, error: errorMessage };
     }
-  }
+  };
+
+  // 동시 다운로드 실행
+  const downloadPromises = allPackages.map((pkg) => limit(() => downloadPackage(pkg)));
+  const downloadResults = await Promise.all(downloadPromises);
+
+  // 취소된 항목 제외하고 결과 수집
+  const results = downloadResults.filter(r => r.error !== 'cancelled');
 
   if (!downloadCancelled) {
     // 설치 스크립트 생성 (의존성 포함)

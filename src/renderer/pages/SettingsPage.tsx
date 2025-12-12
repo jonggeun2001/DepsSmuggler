@@ -99,22 +99,13 @@ const SettingsPage: React.FC = () => {
   const loadCacheInfo = async () => {
     setLoadingCache(true);
     try {
-      // Electron 환경
-      if (window.electronAPI?.cache?.getStats) {
-        const stats = await window.electronAPI.cache.getStats();
-        setCacheSize(stats.totalSize);
-        setCacheCount(stats.entryCount);
-      } else {
-        // 개발 환경 - API 호출
-        const response = await fetch('/api/cache/stats');
-        if (response.ok) {
-          const stats = await response.json();
-          setCacheSize(stats.totalSize);
-          setCacheCount(stats.entryCount);
-        } else {
-          throw new Error('Failed to fetch cache stats');
-        }
+      // Electron IPC 사용 (개발/프로덕션 모두)
+      if (!window.electronAPI?.cache?.getStats) {
+        throw new Error('캐시 정보 API를 사용할 수 없습니다');
       }
+      const stats = await window.electronAPI.cache.getStats();
+      setCacheSize(stats.totalSize);
+      setCacheCount(stats.entryCount);
     } catch (error) {
       console.error('캐시 정보 로드 실패:', error);
       // 에러 시 0으로 설정
@@ -129,16 +120,11 @@ const SettingsPage: React.FC = () => {
   const handleClearCache = async () => {
     setClearingCache(true);
     try {
-      // Electron 환경
-      if (window.electronAPI?.cache?.clear) {
-        await window.electronAPI.cache.clear();
-      } else {
-        // 개발 환경 - API 호출
-        const response = await fetch('/api/cache/clear', { method: 'POST' });
-        if (!response.ok) {
-          throw new Error('Failed to clear cache');
-        }
+      // Electron IPC 사용 (개발/프로덕션 모두)
+      if (!window.electronAPI?.cache?.clear) {
+        throw new Error('캐시 삭제 API를 사용할 수 없습니다');
       }
+      await window.electronAPI.cache.clear();
       setCacheSize(0);
       setCacheCount(0);
       message.success('캐시가 삭제되었습니다');
@@ -201,17 +187,13 @@ const SettingsPage: React.FC = () => {
   const loadDistributions = async () => {
     setLoadingDistributions(true);
     try {
-      if (window.electronAPI?.os?.getAllDistributions) {
-        const data = await window.electronAPI.os.getAllDistributions() as OSDistribution[];
-        setDistributions(data);
-      } else {
-        // 개발 환경 - API 호출
-        const response = await fetch('/api/os/distributions');
-        if (response.ok) {
-          const data = await response.json();
-          setDistributions(data);
-        }
+      // Electron IPC 사용 (개발/프로덕션 모두)
+      if (!window.electronAPI?.os?.getAllDistributions) {
+        console.warn('배포판 목록 API를 사용할 수 없습니다');
+        return;
       }
+      const data = await window.electronAPI.os.getAllDistributions() as OSDistribution[];
+      setDistributions(data);
     } catch (error) {
       console.error('배포판 목록 로드 실패:', error);
     } finally {

@@ -134,8 +134,6 @@ const DownloadPage: React.FC = () => {
   const { addHistory } = useHistoryStore();
 
   const [outputDir, setOutputDir] = useState(outputPath || defaultDownloadPath || '');
-  const [errorModalOpen, setErrorModalOpen] = useState(false);
-  const [errorItem, setErrorItem] = useState<DownloadItem | null>(null);
   // 의존성 확인 관련 상태
   const [isResolvingDeps, setIsResolvingDeps] = useState(false);
   const [depsResolved, setDepsResolved] = useState(false);
@@ -143,9 +141,6 @@ const DownloadPage: React.FC = () => {
   const downloadPausedRef = useRef(false);
   // 다운로드 아이템 목록을 ref로 유지 (SSE 이벤트 핸들러에서 최신 상태 참조용)
   const downloadItemsRef = useRef<DownloadItem[]>([]);
-  // SSE 연결 및 클라이언트 ID 관리 (취소 시 사용)
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const clientIdRef = useRef<string>('');
   // 히스토리 저장용 장바구니 데이터 (다운로드 시작 시 스냅샷)
   const cartSnapshotRef = useRef<typeof cartItems>([]);
 
@@ -169,20 +164,51 @@ const DownloadPage: React.FC = () => {
 
   }, [cartItems, downloadItems.length, setItems, clearLogs]);
 
-  // IPC 이벤트 리스너 설정 (프로덕션 Electron 환경에서만)
+  // IPC 이벤트 리스너 설정
   useEffect(() => {
-    // 개발 환경에서는 HTTP/SSE를 사용하므로 IPC 리스너 불필요
-    const isDevelopment = import.meta.env.DEV;
-    if (isDevelopment || !window.electronAPI?.download) return;
+    if (!window.electronAPI?.download) return;
 
     const unsubProgress = window.electronAPI.download.onProgress((progress: unknown) => {
-      const p = progress as { id: string; percent: number; downloaded: number; total: number; speed: number };
-      updateItem(p.id, {
-        progress: p.percent,
-        downloadedBytes: p.downloaded,
-        totalBytes: p.total,
-        speed: p.speed,
-      });
+      const p = progress as {
+        packageId: string;
+        status: string;
+        progress: number;
+        downloadedBytes: number;
+        totalBytes: number;
+        speed?: number;
+        error?: string;
+      };
+
+      // status에 따라 처리
+      if (p.status === 'completed') {
+        updateItem(p.packageId, {
+          status: 'completed',
+          progress: 100,
+          downloadedBytes: p.totalBytes,
+          totalBytes: p.totalBytes,
+        });
+        const completedItem = downloadItemsRef.current.find(i => i.id === p.packageId);
+        const displayName = completedItem
+          ? `${completedItem.name} (v${completedItem.version})`
+          : p.packageId;
+        addLog('success', `다운로드 완료: ${displayName}`);
+      } else if (p.status === 'failed') {
+        const item = downloadItemsRef.current.find(i => i.id === p.packageId);
+        if (item) {
+          updateItem(p.packageId, { status: 'failed', error: p.error });
+          const displayName = `${item.name} (v${item.version})`;
+          addLog('error', `다운로드 실패: ${displayName}`, p.error);
+        }
+      } else {
+        // downloading 상태
+        updateItem(p.packageId, {
+          status: 'downloading',
+          progress: p.progress,
+          downloadedBytes: p.downloadedBytes,
+          totalBytes: p.totalBytes,
+          speed: p.speed || 0,
+        });
+      }
     });
 
     const unsubComplete = window.electronAPI.download.onComplete((result: unknown) => {
@@ -202,8 +228,6 @@ const DownloadPage: React.FC = () => {
       const item = downloadItemsRef.current.find(i => i.id === e.id);
       if (item) {
         updateItem(e.id, { status: 'failed', error: e.message });
-        setErrorItem({ ...item, error: e.message });
-        setErrorModalOpen(true);
         const displayName = `${item.name} (v${item.version})`;
         addLog('error', `다운로드 실패: ${displayName}`, e.message);
       }
@@ -386,17 +410,7 @@ const DownloadPage: React.FC = () => {
     // downloadItems 대신 downloadItemsRef를 사용하므로 dependency에서 제거
   }, [updateItem, addLog, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, addHistory, clearCart]);
 
-  // 컴포넌트 언마운트 시 SSE 연결 정리
-  useEffect(() => {
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-    };
-  }, []);
-
-  // downloadItems 변경 시 ref 동기화 (SSE 이벤트 핸들러에서 최신 상태 참조용)
+  // downloadItems 변경 시 ref 동기화 (IPC 이벤트 핸들러에서 최신 상태 참조용)
   // updateItem 호출 후에도 ref가 최신 상태를 유지하도록 함
   useEffect(() => {
     downloadItemsRef.current = downloadItems;
@@ -442,22 +456,14 @@ const DownloadPage: React.FC = () => {
 
   // 출력 폴더 검사 및 삭제
   const checkOutputPath = async (): Promise<boolean> => {
-    const isDevelopment = import.meta.env.DEV;
-
     try {
       let data: { exists: boolean; fileCount?: number; totalSize?: number };
 
-      // Electron 환경에서는 IPC API 사용, 개발 환경에서는 HTTP API 사용
-      if (!isDevelopment && window.electronAPI?.download?.checkPath) {
-        data = await window.electronAPI.download.checkPath(outputDir);
-      } else {
-        const response = await fetch('/api/download/check-path', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ outputDir }),
-        });
-        data = await response.json();
+      // Electron IPC 사용 (개발/프로덕션 모두)
+      if (!window.electronAPI?.download?.checkPath) {
+        throw new Error('출력 폴더 검사 API를 사용할 수 없습니다');
       }
+      data = await window.electronAPI.download.checkPath(outputDir);
 
       if (!data.exists || data.fileCount === 0) {
         return true; // 폴더가 없거나 비어있으면 바로 진행
@@ -491,34 +497,19 @@ const DownloadPage: React.FC = () => {
           okType: 'danger',
           cancelText: '취소',
           onOk: async () => {
-            // Electron 환경에서는 IPC API 사용, 개발 환경에서는 HTTP API 사용
-            if (!isDevelopment && window.electronAPI?.download?.clearPath) {
-              const clearResult = await window.electronAPI.download.clearPath(outputDir);
-              if (clearResult.success) {
-                message.success('기존 데이터 삭제 완료');
-                addLog('info', '기존 데이터 삭제', outputDir);
-                resolve(true);
-              } else {
-                message.error('데이터 삭제 실패');
-                resolve(false);
-                throw new Error('삭제 실패'); // 모달 닫힘 방지
-              }
+            // Electron IPC 사용 (개발/프로덕션 모두)
+            if (!window.electronAPI?.download?.clearPath) {
+              throw new Error('폴더 삭제 API를 사용할 수 없습니다');
+            }
+            const clearResult = await window.electronAPI.download.clearPath(outputDir);
+            if (clearResult.success) {
+              message.success('기존 데이터 삭제 완료');
+              addLog('info', '기존 데이터 삭제', outputDir);
+              resolve(true);
             } else {
-              const clearResponse = await fetch('/api/download/clear-path', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ outputDir }),
-              });
-
-              if (clearResponse.ok) {
-                message.success('기존 데이터 삭제 완료');
-                addLog('info', '기존 데이터 삭제', outputDir);
-                resolve(true);
-              } else {
-                message.error('데이터 삭제 실패');
-                resolve(false);
-                throw new Error('삭제 실패'); // 모달 닫힘 방지
-              }
+              message.error('데이터 삭제 실패');
+              resolve(false);
+              throw new Error('삭제 실패'); // 모달 닫힘 방지
             }
           },
           onCancel: () => {
@@ -542,8 +533,6 @@ const DownloadPage: React.FC = () => {
     setIsResolvingDeps(true);
     setDepsResolved(false);
     addLog('info', '의존성 확인 시작', `${cartItems.length}개 패키지`);
-
-    const isDevelopment = import.meta.env.DEV;
 
     try {
       const packages = cartItems.map((item) => ({
@@ -580,27 +569,12 @@ const DownloadPage: React.FC = () => {
 
       let data: DependencyResolveResponse;
 
-      // 개발 환경: HTTP API 사용, 프로덕션: Electron IPC 사용
-      if (isDevelopment) {
-        const response = await fetch('/api/dependency/resolve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages, options }),
-        });
-
-        if (!response.ok) {
-          throw new Error('의존성 해결 실패');
-        }
-
-        data = await response.json() as DependencyResolveResponse;
-      } else {
-        // 프로덕션 Electron 환경: IPC 사용
-        const dependencyAPI = window.electronAPI?.dependency as DependencyAPI | undefined;
-        if (!dependencyAPI?.resolve) {
-          throw new Error('의존성 해결 API를 사용할 수 없습니다');
-        }
-        data = await dependencyAPI.resolve({ packages, options }) as DependencyResolveResponse;
+      // Electron IPC 사용 (개발/프로덕션 모두)
+      const dependencyAPI = window.electronAPI?.dependency as DependencyAPI | undefined;
+      if (!dependencyAPI?.resolve) {
+        throw new Error('의존성 해결 API를 사용할 수 없습니다');
       }
+      data = await dependencyAPI.resolve({ packages, options }) as DependencyResolveResponse;
 
       const originalCount = data.originalPackages.length;
       const totalCount = data.allPackages.length;
@@ -719,324 +693,28 @@ const DownloadPage: React.FC = () => {
 
     addLog('info', '다운로드 시작', `총 ${downloadItems.length}개 패키지`);
 
-    // 개발 환경 감지: Vite 개발 서버가 실행 중이면 HTTP/SSE API 사용
-    const isDevelopment = import.meta.env.DEV;
-
-    // 개발 환경에서는 HTTP/SSE API 사용 (Electron, 브라우저 모두)
-    // 프로덕션에서만 Electron IPC 사용
-    if (isDevelopment || !window.electronAPI?.download?.start) {
-      await browserDownload();
-    } else {
-      // 프로덕션 Electron 환경: IPC 사용
-      try {
-        // 의존성 해결된 downloadItems 사용 (cartItems가 아닌)
-        const packages = downloadItems.map((item: DownloadItem) => ({
-          id: item.id,
-          type: item.type,
-          name: item.name,
-          version: item.version,
-          architecture: (item as unknown as { arch?: string }).arch,
-          // OS 패키지용 필드
-          downloadUrl: (item as unknown as { downloadUrl?: string }).downloadUrl,
-          repository: (item as unknown as { repository?: string }).repository,
-          location: (item as unknown as { location?: string }).location,
-          // Docker 레지스트리 등 추가 메타데이터
-          metadata: (item as unknown as { metadata?: unknown }).metadata,
-        }));
-
-        const options = {
-          outputDir,
-          outputFormat,
-          includeScripts: includeInstallScripts,
-          targetOS: defaultTargetOS,
-          architecture: defaultArchitecture,
-          includeDependencies,
-          pythonVersion: languageVersions.python,
-        };
-
-        await window.electronAPI.download.start({ packages, options });
-      } catch (error) {
-        addLog('error', '다운로드 시작 실패', String(error));
-        setIsDownloading(false);
-      }
-    }
-  };
-
-  // 브라우저 환경에서 실제 다운로드 (Vite 서버 API 사용)
-  const browserDownload = async () => {
-    const clientId = `download-${Date.now()}`;
-    clientIdRef.current = clientId;  // ref에 저장
-
-    // SSE 연결로 진행률 수신
-    const eventSource = new EventSource(`/api/download/events?clientId=${clientId}`);
-    eventSourceRef.current = eventSource;  // ref에 저장
-
-    // SSE 연결이 열릴 때까지 대기
-    await new Promise<void>((resolve, reject) => {
-      eventSource.onopen = () => {
-        addLog('info', 'SSE 연결 성공');
-        resolve();
-      };
-      eventSource.onerror = (e) => {
-        reject(new Error('SSE 연결 실패'));
-      };
-      // 타임아웃 (5초)
-      setTimeout(() => reject(new Error('SSE 연결 타임아웃')), 5000);
-    });
-
-    // 상태 이벤트 핸들러 (resolving, downloading)
-    eventSource.addEventListener('status', (event) => {
-      const data = JSON.parse(event.data) as {
-        phase: string;
-        message: string;
-      };
-
-      if (data.phase === 'resolving') {
-        addLog('info', '의존성 분석 중...');
-      } else if (data.phase === 'downloading') {
-        addLog('info', '다운로드 시작...');
-      }
-    });
-
-    // 의존성 해결 완료 이벤트 핸들러
-    eventSource.addEventListener('deps-resolved', (event) => {
-      interface DependencyNodeData {
-        package: { name: string; version: string; type?: string };
-        dependencies: DependencyNodeData[];
-      }
-      interface DependencyTreeData {
-        root: DependencyNodeData;
-      }
-
-      const data = JSON.parse(event.data) as {
-        originalPackages: Array<{ id: string; name: string; version: string; type: string }>;
-        allPackages: Array<{ id: string; name: string; version: string; type: string }>;
-        dependencyTrees: DependencyTreeData[];
-        failedPackages: Array<{ name: string; version: string; error: string }>;
-      };
-
-      const originalCount = data.originalPackages.length;
-      const totalCount = data.allPackages.length;
-
-      addLog('info', `의존성 해결 완료: ${originalCount}개 → ${totalCount}개 패키지`);
-
-      // 의존성 관계 맵 생성: packageId -> { parentId, parentName }
-      const dependencyMap = new Map<string, { parentId: string; parentName: string }>();
-      const originalIds = new Set(data.originalPackages.map(p => p.id));
-
-      // 의존성 트리에서 관계 추출
-      if (data.dependencyTrees) {
-        data.dependencyTrees.forEach((tree) => {
-          const rootPkg = tree.root.package;
-          const rootId = `${rootPkg.type || 'pip'}-${rootPkg.name}-${rootPkg.version}`;
-          const rootName = rootPkg.name;
-
-          // 재귀적으로 의존성 노드 탐색
-          const extractDeps = (node: DependencyNodeData, parentId: string, parentName: string) => {
-            node.dependencies.forEach((dep) => {
-              const depPkg = dep.package;
-              const depId = `${depPkg.type || 'pip'}-${depPkg.name}-${depPkg.version}`;
-
-              // 원본 패키지가 아닌 경우에만 의존성으로 표시
-              if (!originalIds.has(depId)) {
-                dependencyMap.set(depId, { parentId, parentName });
-              }
-
-              // 재귀 호출 (이 의존성의 하위 의존성들)
-              extractDeps(dep, rootId, rootName);
-            });
-          };
-
-          extractDeps(tree.root, rootId, rootName);
-        });
-      }
-
-      // 의존성 포함된 새로운 아이템 목록으로 업데이트
-      const newItems: DownloadItem[] = data.allPackages.map((pkg) => {
-        const depInfo = dependencyMap.get(pkg.id);
-        const isOriginal = originalIds.has(pkg.id);
-
-        return {
-          id: pkg.id,
-          name: pkg.name,
-          version: pkg.version,
-          type: pkg.type,
-          status: 'pending' as DownloadStatus,
-          progress: 0,
-          downloadedBytes: 0,
-          totalBytes: 0,
-          speed: 0,
-          isDependency: !isOriginal,
-          parentId: depInfo?.parentId,
-          dependencyOf: depInfo?.parentName,
-        };
-      });
-      setItems(newItems);
-      // ref도 업데이트하여 progress 이벤트에서 최신 아이템 참조 가능
-      downloadItemsRef.current = newItems;
-
-      // 실패한 의존성 해결 경고 표시
-      if (data.failedPackages && data.failedPackages.length > 0) {
-        data.failedPackages.forEach((failed) => {
-          addLog('warn', `의존성 해결 실패: ${failed.name} (v${failed.version})`, failed.error);
-        });
-      }
-    });
-
-    eventSource.addEventListener('progress', (event) => {
-      const data = JSON.parse(event.data) as {
-        packageId: string;
-        status: string;
-        progress: number;
-        downloadedBytes?: number;
-        totalBytes?: number;
-        speed?: number;
-        error?: string;
-      };
-
-      updateItem(data.packageId, {
-        status: data.status as DownloadStatus,
-        progress: data.progress,
-        downloadedBytes: data.downloadedBytes || 0,
-        totalBytes: data.totalBytes || 0,
-        speed: data.speed || 0,
-        error: data.error,
-        endTime: data.status === 'completed' || data.status === 'failed' ? Date.now() : undefined,
-      });
-
-      // downloadItemsRef에서 현재 패키지 정보 조회하여 사용자 친화적인 이름 표시
-      // (클로저 문제로 downloadItems 대신 ref 사용)
-      const currentItem = downloadItemsRef.current.find(item => item.id === data.packageId);
-      const displayName = currentItem
-        ? `${currentItem.name} (v${currentItem.version})`
-        : data.packageId;
-
-      if (data.status === 'downloading' && data.progress === 0) {
-        addLog('info', `다운로드 시작: ${displayName}`);
-      } else if (data.status === 'completed') {
-        addLog('success', `다운로드 완료: ${displayName}`);
-      } else if (data.status === 'failed') {
-        addLog('error', `다운로드 실패: ${displayName}`, data.error);
-      }
-    });
-
-    eventSource.addEventListener('complete', (event) => {
-      const data = JSON.parse(event.data) as {
-        success: boolean;
-        outputPath: string;
-      };
-
-      // 전체 완료 시 pending/downloading 상태인 아이템만 completed로 변경
-      // (failed, skipped 등 다른 상태는 보존)
-      // Zustand 스토어에서 직접 최신 상태를 가져옴 (SSE 이벤트 처리 타이밍 문제 해결)
-      const currentItems = useDownloadStore.getState().items;
-      currentItems.forEach((item) => {
-        if (item.status === 'downloading' || item.status === 'pending') {
-          updateItem(item.id, { status: 'completed', progress: 100 });
-        }
-      });
-
+    // Electron IPC 사용 (개발/프로덕션 모두)
+    if (!window.electronAPI?.download?.start) {
+      addLog('error', '다운로드 API를 사용할 수 없습니다');
       setIsDownloading(false);
-      setPackagingStatus('completed');
-      setPackagingProgress(100);
-      addLog('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
-      message.success('다운로드 및 패키징이 완료되었습니다');
+      return;
+    }
 
-      // 히스토리 저장
-      const finalItems = useDownloadStore.getState().items;
-      const settings = useSettingsStore.getState();
-
-      // 패키지 정보 변환 (다운로드 시작 시 저장된 스냅샷 사용)
-      const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
+    try {
+      // 의존성 해결된 downloadItems 사용 (cartItems가 아닌)
+      const packages = downloadItems.map((item: DownloadItem) => ({
+        id: item.id,
         type: item.type,
         name: item.name,
         version: item.version,
-        arch: item.arch,
-        languageVersion: item.languageVersion,
-        metadata: item.metadata,
+        architecture: (item as unknown as { arch?: string }).arch,
+        // OS 패키지용 필드
+        downloadUrl: (item as unknown as { downloadUrl?: string }).downloadUrl,
+        repository: (item as unknown as { repository?: string }).repository,
+        location: (item as unknown as { location?: string }).location,
+        // Docker 레지스트리 등 추가 메타데이터
+        metadata: (item as unknown as { metadata?: unknown }).metadata,
       }));
-
-      // 설정 정보
-      const historySettings: HistorySettings = {
-        outputFormat: settings.defaultOutputFormat,
-        includeScripts: settings.includeInstallScripts,
-        includeDependencies: settings.includeDependencies,
-      };
-
-      // 상태 계산
-      const completedCount = finalItems.filter((i) => i.status === 'completed').length;
-      const failedCount = finalItems.filter((i) => i.status === 'failed').length;
-      const totalCount = finalItems.length;
-
-      let historyStatus: HistoryStatus = 'success';
-      if (failedCount === totalCount) {
-        historyStatus = 'failed';
-      } else if (failedCount > 0) {
-        historyStatus = 'partial';
-      }
-
-      // 총 크기 계산
-      const totalSize = finalItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
-
-      // 히스토리 저장
-      addHistory(
-        historyPackages,
-        historySettings,
-        data.outputPath,
-        totalSize,
-        historyStatus,
-        completedCount,
-        failedCount
-      );
-
-      // 실패 없이 모두 완료되면 장바구니 자동 비우기
-      if (failedCount === 0) {
-        // 클로저 문제 방지를 위해 스토어에서 직접 호출
-        useCartStore.getState().clearCart();
-      }
-
-      eventSource.close();
-      eventSourceRef.current = null;
-    });
-
-    // 취소 이벤트 핸들러
-    eventSource.addEventListener('cancelled', () => {
-      addLog('warn', '다운로드가 취소되었습니다');
-      setIsDownloading(false);
-      setPackagingStatus('idle');
-      eventSource.close();
-      eventSourceRef.current = null;
-    });
-
-    // 에러 핸들러 재설정 (연결 후 에러용)
-    eventSource.onerror = () => {
-      addLog('error', 'SSE 연결 오류');
-      setIsDownloading(false);
-      eventSource.close();
-      eventSourceRef.current = null;
-    };
-
-    // 다운로드 시작 요청
-    try {
-      // 이미 의존성 확인에서 해결된 패키지 목록 사용 (downloadItems)
-      const packages = downloadItems.map((item) => {
-        // 원본 장바구니에서 추가 정보 가져오기
-        const cartItem = cartItems.find(c => c.id === item.id);
-        return {
-          id: item.id,
-          type: item.type,
-          name: item.name,
-          version: item.version,
-          architecture: cartItem?.arch,
-          // OS 패키지용 필드
-          downloadUrl: cartItem?.downloadUrl,
-          repository: cartItem?.repository,
-          location: cartItem?.location,
-          // 의존성 정보
-          isDependency: item.isDependency,
-          parentId: item.parentId,
-        };
-      });
 
       const options = {
         outputDir,
@@ -1044,29 +722,17 @@ const DownloadPage: React.FC = () => {
         includeScripts: includeInstallScripts,
         targetOS: defaultTargetOS,
         architecture: defaultArchitecture,
-        // 의존성은 이미 해결됨 - 다운로드 시에는 해결 안 함
-        includeDependencies: false,
+        includeDependencies,
         pythonVersion: languageVersions.python,
         concurrency: concurrentDownloads,
-        // 의존성이 이미 해결되었음을 표시
-        skipDependencyResolution: true,
       };
 
-      const response = await fetch('/api/download/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packages, options, clientId }),
-      });
-
-      if (!response.ok) {
-        throw new Error('다운로드 시작 실패');
-      }
+      await window.electronAPI.download.start({ packages, options });
     } catch (error) {
       addLog('error', '다운로드 시작 실패', String(error));
       setIsDownloading(false);
-      eventSource.close();
     }
-  };;;
+  };
 
   // 일시정지/재개
   const handlePauseResume = () => {
@@ -1092,33 +758,10 @@ const DownloadPage: React.FC = () => {
       onOk: async () => {
         downloadCancelledRef.current = true;
 
-        // 개발 환경에서 HTTP API로 취소 요청
-        const isDevelopment = import.meta.env.DEV;
-
-        if (isDevelopment || !window.electronAPI?.download?.cancel) {
-          // 백엔드에 취소 요청
-          try {
-            const response = await fetch('/api/download/cancel', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ clientId: clientIdRef.current }),
-            });
-
-            if (response.ok) {
-              addLog('info', '다운로드 취소 요청 전송됨');
-            }
-          } catch (error) {
-            console.error('Failed to cancel download:', error);
-          }
-
-          // SSE 연결 종료
-          if (eventSourceRef.current) {
-            eventSourceRef.current.close();
-            eventSourceRef.current = null;
-          }
-        } else {
-          // 프로덕션 Electron 환경: IPC 사용
-          await window.electronAPI.download.cancel?.();
+        // Electron IPC 사용 (개발/프로덕션 모두)
+        if (window.electronAPI?.download?.cancel) {
+          await window.electronAPI.download.cancel();
+          addLog('info', '다운로드 취소 요청 전송됨');
         }
 
         // UI 상태 업데이트
@@ -1136,31 +779,47 @@ const DownloadPage: React.FC = () => {
     });
   };
 
-  // 에러 모달 - 재시도
-  const handleRetry = () => {
-    if (errorItem) {
-      retryItem(errorItem.id);
-      addLog('info', `재시도: ${errorItem.name}`);
+  // 단일 패키지 재다운로드 실행
+  const executeRetryDownload = async (item: DownloadItem) => {
+    if (!window.electronAPI?.download?.start) {
+      addLog('error', '다운로드 API를 사용할 수 없습니다');
+      return;
     }
-    setErrorModalOpen(false);
-    setErrorItem(null);
-  };
 
-  // 에러 모달 - 건너뛰기
-  const handleSkip = () => {
-    if (errorItem) {
-      skipItem(errorItem.id);
-      addLog('warn', `건너뜀: ${errorItem.name}`);
+    // 상태를 pending → downloading으로 변경
+    retryItem(item.id);
+    updateItem(item.id, { status: 'downloading', progress: 0 });
+
+    try {
+      const packages = [{
+        id: item.id,
+        type: item.type,
+        name: item.name,
+        version: item.version,
+        architecture: (item as unknown as { arch?: string }).arch,
+        downloadUrl: (item as unknown as { downloadUrl?: string }).downloadUrl,
+        repository: (item as unknown as { repository?: string }).repository,
+        location: (item as unknown as { location?: string }).location,
+        metadata: (item as unknown as { metadata?: unknown }).metadata,
+      }];
+
+      const options = {
+        outputDir,
+        outputFormat,
+        includeScripts: includeInstallScripts,
+        targetOS: defaultTargetOS,
+        architecture: defaultArchitecture,
+        includeDependencies: false, // 재시도 시 의존성 해결 불필요
+        pythonVersion: languageVersions.python,
+        concurrency: 1, // 단일 패키지이므로 1
+      };
+
+      await window.electronAPI.download.start({ packages, options });
+      addLog('info', `재시도 완료: ${item.name}`);
+    } catch (error) {
+      addLog('error', `재시도 실패: ${item.name}`, String(error));
+      updateItem(item.id, { status: 'failed', error: String(error) });
     }
-    setErrorModalOpen(false);
-    setErrorItem(null);
-  };
-
-  // 에러 모달 - 취소
-  const handleCancelFromError = () => {
-    setErrorModalOpen(false);
-    setErrorItem(null);
-    handleCancelDownload();
   };
 
   // 완료 후 초기화 (장바구니는 유지, 다운로드 상태만 초기화)
@@ -1200,12 +859,19 @@ const DownloadPage: React.FC = () => {
       key: 'name',
       render: (name: string, record: DownloadItem) => (
         <div>
-          <Text strong>{name}</Text>
-          <Text type="secondary" style={{ marginLeft: 8 }}>
-            {record.version}
-          </Text>
-          {record.type && (
-            <Tag style={{ marginLeft: 8 }}>{record.type}</Tag>
+          <div>
+            <Text strong>{name}</Text>
+            <Text type="secondary" style={{ marginLeft: 8 }}>
+              {record.version}
+            </Text>
+            {record.type && (
+              <Tag style={{ marginLeft: 8 }}>{record.type}</Tag>
+            )}
+          </div>
+          {record.status === 'failed' && record.error && (
+            <Text type="danger" style={{ fontSize: 12 }}>
+              {record.error}
+            </Text>
           )}
         </div>
       ),
@@ -1255,10 +921,7 @@ const DownloadPage: React.FC = () => {
               type="link"
               size="small"
               icon={<ReloadOutlined />}
-              onClick={() => {
-                retryItem(record.id);
-                addLog('info', `재시도 예약: ${record.name}`);
-              }}
+              onClick={() => executeRetryDownload(record)}
             >
               재시도
             </Button>
@@ -1294,14 +957,6 @@ const DownloadPage: React.FC = () => {
   // 원본 패키지별로 의존성 그룹화
   const getPackageDependencies = (parentId: string) => {
     return dependencyPackages.filter((item) => item.parentId === parentId);
-  };
-
-  // 패키지별 진행률 계산 (자신 + 의존성 포함)
-  const getPackageGroupProgress = (parentItem: DownloadItem) => {
-    const deps = getPackageDependencies(parentItem.id);
-    const allItems = [parentItem, ...deps];
-    const totalProgress = allItems.reduce((sum, item) => sum + item.progress, 0);
-    return allItems.length > 0 ? totalProgress / allItems.length : 0;
   };
 
   // 패키지별 완료 상태 계산
@@ -1569,7 +1224,6 @@ const DownloadPage: React.FC = () => {
           >
             {originalPackages.map((pkg) => {
               const deps = getPackageDependencies(pkg.id);
-              const groupProgress = getPackageGroupProgress(pkg);
               const groupStatus = getPackageGroupStatus(pkg);
 
               return (
@@ -1596,13 +1250,13 @@ const DownloadPage: React.FC = () => {
                           {groupStatus.completed}/{groupStatus.total} 완료
                         </Tag>
                         <Progress
-                          percent={Math.round(groupProgress)}
+                          percent={Math.round(pkg.progress)}
                           size="small"
                           style={{ width: 100, marginBottom: 0 }}
                           status={
-                            groupStatus.hasFailures
+                            pkg.status === 'failed'
                               ? 'exception'
-                              : groupStatus.isAllCompleted
+                              : pkg.status === 'completed'
                               ? 'success'
                               : 'active'
                           }
@@ -1638,10 +1292,7 @@ const DownloadPage: React.FC = () => {
                                   type="link"
                                   size="small"
                                   icon={<ReloadOutlined />}
-                                  onClick={() => {
-                                    retryItem(dep.id);
-                                    addLog('info', `재시도 예약: ${dep.name}`);
-                                  }}
+                                  onClick={() => executeRetryDownload(dep)}
                                 >
                                   재시도
                                 </Button>
@@ -1649,14 +1300,23 @@ const DownloadPage: React.FC = () => {
                             </Space>
                           }
                         >
-                          <Space>
-                            {statusIcons[dep.status]}
-                            <Text>{dep.name}</Text>
-                            <Text type="secondary">{dep.version}</Text>
-                            <Tag color={statusColors[dep.status]} style={{ marginLeft: 4 }}>
-                              {statusLabels[dep.status]}
-                            </Tag>
-                          </Space>
+                          <div>
+                            <Space>
+                              {statusIcons[dep.status]}
+                              <Text>{dep.name}</Text>
+                              <Text type="secondary">{dep.version}</Text>
+                              <Tag color={statusColors[dep.status]} style={{ marginLeft: 4 }}>
+                                {statusLabels[dep.status]}
+                              </Tag>
+                            </Space>
+                            {dep.status === 'failed' && dep.error && (
+                              <div style={{ marginLeft: 24, marginTop: 4 }}>
+                                <Text type="danger" style={{ fontSize: 12 }}>
+                                  {dep.error}
+                                </Text>
+                              </div>
+                            )}
+                          </div>
                         </List.Item>
                       )}
                     />
@@ -1801,38 +1461,6 @@ const DownloadPage: React.FC = () => {
           )}
         </div>
       </Card>
-
-      {/* 에러 처리 모달 */}
-      <Modal
-        title={
-          <Space>
-            <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
-            다운로드 오류
-          </Space>
-        }
-        open={errorModalOpen}
-        footer={null}
-        onCancel={() => setErrorModalOpen(false)}
-      >
-        {errorItem && (
-          <>
-            <Alert
-              message={`${errorItem.name}@${errorItem.version} 다운로드 실패`}
-              description={errorItem.error}
-              type="error"
-              showIcon
-              style={{ marginBottom: 24 }}
-            />
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={handleCancelFromError}>전체 취소</Button>
-              <Button onClick={handleSkip}>건너뛰기</Button>
-              <Button type="primary" onClick={handleRetry}>
-                재시도
-              </Button>
-            </Space>
-          </>
-        )}
-      </Modal>
     </div>
   );
 };

@@ -378,9 +378,15 @@ const WizardPage: React.FC = () => {
     }
   };
 
-  // 브라우저에서 npm Registry API로 패키지 검색
+  // npm Registry API로 패키지 검색 (IPC 우선, HTTP 폴백)
   const searchNpmPackage = async (query: string): Promise<SearchResult[]> => {
     try {
+      // Electron IPC 우선
+      if (window.electronAPI?.search?.packages) {
+        const result = await window.electronAPI.search.packages('npm', query);
+        return result.results || [];
+      }
+      // HTTP 폴백 (개발 환경)
       const response = await fetch(`/api/npm/search?q=${encodeURIComponent(query)}`);
       if (!response.ok) {
         return [];
@@ -393,12 +399,22 @@ const WizardPage: React.FC = () => {
     }
   };
 
-  // 브라우저에서 Docker 이미지 검색 (레지스트리별)
+  // Docker 이미지 검색 (레지스트리별, IPC 우선, HTTP 폴백)
   const searchDockerImage = async (query: string, registry: DockerRegistry = 'docker.io'): Promise<SearchResult[]> => {
     try {
       const registryParam = registry === 'custom' && customRegistryUrl
         ? customRegistryUrl
         : registry;
+      // Electron IPC 우선
+      if (window.electronAPI?.search?.packages) {
+        const result = await window.electronAPI.search.packages('docker', query, { registry: registryParam });
+        // 검색 결과에 레지스트리 정보 추가
+        return (result.results || []).map((item: SearchResult) => ({
+          ...item,
+          registry: registryParam,
+        }));
+      }
+      // HTTP 폴백 (개발 환경)
       const response = await fetch(`/api/docker/search?q=${encodeURIComponent(query)}&registry=${encodeURIComponent(registryParam)}`);
       if (!response.ok) {
         return [];
@@ -415,12 +431,18 @@ const WizardPage: React.FC = () => {
     }
   };
 
-  // Docker 이미지 태그 목록 조회
+  // Docker 이미지 태그 목록 조회 (IPC 우선, HTTP 폴백)
   const fetchDockerTags = async (imageName: string, registry: DockerRegistry = 'docker.io'): Promise<string[]> => {
     try {
       const registryParam = registry === 'custom' && customRegistryUrl
         ? customRegistryUrl
         : registry;
+      // Electron IPC 우선
+      if (window.electronAPI?.search?.versions) {
+        const result = await window.electronAPI.search.versions('docker', imageName, { registry: registryParam });
+        return result.versions || ['latest'];
+      }
+      // HTTP 폴백 (개발 환경)
       const response = await fetch(`/api/docker/tags?image=${encodeURIComponent(imageName)}&registry=${encodeURIComponent(registryParam)}`);
       if (!response.ok) {
         return ['latest'];
@@ -433,7 +455,7 @@ const WizardPage: React.FC = () => {
     }
   };
 
-  // 브라우저에서 OS 패키지 API로 검색 (YUM, APT, APK)
+  // OS 패키지 API로 검색 (YUM, APT, APK) - IPC 우선, HTTP 폴백
   const searchOSPackage = async (type: PackageType, query: string): Promise<SearchResult[]> => {
     try {
       // 패키지 타입에 따라 설정에서 배포판 정보 가져오기
@@ -474,34 +496,8 @@ const WizardPage: React.FC = () => {
         return [];
       }
 
-      const response = await fetch('/api/os/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query,
-          distribution: {
-            id: distributionInfo.id,
-            name: distributionInfo.name,
-            osType: distributionInfo.osType,
-            packageManager: distributionInfo.packageManager,
-          },
-          architecture: distributionInfo.architecture,
-          matchType: 'contains',
-          limit: 50,
-        }),
-      });
-
-      if (!response.ok) {
-        console.error(`OS package search failed: ${response.statusText}`);
-        return [];
-      }
-
-      const data = await response.json();
-
-      // OS 패키지 결과를 SearchResult 형식으로 변환 (그룹화된 결과 처리)
-      // API 응답: { packages: OSPackageSearchResult[], totalCount, hasMore }
-      // OSPackageSearchResult: { name, versions: OSPackageInfo[], latest: OSPackageInfo }
-      return (data.packages || []).map((pkg: {
+      // OS 패키지 결과를 SearchResult 형식으로 변환하는 헬퍼 함수
+      const mapOSPackageResult = (data: { packages?: Array<{
         name: string;
         versions: Array<{
           name: string;
@@ -523,16 +519,37 @@ const WizardPage: React.FC = () => {
           location?: string;
           architecture?: string;
         };
-      }) => ({
-        name: pkg.name,
-        version: pkg.latest.version,
-        description: pkg.latest.summary || pkg.latest.description || '',
-        versions: pkg.versions.map(v => v.version), // 버전 목록 포함
-        downloadUrl: pkg.latest.downloadUrl,
-        repository: pkg.latest.repository,
-        location: pkg.latest.location,
-        architecture: pkg.latest.architecture,
-      }));
+      }> }): SearchResult[] => {
+        return (data.packages || []).map((pkg) => ({
+          name: pkg.name,
+          version: pkg.latest.version,
+          description: pkg.latest.summary || pkg.latest.description || '',
+          versions: pkg.versions.map(v => v.version), // 버전 목록 포함
+          downloadUrl: pkg.latest.downloadUrl,
+          repository: pkg.latest.repository,
+          location: pkg.latest.location,
+          architecture: pkg.latest.architecture,
+        }));
+      };
+
+      // Electron IPC 사용 (개발/프로덕션 모두)
+      if (!window.electronAPI?.os?.search) {
+        console.error('OS 패키지 검색 API를 사용할 수 없습니다');
+        return [];
+      }
+      const result = await window.electronAPI.os.search({
+        query,
+        distribution: {
+          id: distributionInfo.id,
+          name: distributionInfo.name,
+          osType: distributionInfo.osType,
+          packageManager: distributionInfo.packageManager,
+        },
+        architecture: distributionInfo.architecture,
+        matchType: 'contains',
+        limit: 50,
+      }) as Parameters<typeof mapOSPackageResult>[0];
+      return mapOSPackageResult(result);
     } catch (error) {
       console.error(`${type} search error:`, error);
       return [];

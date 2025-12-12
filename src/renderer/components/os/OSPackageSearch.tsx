@@ -53,35 +53,17 @@ export const OSPackageSearch: React.FC<OSPackageSearchProps> = ({
     try {
       let results: { packages: OSPackageInfo[]; totalCount: number } | undefined;
 
-      // Electron 환경에서는 IPC 사용
-      if (window.electronAPI?.os?.search) {
-        results = await window.electronAPI.os.search({
-          query: state.query,
-          distribution,
-          architecture,
-          matchType: state.matchType,
-          limit: 50,
-        }) as { packages: OSPackageInfo[]; totalCount: number };
-      } else {
-        // 브라우저 환경에서는 HTTP API 사용
-        const response = await fetch('/api/os/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: state.query,
-            distribution,
-            architecture,
-            matchType: state.matchType,
-            limit: 50,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`검색 실패: ${response.statusText}`);
-        }
-
-        results = await response.json();
+      // Electron IPC 사용 (개발/프로덕션 모두)
+      if (!window.electronAPI?.os?.search) {
+        throw new Error('OS 패키지 검색 API를 사용할 수 없습니다');
       }
+      results = await window.electronAPI.os.search({
+        query: state.query,
+        distribution,
+        architecture,
+        matchType: state.matchType,
+        limit: 50,
+      }) as { packages: OSPackageInfo[]; totalCount: number };
 
       setState((s) => ({
         ...s,

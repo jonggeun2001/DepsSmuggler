@@ -3,6 +3,35 @@
 ## 개요
 - 목적: 데스크톱 앱 UI 및 시스템 통합
 - 프레임워크: Electron + React + Zustand
+- 통신 방식: **IPC 전용** (개발/프로덕션 환경 모두)
+
+### 아키텍처 특징
+
+모든 API 호출은 Electron IPC를 통해 이루어집니다:
+
+```
+┌─────────────────────────────────────────┐
+│           Renderer (React)              │
+│   WizardPage, CartPage, DownloadPage    │
+└──────────────────┬──────────────────────┘
+                   │ window.electronAPI
+                   ▼
+┌─────────────────────────────────────────┐
+│        Preload (contextBridge)          │
+│            electron/preload.ts          │
+└──────────────────┬──────────────────────┘
+                   │ IPC
+                   ▼
+┌─────────────────────────────────────────┐
+│           Main Process                  │
+│   electron/main.ts (IPC handlers)       │
+│            ↓                            │
+│   src/core/* (Downloaders, Resolvers)   │
+└─────────────────────────────────────────┘
+```
+
+> **Note**: 이전에는 개발 환경에서 Vite HTTP API를 사용하고 프로덕션에서 IPC를 사용하는
+> 이중 구조였으나, v0.2.0부터 IPC 전용으로 통합되었습니다.
 
 ---
 
@@ -654,19 +683,6 @@ const response = await window.electronAPI.search.packages(packageType, query, se
 ```
 
 이 변경으로 Docker 검색 시 선택된 레지스트리가 백엔드로 전달되어 해당 레지스트리에서 검색 수행.
-
-#### Maven 버전 조회 (브라우저 환경)
-
-브라우저 환경에서 Maven 패키지 선택 시 Vite 플러그인 API를 통해 버전 목록 조회:
-
-```tsx
-// WizardPage 내 Maven 버전 조회
-if (packageType === 'maven') {
-  const response = await fetch(`/api/maven/versions?package=${encodeURIComponent(record.name)}`);
-  const data = await response.json();
-  setAvailableVersions(data.versions);
-}
-```
 
 ### CartPage
 - 경로: `/cart`
