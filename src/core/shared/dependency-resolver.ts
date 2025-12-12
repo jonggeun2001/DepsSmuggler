@@ -7,6 +7,22 @@ import { getNpmResolver } from '../resolver/npmResolver';
 import { DownloadPackage } from './types';
 import { DependencyResolutionResult } from '../../types';
 import { NpmResolutionResult } from './npm-types';
+import logger from '../../utils/logger';
+
+/**
+ * 의존성 해결 진행 상황 콜백
+ */
+export interface DependencyProgressCallback {
+  (info: {
+    current: number;
+    total: number;
+    packageName: string;
+    packageType: string;
+    status: 'start' | 'success' | 'error';
+    dependencyCount?: number;
+    error?: string;
+  }): void;
+}
 
 /**
  * 고유 ID 생성 함수
@@ -47,6 +63,8 @@ export interface DependencyResolverOptions {
   targetOS?: 'any' | 'windows' | 'macos' | 'linux';
   /** Python 버전 (pip 휠 필터링용, 예: '3.11', '3.12') */
   pythonVersion?: string;
+  /** 진행 상황 콜백 */
+  onProgress?: DependencyProgressCallback;
 }
 
 /**
@@ -100,7 +118,12 @@ export async function resolveAllDependencies(
   };
   const targetPlatform = targetPlatformMap[targetOS] || {};
 
+  const totalPackages = packages.length;
+  let currentIndex = 0;
+
   for (const pkg of packages) {
+    currentIndex++;
+
     // 원본 패키지 추가
     const key = `${pkg.type}:${pkg.name}@${pkg.version}`;
     resolvedSet.set(key, pkg);
@@ -108,9 +131,19 @@ export async function resolveAllDependencies(
     // 타입별 리졸버 선택
     const resolver = getResolverByType(pkg.type);
     if (!resolver) {
-      console.warn(`지원하지 않는 패키지 타입: ${pkg.type}`);
+      logger.warn(`지원하지 않는 패키지 타입: ${pkg.type}`, { package: pkg.name });
       continue;
     }
+
+    // 시작 로그 및 콜백
+    logger.info(`[${currentIndex}/${totalPackages}] 의존성 해결 시작: ${pkg.type}/${pkg.name}@${pkg.version}`);
+    options?.onProgress?.({
+      current: currentIndex,
+      total: totalPackages,
+      packageName: pkg.name,
+      packageType: pkg.type,
+      status: 'start',
+    });
 
     try {
       // 패키지 타입별 의존성 해결 옵션 설정
@@ -210,6 +243,18 @@ export async function resolveAllDependencies(
             });
           }
         }
+
+        // 성공 로그 및 콜백 (npm)
+        const npmDepCount = npmResult.flatList.length;
+        logger.info(`[${currentIndex}/${totalPackages}] 의존성 해결 완료: ${pkg.type}/${pkg.name}@${pkg.version} (${npmDepCount}개 의존성)`);
+        options?.onProgress?.({
+          current: currentIndex,
+          total: totalPackages,
+          packageName: pkg.name,
+          packageType: pkg.type,
+          status: 'success',
+          dependencyCount: npmDepCount,
+        });
       } else {
         const result = await resolver.resolveDependencies(
           pkg.name,
@@ -239,10 +284,30 @@ export async function resolveAllDependencies(
             resolvedSet.set(depKey, downloadPkg);
           }
         }
+
+        // 성공 로그 및 콜백 (기타 타입)
+        const depCount = result.flatList.length;
+        logger.info(`[${currentIndex}/${totalPackages}] 의존성 해결 완료: ${pkg.type}/${pkg.name}@${pkg.version} (${depCount}개 의존성)`);
+        options?.onProgress?.({
+          current: currentIndex,
+          total: totalPackages,
+          packageName: pkg.name,
+          packageType: pkg.type,
+          status: 'success',
+          dependencyCount: depCount,
+        });
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.warn(`의존성 해결 실패: ${pkg.name}@${pkg.version}`, error);
+      logger.error(`[${currentIndex}/${totalPackages}] 의존성 해결 실패: ${pkg.type}/${pkg.name}@${pkg.version}`, { error: errorMessage });
+      options?.onProgress?.({
+        current: currentIndex,
+        total: totalPackages,
+        packageName: pkg.name,
+        packageType: pkg.type,
+        status: 'error',
+        error: errorMessage,
+      });
       failedPackages.push({
         name: pkg.name,
         version: pkg.version,
