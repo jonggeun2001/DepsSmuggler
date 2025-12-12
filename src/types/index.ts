@@ -13,7 +13,7 @@ export type PackageType =
   | 'apk'
   | 'docker';
 
-/** 지원하는 아키텍처 */
+/** 지원하는 아키텍처 (Docker: arm/v7, 386 포함) */
 export type Architecture =
   | 'x86_64'
   | 'amd64'
@@ -22,7 +22,9 @@ export type Architecture =
   | 'i386'
   | 'i686'
   | 'noarch'
-  | 'all';
+  | 'all'
+  | 'arm/v7'
+  | '386';
 
 /** 패키지 정보 */
 export interface PackageInfo {

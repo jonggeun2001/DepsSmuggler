@@ -72,20 +72,28 @@ interface DockerManifest {
     platform: {
       architecture: string;
       os: string;
+      variant?: string;
     };
   }[];
 }
 
-// 아키텍처 매핑
-const ARCH_MAP: Record<Architecture, string> = {
-  x86_64: 'amd64',
-  amd64: 'amd64',
-  arm64: 'arm64',
-  aarch64: 'arm64',
-  i386: '386',
-  i686: '386',
-  noarch: 'amd64',
-  all: 'amd64',
+// 아키텍처 매핑 (Docker manifest의 platform.architecture 값으로 변환)
+interface DockerPlatform {
+  architecture: string;
+  variant?: string;
+}
+
+const ARCH_MAP: Record<Architecture, DockerPlatform> = {
+  x86_64: { architecture: 'amd64' },
+  amd64: { architecture: 'amd64' },
+  arm64: { architecture: 'arm64' },
+  aarch64: { architecture: 'arm64' },
+  i386: { architecture: '386' },
+  i686: { architecture: '386' },
+  '386': { architecture: '386' },
+  'arm/v7': { architecture: 'arm', variant: 'v7' },
+  noarch: { architecture: 'amd64' },
+  all: { architecture: 'amd64' },
 };
 
 // 지원하는 레지스트리 타입
@@ -417,7 +425,7 @@ export class DockerDownloader implements IDownloader {
     try {
       const [namespace, repo] = this.parseImageName(repository);
       const fullName = `${namespace}/${repo}`;
-      const dockerArch = ARCH_MAP[arch] || 'amd64';
+      const dockerPlatform = ARCH_MAP[arch] || { architecture: 'amd64' };
 
       // 토큰 획득
       const token = await this.getTokenForRegistry(registry, fullName);
@@ -427,9 +435,13 @@ export class DockerDownloader implements IDownloader {
 
       // 멀티 아키텍처인 경우 해당 아키텍처 매니페스트 찾기
       if (manifest.manifests) {
-        const archManifest = manifest.manifests.find(
-          (m) => m.platform.architecture === dockerArch && m.platform.os === 'linux'
-        );
+        const archManifest = manifest.manifests.find((m) => {
+          const archMatch = m.platform.architecture === dockerPlatform.architecture;
+          const osMatch = m.platform.os === 'linux';
+          // variant가 지정된 경우 (arm/v7 등) variant도 일치해야 함
+          const variantMatch = !dockerPlatform.variant || m.platform.variant === dockerPlatform.variant;
+          return archMatch && osMatch && variantMatch;
+        });
 
         if (!archManifest) {
           throw new Error(`아키텍처 ${arch}를 지원하지 않습니다`);

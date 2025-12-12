@@ -4,8 +4,8 @@ import { persist } from 'zustand/middleware';
 // 패키지 타입
 export type PackageType = 'pip' | 'conda' | 'maven' | 'npm' | 'yum' | 'apt' | 'apk' | 'docker';
 
-// 아키텍처 타입
-export type Architecture = 'x86_64' | 'amd64' | 'arm64' | 'aarch64' | 'i386' | 'i686' | 'noarch' | 'all';
+// 아키텍처 타입 (Docker: arm/v7, 386 포함)
+export type Architecture = 'x86_64' | 'amd64' | 'arm64' | 'aarch64' | 'i386' | 'i686' | 'noarch' | 'all' | 'arm/v7' | '386';
 
 // 장바구니 아이템
 export interface CartItem {
