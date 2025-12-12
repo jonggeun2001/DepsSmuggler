@@ -143,6 +143,8 @@ const DownloadPage: React.FC = () => {
   const downloadItemsRef = useRef<DownloadItem[]>([]);
   // 히스토리 저장용 장바구니 데이터 (다운로드 시작 시 스냅샷)
   const cartSnapshotRef = useRef<typeof cartItems>([]);
+  // progress 업데이트 쓰로틀링용 Map (useRef로 effect 재실행 시에도 유지)
+  const progressThrottleMapRef = useRef<Map<string, number>>(new Map());
 
   // 초기화
   useEffect(() => {
@@ -169,7 +171,7 @@ const DownloadPage: React.FC = () => {
     if (!window.electronAPI?.download) return;
 
     // progress 업데이트 쓰로틀링 (UI 반응성 향상)
-    const progressThrottleMap = new Map<string, number>();
+    const progressThrottleMap = progressThrottleMapRef.current;
     const THROTTLE_MS = 300; // 300ms 간격으로 제한
 
     const unsubProgress = window.electronAPI.download.onProgress((progress: unknown) => {
