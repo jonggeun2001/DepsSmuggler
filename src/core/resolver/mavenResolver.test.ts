@@ -332,8 +332,9 @@ describe('MavenResolver 단위 테스트', () => {
       expect(result).toHaveLength(0);
     });
 
-    it('루트 패키지에서 dependencyManagement 사용', () => {
+    it('BOM/Parent POM에서 dependencyManagement만 있으면 빈 배열 반환 (버전 관리용)', () => {
       const pom = {
+        packaging: 'pom',
         dependencyManagement: {
           dependencies: {
             dependency: [
@@ -346,16 +347,20 @@ describe('MavenResolver 단위 테스트', () => {
       const coordinate = { groupId: 'org.test', artifactId: 'test', version: '1.0.0' };
       const result = callExtractDependencies(resolver, pom, coordinate, true);
 
-      expect(result).toHaveLength(2);
+      // dependencyManagement는 버전 관리용이므로 의존성으로 반환하지 않음
+      expect(result).toHaveLength(0);
     });
 
-    it('dependencyManagement에서 import scope/pom type 제외', () => {
+    it('dependencies와 dependencyManagement 둘 다 있으면 dependencies만 반환', () => {
       const pom = {
+        dependencies: {
+          dependency: [{ groupId: 'org.actual', artifactId: 'real-dep', version: '1.0' }],
+        },
         dependencyManagement: {
           dependencies: {
             dependency: [
-              { groupId: 'org.managed', artifactId: 'dep1', version: '1.0' },
-              { groupId: 'org.bom', artifactId: 'bom', version: '1.0', scope: 'import', type: 'pom' },
+              { groupId: 'org.managed', artifactId: 'managed1', version: '2.0' },
+              { groupId: 'org.managed', artifactId: 'managed2', version: '3.0' },
             ],
           },
         },
@@ -363,24 +368,9 @@ describe('MavenResolver 단위 테스트', () => {
       const coordinate = { groupId: 'org.test', artifactId: 'test', version: '1.0.0' };
       const result = callExtractDependencies(resolver, pom, coordinate, true);
 
+      // 실제 dependencies 섹션만 반환
       expect(result).toHaveLength(1);
-      expect(result[0].artifactId).toBe('dep1');
-    });
-
-    it('property 치환 적용', () => {
-      const pom = {
-        dependencyManagement: {
-          dependencies: {
-            dependency: { groupId: 'org.managed', artifactId: 'dep1', version: '${dep.version}' },
-          },
-        },
-      };
-      const coordinate = { groupId: 'org.test', artifactId: 'test', version: '1.0.0' };
-      const properties = { 'dep.version': '3.0.0' };
-      const result = callExtractDependencies(resolver, pom, coordinate, true, properties);
-
-      expect(result).toHaveLength(1);
-      expect(result[0].version).toBe('3.0.0');
+      expect(result[0].artifactId).toBe('real-dep');
     });
   });
 
