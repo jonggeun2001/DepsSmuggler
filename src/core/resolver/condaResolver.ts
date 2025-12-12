@@ -66,11 +66,42 @@ export class CondaResolver implements IResolver {
   // repodata 캐시 (channel/subdir -> RepoData)
   private repodataCache: Map<string, RepoData> = new Map();
 
+  // 패키지 이름별 인덱스 캐시 (channel/subdir -> Map<packageName, PackageEntry[]>)
+  // O(n) 전체 순회 대신 O(1) 조회를 위한 인덱스
+  private packageIndex: Map<string, Map<string, Array<{ filename: string; pkg: RepoDataPackage }>>> = new Map();
+
   // 타겟 플랫폼 설정
   private targetSubdir: string = 'linux-64';
 
   // Python 버전 설정
   private pythonVersion: string | null = null;
+
+  /**
+   * repodata에서 패키지 이름별 인덱스 생성 (O(n) -> O(1) 조회 최적화)
+   */
+  private buildPackageIndex(cacheKey: string, repodata: RepoData): Map<string, Array<{ filename: string; pkg: RepoDataPackage }>> {
+    const startTime = Date.now();
+    const index = new Map<string, Array<{ filename: string; pkg: RepoDataPackage }>>();
+
+    // packages와 packages.conda 모두 인덱싱
+    const allPackages = {
+      ...repodata.packages,
+      ...(repodata['packages.conda'] || {}),
+    };
+
+    for (const [filename, pkg] of Object.entries(allPackages)) {
+      const normalizedName = pkg.name.toLowerCase();
+      if (!index.has(normalizedName)) {
+        index.set(normalizedName, []);
+      }
+      index.get(normalizedName)!.push({ filename, pkg });
+    }
+
+    const elapsed = Date.now() - startTime;
+    logger.info(`패키지 인덱스 생성 완료: ${cacheKey} (${index.size}개 패키지명, ${elapsed}ms)`);
+
+    return index;
+  }
 
   /**
    * repodata.json 가져오기 (zstd 압축 우선, 캐싱 포함)
@@ -80,8 +111,11 @@ export class CondaResolver implements IResolver {
 
     // 메모리 캐시 확인 (세션 내 재사용)
     if (this.repodataCache.has(cacheKey)) {
+      logger.debug(`repodata 메모리 캐시 사용: ${channel}/${subdir}`);
       return this.repodataCache.get(cacheKey)!;
     }
+
+    logger.info(`repodata 로드 시작: ${channel}/${subdir} (처음 로드 시 시간이 걸릴 수 있습니다)`);
 
     // 파일 시스템 캐시 + HTTP 조건부 요청 사용
     const result = await fetchRepodata(channel, subdir, {
@@ -93,17 +127,19 @@ export class CondaResolver implements IResolver {
       // 메모리 캐시에도 저장 (세션 내 빠른 접근)
       this.repodataCache.set(cacheKey, result.data);
 
-      logger.info('repodata 로드 완료', {
-        channel,
-        subdir,
-        fromCache: result.fromCache,
+      // 패키지 이름별 인덱스 생성 (검색 최적화)
+      const index = this.buildPackageIndex(cacheKey, result.data);
+      this.packageIndex.set(cacheKey, index);
+
+      logger.info(`repodata 로드 완료: ${channel}/${subdir}`, {
+        fromCache: result.fromCache ? '디스크 캐시' : '네트워크',
         packages: result.meta.packageCount,
       });
 
       return result.data;
     }
 
-    logger.error('repodata 가져오기 실패', { channel, subdir });
+    logger.error(`repodata 가져오기 실패: ${channel}/${subdir}`);
     return null;
   }
 
@@ -138,24 +174,38 @@ export class CondaResolver implements IResolver {
 
   /**
    * repodata에서 패키지 후보 찾기 (Conda MatchSpec 문법 지원)
+   * 인덱스를 사용하여 O(1) 조회 최적화
    */
   private findPackageCandidates(
     repodata: RepoData,
     packageName: string,
-    versionSpec?: string
+    versionSpec?: string,
+    cacheKey?: string
   ): PackageCandidate[] {
     const candidates: Array<PackageCandidate & { isPythonMatch: boolean; timestamp: number }> = [];
     const normalizedName = packageName.toLowerCase();
 
-    // packages와 packages.conda 모두 검색
-    const allPackages = {
-      ...repodata.packages,
-      ...(repodata['packages.conda'] || {}),
-    };
+    // 인덱스가 있으면 O(1) 조회 사용
+    let packageEntries: Array<{ filename: string; pkg: RepoDataPackage }> | undefined;
+    if (cacheKey && this.packageIndex.has(cacheKey)) {
+      packageEntries = this.packageIndex.get(cacheKey)?.get(normalizedName);
+    }
 
-    for (const [filename, pkg] of Object.entries(allPackages)) {
-      if (pkg.name.toLowerCase() !== normalizedName) continue;
+    // 인덱스가 없으면 폴백: 전체 순회 (첫 로드 시)
+    if (!packageEntries) {
+      const allPackages = {
+        ...repodata.packages,
+        ...(repodata['packages.conda'] || {}),
+      };
+      packageEntries = [];
+      for (const [filename, pkg] of Object.entries(allPackages)) {
+        if (pkg.name.toLowerCase() === normalizedName) {
+          packageEntries.push({ filename, pkg });
+        }
+      }
+    }
 
+    for (const { filename, pkg } of packageEntries) {
       // 버전 스펙 체크 (새로운 MatchSpec 파서 사용)
       if (versionSpec && !matchesVersionSpec(pkg.version, versionSpec)) {
         continue;
@@ -224,13 +274,20 @@ export class CondaResolver implements IResolver {
 
     // Python 버전 설정
     this.pythonVersion = (options as { pythonVersion?: string })?.pythonVersion || null;
-    if (this.pythonVersion) {
-      logger.info('Conda 의존성 해결: Python 버전 필터링 활성화', { pythonVersion: this.pythonVersion });
-    }
+    
+    const startTime = Date.now();
+    logger.info(`Conda 의존성 해결 시작: ${packageName}@${version}`, {
+      channel,
+      targetSubdir: this.targetSubdir,
+      pythonVersion: this.pythonVersion,
+    });
 
     try {
       const root = await this.resolvePackage(packageName, version, channel, 0, maxDepth);
       const flatList = this.flattenDependencies(root);
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      logger.info(`Conda 의존성 해결 완료: ${packageName}@${version} (${flatList.length}개 패키지, ${elapsed}초)`);
 
       return {
         root,
@@ -238,7 +295,8 @@ export class CondaResolver implements IResolver {
         conflicts: this.conflicts,
       };
     } catch (error) {
-      logger.error('Conda 의존성 해결 실패', { packageName, version, channel, error });
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      logger.error(`Conda 의존성 해결 실패: ${packageName}@${version} (${elapsed}초)`, { error });
       throw error;
     }
   }
@@ -272,25 +330,33 @@ export class CondaResolver implements IResolver {
       // repodata에서 패키지 정보 조회
       let depends: string[] = [];
       let resolvedVersion = version;
+      let resolvedSubdir: string | undefined;
+      let resolvedFilename: string | undefined;
 
       // 먼저 타겟 플랫폼의 repodata 확인
+      const targetCacheKey = `${channel}/${this.targetSubdir}`;
       const repodata = await this.getRepoData(channel, this.targetSubdir);
       if (repodata) {
-        const candidates = this.findPackageCandidates(repodata, name, version === 'latest' ? undefined : `==${version}`);
+        const candidates = this.findPackageCandidates(repodata, name, version === 'latest' ? undefined : `==${version}`, targetCacheKey);
         if (candidates.length > 0) {
           depends = candidates[0].depends;
           resolvedVersion = candidates[0].version;
+          resolvedSubdir = candidates[0].subdir;
+          resolvedFilename = candidates[0].filename;
         }
       }
 
       // noarch도 확인
       if (depends.length === 0) {
+        const noarchCacheKey = `${channel}/noarch`;
         const noarchRepodata = await this.getRepoData(channel, 'noarch');
         if (noarchRepodata) {
-          const candidates = this.findPackageCandidates(noarchRepodata, name, version === 'latest' ? undefined : `==${version}`);
+          const candidates = this.findPackageCandidates(noarchRepodata, name, version === 'latest' ? undefined : `==${version}`, noarchCacheKey);
           if (candidates.length > 0) {
             depends = candidates[0].depends;
             resolvedVersion = candidates[0].version;
+            resolvedSubdir = candidates[0].subdir;
+            resolvedFilename = candidates[0].filename;
           }
         }
       }
@@ -304,12 +370,20 @@ export class CondaResolver implements IResolver {
         }
       }
 
+      // 다운로드 URL 생성 (subdir과 filename이 있는 경우)
+      const downloadUrl = resolvedSubdir && resolvedFilename
+        ? `${this.condaUrl}/${channel}/${resolvedSubdir}/${resolvedFilename}`
+        : undefined;
+
       const packageInfo: PackageInfo = {
         type: 'conda',
         name,
         version: resolvedVersion,
         metadata: {
           repository: `${channel}/${name}`,
+          subdir: resolvedSubdir,
+          filename: resolvedFilename,
+          downloadUrl,
         },
       };
 
@@ -392,18 +466,20 @@ export class CondaResolver implements IResolver {
     versionSpec?: string
   ): Promise<string | null> {
     // 타겟 플랫폼 repodata 확인
+    const targetCacheKey = `${channel}/${this.targetSubdir}`;
     const repodata = await this.getRepoData(channel, this.targetSubdir);
     if (repodata) {
-      const candidates = this.findPackageCandidates(repodata, name, versionSpec);
+      const candidates = this.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
       if (candidates.length > 0) {
         return candidates[0].version;
       }
     }
 
     // noarch 확인
+    const noarchCacheKey = `${channel}/noarch`;
     const noarchRepodata = await this.getRepoData(channel, 'noarch');
     if (noarchRepodata) {
-      const candidates = this.findPackageCandidates(noarchRepodata, name, versionSpec);
+      const candidates = this.findPackageCandidates(noarchRepodata, name, versionSpec, noarchCacheKey);
       if (candidates.length > 0) {
         return candidates[0].version;
       }
@@ -543,6 +619,7 @@ export class CondaResolver implements IResolver {
    */
   clearCache(): void {
     this.repodataCache.clear();
+    this.packageIndex.clear();
   }
 
   /**

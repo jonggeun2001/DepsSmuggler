@@ -337,14 +337,20 @@ export class CondaDownloader implements IDownloader {
     try {
       const channel = (info.metadata?.repository as string)?.split('/')[0] || 'conda-forge';
 
-      // 메타데이터 조회 (downloadUrl 포함)
-      const packageInfo = await this.getPackageMetadata(
-        info.name,
-        info.version,
-        channel,
-        info.arch
-      );
-      const downloadUrl = packageInfo.metadata?.downloadUrl;
+      // 1. resolver에서 이미 downloadUrl을 저장했으면 그대로 사용
+      let downloadUrl = info.metadata?.downloadUrl as string | undefined;
+      let packageInfo = info;
+
+      // 2. downloadUrl이 없으면 다시 메타데이터 조회
+      if (!downloadUrl) {
+        packageInfo = await this.getPackageMetadata(
+          info.name,
+          info.version,
+          channel,
+          info.arch
+        );
+        downloadUrl = packageInfo.metadata?.downloadUrl as string | undefined;
+      }
 
       if (!downloadUrl) {
         throw new Error(`다운로드 URL을 찾을 수 없습니다: ${info.name}@${info.version}`);

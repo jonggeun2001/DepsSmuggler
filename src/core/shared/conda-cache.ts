@@ -249,18 +249,37 @@ export async function fetchRepodata(
         }
       }
 
-      logger.info('repodata 가져오기', {
+      const startTime = Date.now();
+      logger.info(`repodata 다운로드 시작: ${channel}/${subdir}`, {
         url,
         compressed,
         conditional: !!(headers['If-None-Match'] || headers['If-Modified-Since']),
       });
 
+      let lastLoggedPercent = 0;
       const response = await axios.get(url, {
         responseType: compressed ? 'arraybuffer' : 'json',
         headers,
         timeout,
         validateStatus: (status) => status === 200 || status === 304,
+        onDownloadProgress: (progressEvent) => {
+          const { loaded, total } = progressEvent;
+          if (total) {
+            const percent = Math.floor((loaded / total) * 100);
+            // 20% 단위로 로그 출력 (너무 많은 로그 방지)
+            if (percent >= lastLoggedPercent + 20) {
+              lastLoggedPercent = percent;
+              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+              const loadedMB = (loaded / 1024 / 1024).toFixed(1);
+              const totalMB = (total / 1024 / 1024).toFixed(1);
+              logger.info(`repodata 다운로드 중: ${channel}/${subdir} (${loadedMB}MB / ${totalMB}MB, ${percent}%, ${elapsed}초)`);
+            }
+          }
+        },
       });
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      logger.info(`repodata 다운로드 완료: ${channel}/${subdir} (${elapsed}초)`);
 
       // 304 Not Modified - 캐시 유효 (디스크에서 읽기)
       if (response.status === 304) {
