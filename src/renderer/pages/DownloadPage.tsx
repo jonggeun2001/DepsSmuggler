@@ -460,24 +460,35 @@ const DownloadPage: React.FC = () => {
     }
   };
 
-  // 남은 시간 계산
+  // 남은 시간 계산 (바이트/속도 기반)
   const calculateRemainingTime = useCallback(() => {
-    if (!startTime || !isDownloading) return null;
+    if (!isDownloading) return null;
 
-    const totalProgress = downloadItems.reduce((sum, item) => sum + item.progress, 0) / downloadItems.length;
-    if (totalProgress === 0) return null;
+    // 현재 총 다운로드 속도 (bytes/sec)
+    const currentSpeed = downloadItems
+      .filter((item) => item.status === 'downloading')
+      .reduce((sum, item) => sum + (item.speed || 0), 0);
 
-    const elapsed = Date.now() - startTime;
-    const estimated = (elapsed / totalProgress) * (100 - totalProgress);
+    if (currentSpeed === 0) return null;
 
-    if (estimated < 60000) {
-      return `${Math.ceil(estimated / 1000)}초`;
-    } else if (estimated < 3600000) {
-      return `${Math.ceil(estimated / 60000)}분`;
+    // 총 예상 바이트와 다운로드된 바이트 계산
+    const downloadedBytes = downloadItems.reduce((sum, item) => sum + (item.downloadedBytes || 0), 0);
+    const expectedBytes = downloadItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
+    const remainingBytes = expectedBytes - downloadedBytes;
+
+    if (remainingBytes <= 0) return null;
+
+    // 남은 시간 (밀리초)
+    const remainingMs = (remainingBytes / currentSpeed) * 1000;
+
+    if (remainingMs < 60000) {
+      return `${Math.ceil(remainingMs / 1000)}초`;
+    } else if (remainingMs < 3600000) {
+      return `${Math.ceil(remainingMs / 60000)}분`;
     } else {
-      return `${Math.floor(estimated / 3600000)}시간 ${Math.ceil((estimated % 3600000) / 60000)}분`;
+      return `${Math.floor(remainingMs / 3600000)}시간 ${Math.ceil((remainingMs % 3600000) / 60000)}분`;
     }
-  }, [startTime, isDownloading, downloadItems]);
+  }, [isDownloading, downloadItems]);
 
   // 출력 폴더 검사 및 삭제
   const checkOutputPath = async (): Promise<boolean> => {
@@ -1006,11 +1017,12 @@ const DownloadPage: React.FC = () => {
     },
   ];
 
-  // 전체 진행률 계산
-  const totalProgress =
-    downloadItems.length > 0
-      ? downloadItems.reduce((sum, item) => sum + item.progress, 0) / downloadItems.length
-      : 0;
+  // 전체 진행률 계산 (바이트 기반)
+  const totalDownloadedBytes = downloadItems.reduce((sum, item) => sum + (item.downloadedBytes || 0), 0);
+  const totalExpectedBytes = downloadItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
+  const totalProgress = totalExpectedBytes > 0
+    ? (totalDownloadedBytes / totalExpectedBytes) * 100
+    : 0;
 
   const completedCount = downloadItems.filter((item) => item.status === 'completed').length;
   const failedCount = downloadItems.filter((item) => item.status === 'failed').length;
@@ -1248,6 +1260,10 @@ const DownloadPage: React.FC = () => {
         {/* 전체 진행률 */}
         <Progress
           percent={Math.round(totalProgress)}
+          format={() => totalExpectedBytes > 0
+            ? `${formatBytes(totalDownloadedBytes)} / ${formatBytes(totalExpectedBytes)}`
+            : `${Math.round(totalProgress)}%`
+          }
           status={
             failedCount > 0 && !isDownloading
               ? 'exception'
@@ -1280,8 +1296,9 @@ const DownloadPage: React.FC = () => {
             </Col>
             <Col span={8}>
               <Statistic
-                title="상태"
-                value={isPaused ? '일시정지' : '다운로드 중'}
+                title="진행 상황"
+                value={`${completedCount}/${downloadItems.length}`}
+                suffix="완료"
                 valueStyle={{ color: isPaused ? '#faad14' : '#1890ff' }}
               />
             </Col>
