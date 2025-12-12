@@ -208,40 +208,23 @@ export function getPipDownloader(): PipDownloader {
 
 ## 테스트
 
-### 테스트 설정 (`vitest.config.ts`)
+Vitest 기반 테스트 환경으로 단위 테스트와 통합 테스트를 구분하여 운영합니다.
 
-Vitest 기반 단위 테스트 환경
+### 테스트 분류
 
-| 설정 | 값 | 설명 |
-|------|-----|------|
-| environment | node | Node.js 환경 |
-| include | `src/**/*.test.ts` | 테스트 파일 패턴 |
-| testTimeout | 30000 | 테스트 타임아웃 (30초) |
-| coverage.provider | v8 | 커버리지 측정 |
-| coverage.include | `src/core/**/*.ts` | 커버리지 대상 |
-
-### 테스트 파일
-
-| 모듈 | 테스트 파일 | 설명 |
-|------|-------------|------|
-| CacheManager | `cacheManager.test.ts` | 캐시 관리자 테스트 |
-| PipDownloader | `pip.test.ts` | PyPI 다운로더 테스트 |
-| CondaDownloader | `conda.test.ts` | Conda 다운로더 테스트 |
-| MavenDownloader | `maven.test.ts` | Maven 다운로더 테스트 |
-| NpmDownloader | `npm.test.ts` | npm 다운로더 테스트 |
-| DockerDownloader | `docker.test.ts` | Docker 다운로더 테스트 |
-| YumDownloader | `yum.test.ts` | YUM 다운로더 테스트 |
-| OS Package | `os/os-package.test.ts` | OS 패키지 통합 테스트 |
-| Packager | `packager/packager.test.ts` | 패키저 테스트 |
-| search-utils | `shared/search-utils.test.ts` | 검색 유틸 테스트 |
-| version-utils | `shared/version-utils.test.ts` | 버전 유틸 테스트 |
-| conda-matchspec | `shared/conda-matchspec.test.ts` | MatchSpec 파서 테스트 |
+| 분류 | 파일 패턴 | 환경 변수 | 설명 |
+|------|----------|----------|------|
+| 단위 테스트 | `*.test.ts` | - | 네트워크 없이 로직 테스트 |
+| 통합 테스트 | `*.integration.test.ts` | `INTEGRATION_TEST=true` | 실제 API 호출 포함 |
 
 ### 테스트 실행
 
 ```bash
-# 전체 테스트 실행
+# 단위 테스트만 실행
 npm run test
+
+# 통합 테스트 포함 실행
+INTEGRATION_TEST=true npm run test
 
 # 커버리지 포함 테스트
 npm run test:coverage
@@ -249,6 +232,13 @@ npm run test:coverage
 # 특정 파일 테스트
 npx vitest run src/core/downloaders/pip.test.ts
 ```
+
+### GitHub Actions CI
+
+- 모든 OS (Ubuntu, Windows, macOS)에서 단위 테스트 + 통합 테스트 실행
+- 커버리지 측정 시 통합 테스트 포함
+
+자세한 내용은 [테스트 문서](./testing.md) 참조
 
 ---
 
@@ -261,3 +251,5 @@ npx vitest run src/core/downloaders/pip.test.ts
 - [CLI 문서](./cli.md)
 - [OS 패키지 다운로더 문서](./os-package-downloader.md)
 - [OS 패키지 설계 문서](./os-package-downloader-design.md)
+- [API 마이그레이션 (HTTP→IPC)](./api-migration-ipc.md)
+- [테스트 구조](./testing.md)
