@@ -6,6 +6,8 @@ export interface DownloadPackage {
   name: string;
   version: string;
   architecture?: string;
+  /** 패키지 크기 (바이트) */
+  size?: number;
   /** OS 패키지의 다운로드 URL (yum/apt/apk 등) */
   downloadUrl?: string;
   /** OS 패키지의 저장소 정보 */

@@ -615,8 +615,8 @@ const DownloadPage: React.FC = () => {
 
       // 응답 데이터 타입 정의
       type DependencyResolveResponse = {
-        originalPackages: Array<{ id: string; name: string; version: string; type: string }>;
-        allPackages: Array<{ id: string; name: string; version: string; type: string }>;
+        originalPackages: Array<{ id: string; name: string; version: string; type: string; size?: number }>;
+        allPackages: Array<{ id: string; name: string; version: string; type: string; size?: number }>;
         dependencyTrees: Array<{
           root: {
             package: { name: string; version: string; type?: string };
@@ -695,7 +695,7 @@ const DownloadPage: React.FC = () => {
           status: 'pending' as DownloadStatus,
           progress: 0,
           downloadedBytes: 0,
-          totalBytes: 0,
+          totalBytes: pkg.size || 0,
           speed: 0,
           isDependency: !isOriginal,
           parentId: depInfo?.parentId,
@@ -706,6 +706,17 @@ const DownloadPage: React.FC = () => {
       setItems(newItems);
       downloadItemsRef.current = newItems;
 
+      // 총 크기 계산 및 로그
+      const totalSize = newItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
+      const formatSize = (bytes: number) => {
+        if (!bytes || bytes === 0) return '알 수 없음';
+        if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+        if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${bytes} B`;
+      };
+      addLog('info', `총 다운로드 크기: ${formatSize(totalSize)}`);
+
       // 실패한 의존성 해결 경고 표시
       if (data.failedPackages && data.failedPackages.length > 0) {
         data.failedPackages.forEach((failed) => {
@@ -714,7 +725,7 @@ const DownloadPage: React.FC = () => {
       }
 
       setDepsResolved(true);
-      message.success(`의존성 확인 완료: ${totalCount}개 패키지`);
+      message.success(`의존성 확인 완료: ${totalCount}개 패키지 (${formatSize(totalSize)})`);
     } catch (error) {
       addLog('error', '의존성 확인 실패', String(error));
       message.error('의존성 확인 중 오류가 발생했습니다');

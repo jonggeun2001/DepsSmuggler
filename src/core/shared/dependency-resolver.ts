@@ -240,6 +240,7 @@ export async function resolveAllDependencies(
               name: depPkg.name,
               version: depPkg.version,
               architecture: pkg.architecture,
+              size: depPkg.size,
             });
           }
         }
@@ -274,6 +275,7 @@ export async function resolveAllDependencies(
               name: depPkg.name,
               version: depPkg.version,
               architecture: depPkg.arch || pkg.architecture,
+              size: depPkg.metadata?.size as number | undefined,
             };
 
             // OS 패키지 (yum/apt/apk)의 경우 downloadUrl 전달
