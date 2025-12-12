@@ -259,7 +259,18 @@ export class MavenDownloader implements IDownloader {
 
     // packaging 타입 확인 (pom이면 JAR가 없는 POM-only 패키지: BOM, parent POM 등)
     // getPackageMetadata에서는 packaging으로, resolver에서는 type으로 저장
-    const packaging = (info.metadata?.packaging as string) || (info.metadata?.type as string) || 'jar';
+    let packaging = (info.metadata?.packaging as string) || (info.metadata?.type as string);
+
+    // packaging 타입이 없으면 POM을 조회하여 확인 (의존성 해결 시 일부 노드는 POM 로드를 건너뛸 수 있음)
+    if (!packaging) {
+      try {
+        const metadata = await this.getPackageMetadata(info.name, info.version);
+        packaging = (metadata.metadata?.packaging as string) || 'jar';
+        logger.debug('POM에서 packaging 타입 조회', { groupId, artifactId, version: info.version, packaging });
+      } catch {
+        packaging = 'jar'; // 조회 실패 시 기본값
+      }
+    }
 
     // ArtifactType으로 변환 및 검증
     const artifactType = this.validateArtifactType(packaging);

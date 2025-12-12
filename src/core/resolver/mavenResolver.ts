@@ -678,7 +678,13 @@ export class MavenResolver implements IResolver {
       };
 
       const bomPom = await this.fetchPomWithCache(bomCoordinate);
-      this.processDependencyManagement(bomPom, bomPom.properties);
+
+      // BOM의 parent POM 체인을 처리하여 properties 상속받기
+      // 예: spring-boot-dependencies의 ${jakarta.el-api.version} 같은 프로퍼티가 parent에서 정의됨
+      const bomProperties = await this.processParentPom(bomPom, bomCoordinate);
+
+      // 상속받은 properties로 dependencyManagement 처리
+      await this.processDependencyManagement(bomPom, bomProperties);
     } catch (error) {
       logger.debug('BOM import 실패', { bom: `${dep.groupId}:${dep.artifactId}:${version}` });
     }
