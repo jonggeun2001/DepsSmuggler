@@ -45,6 +45,7 @@ const parser = new XMLParser({
   attributeNamePrefix: '@_',
   textNodeName: '#text',
   parseAttributeValue: true,
+  parseTagValue: false, // 버전 등의 값이 숫자로 변환되지 않도록 (4.0 -> 4 방지)
 });
 
 /**

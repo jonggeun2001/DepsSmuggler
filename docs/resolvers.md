@@ -271,6 +271,34 @@ const result = await resolver.resolveDependencies(
 // → dependencyManagement의 모든 의존성이 해결됨
 ```
 
+### Packaging 타입 처리
+
+POM의 `<packaging>` 태그를 읽어 각 의존성의 타입을 설정합니다:
+
+```typescript
+// POM에서 packaging 타입 추출 후 metadata에 저장
+if (pom.packaging) {
+  node.package.metadata = {
+    ...node.package.metadata,
+    type: pom.packaging,  // 'jar', 'pom', 'war', 'maven-plugin' 등
+  };
+}
+```
+
+이를 통해 다운로더가 올바른 파일 확장자로 다운로드할 수 있습니다 (예: pom → POM만, war → WAR 파일).
+
+### XML 파서 설정
+
+버전 문자열이 숫자로 변환되는 것을 방지:
+
+```typescript
+this.parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  parseTagValue: false,  // '4.0' → 4 변환 방지
+});
+```
+
 ### pom.xml 파싱
 ```typescript
 const deps = resolver.parseFromText(`
@@ -543,6 +571,7 @@ interface DependencyConflict {
 - [아키텍처 개요](./architecture-overview.md)
 - [Downloaders 문서](./downloaders.md)
 - [Shared Utilities 문서](./shared-utilities.md)
+- [테스트 구조](./testing.md)
 - [pip 의존성 해결 알고리즘](./pip-dependency-resolution.md)
 - [conda 의존성 해결 알고리즘](./conda-dependency-resolution.md)
 - [Maven 의존성 해결 알고리즘](./maven-dependency-resolution.md)

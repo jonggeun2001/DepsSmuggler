@@ -79,6 +79,7 @@ export class MavenResolver implements IResolver {
     this.parser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
+      parseTagValue: false, // 버전 등의 값이 숫자로 변환되지 않도록 (4.0 -> 4 방지)
     });
 
     this.axiosInstance = axios.create({
@@ -170,15 +171,25 @@ export class MavenResolver implements IResolver {
     // 루트 POM 로드 및 초기 의존성 큐에 추가
     const rootPom = await this.fetchPomWithCache(rootCoordinate);
 
+    // POM의 packaging 타입을 좌표에 설정 (pom이면 JAR가 없는 POM-only 패키지)
+    if (rootPom.packaging) {
+      rootCoordinate.type = rootPom.packaging;
+      // 루트 노드의 metadata도 업데이트
+      rootNode.package.metadata = {
+        ...rootNode.package.metadata,
+        type: rootPom.packaging,
+      };
+    }
+
     // Parent POM 처리 및 properties 체인 구축
     const resolvedProperties = await this.processParentPom(rootPom, rootCoordinate);
 
     // 현재 POM의 dependencyManagement 처리 (해결된 properties 사용)
-    this.processDependencyManagement(rootPom, resolvedProperties);
+    await this.processDependencyManagement(rootPom, resolvedProperties);
 
     // 루트의 직접 의존성을 큐에 추가
     // isRoot=true로 설정하여 dependencies가 없는 pom 타입도 dependencyManagement에서 의존성 추출
-    const rootDependencies = this.extractDependencies(rootPom, rootCoordinate, true);
+    const rootDependencies = this.extractDependencies(rootPom, rootCoordinate, true, resolvedProperties);
 
     // 좌표 할당 (루트)
     this.skipper.getCoordinateManager().createCoordinate(rootCoordinate, 0);
@@ -282,6 +293,15 @@ export class MavenResolver implements IResolver {
           error: error instanceof Error ? error.message : String(error),
         });
         continue;
+      }
+
+      // POM의 packaging 타입을 노드의 metadata에 업데이트 (pom이면 JAR가 없는 POM-only 패키지)
+      if (pom.packaging && node) {
+        coordinate.type = pom.packaging;
+        node.package.metadata = {
+          ...node.package.metadata,
+          type: pom.packaging,
+        };
       }
 
       // 하위 의존성의 properties 체인 구축 (parent POM에서 상속)
@@ -448,7 +468,12 @@ export class MavenResolver implements IResolver {
    * POM에서 의존성 목록 추출
    * dependencies가 없는 pom 타입(parent/BOM)의 경우 dependencyManagement의 의존성 반환
    */
-  private extractDependencies(pom: PomProject, coordinate: MavenCoordinate, isRoot = false): PomDependency[] {
+  private extractDependencies(
+    pom: PomProject,
+    coordinate: MavenCoordinate,
+    isRoot = false,
+    properties?: Record<string, string>
+  ): PomDependency[] {
     const deps = pom.dependencies?.dependency;
     if (deps) {
       return Array.isArray(deps) ? deps : [deps];
@@ -462,10 +487,17 @@ export class MavenResolver implements IResolver {
       if (managed) {
         const managedDeps = Array.isArray(managed) ? managed : [managed];
         // import 타입(BOM)이 아닌 실제 의존성만 반환
-        return managedDeps.filter(dep => dep.scope !== 'import' || dep.type !== 'pom');
+        // 버전이 property인 경우 해결 (${...} 형식)
+        return managedDeps
+          .filter(dep => dep.scope !== 'import' || dep.type !== 'pom')
+          .map(dep => ({
+            ...dep,
+            version: dep.version ? this.resolveProperty(dep.version, properties) : dep.version,
+          }));
       }
 
       // 2. 현재 POM에 없으면 상속받은 dependencyManagement 사용 (this.dependencyManagement)
+      // 이 경우 버전은 이미 해결된 상태
       if (this.dependencyManagement.size > 0) {
         const inheritedDeps: PomDependency[] = [];
         for (const [key, version] of this.dependencyManagement.entries()) {
@@ -570,7 +602,7 @@ export class MavenResolver implements IResolver {
       };
 
       // Parent의 dependencyManagement 상속 (부모의 properties로 해결)
-      this.processDependencyManagement(parentPom, parentProperties);
+      await this.processDependencyManagement(parentPom, parentProperties);
 
       return finalProperties;
     } catch (error) {
@@ -583,32 +615,48 @@ export class MavenResolver implements IResolver {
 
   /**
    * dependencyManagement 처리
+   * BOM import를 동기적으로 처리하여 의존성 버전이 올바르게 해결되도록 함
    */
-  private processDependencyManagement(
+  private async processDependencyManagement(
     pom: PomProject,
     properties?: Record<string, string>
-  ): void {
+  ): Promise<void> {
     const managed = pom.dependencyManagement?.dependencies?.dependency;
     if (!managed) return;
 
     const deps = Array.isArray(managed) ? managed : [managed];
 
+    // BOM import를 먼저 수집하고 병렬로 처리
+    const bomImports: { dep: PomDependency; properties?: Record<string, string> }[] = [];
+
     for (const dep of deps) {
-      const version = this.resolveProperty(dep.version || '', properties);
-      if (version) {
-        const key = `${dep.groupId}:${dep.artifactId}`;
-        // 먼저 정의된 것이 우선 (Nearest Definition)
-        if (!this.dependencyManagement.has(key)) {
-          this.dependencyManagement.set(key, version);
+      // BOM import 수집
+      if (dep.scope === 'import' && dep.type === 'pom') {
+        bomImports.push({ dep, properties });
+      } else {
+        // 일반 의존성 버전 등록
+        const version = this.resolveProperty(dep.version || '', properties);
+        if (version) {
+          const key = `${dep.groupId}:${dep.artifactId}`;
+          // 먼저 정의된 것이 우선 (Nearest Definition)
+          if (!this.dependencyManagement.has(key)) {
+            this.dependencyManagement.set(key, version);
+          }
         }
       }
+    }
 
-      // BOM import 처리
-      if (dep.scope === 'import' && dep.type === 'pom') {
-        this.importBom(dep, properties).catch((err) => {
-          logger.debug('BOM import 실패', { dep: `${dep.groupId}:${dep.artifactId}`, err });
-        });
-      }
+    // BOM import를 병렬로 처리 (모두 완료될 때까지 대기)
+    if (bomImports.length > 0) {
+      await Promise.all(
+        bomImports.map(async ({ dep, properties }) => {
+          try {
+            await this.importBom(dep, properties);
+          } catch (err) {
+            logger.debug('BOM import 실패', { dep: `${dep.groupId}:${dep.artifactId}`, err });
+          }
+        })
+      );
     }
   }
 
@@ -763,7 +811,7 @@ export class MavenResolver implements IResolver {
 
       // dependencyManagement 처리
       this.dependencyManagement.clear();
-      this.processDependencyManagement(pom, pom.properties);
+      await this.processDependencyManagement(pom, pom.properties);
 
       // 프로젝트 자체
       const projectGroupId = pom.groupId || pom.parent?.groupId;

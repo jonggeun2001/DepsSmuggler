@@ -463,7 +463,315 @@ Maven Resolver가 지원하는 체크섬 알고리즘:
 
 ---
 
-## 10. 소스 코드 참조
+## 10. 패키징 타입(Packaging Type) 처리
+
+### 10.1 Maven 패키징 타입 개요
+
+Maven은 다양한 패키징 타입을 지원하며, 각 타입에 따라 다운로드할 아티팩트가 다릅니다.
+
+| 패키징 타입 | 확장자 | 설명 | JAR 존재 |
+|------------|--------|------|----------|
+| `jar` | `.jar` | 기본값, Java 라이브러리 | ✅ |
+| `pom` | `.pom`만 | BOM, Parent POM (코드 없음) | ❌ |
+| `war` | `.war` | 웹 애플리케이션 | ❌ (WAR 대신) |
+| `ear` | `.ear` | 엔터프라이즈 애플리케이션 | ❌ (EAR 대신) |
+| `ejb` | `.jar` | Enterprise JavaBean | ✅ |
+| `maven-plugin` | `.jar` | Maven 플러그인 | ✅ |
+| `bundle` | `.jar` | OSGi 번들 | ✅ |
+| `rar` | `.rar` | 리소스 어댑터 | ❌ (RAR 대신) |
+| `aar` | `.aar` | Android 라이브러리 | ❌ (AAR 대신) |
+| `hpi`/`jpi` | `.hpi`/`.jpi` | Jenkins 플러그인 | ❌ |
+| `test-jar` | `-tests.jar` | 테스트 클래스 JAR | ✅ (classifier) |
+| `javadoc` | `-javadoc.jar` | Javadoc JAR | ✅ (classifier) |
+| `sources` | `-sources.jar` | 소스 JAR | ✅ (classifier) |
+
+### 10.2 타입 결정 우선순위
+
+패키징 타입은 다음 순서로 결정됩니다:
+
+```
+1. 의존성 선언의 <type> 태그 (명시적 지정)
+2. POM의 <packaging> 태그
+3. 기본값: jar
+```
+
+```xml
+<!-- 예시: 의존성에서 type 명시 -->
+<dependency>
+    <groupId>org.eclipse.microprofile</groupId>
+    <artifactId>microprofile-telemetry-api</artifactId>
+    <version>2.1</version>
+    <type>pom</type>  <!-- BOM import -->
+    <scope>import</scope>
+</dependency>
+
+<!-- 예시: POM에서 packaging 선언 -->
+<project>
+    <packaging>war</packaging>  <!-- WAR 패키징 -->
+</project>
+```
+
+### 10.3 타입별 다운로드 전략
+
+#### 10.3.1 JAR 계열 (`jar`, `ejb`, `maven-plugin`, `bundle`)
+
+```
+다운로드 대상:
+├── {artifactId}-{version}.jar       # 메인 아티팩트
+├── {artifactId}-{version}.pom       # POM 파일
+├── {artifactId}-{version}.jar.sha1  # JAR 체크섬
+└── {artifactId}-{version}.pom.sha1  # POM 체크섬
+
+선택적:
+├── {artifactId}-{version}-sources.jar
+└── {artifactId}-{version}-javadoc.jar
+```
+
+#### 10.3.2 POM Only (`pom`)
+
+BOM(Bill of Materials) 또는 Parent POM으로, 실행 가능한 코드가 없습니다.
+
+```
+다운로드 대상:
+├── {artifactId}-{version}.pom       # POM 파일만
+└── {artifactId}-{version}.pom.sha1  # 체크섬
+```
+
+**주의**: JAR 다운로드를 시도하면 404 에러 발생
+
+#### 10.3.3 WAR (`war`)
+
+웹 애플리케이션 아카이브:
+
+```
+다운로드 대상:
+├── {artifactId}-{version}.war       # WAR 파일
+├── {artifactId}-{version}.pom       # POM 파일
+├── {artifactId}-{version}.war.sha1  # WAR 체크섬
+└── {artifactId}-{version}.pom.sha1  # POM 체크섬
+```
+
+#### 10.3.4 EAR (`ear`)
+
+엔터프라이즈 애플리케이션 아카이브:
+
+```
+다운로드 대상:
+├── {artifactId}-{version}.ear       # EAR 파일
+├── {artifactId}-{version}.pom       # POM 파일
+├── {artifactId}-{version}.ear.sha1  # EAR 체크섬
+└── {artifactId}-{version}.pom.sha1  # POM 체크섬
+```
+
+#### 10.3.5 RAR (`rar`)
+
+리소스 어댑터 아카이브:
+
+```
+다운로드 대상:
+├── {artifactId}-{version}.rar       # RAR 파일
+├── {artifactId}-{version}.pom       # POM 파일
+└── 체크섬 파일들
+```
+
+#### 10.3.6 AAR (`aar`)
+
+Android 라이브러리:
+
+```
+다운로드 대상:
+├── {artifactId}-{version}.aar       # AAR 파일
+├── {artifactId}-{version}.pom       # POM 파일
+└── 체크섬 파일들
+
+저장소: Google Maven (https://maven.google.com)
+```
+
+#### 10.3.7 Classifier 타입 (`test-jar`, `sources`, `javadoc`)
+
+Classifier는 동일 좌표의 추가 아티팩트를 구분합니다:
+
+```xml
+<dependency>
+    <groupId>com.example</groupId>
+    <artifactId>my-lib</artifactId>
+    <version>1.0</version>
+    <type>test-jar</type>  <!-- 또는 classifier 사용 -->
+    <classifier>tests</classifier>
+</dependency>
+```
+
+```
+다운로드 URL 패턴:
+├── {artifactId}-{version}.jar                # 기본
+├── {artifactId}-{version}-tests.jar          # test-jar (classifier=tests)
+├── {artifactId}-{version}-sources.jar        # sources
+└── {artifactId}-{version}-javadoc.jar        # javadoc
+```
+
+### 10.4 구현 가이드라인
+
+#### 10.4.1 ArtifactType 정의
+
+```typescript
+// 지원하는 모든 패키징 타입
+type ArtifactType =
+  | 'jar'           // 기본 JAR
+  | 'pom'           // POM only (BOM, parent)
+  | 'war'           // 웹 애플리케이션
+  | 'ear'           // 엔터프라이즈 애플리케이션
+  | 'ejb'           // EJB (JAR로 다운로드)
+  | 'maven-plugin'  // Maven 플러그인 (JAR로 다운로드)
+  | 'bundle'        // OSGi 번들 (JAR로 다운로드)
+  | 'rar'           // 리소스 어댑터
+  | 'aar'           // Android 라이브러리
+  | 'hpi'           // Jenkins 플러그인
+  | 'test-jar'      // 테스트 JAR (classifier)
+  | 'sources'       // 소스 JAR (classifier)
+  | 'javadoc';      // Javadoc JAR (classifier)
+
+// 타입별 실제 확장자 매핑
+const TYPE_EXTENSION_MAP: Record<ArtifactType, string> = {
+  'jar': '.jar',
+  'pom': '.pom',
+  'war': '.war',
+  'ear': '.ear',
+  'ejb': '.jar',           // EJB는 JAR 확장자
+  'maven-plugin': '.jar',  // 플러그인도 JAR 확장자
+  'bundle': '.jar',        // OSGi 번들도 JAR 확장자
+  'rar': '.rar',
+  'aar': '.aar',
+  'hpi': '.hpi',
+  'test-jar': '.jar',      // classifier로 구분
+  'sources': '.jar',       // classifier로 구분
+  'javadoc': '.jar',       // classifier로 구분
+};
+
+// Classifier 매핑
+const TYPE_CLASSIFIER_MAP: Record<string, string> = {
+  'test-jar': 'tests',
+  'sources': 'sources',
+  'javadoc': 'javadoc',
+};
+```
+
+#### 10.4.2 파일명 생성 로직
+
+```typescript
+function buildFileName(
+  artifactId: string,
+  version: string,
+  type: ArtifactType,
+  classifier?: string
+): string {
+  const ext = TYPE_EXTENSION_MAP[type] || '.jar';
+  const typeClassifier = TYPE_CLASSIFIER_MAP[type];
+  const finalClassifier = classifier || typeClassifier;
+
+  if (finalClassifier) {
+    return `${artifactId}-${version}-${finalClassifier}${ext}`;
+  }
+  return `${artifactId}-${version}${ext}`;
+}
+
+// 예시
+buildFileName('spring-core', '5.3.0', 'jar');           // spring-core-5.3.0.jar
+buildFileName('spring-core', '5.3.0', 'sources');       // spring-core-5.3.0-sources.jar
+buildFileName('my-app', '1.0', 'war');                  // my-app-1.0.war
+buildFileName('my-ejb', '1.0', 'ejb');                  // my-ejb-1.0.jar
+buildFileName('my-lib', '1.0', 'jar', 'linux-x64');     // my-lib-1.0-linux-x64.jar
+```
+
+#### 10.4.3 다운로드 로직
+
+```typescript
+async function downloadPackage(info: PackageInfo, destPath: string): Promise<string> {
+  const { groupId, artifactId, version, type, classifier } = info.metadata;
+  const packaging = type || 'jar';
+
+  // POM-only 패키지 체크
+  const isPomOnly = packaging === 'pom';
+
+  // 메인 아티팩트 다운로드 (pom이 아닌 경우)
+  if (!isPomOnly) {
+    await downloadArtifact(groupId, artifactId, version, destPath, packaging, classifier);
+    await downloadChecksumFile(groupId, artifactId, version, destPath, packaging, classifier);
+  }
+
+  // POM 파일은 항상 다운로드
+  await downloadArtifact(groupId, artifactId, version, destPath, 'pom');
+  await downloadChecksumFile(groupId, artifactId, version, destPath, 'pom');
+
+  return buildFilePath(destPath, groupId, artifactId, version, packaging);
+}
+```
+
+### 10.5 특수 케이스 처리
+
+#### 10.5.1 BOM Import
+
+BOM(Bill of Materials)은 `<type>pom</type>`과 `<scope>import</scope>`로 선언됩니다.
+
+```xml
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-dependencies</artifactId>
+            <version>3.2.0</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+```
+
+**처리 방법**:
+- POM 파일만 다운로드
+- dependencyManagement 섹션의 버전 정보를 현재 프로젝트에 병합
+- 의존성 트리에는 포함하지 않음 (import scope)
+
+#### 10.5.2 Native Classifier
+
+플랫폼별 네이티브 라이브러리:
+
+```xml
+<dependency>
+    <groupId>io.netty</groupId>
+    <artifactId>netty-transport-native-epoll</artifactId>
+    <version>4.1.100.Final</version>
+    <classifier>linux-x86_64</classifier>
+</dependency>
+```
+
+**처리 방법**:
+- classifier가 포함된 파일명으로 다운로드
+- 사용자가 대상 아키텍처를 선택할 수 있도록 UI 제공
+
+#### 10.5.3 존재하지 않는 아티팩트 처리
+
+일부 POM은 메인 아티팩트 없이 POM만 배포됩니다 (aggregator, parent):
+
+```typescript
+async function downloadArtifact(...): Promise<string | null> {
+  try {
+    // 다운로드 시도
+    const response = await axios.get(url);
+    // ...
+  } catch (error) {
+    if (error.response?.status === 404) {
+      // POM-only 패키지일 가능성
+      logger.info('아티팩트 없음 (POM-only 패키지)', { type, groupId, artifactId });
+      return null;
+    }
+    throw error;
+  }
+}
+```
+
+---
+
+## 11. 소스 코드 참조
 
 ### 핵심 클래스 위치 (maven-resolver)
 

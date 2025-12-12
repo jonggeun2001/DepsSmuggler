@@ -226,15 +226,47 @@ const valid = await downloader.verifyChecksum(result.filePath, result.sha256);
 | `parseCoordinates` | GAV 좌표 파싱 (groupId:artifactId:version) |
 
 ### 아티팩트 타입
+
 ```typescript
-const ArtifactType = {
-  JAR: 'jar',
-  POM: 'pom',
-  SOURCES: 'sources',
-  JAVADOC: 'javadoc',
-  WAR: 'war',
-  EAR: 'ear'
-} as const;
+type ArtifactType =
+  | 'jar'           // 기본 JAR
+  | 'pom'           // POM only (BOM, parent)
+  | 'war'           // 웹 애플리케이션
+  | 'ear'           // 엔터프라이즈 애플리케이션
+  | 'ejb'           // EJB (JAR로 다운로드)
+  | 'maven-plugin'  // Maven 플러그인 (JAR로 다운로드)
+  | 'bundle'        // OSGi 번들 (JAR로 다운로드)
+  | 'rar'           // 리소스 어댑터
+  | 'aar'           // Android 라이브러리
+  | 'hpi'           // Jenkins 플러그인
+  | 'test-jar'      // 테스트 JAR (classifier)
+  | 'sources'       // 소스 JAR (classifier)
+  | 'javadoc';      // Javadoc JAR (classifier)
+```
+
+### 타입별 확장자 매핑
+
+| 타입 | 확장자 | 설명 |
+|------|--------|------|
+| jar, ejb, maven-plugin, bundle | .jar | JAR 파일 |
+| pom | .pom | POM 파일만 |
+| war | .war | 웹 애플리케이션 |
+| ear | .ear | 엔터프라이즈 애플리케이션 |
+| rar | .rar | 리소스 어댑터 |
+| aar | .aar | Android 라이브러리 |
+| hpi | .hpi | Jenkins 플러그인 |
+| test-jar, sources, javadoc | .jar | Classifier로 구분 |
+
+### POM-only 패키지 처리
+
+BOM(Bill of Materials)이나 Parent POM처럼 실행 코드가 없는 패키지는 POM 파일만 다운로드:
+
+```typescript
+// packaging이 'pom'이면 JAR 다운로드 스킵
+const isPomOnly = artifactType === 'pom';
+if (isPomOnly) {
+  // POM 파일만 다운로드
+}
 ```
 
 ### 완전 다운로드 (downloadPackage)
@@ -755,5 +787,7 @@ interface IDownloader {
 - [아키텍처 개요](./architecture-overview.md)
 - [Resolver 문서](./resolvers.md)
 - [Shared Utilities 문서](./shared-utilities.md)
+- [테스트 구조](./testing.md)
 - [npm 의존성 해결 알고리즘](./npm-dependency-resolution.md)
+- [Maven 의존성 해결 알고리즘](./maven-dependency-resolution.md)
 - [OS 패키지 다운로더](./os-package-downloader.md)
