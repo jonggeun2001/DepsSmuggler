@@ -125,7 +125,16 @@ export class PipResolver implements IResolver {
       if (!cacheResult) {
         throw new Error(`패키지를 찾을 수 없음: ${name}@${actualVersion}`);
       }
-      const { info } = cacheResult.data;
+      const { info, urls } = cacheResult.data;
+
+      // 패키지 크기 계산 (wheel 또는 sdist 중 가장 적합한 것 선택)
+      let packageSize = 0;
+      if (urls && urls.length > 0) {
+        // wheel 파일 우선, 없으면 sdist
+        const wheel = urls.find((u) => u.packagetype === 'bdist_wheel');
+        const sdist = urls.find((u) => u.packagetype === 'sdist');
+        packageSize = (wheel || sdist || urls[0]).size || 0;
+      }
 
       const packageInfo: PackageInfo = {
         type: 'pip',
@@ -133,6 +142,7 @@ export class PipResolver implements IResolver {
         version: info.version,
         metadata: {
           description: '',
+          size: packageSize,
         },
       };
 

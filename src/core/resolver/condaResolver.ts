@@ -53,6 +53,7 @@ interface PackageCandidate {
   buildNumber: number;
   depends: string[];
   subdir: string;
+  size: number;
 }
 
 export class CondaResolver implements IResolver {
@@ -221,6 +222,7 @@ export class CondaResolver implements IResolver {
         buildNumber: pkg.build_number,
         depends: pkg.depends || [],
         subdir: pkg.subdir || repodata.info?.subdir || 'noarch',
+        size: pkg.size || 0,
         isPythonMatch,
         timestamp: pkg.timestamp || 0,
       });
@@ -285,6 +287,7 @@ export class CondaResolver implements IResolver {
     try {
       const root = await this.resolvePackage(packageName, version, channel, 0, maxDepth);
       const flatList = this.flattenDependencies(root);
+      const totalSize = flatList.reduce((sum, pkg) => sum + ((pkg.metadata?.size as number) || 0), 0);
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       logger.info(`Conda 의존성 해결 완료: ${packageName}@${version} (${flatList.length}개 패키지, ${elapsed}초)`);
@@ -293,6 +296,7 @@ export class CondaResolver implements IResolver {
         root,
         flatList,
         conflicts: this.conflicts,
+        totalSize,
       };
     } catch (error) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -332,6 +336,7 @@ export class CondaResolver implements IResolver {
       let resolvedVersion = version;
       let resolvedSubdir: string | undefined;
       let resolvedFilename: string | undefined;
+      let resolvedSize = 0;
 
       // 먼저 타겟 플랫폼의 repodata 확인
       const targetCacheKey = `${channel}/${this.targetSubdir}`;
@@ -343,6 +348,7 @@ export class CondaResolver implements IResolver {
           resolvedVersion = candidates[0].version;
           resolvedSubdir = candidates[0].subdir;
           resolvedFilename = candidates[0].filename;
+          resolvedSize = candidates[0].size;
         }
       }
 
@@ -357,6 +363,7 @@ export class CondaResolver implements IResolver {
             resolvedVersion = candidates[0].version;
             resolvedSubdir = candidates[0].subdir;
             resolvedFilename = candidates[0].filename;
+            resolvedSize = candidates[0].size;
           }
         }
       }
@@ -384,6 +391,7 @@ export class CondaResolver implements IResolver {
           subdir: resolvedSubdir,
           filename: resolvedFilename,
           downloadUrl,
+          size: resolvedSize,
         },
       };
 
