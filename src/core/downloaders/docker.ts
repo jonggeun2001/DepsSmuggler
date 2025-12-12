@@ -450,6 +450,9 @@ export class DockerDownloader implements IDownloader {
       // 전체 크기 계산
       const totalSize = manifest.layers.reduce((sum, layer) => sum + layer.size, 0);
       let downloadedSize = 0;
+      let lastBytes = 0;
+      let lastTime = Date.now();
+      let currentSpeed = 0;
 
       // Config blob 다운로드
       const configPath = path.join(imageDir, 'config.json');
@@ -470,13 +473,23 @@ export class DockerDownloader implements IDownloader {
           registry,
           (bytes) => {
             downloadedSize += bytes;
+
+            // 속도 계산 (0.3초마다)
+            const now = Date.now();
+            const elapsed = (now - lastTime) / 1000;
+            if (elapsed >= 0.3) {
+              currentSpeed = (downloadedSize - lastBytes) / elapsed;
+              lastBytes = downloadedSize;
+              lastTime = now;
+            }
+
             if (onProgress) {
               onProgress({
                 itemId: `${registry}/${repository}:${tag}`,
                 progress: (downloadedSize / totalSize) * 100,
                 downloadedBytes: downloadedSize,
                 totalBytes: totalSize,
-                speed: 0,
+                speed: currentSpeed,
               });
             }
           }
@@ -812,7 +825,7 @@ export class DockerDownloader implements IDownloader {
    */
   async verifyChecksum(filePath: string, expected: string): Promise<boolean> {
     const actual = await this.calculateSha256(filePath);
-    return actual === expected;
+    return actual.toLowerCase() === expected.toLowerCase();
   }
 
 

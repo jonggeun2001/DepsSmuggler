@@ -176,6 +176,9 @@ export abstract class BaseOSDownloader {
 
     const chunks: Uint8Array[] = [];
     let downloaded = 0;
+    let lastBytes = 0;
+    let lastTime = Date.now();
+    let currentSpeed = 0;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -185,6 +188,15 @@ export abstract class BaseOSDownloader {
       chunks.push(value);
       downloaded += value.length;
 
+      // 속도 계산 (0.3초마다)
+      const now = Date.now();
+      const elapsed = (now - lastTime) / 1000;
+      if (elapsed >= 0.3) {
+        currentSpeed = (downloaded - lastBytes) / elapsed;
+        lastBytes = downloaded;
+        lastTime = now;
+      }
+
       // 진행률 콜백
       if (this.options.onProgress) {
         this.options.onProgress({
@@ -193,7 +205,7 @@ export abstract class BaseOSDownloader {
           totalPackages: 1,
           bytesDownloaded: downloaded,
           totalBytes: contentLength || pkg.size,
-          speed: 0, // 속도 계산은 생략
+          speed: currentSpeed,
           phase: 'downloading',
         });
       }

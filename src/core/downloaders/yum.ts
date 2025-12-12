@@ -218,18 +218,31 @@ export class YumDownloader implements IDownloader {
 
       const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
       let downloadedBytes = 0;
+      let lastBytes = 0;
+      let lastTime = Date.now();
+      let currentSpeed = 0;
 
       const writer = fs.createWriteStream(filePath);
 
       response.data.on('data', (chunk: Buffer) => {
         downloadedBytes += chunk.length;
+
+        // 속도 계산 (0.3초마다)
+        const now = Date.now();
+        const elapsed = (now - lastTime) / 1000;
+        if (elapsed >= 0.3) {
+          currentSpeed = (downloadedBytes - lastBytes) / elapsed;
+          lastBytes = downloadedBytes;
+          lastTime = now;
+        }
+
         if (onProgress) {
           onProgress({
             itemId: `${info.name}@${info.version}`,
             progress: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0,
             downloadedBytes,
             totalBytes,
-            speed: 0,
+            speed: currentSpeed,
           });
         }
       });
@@ -285,8 +298,8 @@ export class YumDownloader implements IDownloader {
 
       stream.on('data', (data) => hash.update(data));
       stream.on('end', () => {
-        const actual = hash.digest('hex');
-        resolve(actual === expected);
+        const actual = hash.digest('hex').toLowerCase();
+        resolve(actual === expected.toLowerCase());
       });
       stream.on('error', reject);
     });
