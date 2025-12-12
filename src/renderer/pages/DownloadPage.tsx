@@ -170,7 +170,7 @@ const DownloadPage: React.FC = () => {
 
     // progress 업데이트 쓰로틀링 (UI 반응성 향상)
     const progressThrottleMap = new Map<string, number>();
-    const THROTTLE_MS = 100; // 100ms 간격으로 제한
+    const THROTTLE_MS = 300; // 300ms 간격으로 제한
 
     const unsubProgress = window.electronAPI.download.onProgress((progress: unknown) => {
       const p = progress as {
@@ -181,6 +181,15 @@ const DownloadPage: React.FC = () => {
         totalBytes: number;
         speed?: number;
         error?: string;
+      };
+
+      // 크기 포맷팅 함수
+      const formatSize = (bytes: number) => {
+        if (!bytes || bytes === 0) return '';
+        if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+        if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${bytes} B`;
       };
 
       // status에 따라 처리
@@ -196,7 +205,10 @@ const DownloadPage: React.FC = () => {
         const displayName = completedItem
           ? `${completedItem.name} (v${completedItem.version})`
           : p.packageId;
-        addLog('success', `다운로드 완료: ${displayName}`);
+
+        // 크기 정보 추가
+        const sizeStr = p.totalBytes ? formatSize(p.totalBytes) : '';
+        addLog('success', `다운로드 완료: ${displayName}`, sizeStr || undefined);
       } else if (p.status === 'failed') {
         progressThrottleMap.delete(p.packageId);
         const item = downloadItemsRef.current.find(i => i.id === p.packageId);
@@ -953,16 +965,22 @@ const DownloadPage: React.FC = () => {
       ),
     },
     {
-      title: '속도',
-      dataIndex: 'speed',
-      key: 'speed',
-      width: 120,
-      render: (speed: number, record: DownloadItem) => {
-        if (record.status !== 'downloading') return '-';
-        if (speed > 1024 * 1024) {
-          return `${(speed / 1024 / 1024).toFixed(1)} MB/s`;
+      title: '크기',
+      dataIndex: 'totalBytes',
+      key: 'size',
+      width: 100,
+      render: (totalBytes: number) => {
+        if (!totalBytes || totalBytes === 0) return '-';
+        if (totalBytes >= 1024 * 1024 * 1024) {
+          return `${(totalBytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
         }
-        return `${(speed / 1024).toFixed(1)} KB/s`;
+        if (totalBytes >= 1024 * 1024) {
+          return `${(totalBytes / 1024 / 1024).toFixed(1)} MB`;
+        }
+        if (totalBytes >= 1024) {
+          return `${(totalBytes / 1024).toFixed(1)} KB`;
+        }
+        return `${totalBytes} B`;
       },
     },
     {
@@ -1004,6 +1022,15 @@ const DownloadPage: React.FC = () => {
   const totalSpeed = downloadItems
     .filter((item) => item.status === 'downloading')
     .reduce((sum, item) => sum + item.speed, 0);
+
+  // 크기 포맷팅 함수
+  const formatBytes = (bytes: number) => {
+    if (!bytes || bytes === 0) return '-';
+    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
+  };
 
   // 원본 패키지와 의존성 패키지 분류
   const originalPackages = downloadItems.filter((item) => !item.isDependency);
@@ -1304,6 +1331,9 @@ const DownloadPage: React.FC = () => {
                         <Tag color={groupStatus.isAllCompleted ? 'success' : 'processing'}>
                           {groupStatus.completed}/{groupStatus.total} 완료
                         </Tag>
+                        <Text type="secondary" style={{ minWidth: 70, textAlign: 'right' }}>
+                          {formatBytes(pkg.totalBytes)}
+                        </Text>
                         <Progress
                           percent={Math.round(pkg.progress)}
                           size="small"
@@ -1330,6 +1360,9 @@ const DownloadPage: React.FC = () => {
                           style={{ padding: '8px 12px' }}
                           extra={
                             <Space>
+                              <Text type="secondary" style={{ minWidth: 70, textAlign: 'right' }}>
+                                {formatBytes(dep.totalBytes)}
+                              </Text>
                               <Progress
                                 percent={Math.round(dep.progress)}
                                 size="small"

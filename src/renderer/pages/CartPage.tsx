@@ -36,6 +36,7 @@ import {
 } from '@ant-design/icons';
 import { useCartStore, CartItem, PackageType } from '../stores/cartStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useDownloadStore } from '../stores/downloadStore';
 import { DependencyTree } from '../components';
 import { DependencyResolutionResult, DependencyNode, PackageType as CorePackageType } from '../../types';
 import type { DependencyAPI } from '../../types/electron';
@@ -74,6 +75,7 @@ const CartPage: React.FC = () => {
   const navigate = useNavigate();
   const { items, removeItem, clearCart, addItem } = useCartStore();
   const settings = useSettingsStore();
+  const resetDownload = useDownloadStore((state) => state.reset);
 
   // 모달 상태
   const [textInputModalOpen, setTextInputModalOpen] = useState(false);
@@ -448,6 +450,8 @@ const CartPage: React.FC = () => {
 
   // 다운로드 시작
   const handleStartDownload = () => {
+    // 이전 다운로드 상태 초기화 후 새로운 다운로드 시작
+    resetDownload();
     navigate('/download');
   };
 
