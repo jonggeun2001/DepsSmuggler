@@ -7,6 +7,7 @@
 
 import axios, { AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
+import pLimit from 'p-limit';
 import {
   IResolver,
   PackageInfo,
@@ -128,18 +129,24 @@ export class MavenResolver implements IResolver {
       const root = await this.resolveBF(rootCoordinate, opts);
       const flatList = this.flattenDependencies(root);
 
+      // 패키지 크기 조회 (병렬 HEAD 요청)
+      const flatListWithSizes = await this.fetchPackageSizes(flatList);
+      const totalSize = flatListWithSizes.reduce((sum, pkg) => sum + (pkg.metadata?.size as number || 0), 0);
+
       const stats = this.skipper.getStats();
       logger.info('Maven 의존성 해결 완료', {
         package: packageName,
-        totalDependencies: flatList.length,
+        totalDependencies: flatListWithSizes.length,
+        totalSize,
         conflicts: this.conflicts.length,
         skipperStats: stats,
       });
 
       return {
         root,
-        flatList,
+        flatList: flatListWithSizes,
         conflicts: this.conflicts,
+        totalSize,
       };
     } catch (error) {
       logger.error('Maven 의존성 해결 실패', { packageName, version, error });
@@ -466,7 +473,9 @@ export class MavenResolver implements IResolver {
 
   /**
    * POM에서 의존성 목록 추출
-   * dependencies가 없는 pom 타입(parent/BOM)의 경우 dependencyManagement의 의존성 반환
+   *
+   * 주의: Parent POM / BOM의 dependencyManagement는 버전 관리용이므로
+   * 실제 다운로드 대상 의존성으로 처리하지 않음
    */
   private extractDependencies(
     pom: PomProject,
@@ -474,45 +483,17 @@ export class MavenResolver implements IResolver {
     isRoot = false,
     properties?: Record<string, string>
   ): PomDependency[] {
+    // 실제 <dependencies> 섹션만 반환
     const deps = pom.dependencies?.dependency;
     if (deps) {
       return Array.isArray(deps) ? deps : [deps];
     }
 
-    // 루트 패키지이고 dependencies가 없는 경우 (parent POM, BOM 등)
-    // dependencyManagement의 의존성을 반환 (parent로부터 상속받은 것 포함)
-    if (isRoot) {
-      // 1. 먼저 현재 POM의 dependencyManagement 확인
-      const managed = pom.dependencyManagement?.dependencies?.dependency;
-      if (managed) {
-        const managedDeps = Array.isArray(managed) ? managed : [managed];
-        // import 타입(BOM)이 아닌 실제 의존성만 반환
-        // 버전이 property인 경우 해결 (${...} 형식)
-        return managedDeps
-          .filter(dep => dep.scope !== 'import' || dep.type !== 'pom')
-          .map(dep => ({
-            ...dep,
-            version: dep.version ? this.resolveProperty(dep.version, properties) : dep.version,
-          }));
-      }
-
-      // 2. 현재 POM에 없으면 상속받은 dependencyManagement 사용 (this.dependencyManagement)
-      // 이 경우 버전은 이미 해결된 상태
-      if (this.dependencyManagement.size > 0) {
-        const inheritedDeps: PomDependency[] = [];
-        for (const [key, version] of this.dependencyManagement.entries()) {
-          const [groupId, artifactId] = key.split(':');
-          if (groupId && artifactId) {
-            inheritedDeps.push({
-              groupId,
-              artifactId,
-              version,
-              scope: 'compile',
-            });
-          }
-        }
-        return inheritedDeps;
-      }
+    // <dependencies>가 없으면 빈 배열 반환
+    // Parent POM / BOM의 dependencyManagement는 버전 관리용이므로 의존성으로 처리하지 않음
+    // (dependencyManagement의 630개 이상 항목을 모두 다운로드하면 스택 오버플로우 및 불필요한 다운로드 발생)
+    if (isRoot && pom.packaging === 'pom') {
+      logger.info(`Parent/BOM POM 감지: ${coordinateToString(coordinate)} - 실제 의존성 없음 (dependencyManagement는 버전 관리용)`);
     }
 
     return [];
@@ -804,6 +785,66 @@ export class MavenResolver implements IResolver {
 
     traverse(node, []);
     return Array.from(result.values());
+  }
+
+  /**
+   * 패키지 크기 조회 (병렬 HEAD 요청)
+   * @param packages 패키지 목록
+   * @returns 크기 정보가 추가된 패키지 목록
+   */
+  private async fetchPackageSizes(packages: PackageInfo[]): Promise<PackageInfo[]> {
+    const limit = pLimit(15); // 동시 15개 요청
+    const startTime = Date.now();
+
+    logger.debug('Maven 패키지 크기 조회 시작', { count: packages.length });
+
+    const results = await Promise.all(
+      packages.map((pkg) =>
+        limit(async () => {
+          try {
+            const [groupId, artifactId] = pkg.name.split(':');
+            const version = pkg.version;
+            const type = (pkg.metadata?.type as string) || 'jar';
+
+            // POM-only 패키지는 pom 파일 크기 조회
+            const extension = type === 'pom' ? 'pom' : 'jar';
+            const groupPath = groupId.replace(/\./g, '/');
+            const fileName = `${artifactId}-${version}.${extension}`;
+            const url = `${this.repoUrl}/${groupPath}/${artifactId}/${version}/${fileName}`;
+
+            const response = await this.axiosInstance.head(url, { timeout: 5000 });
+            const size = parseInt(response.headers['content-length'] || '0', 10);
+
+            return {
+              ...pkg,
+              metadata: {
+                ...pkg.metadata,
+                size,
+              },
+            };
+          } catch {
+            // 크기 조회 실패 시 0으로 설정 (다운로드에는 영향 없음)
+            return {
+              ...pkg,
+              metadata: {
+                ...pkg.metadata,
+                size: 0,
+              },
+            };
+          }
+        })
+      )
+    );
+
+    const elapsed = Date.now() - startTime;
+    const totalSize = results.reduce((sum, pkg) => sum + (pkg.metadata?.size as number || 0), 0);
+    logger.debug('Maven 패키지 크기 조회 완료', {
+      count: packages.length,
+      totalSize,
+      elapsed: `${elapsed}ms`,
+    });
+
+    return results;
   }
 
   /**
