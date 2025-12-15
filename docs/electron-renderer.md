@@ -334,9 +334,46 @@ interface UpdateStatus {
 |--------|--------|------|
 | `updater:status` | UpdateStatus | 업데이트 상태 변경 |
 
+#### 개발 모드 핸들러 (`registerDevModeHandlers`)
+
+개발 모드에서 렌더러가 업데이터 API를 호출할 때 에러 방지를 위한 더미 핸들러:
+
+```typescript
+// electron/updater.ts
+export function registerDevModeHandlers() {
+  log.info('Registering dev mode updater handlers');
+
+  // 개발 모드에서는 더미 응답 반환
+  ipcMain.handle('updater:status', () => updateStatus);
+  ipcMain.handle('updater:check', async () => {
+    log.info('Update check skipped in dev mode');
+    return { success: true, message: 'Skipped in dev mode' };
+  });
+  ipcMain.handle('updater:download', async () => {
+    log.info('Update download skipped in dev mode');
+    return { success: true, message: 'Skipped in dev mode' };
+  });
+  ipcMain.handle('updater:install', () => {
+    log.info('Update install skipped in dev mode');
+    return { success: true, message: 'Skipped in dev mode' };
+  });
+  ipcMain.handle('updater:set-auto-download', () => {
+    return { success: true };
+  });
+}
+
+// electron/main.ts에서 호출
+if (!isDev && mainWindow) {
+  initAutoUpdater(mainWindow);  // 프로덕션: 전체 업데이트 기능
+  setTimeout(() => checkForUpdatesOnStartup(), 3000);
+} else {
+  registerDevModeHandlers();    // 개발: 더미 핸들러만 등록
+}
+```
+
 #### 관련 파일
 
-- `electron/updater.ts`: 자동 업데이트 모듈
+- `electron/updater.ts`: 자동 업데이트 모듈 (프로덕션 + 개발 모드 핸들러)
 - `src/renderer/components/UpdateNotification.tsx`: 업데이트 알림 UI
 
 ### 다운로드 처리 흐름
@@ -906,30 +943,115 @@ const unsubscribe = window.electronAPI.dependency.onProgress((progress) => {
 unsubscribe?.();
 ```
 
-#### 진행률 업데이트 쓰로틀링
+#### 진행률 업데이트 스로틀링 (2단계)
 
-다운로드 중 진행률 업데이트가 너무 빈번하면 UI 성능이 저하되므로 300ms 간격으로 제한합니다:
+다운로드 진행률 업데이트는 메인 프로세스와 렌더러 양쪽에서 스로틀링됩니다.
 
-```tsx
-// progress 업데이트 쓰로틀링 (UI 반응성 향상)
-const progressThrottleMap = new Map<string, number>();
-const THROTTLE_MS = 300; // 300ms 간격으로 제한
+##### 1단계: 메인 프로세스 스로틀링 (`download-handlers.ts`)
 
-const unsubProgress = window.electronAPI.download.onProgress((progress) => {
-  if (p.status === 'completed' || p.status === 'failed') {
-    progressThrottleMap.delete(p.packageId); // 완료/실패 시 쓰로틀 제거
-    updateItem(p.packageId, { status: p.status, ... });
-  } else {
-    // downloading/paused 상태 - 쓰로틀링 적용
-    const now = Date.now();
-    const lastUpdate = progressThrottleMap.get(p.packageId) || 0;
-    if (now - lastUpdate >= THROTTLE_MS) {
-      progressThrottleMap.set(p.packageId, now);
-      updateItem(p.packageId, { status: p.status, progress: p.progress, ... });
-    }
+메인 프로세스에서 IPC 전송을 1초 간격으로 스로틀링하여 IPC 오버헤드를 줄입니다:
+
+```typescript
+// 진행 상황 스로틀링을 위한 마지막 전송 시간 추적
+const lastProgressTime = new Map<string, number>();
+const PROGRESS_THROTTLE_MS = 1000; // 1초 간격으로 스로틀링
+
+function sendProgressThrottled(
+  mainWindow: BrowserWindow | null,
+  packageId: string,
+  data: { status: string; progress: number; downloadedBytes: number; totalBytes: number; speed?: number },
+  force = false  // 완료/에러 상태는 강제 전송
+): void {
+  const now = Date.now();
+  const lastTime = lastProgressTime.get(packageId) || 0;
+
+  if (force || now - lastTime >= PROGRESS_THROTTLE_MS) {
+    lastProgressTime.set(packageId, now);
+    mainWindow?.webContents.send('download:progress', { packageId, ...data });
   }
-});
+}
 ```
+
+- **강제 전송**: 완료/에러/일시정지 상태는 `force=true`로 즉시 전송
+- **상태 정리**: 다운로드 완료/실패/취소 시 `lastProgressTime.delete()` 또는 `clear()` 호출
+
+##### 2단계: 렌더러 배치 업데이트 (`DownloadPage.tsx`)
+
+렌더러에서 여러 진행 상황을 배치로 모아서 처리하여 React 렌더링 횟수를 줄입니다:
+
+```typescript
+// 배치 업데이트용 pending 상태 저장
+const pendingUpdatesRef = useRef<Map<string, Partial<DownloadItem>>>(new Map());
+const pendingLogsRef = useRef<Array<{ level: string; message: string; details?: string }>>([]);
+const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+// 배치 업데이트 처리 함수 - 설정된 간격마다 한번만 실행
+const flushPendingUpdates = () => {
+  const pendingUpdates = pendingUpdatesRef.current;
+  const pendingLogs = pendingLogsRef.current;
+
+  if (pendingUpdates.size > 0) {
+    updateItemsBatch(new Map(pendingUpdates));  // 단일 상태 변경
+    pendingUpdates.clear();
+  }
+  if (pendingLogs.length > 0) {
+    addLogsBatch([...pendingLogs]);  // 단일 상태 변경
+    pendingLogsRef.current = [];
+  }
+  batchTimerRef.current = null;
+};
+
+// 배치 업데이트 예약 함수
+const scheduleBatchUpdate = (packageId: string, update: Partial<DownloadItem>) => {
+  pendingUpdatesRef.current.set(packageId, update);
+  if (batchTimerRef.current === null) {
+    batchTimerRef.current = setTimeout(flushPendingUpdates, downloadRenderInterval);
+  }
+};
+```
+
+- **렌더링 간격**: `downloadRenderInterval` 설정값 사용 (기본 300ms)
+- **배치 스토어 액션**: `updateItemsBatch()`, `addLogsBatch()` 사용
+- **정리**: 컴포넌트 언마운트 시 타이머 취소 및 pending 상태 정리
+
+#### 전체 다운로드 속도 계산 (이동 평균)
+
+개별 패키지 속도 합산 대신 전체 다운로드 바이트 기반 가중 이동 평균으로 계산:
+
+```typescript
+const calculateOverallSpeed = useCallback((): number => {
+  const now = Date.now();
+  const totalDownloaded = downloadItems.reduce((sum, item) => sum + (item.downloadedBytes || 0), 0);
+
+  // 500ms 간격으로 속도 계산
+  const timeDiff = now - lastSpeedCalcRef.current.time;
+  if (timeDiff >= 500 && lastSpeedCalcRef.current.time > 0) {
+    const bytesDiff = totalDownloaded - lastSpeedCalcRef.current.bytes;
+    const instantSpeed = bytesDiff > 0 ? (bytesDiff / timeDiff) * 1000 : 0;
+
+    // 속도 히스토리에 추가 (최대 10개 유지)
+    if (instantSpeed > 0) {
+      speedHistoryRef.current.push(instantSpeed);
+      if (speedHistoryRef.current.length > 10) speedHistoryRef.current.shift();
+    }
+    lastSpeedCalcRef.current = { time: now, bytes: totalDownloaded };
+  }
+
+  // 가중 이동 평균 (최근 값에 더 높은 가중치)
+  const history = speedHistoryRef.current;
+  let weightedSum = 0, weightSum = 0;
+  history.forEach((speed, index) => {
+    const weight = index + 1;  // 최근 값일수록 높은 가중치
+    weightedSum += speed * weight;
+    weightSum += weight;
+  });
+  return weightSum > 0 ? weightedSum / weightSum : 0;
+}, [downloadItems]);
+```
+
+- **이동 평균**: 최근 10개 속도 샘플의 가중 평균
+- **안정적인 표시**: 순간 속도 변동 완화
+- **남은 시간 계산**: `calculateRemainingTime()`에서 이 속도 사용
 
 #### 일시정지/재개 IPC 연동
 
@@ -999,6 +1121,7 @@ const outputFormat = defaultOutputFormat;  // 설정 페이지 값 직접 사용
 - **SMTP 설정**: 메일 발송 설정
 - **OS 배포판 설정**: YUM/APT/APK별 기본 배포판 및 아키텍처
 - **Docker 설정**: 기본 레지스트리, 커스텀 레지스트리 URL, 이미지 아키텍처 등
+- **UI 렌더링 설정**: 다운로드 화면 갱신 간격 (0.1초~2초)
 
 #### 레이아웃 개선
 - 헤더 고정: 저장/초기화 버튼이 상단에 항상 표시
@@ -1112,44 +1235,80 @@ interface DownloadItem {
   name: string;
   version: string;
   type: PackageType;
-  status: 'pending' | 'downloading' | 'completed' | 'error' | 'skipped';
+  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'failed' | 'skipped';
   progress: number;
-  size?: number;
-  downloadedSize?: number;
+  downloadedBytes: number;
+  totalBytes: number;
+  speed: number;
   error?: string;
   parentPackage?: string;  // 의존성인 경우 부모 패키지명
 }
 
 interface LogEntry {
   id: string;
-  timestamp: Date;
-  level: 'info' | 'warn' | 'error';
+  timestamp: number;
+  level: 'info' | 'warn' | 'error' | 'success';
   message: string;
+  details?: string;
 }
 
 interface DownloadState {
-  status: DownloadStatus;
   items: DownloadItem[];
+  isDownloading: boolean;
+  isPaused: boolean;
+  outputPath: string;
   packagingStatus: PackagingStatus;
-  overallProgress: number;
-  currentSpeed: number;
-  estimatedTime: number;
+  packagingProgress: number;
+  startTime: number | null;
   logs: LogEntry[];
-  outputPath?: string;
-  error?: string;
   originalPackages: DownloadItem[];  // 원본 패키지 목록
 
   // Actions
-  setStatus(status: DownloadStatus): void;
-  addItem(item: Omit<DownloadItem, 'id'>): void;
+  setItems(items: DownloadItem[]): void;
   updateItem(id: string, updates: Partial<DownloadItem>): void;
+  updateItemsBatch(updates: Map<string, Partial<DownloadItem>>): void;  // 배치 업데이트
+  addLog(level: LogEntry['level'], message: string, details?: string): void;
+  addLogsBatch(logs: Array<{ level: LogEntry['level']; message: string; details?: string }>): void;  // 배치 로그
+  setIsDownloading(isDownloading: boolean): void;
+  setIsPaused(isPaused: boolean): void;
+  setOutputPath(path: string): void;
   setPackagingStatus(status: PackagingStatus): void;
-  setOverallProgress(progress: number): void;
-  addLog(level: LogEntry['level'], message: string): void;
+  setPackagingProgress(progress: number): void;
+  setStartTime(time: number | null): void;
   reset(): void;
 }
 
 const useDownloadStore = create<DownloadState>(...);
+```
+
+#### 배치 업데이트 액션
+
+여러 아이템/로그를 단일 상태 변경으로 처리하여 렌더링 최적화:
+
+```typescript
+// 여러 아이템을 한번에 업데이트 (배치)
+updateItemsBatch: (updates) =>
+  set((state) => ({
+    items: state.items.map((item) => {
+      const update = updates.get(item.id);
+      return update ? { ...item, ...update } : item;
+    }),
+  })),
+
+// 여러 로그를 한번에 추가 (배치)
+addLogsBatch: (logs) =>
+  set((state) => ({
+    logs: [
+      ...state.logs,
+      ...logs.map((log) => ({
+        id: generateLogId(),
+        timestamp: Date.now(),
+        level: log.level,
+        message: log.message,
+        details: log.details,
+      })),
+    ],
+  })),
 ```
 
 ### SettingsStore (`stores/settingsStore.ts`)
@@ -1254,6 +1413,9 @@ interface SettingsState {
   // 자동 업데이트 설정
   autoUpdate: boolean;
   autoDownloadUpdate: boolean;
+
+  // UI 렌더링 설정
+  downloadRenderInterval: number;  // 다운로드 화면 렌더링 간격 (ms), 기본값 300
 
   // 내부 상태
   _initialized: boolean;
