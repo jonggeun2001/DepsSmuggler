@@ -9,6 +9,7 @@ import {
   DownloadProgressEvent,
 } from '../../types';
 import logger from '../../utils/logger';
+import { sanitizePath } from '../shared/path-utils';
 
 // Maven Central Search API 응답 타입
 interface MavenSearchResponse {
@@ -537,8 +538,14 @@ export class MavenDownloader implements IDownloader {
    * 예: com/crealytics/spark-excel_2.12/3.5.1_0.20.4/
    */
   private buildM2Path(groupId: string, artifactId: string, version: string): string {
-    const groupPath = groupId.replace(/\./g, '/');
-    return path.join(groupPath, artifactId, version);
+    // groupId의 각 세그먼트를 정규화 (com.example -> com/example)
+    const groupPath = groupId
+      .split('.')
+      .map((segment) => sanitizePath(segment))
+      .join('/');
+    const safeArtifactId = sanitizePath(artifactId);
+    const safeVersion = sanitizePath(version);
+    return path.join(groupPath, safeArtifactId, safeVersion);
   }
 
   /**
@@ -555,6 +562,8 @@ export class MavenDownloader implements IDownloader {
     classifier?: string
   ): string {
     const ext = TYPE_EXTENSION_MAP[artifactType] || '.jar';
+    const safeArtifactId = sanitizePath(artifactId);
+    const safeVersion = sanitizePath(version);
 
     // 타입에서 기본 classifier 가져오기
     const typeClassifier = TYPE_CLASSIFIER_MAP[artifactType];
@@ -563,9 +572,10 @@ export class MavenDownloader implements IDownloader {
     const finalClassifier = classifier || typeClassifier;
 
     if (finalClassifier) {
-      return `${artifactId}-${version}-${finalClassifier}${ext}`;
+      const safeClassifier = sanitizePath(finalClassifier);
+      return `${safeArtifactId}-${safeVersion}-${safeClassifier}${ext}`;
     }
-    return `${artifactId}-${version}${ext}`;
+    return `${safeArtifactId}-${safeVersion}${ext}`;
   }
 
   /**

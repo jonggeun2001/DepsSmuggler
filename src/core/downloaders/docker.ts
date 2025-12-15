@@ -13,6 +13,7 @@ import {
 } from '../../types';
 import logger from '../../utils/logger';
 import { sanitizeDockerTag } from '../shared/filename-utils';
+import { sanitizePath } from '../shared/path-utils';
 
 // Docker Hub 검색 응답
 interface DockerSearchResponse {
@@ -456,7 +457,8 @@ export class DockerDownloader implements IDownloader {
 
       // 디렉토리 생성
       const safeTag = sanitizeDockerTag(tag);
-      const imageDir = path.join(destPath, `${repo}-${safeTag}`);
+      const safeRepo = sanitizePath(repo);
+      const imageDir = path.join(destPath, `${safeRepo}-${safeTag}`);
       await fs.ensureDir(imageDir);
 
       // 전체 크기 계산
@@ -526,7 +528,7 @@ export class DockerDownloader implements IDownloader {
       await fs.writeJson(path.join(imageDir, 'manifest.json'), manifestJson);
 
       // tar 파일로 패키징
-      const tarPath = path.join(destPath, `${repo}-${safeTag}.tar`);
+      const tarPath = path.join(destPath, `${safeRepo}-${safeTag}.tar`);
       await this.createImageTar(imageDir, tarPath);
 
       // 임시 디렉토리 삭제

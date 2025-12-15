@@ -21,6 +21,7 @@ import {
 } from '../../types';
 import logger from '../../utils/logger';
 import { fetchPackument, clearNpmCache } from '../shared/npm-cache';
+import { sanitizePath } from '../shared/path-utils';
 
 /**
  * npm 다운로더 클래스
@@ -142,8 +143,9 @@ export class NpmDownloader implements IDownloader {
         throw new Error(`다운로드 URL을 찾을 수 없습니다: ${info.name}@${info.version}`);
       }
 
-      // 파일명 추출
-      const fileName = path.basename(new URL(downloadUrl).pathname);
+      // 파일명 추출 (경로 조작 방지를 위해 정규화)
+      const rawFileName = path.basename(new URL(downloadUrl).pathname);
+      const fileName = sanitizePath(rawFileName, /[^a-zA-Z0-9._\-]/g);
       const filePath = path.join(destPath, fileName);
 
       // 디렉토리 생성
@@ -240,7 +242,9 @@ export class NpmDownloader implements IDownloader {
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string> {
     try {
-      const fileName = path.basename(new URL(tarballUrl).pathname);
+      // 파일명 추출 (경로 조작 방지를 위해 정규화)
+      const rawFileName = path.basename(new URL(tarballUrl).pathname);
+      const fileName = sanitizePath(rawFileName, /[^a-zA-Z0-9._\-]/g);
       const filePath = path.join(destPath, fileName);
 
       await fs.ensureDir(destPath);

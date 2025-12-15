@@ -18,6 +18,7 @@ import {
 } from '../shared/pip-types';
 import { compareVersions } from '../shared';
 import { fetchVersionsFromSimpleApi } from '../shared/pip-simple-api';
+import { sanitizePath } from '../shared/path-utils';
 
 export class PipDownloader implements IDownloader {
   readonly type = 'pip' as const;
@@ -158,8 +159,9 @@ export class PipDownloader implements IDownloader {
         throw new Error(`다운로드 URL을 찾을 수 없습니다: ${info.name}@${info.version}`);
       }
 
-      // 파일명 추출
-      const fileName = path.basename(new URL(downloadUrl).pathname);
+      // 파일명 추출 (경로 조작 방지를 위해 정규화)
+      const rawFileName = path.basename(new URL(downloadUrl).pathname);
+      const fileName = sanitizePath(rawFileName, /[^a-zA-Z0-9._\-]/g);
       const filePath = path.join(destPath, fileName);
 
       // 디렉토리 생성
