@@ -2,6 +2,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import { machineIdSync } from 'node-machine-id';
 
 // 설정 인터페이스 정의
 export interface Config {
@@ -39,15 +40,43 @@ export interface CLIConfig {
   logLevel: string;
 }
 
-// 암호화 키 (실제 운영에서는 더 안전한 방법 사용 권장)
-const ENCRYPTION_KEY = 'depssmuggler-secret-key-32bytes!';
+// 암호화 설정
 const ENCRYPTION_IV_LENGTH = 16;
+const ENCRYPTION_SALT = 'depssmuggler-salt';
+
+// 레거시 키 (기존 설정 마이그레이션용) - 마이그레이션 완료 후 제거 예정
+const LEGACY_ENCRYPTION_KEY = 'depssmuggler-secret-key-32bytes!';
+
+/**
+ * 머신별 고유 암호화 키를 생성합니다.
+ * machineId + salt를 SHA-256으로 해싱하여 32바이트 키 생성
+ */
+function generateMachineKey(): Buffer {
+  try {
+    const machineId = machineIdSync();
+    return crypto
+      .createHash('sha256')
+      .update(machineId + ENCRYPTION_SALT)
+      .digest();
+  } catch (error) {
+    // machineId 획득 실패 시 폴백 (테스트 환경 등)
+    console.warn('머신 ID 획득 실패, 폴백 키 사용:', error);
+    return crypto
+      .createHash('sha256')
+      .update(os.hostname() + os.userInfo().username + ENCRYPTION_SALT)
+      .digest();
+  }
+}
+
+// 머신별 고유 암호화 키 (32 bytes for AES-256)
+const ENCRYPTION_KEY = generateMachineKey();
 
 export class ConfigManager {
   private configDir: string;
   private configPath: string;
   private logsDir: string;
   private cacheDir: string;
+  private needsEncryptionMigration: boolean = false;
 
   constructor() {
     this.configDir = path.join(os.homedir(), '.depssmuggler');
@@ -70,6 +99,7 @@ export class ConfigManager {
    */
   async loadConfig(): Promise<Config> {
     await this.ensureDirectories();
+    this.needsEncryptionMigration = false; // 마이그레이션 플래그 초기화
 
     try {
       if (await fs.pathExists(this.configPath)) {
@@ -80,6 +110,14 @@ export class ConfigManager {
         // SMTP 비밀번호 복호화
         if (config.smtpPassword) {
           config.smtpPassword = this.decrypt(config.smtpPassword);
+        }
+
+        // 레거시 키로 복호화된 경우 새 키로 마이그레이션
+        if (this.needsEncryptionMigration && config.smtpPassword) {
+          console.log('암호화 키 마이그레이션을 수행합니다...');
+          await this.saveConfig(config);
+          this.needsEncryptionMigration = false;
+          console.log('암호화 키 마이그레이션 완료.');
         }
 
         return config;
@@ -209,7 +247,7 @@ export class ConfigManager {
     const iv = crypto.randomBytes(ENCRYPTION_IV_LENGTH);
     const cipher = crypto.createCipheriv(
       'aes-256-cbc',
-      Buffer.from(ENCRYPTION_KEY),
+      ENCRYPTION_KEY,
       iv
     );
     let encrypted = cipher.update(text, 'utf8', 'hex');
@@ -228,14 +266,30 @@ export class ConfigManager {
       }
       const iv = Buffer.from(parts[0], 'hex');
       const encrypted = parts[1];
-      const decipher = crypto.createDecipheriv(
-        'aes-256-cbc',
-        Buffer.from(ENCRYPTION_KEY),
-        iv
-      );
-      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-      decrypted += decipher.final('utf8');
-      return decrypted;
+      
+      // 새로운 머신별 키로 복호화 시도
+      try {
+        const decipher = crypto.createDecipheriv(
+          'aes-256-cbc',
+          ENCRYPTION_KEY,
+          iv
+        );
+        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+      } catch {
+        // 새 키로 실패 시 레거시 키로 복호화 시도 (마이그레이션)
+        const legacyDecipher = crypto.createDecipheriv(
+          'aes-256-cbc',
+          Buffer.from(LEGACY_ENCRYPTION_KEY),
+          iv
+        );
+        let decrypted = legacyDecipher.update(encrypted, 'hex', 'utf8');
+        decrypted += legacyDecipher.final('utf8');
+        this.needsEncryptionMigration = true;
+        console.log('레거시 키로 복호화 성공 - 마이그레이션을 수행합니다.');
+        return decrypted;
+      }
     } catch {
       return encryptedText; // 복호화 실패 시 원본 반환
     }

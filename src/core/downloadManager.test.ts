@@ -4,8 +4,13 @@
  * 네트워크 호출 없이 DownloadManager의 핵심 로직을 테스트합니다.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { DownloadManager, DownloadItem, OverallProgress } from './downloadManager';
+
+// fs-extra 모킹
+vi.mock('fs-extra', () => ({
+  ensureDir: vi.fn().mockResolvedValue(undefined),
+}));
 
 // DownloadManager 인스턴스 생성
 // 주의: DownloadManager 생성자는 옵션을 받지 않고, startDownload에서 옵션을 설정함
@@ -470,6 +475,248 @@ describe('DownloadManager 단위 테스트', () => {
       const manager = createManager();
       const queue = (manager as any).queue;
       expect(queue.concurrency).toBe(3);
+    });
+  });
+
+  describe('pauseDownload', () => {
+    it('다운로드 일시정지', () => {
+      const queue = (manager as any).queue;
+      const pauseSpy = vi.spyOn(queue, 'pause');
+
+      manager.pauseDownload();
+
+      expect(pauseSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('resumeDownload', () => {
+    it('다운로드 재개', () => {
+      const queue = (manager as any).queue;
+      const startSpy = vi.spyOn(queue, 'start');
+
+      manager.resumeDownload();
+
+      expect(startSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('cancelDownload', () => {
+    it('다운로드 취소 시 플래그 설정', () => {
+      manager.cancelDownload();
+
+      expect((manager as any).isCancelled).toBe(true);
+    });
+
+    it('다운로드 취소 시 큐 정리', () => {
+      const queue = (manager as any).queue;
+      const clearSpy = vi.spyOn(queue, 'clear');
+      const pauseSpy = vi.spyOn(queue, 'pause');
+
+      manager.cancelDownload();
+
+      expect(clearSpy).toHaveBeenCalled();
+      expect(pauseSpy).toHaveBeenCalled();
+    });
+
+    it('다운로드 취소 시 아이템 상태 변경', () => {
+      const packages = [
+        { type: 'pip' as const, name: 'requests', version: '2.28.0' },
+        { type: 'pip' as const, name: 'flask', version: '2.0.0' },
+        { type: 'pip' as const, name: 'django', version: '4.0.0' },
+      ];
+
+      manager.addToQueue(packages);
+
+      // 일부 아이템의 상태 변경
+      const items = (manager as any).items as Map<string, DownloadItem>;
+      const itemsArray = Array.from(items.values());
+      itemsArray[0].status = 'downloading';
+      itemsArray[1].status = 'pending';
+      itemsArray[2].status = 'completed'; // 완료된 것은 유지
+
+      manager.cancelDownload();
+
+      expect(itemsArray[0].status).toBe('cancelled');
+      expect(itemsArray[1].status).toBe('cancelled');
+      expect(itemsArray[2].status).toBe('completed'); // 완료된 것은 유지
+    });
+  });
+
+  describe('initDownloaders', () => {
+    it('다운로더 초기화 호출', async () => {
+      const manager = createManager();
+      // initDownloaders는 private async 메서드이므로 직접 호출
+      await (manager as any).initDownloaders();
+
+      // 다운로더가 설정되었는지 확인 (에러 없이 완료)
+      expect((manager as any).downloaders).toBeDefined();
+    });
+  });
+
+  describe('getQueueStatus 추가 케이스', () => {
+    it('취소된 아이템은 failed로 카운트됨', () => {
+      const packages = [
+        { type: 'pip' as const, name: 'requests', version: '2.28.0' },
+        { type: 'pip' as const, name: 'flask', version: '2.0.0' },
+      ];
+
+      manager.addToQueue(packages);
+
+      const items = (manager as any).items as Map<string, DownloadItem>;
+      const itemsArray = Array.from(items.values());
+      itemsArray[0].status = 'cancelled';
+      itemsArray[1].status = 'pending';
+
+      const status = manager.getQueueStatus();
+
+      expect(status.failed).toBe(1); // cancelled는 failed로 카운트
+      expect(status.pending).toBe(1);
+    });
+
+    it('건너뛴 아이템은 failed로 카운트됨', () => {
+      const packages = [
+        { type: 'pip' as const, name: 'requests', version: '2.28.0' },
+      ];
+
+      manager.addToQueue(packages);
+
+      const items = (manager as any).items as Map<string, DownloadItem>;
+      const itemsArray = Array.from(items.values());
+      itemsArray[0].status = 'skipped';
+
+      const status = manager.getQueueStatus();
+
+      expect(status.failed).toBe(1); // skipped는 failed로 카운트
+    });
+  });
+
+  describe('getOverallProgress 추가 케이스', () => {
+    it('currentSpeed 계산 (speedSamples 기반)', () => {
+      const packages = [
+        { type: 'pip' as const, name: 'requests', version: '2.28.0' },
+      ];
+
+      manager.addToQueue(packages);
+
+      // speedSamples에 직접 값 추가
+      (manager as any).speedSamples = [1000, 2000, 3000];
+
+      const progress = manager.getOverallProgress();
+
+      // 평균: (1000 + 2000 + 3000) / 3 = 2000
+      expect(progress.currentSpeed).toBe(2000);
+    });
+
+    it('estimatedTimeRemaining 계산', () => {
+      const packages = [
+        { type: 'pip' as const, name: 'requests', version: '2.28.0' },
+      ];
+
+      manager.addToQueue(packages);
+
+      const items = (manager as any).items as Map<string, DownloadItem>;
+      const itemsArray = Array.from(items.values());
+      itemsArray[0].status = 'downloading';
+      itemsArray[0].totalBytes = 10000;
+      itemsArray[0].downloadedBytes = 5000;
+
+      // speedSamples 설정
+      (manager as any).speedSamples = [1000]; // 1000 bytes/sec
+
+      const progress = manager.getOverallProgress();
+
+      // 남은 바이트(5000) / 속도(1000) = 5초
+      expect(progress.estimatedTimeRemaining).toBe(5);
+    });
+
+    it('속도가 0일 때 estimatedTimeRemaining은 0', () => {
+      const packages = [
+        { type: 'pip' as const, name: 'requests', version: '2.28.0' },
+      ];
+
+      manager.addToQueue(packages);
+
+      const items = (manager as any).items as Map<string, DownloadItem>;
+      const itemsArray = Array.from(items.values());
+      itemsArray[0].totalBytes = 10000;
+      itemsArray[0].downloadedBytes = 5000;
+
+      // speedSamples가 비어있으면 속도 0
+      (manager as any).speedSamples = [];
+
+      const progress = manager.getOverallProgress();
+
+      expect(progress.currentSpeed).toBe(0);
+      expect(progress.estimatedTimeRemaining).toBe(0);
+    });
+  });
+
+  describe('startDownload', () => {
+    afterEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('이미 실행 중이면 에러 발생', async () => {
+      (manager as any).isRunning = true;
+
+      await expect(
+        manager.startDownload({ outputPath: '/test/output' })
+      ).rejects.toThrow('다운로드가 이미 진행 중입니다');
+    });
+
+    it('옵션 설정', async () => {
+      const packages = [
+        { type: 'pip' as const, name: 'requests', version: '2.28.0' },
+      ];
+      manager.addToQueue(packages);
+
+      // 다운로더 모킹
+      const mockDownloader = {
+        downloadPackage: vi.fn().mockResolvedValue('/path/to/file'),
+      };
+      (manager as any).downloaders.set('pip', mockDownloader);
+
+      // 아이템 상태를 completed로 설정하여 다운로드 스킵
+      const items = (manager as any).items as Map<string, DownloadItem>;
+      const itemsArray = Array.from(items.values());
+      itemsArray[0].status = 'completed';
+
+      const result = await manager.startDownload({
+        outputPath: '/test/output',
+        concurrency: 5,
+        maxRetries: 2,
+      });
+
+      expect((manager as any).options.concurrency).toBe(5);
+      expect((manager as any).options.maxRetries).toBe(2);
+    });
+
+    it('allComplete 이벤트 발생', async () => {
+      const listener = vi.fn();
+      manager.on('allComplete', listener);
+
+      // 빈 큐로 시작
+      const result = await manager.startDownload({ outputPath: '/test/output' });
+
+      expect(listener).toHaveBeenCalledWith(result);
+    });
+
+    it('다운로드 완료 후 isRunning이 false로 설정됨', async () => {
+      const result = await manager.startDownload({ outputPath: '/test/output' });
+
+      expect(manager.running).toBe(false);
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('getDownloadManager 싱글톤', () => {
+    it('싱글톤 인스턴스 반환', async () => {
+      const { getDownloadManager } = await import('./downloadManager');
+
+      const instance1 = getDownloadManager();
+      const instance2 = getDownloadManager();
+
+      expect(instance1).toBe(instance2);
     });
   });
 });

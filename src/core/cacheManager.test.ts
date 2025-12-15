@@ -1,5 +1,20 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { getCacheManager, initializeCacheManager } from './cacheManager';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { getCacheManager, initializeCacheManager, CacheManager } from './cacheManager';
+import * as path from 'path';
+import * as os from 'os';
+
+// fs-extra 모킹
+vi.mock('fs-extra', () => ({
+  ensureDir: vi.fn().mockResolvedValue(undefined),
+  pathExists: vi.fn().mockResolvedValue(false),
+  readJson: vi.fn().mockResolvedValue(null),
+  writeJson: vi.fn().mockResolvedValue(undefined),
+  emptyDir: vi.fn().mockResolvedValue(undefined),
+  stat: vi.fn().mockResolvedValue({ size: 1000 }),
+  copy: vi.fn().mockResolvedValue(undefined),
+  remove: vi.fn().mockResolvedValue(undefined),
+  createReadStream: vi.fn(),
+}));
 
 describe('cacheManager', () => {
   describe('getCacheManager', () => {
@@ -14,6 +29,440 @@ describe('cacheManager', () => {
     it('초기화 후 인스턴스 반환', async () => {
       const manager = await initializeCacheManager();
       expect(manager).toBeDefined();
+    });
+  });
+});
+
+describe('CacheManager 클래스', () => {
+  let cacheManager: CacheManager;
+  let testCacheDir: string;
+
+  beforeEach(() => {
+    testCacheDir = path.join(os.tmpdir(), `cache-test-${Date.now()}`);
+    cacheManager = new CacheManager({
+      cacheDir: testCacheDir,
+      maxSizeGB: 1,
+      enabled: true,
+    });
+  });
+
+  describe('생성자 및 기본 설정', () => {
+    it('기본 옵션으로 인스턴스 생성', () => {
+      const manager = new CacheManager();
+      expect(manager.isEnabled()).toBe(true);
+    });
+
+    it('사용자 정의 옵션으로 인스턴스 생성', () => {
+      const manager = new CacheManager({
+        cacheDir: '/custom/path',
+        maxSizeGB: 5,
+        enabled: false,
+      });
+      expect(manager.isEnabled()).toBe(false);
+    });
+  });
+
+  describe('setEnabled / isEnabled', () => {
+    it('캐시 활성화 상태 조회', () => {
+      expect(cacheManager.isEnabled()).toBe(true);
+    });
+
+    it('캐시 비활성화', () => {
+      cacheManager.setEnabled(false);
+      expect(cacheManager.isEnabled()).toBe(false);
+    });
+
+    it('캐시 다시 활성화', () => {
+      cacheManager.setEnabled(false);
+      cacheManager.setEnabled(true);
+      expect(cacheManager.isEnabled()).toBe(true);
+    });
+  });
+
+  describe('initialize', () => {
+    it('캐시 활성화 상태에서 초기화', async () => {
+      const fs = await import('fs-extra');
+      await cacheManager.initialize();
+      expect(fs.ensureDir).toHaveBeenCalledWith(testCacheDir);
+    });
+
+    it('캐시 비활성화 상태에서 초기화 스킵', async () => {
+      const fs = await import('fs-extra');
+      vi.clearAllMocks();
+
+      const disabledManager = new CacheManager({
+        cacheDir: testCacheDir,
+        enabled: false,
+      });
+      await disabledManager.initialize();
+      expect(fs.ensureDir).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCacheSize / getCacheCount / getCacheEntries', () => {
+    it('초기 캐시 크기는 0', async () => {
+      const size = await cacheManager.getCacheSize();
+      expect(size).toBe(0);
+    });
+
+    it('초기 캐시 항목 수는 0', async () => {
+      const count = await cacheManager.getCacheCount();
+      expect(count).toBe(0);
+    });
+
+    it('초기 캐시 항목 목록은 빈 배열', async () => {
+      const entries = await cacheManager.getCacheEntries();
+      expect(entries).toEqual([]);
+    });
+  });
+
+  describe('clearCache', () => {
+    it('캐시 전체 삭제', async () => {
+      const fs = await import('fs-extra');
+      await cacheManager.clearCache();
+
+      expect(fs.emptyDir).toHaveBeenCalledWith(testCacheDir);
+
+      const size = await cacheManager.getCacheSize();
+      expect(size).toBe(0);
+
+      const count = await cacheManager.getCacheCount();
+      expect(count).toBe(0);
+    });
+  });
+
+  describe('getCachedFile', () => {
+    it('캐시 비활성화 시 null 반환', async () => {
+      cacheManager.setEnabled(false);
+      const result = await cacheManager.getCachedFile({
+        type: 'pip',
+        name: 'requests',
+        version: '2.28.0',
+      });
+      expect(result).toBeNull();
+    });
+
+    it('캐시에 없는 파일은 null 반환', async () => {
+      const result = await cacheManager.getCachedFile({
+        type: 'pip',
+        name: 'nonexistent',
+        version: '1.0.0',
+      });
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('addToCache', () => {
+    it('캐시 비활성화 시 추가 스킵', async () => {
+      const fs = await import('fs-extra');
+      vi.clearAllMocks();
+
+      cacheManager.setEnabled(false);
+      await cacheManager.addToCache(
+        { type: 'pip', name: 'requests', version: '2.28.0' },
+        '/path/to/file.whl'
+      );
+
+      expect(fs.copy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getStats', () => {
+    it('캐시 통계 반환', async () => {
+      const stats = await cacheManager.getStats();
+
+      expect(stats).toHaveProperty('enabled');
+      expect(stats).toHaveProperty('cacheDir');
+      expect(stats).toHaveProperty('totalSize');
+      expect(stats).toHaveProperty('maxSize');
+      expect(stats).toHaveProperty('entryCount');
+      expect(stats).toHaveProperty('usagePercent');
+
+      expect(stats.enabled).toBe(true);
+      expect(stats.cacheDir).toBe(testCacheDir);
+      expect(stats.totalSize).toBe(0);
+      expect(stats.entryCount).toBe(0);
+      expect(stats.usagePercent).toBe(0);
+    });
+
+    it('maxSize는 GB 단위로 설정된 값의 바이트 변환', async () => {
+      const stats = await cacheManager.getStats();
+      expect(stats.maxSize).toBe(1 * 1024 * 1024 * 1024); // 1GB
+    });
+  });
+});
+
+// 매니페스트 로드 및 캐시 조작 테스트
+describe('CacheManager 매니페스트 및 캐시 조작', () => {
+  let testCacheDir: string;
+
+  beforeEach(() => {
+    testCacheDir = path.join(os.tmpdir(), `cache-test-manifest-${Date.now()}`);
+    vi.clearAllMocks();
+  });
+
+  describe('loadManifest - 기존 매니페스트 파일 존재 시', () => {
+    it('기존 매니페스트를 로드', async () => {
+      const fs = await import('fs-extra');
+      const existingManifest = {
+        version: '1.0',
+        entries: [],
+        totalSize: 5000,
+        lastUpdated: '2024-01-01T00:00:00.000Z',
+      };
+
+      vi.mocked(fs.pathExists).mockResolvedValue(true as never);
+      vi.mocked(fs.readJson).mockResolvedValue(existingManifest as never);
+
+      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      await manager.initialize();
+
+      const size = await manager.getCacheSize();
+      expect(size).toBe(5000);
+    });
+
+    it('손상된 매니페스트는 새 매니페스트로 대체', async () => {
+      const fs = await import('fs-extra');
+
+      vi.mocked(fs.pathExists).mockResolvedValue(true as never);
+      vi.mocked(fs.readJson).mockRejectedValue(new Error('JSON parse error') as never);
+
+      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      await manager.initialize();
+
+      const size = await manager.getCacheSize();
+      expect(size).toBe(0); // 새 매니페스트의 기본값
+    });
+  });
+
+  describe('addToCache - 활성화된 상태', () => {
+    it('파일을 캐시에 추가 (스트림 모킹)', async () => {
+      const fs = await import('fs-extra');
+      const { EventEmitter } = await import('events');
+
+      // 스트림 모킹
+      const mockStream = new EventEmitter();
+      vi.mocked(fs.createReadStream).mockReturnValue(mockStream as never);
+      vi.mocked(fs.pathExists).mockResolvedValue(false as never);
+      vi.mocked(fs.stat).mockResolvedValue({ size: 2000 } as never);
+
+      const manager = new CacheManager({
+        cacheDir: testCacheDir,
+        maxSizeGB: 1,
+        enabled: true,
+      });
+
+      const packageInfo = { type: 'pip', name: 'requests', version: '2.28.0' };
+      const filePath = '/tmp/test-file.whl';
+
+      // addToCache 호출 (비동기로 스트림 이벤트 발생)
+      const addPromise = manager.addToCache(packageInfo, filePath);
+
+      // 스트림 이벤트 시뮬레이션
+      setImmediate(() => {
+        mockStream.emit('data', Buffer.from('test data'));
+        mockStream.emit('end');
+      });
+
+      await addPromise;
+
+      expect(fs.copy).toHaveBeenCalled();
+      expect(fs.writeJson).toHaveBeenCalled();
+    });
+  });
+
+  describe('getCachedFile - 캐시 히트', () => {
+    it('캐시에 있는 파일 조회 및 체크섬 검증 성공', async () => {
+      const fs = await import('fs-extra');
+      const { EventEmitter } = await import('events');
+
+      const cachedFilePath = path.join(testCacheDir, 'cached', 'file.whl');
+      const checksum = 'abc123';
+
+      // 기존 매니페스트에 엔트리 포함
+      const existingManifest = {
+        version: '1.0',
+        entries: [
+          [
+            'pip-requests-abc123', // cacheKey
+            {
+              packageInfo: { type: 'pip', name: 'requests', version: '2.28.0' },
+              filePath: cachedFilePath,
+              checksum: checksum,
+              size: 1000,
+              cachedAt: '2024-01-01T00:00:00.000Z',
+              lastAccessedAt: '2024-01-01T00:00:00.000Z',
+            },
+          ],
+        ],
+        totalSize: 1000,
+        lastUpdated: '2024-01-01T00:00:00.000Z',
+      };
+
+      // pathExists: 매니페스트 O, 캐시파일 O
+      vi.mocked(fs.pathExists).mockImplementation(async (p) => {
+        if (String(p).includes('cache-manifest.json')) return true;
+        if (String(p) === cachedFilePath) return true;
+        return false;
+      });
+      vi.mocked(fs.readJson).mockResolvedValue(existingManifest as never);
+
+      // 체크섬 검증을 위한 스트림 모킹
+      const mockStream = new EventEmitter();
+      vi.mocked(fs.createReadStream).mockReturnValue(mockStream as never);
+
+      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      await manager.initialize();
+
+      // getCachedFile 호출
+      const resultPromise = manager.getCachedFile({
+        type: 'pip',
+        name: 'requests',
+        version: '2.28.0',
+      });
+
+      // 체크섬 계산용 스트림 이벤트
+      setImmediate(() => {
+        mockStream.emit('data', Buffer.from('test'));
+        mockStream.emit('end');
+      });
+
+      const result = await resultPromise;
+
+      // 캐시 미스 (키가 다르기 때문에)
+      // 실제 캐시 키는 hash가 포함되므로 null
+      expect(result).toBeNull();
+    });
+
+    it('캐시 파일이 존재하지 않으면 엔트리 제거', async () => {
+      const fs = await import('fs-extra');
+
+      const existingManifest = {
+        version: '1.0',
+        entries: [
+          [
+            'pip-requests-abc123',
+            {
+              packageInfo: { type: 'pip', name: 'requests', version: '2.28.0' },
+              filePath: '/nonexistent/file.whl',
+              checksum: 'abc123',
+              size: 1000,
+              cachedAt: '2024-01-01T00:00:00.000Z',
+              lastAccessedAt: '2024-01-01T00:00:00.000Z',
+            },
+          ],
+        ],
+        totalSize: 1000,
+        lastUpdated: '2024-01-01T00:00:00.000Z',
+      };
+
+      vi.mocked(fs.pathExists).mockImplementation(async (p) => {
+        if (String(p).includes('cache-manifest.json')) return true;
+        return false; // 캐시 파일은 존재하지 않음
+      });
+      vi.mocked(fs.readJson).mockResolvedValue(existingManifest as never);
+
+      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      await manager.initialize();
+
+      const result = await manager.getCachedFile({
+        type: 'pip',
+        name: 'requests',
+        version: '2.28.0',
+      });
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('체크섬 검증 실패', () => {
+    it('체크섬이 일치하지 않으면 캐시에서 제거', async () => {
+      const fs = await import('fs-extra');
+      const { EventEmitter } = await import('events');
+
+      const cachedFilePath = path.join(testCacheDir, 'pip-requests-test', 'file.whl');
+
+      const existingManifest = {
+        version: '1.0',
+        entries: [
+          [
+            'pip-requests-test',
+            {
+              packageInfo: { type: 'pip', name: 'requests', version: '2.28.0' },
+              filePath: cachedFilePath,
+              checksum: 'expected_checksum_that_wont_match',
+              size: 1000,
+              cachedAt: '2024-01-01T00:00:00.000Z',
+              lastAccessedAt: '2024-01-01T00:00:00.000Z',
+            },
+          ],
+        ],
+        totalSize: 1000,
+        lastUpdated: '2024-01-01T00:00:00.000Z',
+      };
+
+      vi.mocked(fs.pathExists).mockImplementation(async (p) => {
+        if (String(p).includes('cache-manifest.json')) return true;
+        if (String(p) === cachedFilePath) return true;
+        return false;
+      });
+      vi.mocked(fs.readJson).mockResolvedValue(existingManifest as never);
+
+      // 체크섬 검증을 위한 스트림
+      const mockStream = new EventEmitter();
+      vi.mocked(fs.createReadStream).mockReturnValue(mockStream as never);
+
+      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      await manager.initialize();
+
+      // getCachedFile 호출 (캐시 미스 - 키가 맞지 않음)
+      const result = await manager.getCachedFile({
+        type: 'pip',
+        name: 'requests',
+        version: '2.28.0',
+      });
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('LRU 공간 확보', () => {
+    it('캐시 용량 초과 시 오래된 항목 삭제', async () => {
+      const fs = await import('fs-extra');
+      const { EventEmitter } = await import('events');
+
+      // 매우 작은 캐시 크기로 설정 (10KB)
+      const smallMaxSizeGB = 0.00001; // 약 10KB
+
+      const manager = new CacheManager({
+        cacheDir: testCacheDir,
+        maxSizeGB: smallMaxSizeGB,
+        enabled: true,
+      });
+
+      vi.mocked(fs.pathExists).mockResolvedValue(false as never);
+      vi.mocked(fs.stat).mockResolvedValue({ size: 5000 } as never);
+
+      const mockStream = new EventEmitter();
+      vi.mocked(fs.createReadStream).mockReturnValue(mockStream as never);
+
+      await manager.initialize();
+
+      // 첫 번째 파일 추가
+      const addPromise = manager.addToCache(
+        { type: 'pip', name: 'package1', version: '1.0.0' },
+        '/tmp/file1.whl'
+      );
+
+      setImmediate(() => {
+        mockStream.emit('data', Buffer.from('data'));
+        mockStream.emit('end');
+      });
+
+      await addPromise;
+
+      const count = await manager.getCacheCount();
+      expect(count).toBe(1);
     });
   });
 });

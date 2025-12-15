@@ -7,7 +7,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import logger from '../../utils/logger';
-import { resolvePath, getWriteOptions } from '../shared/path-utils';
+import { resolvePath, getWriteOptions, sanitizePath } from '../shared/path-utils';
 
 export interface SplitOptions {
   maxSizeMB?: number; // 분할 크기 (MB), 기본 25MB
@@ -251,9 +251,11 @@ export class FileSplitter {
       const loadedMetadata: SplitMetadata = await fs.readJson(parts);
       metadata = loadedMetadata;
       const dir = path.dirname(parts);
+      // 경로 조작 방지를 위해 원본 파일명 정규화
+      const safeOriginalFileName = sanitizePath(loadedMetadata.originalFileName);
       partFiles = [];
       for (let i = 1; i <= loadedMetadata.partCount; i++) {
-        partFiles.push(path.join(dir, `${loadedMetadata.originalFileName}.part${String(i).padStart(3, '0')}`));
+        partFiles.push(path.join(dir, `${safeOriginalFileName}.part${String(i).padStart(3, '0')}`));
       }
     } else if (typeof parts === 'string') {
       throw new Error('parts는 파일 배열이거나 메타데이터 파일 경로여야 합니다.');

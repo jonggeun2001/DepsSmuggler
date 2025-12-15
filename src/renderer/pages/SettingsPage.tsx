@@ -324,9 +324,16 @@ const SettingsPage: React.FC = () => {
   };
 
   // 폴더 선택
-  const handleSelectFolder = () => {
-    // TODO: Electron IPC로 폴더 선택
-    message.info('폴더 선택 기능은 Electron 환경에서 사용 가능합니다');
+  const handleSelectFolder = async () => {
+    if (window.electronAPI?.selectFolder) {
+      const folder = await window.electronAPI.selectFolder();
+      if (folder) {
+        form.setFieldsValue({ defaultOutputPath: folder });
+        message.success('폴더가 선택되었습니다');
+      }
+    } else {
+      message.info('폴더 선택 기능은 Electron 환경에서 사용 가능합니다');
+    }
   };
 
   // 배포판 필터링 헬퍼
