@@ -172,6 +172,38 @@ function registerIpcHandlers() {
 }
 
 /**
+ * 개발 모드용 더미 IPC 핸들러 등록
+ * 개발 모드에서 렌더러가 updater:status 등을 호출할 때 에러 방지
+ */
+export function registerDevModeHandlers() {
+  log.info('Registering dev mode updater handlers');
+
+  // 개발 모드에서는 더미 응답 반환
+  ipcMain.handle('updater:status', () => {
+    return updateStatus;
+  });
+
+  ipcMain.handle('updater:check', async () => {
+    log.info('Update check skipped in dev mode');
+    return { success: true, message: 'Skipped in dev mode' };
+  });
+
+  ipcMain.handle('updater:download', async () => {
+    log.info('Update download skipped in dev mode');
+    return { success: true, message: 'Skipped in dev mode' };
+  });
+
+  ipcMain.handle('updater:install', () => {
+    log.info('Update install skipped in dev mode');
+    return { success: true, message: 'Skipped in dev mode' };
+  });
+
+  ipcMain.handle('updater:set-auto-download', () => {
+    return { success: true };
+  });
+}
+
+/**
  * 업데이트 체크 (앱 시작 시 호출)
  */
 export async function checkForUpdatesOnStartup() {

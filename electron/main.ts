@@ -29,7 +29,7 @@ import { registerSearchHandlers } from './search-handlers';
 import { registerDownloadHandlers } from './download-handlers';
 
 // 자동 업데이트 모듈
-import { initAutoUpdater, checkForUpdatesOnStartup } from './updater';
+import { initAutoUpdater, checkForUpdatesOnStartup, registerDevModeHandlers } from './updater';
 
 // 개발 모드 여부 확인
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -111,13 +111,17 @@ async function createWindow(): Promise<void> {
 app.whenReady().then(async () => {
   await createWindow();
 
-  // 자동 업데이트 초기화 (프로덕션 모드에서만)
+  // 자동 업데이트 초기화
   if (!isDev && mainWindow) {
+    // 프로덕션 모드: 전체 업데이트 기능
     initAutoUpdater(mainWindow);
     // 앱 시작 후 업데이트 확인
     setTimeout(() => {
       checkForUpdatesOnStartup();
     }, 3000);
+  } else {
+    // 개발 모드: 더미 핸들러만 등록 (렌더러 에러 방지)
+    registerDevModeHandlers();
   }
 
   app.on('activate', () => {
