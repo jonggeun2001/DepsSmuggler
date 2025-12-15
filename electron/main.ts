@@ -98,7 +98,8 @@ async function createWindow(): Promise<void> {
     }
   } else {
     // 프로덕션 모드: 빌드된 정적 파일 로드
-    const indexPath = path.join(__dirname, '../dist/index.html');
+    // __dirname은 dist/electron/ 이므로 ../index.html로 접근
+    const indexPath = path.join(__dirname, '../index.html');
     await mainWindow.loadFile(indexPath);
   }
 
