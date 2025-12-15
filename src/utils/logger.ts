@@ -2,6 +2,7 @@ import * as winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import * as path from 'path';
 import { getConfigManager } from '../core/config';
+import { mask } from './mask';
 
 // 개발 모드 여부
 const isDev = process.env.NODE_ENV === 'development';
@@ -107,31 +108,31 @@ class Logger {
   }
 
   /**
-   * 에러 로그
+   * 에러 로그 (민감 정보 마스킹 적용)
    */
   error(message: string, meta?: Record<string, unknown>): void {
-    this.logger.error(message, meta);
+    this.logger.error(message, meta ? (mask(meta) as Record<string, unknown>) : undefined);
   }
 
   /**
-   * 경고 로그
+   * 경고 로그 (민감 정보 마스킹 적용)
    */
   warn(message: string, meta?: Record<string, unknown>): void {
-    this.logger.warn(message, meta);
+    this.logger.warn(message, meta ? (mask(meta) as Record<string, unknown>) : undefined);
   }
 
   /**
-   * 정보 로그
+   * 정보 로그 (민감 정보 마스킹 적용)
    */
   info(message: string, meta?: Record<string, unknown>): void {
-    this.logger.info(message, meta);
+    this.logger.info(message, meta ? (mask(meta) as Record<string, unknown>) : undefined);
   }
 
   /**
-   * 디버그 로그
+   * 디버그 로그 (민감 정보 마스킹 적용)
    */
   debug(message: string, meta?: Record<string, unknown>): void {
-    this.logger.debug(message, meta);
+    this.logger.debug(message, meta ? (mask(meta) as Record<string, unknown>) : undefined);
   }
 
   /**

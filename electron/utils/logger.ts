@@ -1,12 +1,13 @@
 /**
  * Electron Backend Logger
- * electron-log 기반 파일 로깅 시스템
+ * electron-log 기반 파일 로깅 시스템 (민감 정보 마스킹 포함)
  */
 
 import log from 'electron-log';
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import { maskSensitiveData } from '../../src/utils/mask';
 
 // 로그 디렉토리 설정 (앱 실행 디렉토리/logs)
 const getLogPath = (): string => {
@@ -95,21 +96,21 @@ export const getLogger = (): typeof log => {
   return logger;
 };
 
-// 편의 메서드 export
+// 편의 메서드 export (민감 정보 마스킹 적용)
 export const logDebug = (message: string, ...args: unknown[]): void => {
-  getLogger().debug(message, ...args);
+  getLogger().debug(message, ...maskSensitiveData(...args));
 };
 
 export const logInfo = (message: string, ...args: unknown[]): void => {
-  getLogger().info(message, ...args);
+  getLogger().info(message, ...maskSensitiveData(...args));
 };
 
 export const logWarn = (message: string, ...args: unknown[]): void => {
-  getLogger().warn(message, ...args);
+  getLogger().warn(message, ...maskSensitiveData(...args));
 };
 
 export const logError = (message: string, ...args: unknown[]): void => {
-  getLogger().error(message, ...args);
+  getLogger().error(message, ...maskSensitiveData(...args));
 };
 
 // 특정 모듈용 스코프 로거 생성
