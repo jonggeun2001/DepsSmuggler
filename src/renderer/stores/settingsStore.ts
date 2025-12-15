@@ -88,6 +88,9 @@ interface SettingsState {
   autoUpdate: boolean;                      // 자동 업데이트 활성화
   autoDownloadUpdate: boolean;              // 자동 다운로드 (알림 없이)
 
+  // UI 렌더링 설정
+  downloadRenderInterval: number;           // 다운로드 화면 렌더링 간격 (ms)
+
   // 초기화 상태
   _initialized: boolean;
 
@@ -143,6 +146,9 @@ const defaultSettings = {
   // 자동 업데이트 기본값
   autoUpdate: true,
   autoDownloadUpdate: false,
+
+  // UI 렌더링 기본값
+  downloadRenderInterval: 300, // 0.3초 (300ms)
 
   _initialized: false,
 };

@@ -70,6 +70,7 @@ const SettingsPage: React.FC = () => {
     dockerIncludeLoadScript,
     autoUpdate,
     autoDownloadUpdate,
+    downloadRenderInterval,
     updateSettings,
     resetSettings,
   } = useSettingsStore();
@@ -242,6 +243,8 @@ const SettingsPage: React.FC = () => {
       // 자동 업데이트
       autoUpdate,
       autoDownloadUpdate,
+      // UI 렌더링
+      downloadRenderInterval,
     });
     // 로컬 상태도 업데이트
     setSelectedYumDistroId(yumDistribution?.id || 'rocky-9');
@@ -275,6 +278,7 @@ const SettingsPage: React.FC = () => {
     dockerIncludeLoadScript,
     autoUpdate,
     autoDownloadUpdate,
+    downloadRenderInterval,
   ]);
 
   // 저장
@@ -944,6 +948,39 @@ const SettingsPage: React.FC = () => {
             </Row>
           </Card>
         )}
+
+        {/* UI 렌더링 설정 */}
+        <Card
+          title="UI 렌더링"
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
+        >
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="downloadRenderInterval"
+                label="다운로드 화면 갱신 간격"
+                style={{ marginBottom: 8 }}
+                tooltip="다운로드 진행 상황 UI 갱신 간격을 설정합니다. 값이 클수록 CPU 사용량이 줄어듭니다."
+              >
+                <Select size="small">
+                  <Select.Option value={100}>0.1초 (빠름)</Select.Option>
+                  <Select.Option value={300}>0.3초 (기본)</Select.Option>
+                  <Select.Option value={500}>0.5초</Select.Option>
+                  <Select.Option value={1000}>1초 (느림)</Select.Option>
+                  <Select.Option value={2000}>2초 (매우 느림)</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <div style={{ fontSize: 12, color: '#888', paddingTop: 24 }}>
+                낮은 값: 부드러운 애니메이션, 높은 CPU 사용<br />
+                높은 값: 끊김 현상, 낮은 CPU 사용
+              </div>
+            </Col>
+          </Row>
+        </Card>
 
         {/* 출력 설정 */}
         <Card
