@@ -22,8 +22,10 @@ src/core/shared/
 ├── dependency-resolver.ts        # 의존성 해결 유틸리티
 ├── file-utils.ts                 # 파일 다운로드/압축 유틸리티
 ├── script-utils.ts               # 설치 스크립트 생성
+├── path-utils.ts                 # 크로스 플랫폼 경로 처리
 │
 │   # 공유 캐시 모듈
+├── cache-utils.ts                # 캐시 공통 유틸리티 (NEW)
 ├── pip-cache.ts                  # PyPI 메타데이터 캐시 (메모리 + 디스크)
 ├── npm-cache.ts                  # npm packument 캐시 (메모리)
 ├── maven-cache.ts                # Maven POM 캐시 (메모리 + 디스크)
@@ -44,6 +46,10 @@ src/core/shared/
 │
 │   # 검색 유틸리티
 └── search-utils.ts               # 검색 결과 정렬/관련성 점수 계산
+
+src/utils/
+├── logger.ts                     # 로깅 유틸리티
+└── mask.ts                       # 민감 정보 마스킹 (NEW)
 ```
 
 ---
@@ -1957,6 +1963,281 @@ ensureForwardSlashForArchive('packages\\requests\\file.whl');
 
 ---
 
+## 캐시 공통 유틸리티 (`cache-utils.ts`)
+
+모든 캐시 모듈 (pip-cache, npm-cache, maven-cache, conda-cache)에서 공통으로 사용하는 캐시 관련 유틸리티
+
+### 상수
+
+```typescript
+const DEFAULT_MEMORY_TTL_MS = 300000;   // 5분 (메모리 캐시 기본 TTL)
+const DEFAULT_DISK_TTL_MS = 86400000;   // 24시간 (디스크 캐시 기본 TTL)
+const LONG_DISK_TTL_MS = 604800000;     // 7일 (장기 디스크 캐시 TTL)
+```
+
+### 타입 정의
+
+#### BaseCacheEntry
+
+캐시 엔트리 기본 구조
+
+```typescript
+interface BaseCacheEntry<T> {
+  data: T;             // 캐시된 데이터
+  cachedAt: number;    // 캐시 저장 시간 (Unix timestamp ms)
+  ttl: number;         // TTL (ms)
+}
+```
+
+#### CacheEntryWithMeta
+
+메타데이터를 포함한 캐시 엔트리
+
+```typescript
+interface CacheEntryWithMeta<T, M = Record<string, unknown>> extends BaseCacheEntry<T> {
+  metadata?: M;        // 추가 메타데이터
+}
+```
+
+#### CacheOptions
+
+캐시 조회 옵션
+
+```typescript
+interface CacheOptions {
+  ttl?: number;              // TTL (ms)
+  forceRefresh?: boolean;    // 강제 새로고침
+  useDiskCache?: boolean;    // 디스크 캐시 사용 여부
+}
+```
+
+#### CacheStats
+
+캐시 통계
+
+```typescript
+interface CacheStats {
+  entries: number;           // 캐시 항목 수
+  hits: number;              // 캐시 히트 수
+  misses: number;            // 캐시 미스 수
+  hitRate: number;           // 히트율 (0~1)
+}
+```
+
+#### ExtendedCacheStats
+
+확장 캐시 통계
+
+```typescript
+interface ExtendedCacheStats extends CacheStats {
+  memoryEntries: number;     // 메모리 캐시 항목 수
+  diskEntries: number;       // 디스크 캐시 항목 수
+  diskSize: number;          // 디스크 캐시 크기 (바이트)
+  pendingRequests: number;   // 진행 중인 요청 수
+}
+```
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `isCacheValid` | cachedAt, ttl | boolean | 캐시 유효성 검사 |
+| `isCacheEntryValid` | entry: BaseCacheEntry | boolean | 캐시 엔트리 유효성 검사 |
+| `createCacheEntry` | data, ttl, metadata? | CacheEntryWithMeta | 캐시 엔트리 생성 |
+| `normalizeKey` | key | string | 캐시 키 정규화 |
+| `pruneExpiredEntries` | cache: Map, getTtl? | number | 만료된 엔트리 정리 |
+| `calculateCacheStats` | cache: Map, hits?, misses? | CacheStats | 캐시 통계 계산 |
+| `isBaseCacheEntry` | entry | boolean | BaseCacheEntry 타입 가드 |
+| `createPendingRequestManager` | - | PendingRequestManager | 중복 요청 방지 관리자 생성 |
+
+### PendingRequestManager
+
+중복 네트워크 요청을 방지하는 관리자
+
+```typescript
+interface PendingRequestManager<T> {
+  has(key: string): boolean;
+  get(key: string): Promise<T | null> | undefined;
+  set(key: string, promise: Promise<T | null>): void;
+  delete(key: string): void;
+  clear(): void;
+  readonly size: number;
+  execute(key: string, fetcher: () => Promise<T | null>, onComplete?: (data: T) => void): Promise<T | null>;
+}
+```
+
+### 사용 예시
+
+```typescript
+import {
+  isCacheValid,
+  createCacheEntry,
+  createPendingRequestManager,
+  DEFAULT_MEMORY_TTL_MS,
+} from './cache-utils';
+
+// 캐시 유효성 검사
+const cachedAt = Date.now() - 60000; // 1분 전
+const isValid = isCacheValid(cachedAt, DEFAULT_MEMORY_TTL_MS); // true (5분 이내)
+
+// 캐시 엔트리 생성
+const entry = createCacheEntry(
+  { name: 'requests', version: '2.28.0' },
+  DEFAULT_MEMORY_TTL_MS,
+  { source: 'pypi' }
+);
+
+// 중복 요청 방지 관리자
+const pendingRequests = createPendingRequestManager<PackageMetadata>();
+
+const metadata = await pendingRequests.execute(
+  'requests:2.28.0',
+  async () => {
+    // 네트워크 요청
+    const response = await fetch(`https://pypi.org/pypi/requests/2.28.0/json`);
+    return response.json();
+  },
+  (data) => {
+    // 성공 시 캐시에 저장
+    cache.set('requests:2.28.0', createCacheEntry(data, DEFAULT_MEMORY_TTL_MS));
+  }
+);
+```
+
+---
+
+## 민감 정보 마스킹 (`src/utils/mask.ts`)
+
+로그 출력 시 비밀번호, API 키 등 민감한 정보를 자동으로 마스킹하는 유틸리티
+
+### 상수
+
+```typescript
+const MASK = '****';  // 마스킹 문자열
+```
+
+### 민감 정보 패턴
+
+```typescript
+// 민감한 필드명 패턴
+const SENSITIVE_FIELD_PATTERNS = [
+  'password', 'passwd', 'pwd', 'secret', 'token',
+  'apikey', 'api_key', 'api-key', 'auth', 'credential',
+  'private', 'key', 'bearer', 'authorization', 'access_token',
+  'refresh_token', 'client_secret', 'smtp', 'mail'
+];
+
+// 민감한 URL 파라미터 정규식
+const URL_SENSITIVE_PARAM_REGEX = /([\?&])(password|token|key|secret|auth|api_key)=/gi;
+
+// Bearer 토큰 정규식
+const BEARER_TOKEN_REGEX = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi;
+
+// key=value 패턴 정규식
+const KEY_VALUE_SENSITIVE_REGEX = /(password|token|secret|key|auth)=([^\s&]+)/gi;
+```
+
+### 주요 함수
+
+| 함수명 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `mask` | value: unknown | unknown | 값의 민감 정보 마스킹 (alias) |
+| `maskObject` | obj: unknown, depth? | unknown | 객체 내 민감 정보 마스킹 |
+| `maskString` | input: string | string | 문자열 내 민감 정보 마스킹 |
+| `maskSensitiveData` | ...args: unknown[] | unknown[] | 여러 인자의 민감 정보 마스킹 |
+| `isSensitiveKey` | key: string | boolean | 민감한 키인지 확인 |
+| `addSensitivePattern` | pattern: string | void | 커스텀 민감 패턴 추가 |
+| `getSensitivePatterns` | - | string[] | 등록된 민감 패턴 목록 |
+
+### maskObject
+
+객체 내 민감 정보를 재귀적으로 마스킹
+
+- 순환 참조 방지를 위한 깊이 제한 (최대 10)
+- 민감한 키의 값은 완전히 마스킹 (`****`)
+- 문자열 값은 `maskString`으로 처리
+- 배열, Date, Error 객체 지원
+
+```typescript
+function maskObject(obj: unknown, depth: number = 0): unknown
+```
+
+### maskString
+
+문자열 내 민감 정보 패턴 마스킹
+
+- Bearer 토큰: `Bearer abc123` → `Bearer ****`
+- URL 파라미터: `?password=secret` → `?password=****`
+- key=value: `token=abc123` → `token=****`
+
+```typescript
+function maskString(input: string): string
+```
+
+### 사용 예시
+
+```typescript
+import { mask, maskObject, maskString, addSensitivePattern } from './mask';
+
+// 객체 마스킹
+const config = {
+  host: 'smtp.example.com',
+  username: 'user@example.com',
+  password: 'secretPassword123',
+  apiKey: 'sk-abc123xyz',
+};
+
+const masked = maskObject(config);
+// {
+//   host: 'smtp.example.com',
+//   username: 'user@example.com',
+//   password: '****',
+//   apiKey: '****',
+// }
+
+// 문자열 마스킹
+const logMessage = 'Request to https://api.example.com?token=abc123&user=john';
+const maskedLog = maskString(logMessage);
+// 'Request to https://api.example.com?token=****&user=john'
+
+// Bearer 토큰 마스킹
+const authHeader = 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...';
+const maskedHeader = maskString(authHeader);
+// 'Authorization: Bearer ****'
+
+// 커스텀 패턴 추가
+addSensitivePattern('myCustomSecret');
+const customData = { myCustomSecret: 'sensitive value' };
+const maskedCustom = maskObject(customData);
+// { myCustomSecret: '****' }
+
+// 로거에서 사용
+import { logger } from './logger';
+
+logger.info('SMTP config:', mask(smtpConfig));
+// [INFO] SMTP config: { host: 'smtp.example.com', password: '****' }
+```
+
+### 로거와의 통합
+
+`src/utils/logger.ts`에서 자동으로 마스킹을 적용:
+
+```typescript
+import { maskSensitiveData } from './mask';
+
+class Logger {
+  info(message: string, ...args: unknown[]): void {
+    console.log(`[INFO] ${message}`, ...maskSensitiveData(...args));
+  }
+
+  error(message: string, ...args: unknown[]): void {
+    console.error(`[ERROR] ${message}`, ...maskSensitiveData(...args));
+  }
+}
+```
+
+---
+
 ## 관련 문서
 - [아키텍처 개요](./architecture-overview.md)
 - [Downloaders 문서](./downloaders.md)
@@ -1965,3 +2246,5 @@ ensureForwardSlashForArchive('packages\\requests\\file.whl');
 - [conda 의존성 해결 알고리즘](./conda-dependency-resolution.md)
 - [Maven 의존성 해결 알고리즘](./maven-dependency-resolution.md)
 - [npm 의존성 해결 알고리즘](./npm-dependency-resolution.md)
+- [IPC 핸들러](./ipc-handlers.md)
+- [Downloader Factory](./downloader-factory.md)
