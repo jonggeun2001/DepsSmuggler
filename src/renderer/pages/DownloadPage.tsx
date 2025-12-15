@@ -104,7 +104,7 @@ const DownloadPage: React.FC = () => {
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
-  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, concurrentDownloads, defaultDownloadPath } = useSettingsStore();
+  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, concurrentDownloads, defaultDownloadPath, downloadRenderInterval } = useSettingsStore();
   const {
     items: downloadItems,
     isDownloading,
@@ -116,6 +116,8 @@ const DownloadPage: React.FC = () => {
     startTime,
     setItems,
     updateItem,
+    updateItemsBatch,
+    addLogsBatch,
     setIsDownloading,
     setIsPaused,
     setOutputPath,
@@ -143,8 +145,15 @@ const DownloadPage: React.FC = () => {
   const downloadItemsRef = useRef<DownloadItem[]>([]);
   // 히스토리 저장용 장바구니 데이터 (다운로드 시작 시 스냅샷)
   const cartSnapshotRef = useRef<typeof cartItems>([]);
-  // progress 업데이트 쓰로틀링용 Map (useRef로 effect 재실행 시에도 유지)
-  const progressThrottleMapRef = useRef<Map<string, number>>(new Map());
+  // 배치 업데이트용 pending 상태 저장
+  const pendingUpdatesRef = useRef<Map<string, Partial<DownloadItem>>>(new Map());
+  const pendingLogsRef = useRef<Array<{ level: 'info' | 'warn' | 'error' | 'success'; message: string; details?: string }>>([]);
+  const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 설정에서 렌더링 간격 사용 (기본값 300ms)
+
+  // 전체 다운로드 속도 계산용 ref
+  const lastSpeedCalcRef = useRef<{ time: number; bytes: number }>({ time: 0, bytes: 0 });
+  const speedHistoryRef = useRef<number[]>([]);
 
   // 초기화
   useEffect(() => {
@@ -170,9 +179,51 @@ const DownloadPage: React.FC = () => {
   useEffect(() => {
     if (!window.electronAPI?.download) return;
 
-    // progress 업데이트 쓰로틀링 (UI 반응성 향상)
-    const progressThrottleMap = progressThrottleMapRef.current;
-    const THROTTLE_MS = 300; // 300ms 간격으로 제한
+    // 배치 업데이트 처리 함수 - 1초마다 한번만 실행
+    const flushPendingUpdates = () => {
+      const pendingUpdates = pendingUpdatesRef.current;
+      const pendingLogs = pendingLogsRef.current;
+
+      // 모든 pending 업데이트를 한번에 적용 (단일 상태 변경)
+      if (pendingUpdates.size > 0) {
+        updateItemsBatch(new Map(pendingUpdates));
+        pendingUpdates.clear();
+      }
+
+      // 모든 pending 로그를 한번에 추가 (단일 상태 변경)
+      if (pendingLogs.length > 0) {
+        addLogsBatch([...pendingLogs]);
+        pendingLogsRef.current = [];
+      }
+
+      batchTimerRef.current = null;
+    };
+
+    // 배치 업데이트 예약 함수
+    const scheduleBatchUpdate = (packageId: string, update: Partial<DownloadItem>) => {
+      pendingUpdatesRef.current.set(packageId, update);
+      // 이미 예약된 타이머가 없으면 1초 후 실행 예약
+      if (batchTimerRef.current === null) {
+        batchTimerRef.current = setTimeout(flushPendingUpdates, downloadRenderInterval);
+      }
+    };
+
+    // 로그 배치 예약 함수
+    const scheduleLogBatch = (level: 'info' | 'warn' | 'error' | 'success', message: string, details?: string) => {
+      pendingLogsRef.current.push({ level, message, details });
+      if (batchTimerRef.current === null) {
+        batchTimerRef.current = setTimeout(flushPendingUpdates, downloadRenderInterval);
+      }
+    };
+
+    // 크기 포맷팅 함수
+    const formatSize = (bytes: number) => {
+      if (!bytes || bytes === 0) return '';
+      if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+      if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+      if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${bytes} B`;
+    };
 
     const unsubProgress = window.electronAPI.download.onProgress((progress: unknown) => {
       const p = progress as {
@@ -185,19 +236,9 @@ const DownloadPage: React.FC = () => {
         error?: string;
       };
 
-      // 크기 포맷팅 함수
-      const formatSize = (bytes: number) => {
-        if (!bytes || bytes === 0) return '';
-        if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-        if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-        if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${bytes} B`;
-      };
-
-      // status에 따라 처리
+      // 모든 상태를 배치 업데이트로 처리
       if (p.status === 'completed') {
-        progressThrottleMap.delete(p.packageId); // 완료 시 쓰로틀 제거
-        updateItem(p.packageId, {
+        scheduleBatchUpdate(p.packageId, {
           status: 'completed',
           progress: 100,
           downloadedBytes: p.totalBytes,
@@ -207,44 +248,39 @@ const DownloadPage: React.FC = () => {
         const displayName = completedItem
           ? `${completedItem.name} (v${completedItem.version})`
           : p.packageId;
-
-        // 크기 정보 추가
         const sizeStr = p.totalBytes ? formatSize(p.totalBytes) : '';
-        addLog('success', `다운로드 완료: ${displayName}`, sizeStr || undefined);
+        scheduleLogBatch('success', `다운로드 완료: ${displayName}`, sizeStr || undefined);
       } else if (p.status === 'failed') {
-        progressThrottleMap.delete(p.packageId);
+        scheduleBatchUpdate(p.packageId, {
+          status: 'failed',
+          error: p.error,
+        });
         const item = downloadItemsRef.current.find(i => i.id === p.packageId);
         if (item) {
-          updateItem(p.packageId, { status: 'failed', error: p.error });
           const displayName = `${item.name} (v${item.version})`;
-          addLog('error', `다운로드 실패: ${displayName}`, p.error);
+          scheduleLogBatch('error', `다운로드 실패: ${displayName}`, p.error);
         }
       } else {
-        // downloading/paused 상태 - 쓰로틀링 적용
-        const now = Date.now();
-        const lastUpdate = progressThrottleMap.get(p.packageId) || 0;
-        if (now - lastUpdate >= THROTTLE_MS) {
-          progressThrottleMap.set(p.packageId, now);
-          updateItem(p.packageId, {
-            status: p.status as 'downloading' | 'paused',
-            progress: p.progress,
-            downloadedBytes: p.downloadedBytes,
-            totalBytes: p.totalBytes,
-            speed: p.speed || 0,
-          });
-        }
+        // downloading/paused 상태
+        scheduleBatchUpdate(p.packageId, {
+          status: p.status as 'downloading' | 'paused',
+          progress: p.progress,
+          downloadedBytes: p.downloadedBytes,
+          totalBytes: p.totalBytes,
+          speed: p.speed || 0,
+        });
       }
     });
 
     const unsubComplete = window.electronAPI.download.onComplete((result: unknown) => {
       const r = result as { id: string };
-      updateItem(r.id, { status: 'completed', progress: 100 });
+      scheduleBatchUpdate(r.id, { status: 'completed', progress: 100 });
       // ref를 사용하여 최신 아이템 목록에서 조회 (클로저 문제 방지)
       const completedItem = downloadItemsRef.current.find(i => i.id === r.id);
       const displayName = completedItem
         ? `${completedItem.name} (v${completedItem.version})`
         : r.id;
-      addLog('success', `다운로드 완료: ${displayName}`);
+      scheduleLogBatch('success', `다운로드 완료: ${displayName}`);
     });
 
     const unsubError = window.electronAPI.download.onError((error: unknown) => {
@@ -252,18 +288,18 @@ const DownloadPage: React.FC = () => {
       // ref를 사용하여 최신 아이템 목록에서 조회 (클로저 문제 방지)
       const item = downloadItemsRef.current.find(i => i.id === e.id);
       if (item) {
-        updateItem(e.id, { status: 'failed', error: e.message });
+        scheduleBatchUpdate(e.id, { status: 'failed', error: e.message });
         const displayName = `${item.name} (v${item.version})`;
-        addLog('error', `다운로드 실패: ${displayName}`, e.message);
+        scheduleLogBatch('error', `다운로드 실패: ${displayName}`, e.message);
       }
     });
 
     // 의존성 해결 상태 리스너
     const unsubStatus = window.electronAPI.download.onStatus?.((status) => {
       if (status.phase === 'resolving') {
-        addLog('info', '의존성 분석 중...');
+        scheduleLogBatch('info', '의존성 분석 중...');
       } else if (status.phase === 'downloading') {
-        addLog('info', '다운로드 시작...');
+        scheduleLogBatch('info', '다운로드 시작...');
       }
     });
 
@@ -285,7 +321,7 @@ const DownloadPage: React.FC = () => {
       const originalCount = originalPackages.length;
       const totalCount = allPackages.length;
 
-      addLog(
+      scheduleLogBatch(
         'info',
         `의존성 해결 완료: ${originalCount}개 → ${totalCount}개 패키지`
       );
@@ -348,7 +384,7 @@ const DownloadPage: React.FC = () => {
       // 실패한 의존성 해결 경고 표시
       if (failedPackages && failedPackages.length > 0) {
         failedPackages.forEach((failed) => {
-          addLog('warn', `의존성 해결 실패: ${failed.name} (v${failed.version})`, failed.error);
+          scheduleLogBatch('warn', `의존성 해결 실패: ${failed.name} (v${failed.version})`, failed.error);
         });
       }
     });
@@ -361,14 +397,14 @@ const DownloadPage: React.FC = () => {
       const currentItems = useDownloadStore.getState().items;
       currentItems.forEach((item) => {
         if (item.status === 'downloading' || item.status === 'pending') {
-          updateItem(item.id, { status: 'completed', progress: 100 });
+          scheduleBatchUpdate(item.id, { status: 'completed', progress: 100 });
         }
       });
 
       setIsDownloading(false);
       setPackagingStatus('completed');
       setPackagingProgress(100);
-      addLog('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
+      scheduleLogBatch('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
       message.success('다운로드 및 패키징이 완료되었습니다');
 
       // 히스토리 저장
@@ -431,9 +467,16 @@ const DownloadPage: React.FC = () => {
       unsubStatus?.();
       unsubDepsResolved?.();
       unsubAllComplete?.();
+      // 배치 업데이트 타이머 취소
+      if (batchTimerRef.current !== null) {
+        clearTimeout(batchTimerRef.current);
+        batchTimerRef.current = null;
+      }
+      pendingUpdatesRef.current.clear();
+      pendingLogsRef.current = [];
     };
     // downloadItems 대신 downloadItemsRef를 사용하므로 dependency에서 제거
-  }, [updateItem, addLog, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, addHistory, clearCart]);
+  }, [updateItem, updateItemsBatch, addLog, addLogsBatch, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, addHistory, clearCart]);
 
   // downloadItems 변경 시 ref 동기화 (IPC 이벤트 핸들러에서 최신 상태 참조용)
   // updateItem 호출 후에도 ref가 최신 상태를 유지하도록 함
@@ -460,16 +503,63 @@ const DownloadPage: React.FC = () => {
     }
   };
 
-  // 남은 시간 계산 (바이트/속도 기반)
+  // 전체 다운로드 속도 계산 (이동 평균 적용)
+  const calculateOverallSpeed = useCallback((): number => {
+    if (!isDownloading || !startTime) return 0;
+
+    const now = Date.now();
+    const totalDownloaded = downloadItems.reduce((sum, item) => sum + (item.downloadedBytes || 0), 0);
+
+    // 최소 500ms 간격으로 속도 계산
+    const lastCalc = lastSpeedCalcRef.current;
+    const timeDiff = now - lastCalc.time;
+
+    if (timeDiff >= 500 && lastCalc.time > 0) {
+      const bytesDiff = totalDownloaded - lastCalc.bytes;
+      const instantSpeed = bytesDiff > 0 ? (bytesDiff / timeDiff) * 1000 : 0;
+
+      // 속도 히스토리에 추가 (최대 10개 유지)
+      const history = speedHistoryRef.current;
+      if (instantSpeed > 0) {
+        history.push(instantSpeed);
+        if (history.length > 10) {
+          history.shift();
+        }
+      }
+
+      // 참조값 업데이트
+      lastSpeedCalcRef.current = { time: now, bytes: totalDownloaded };
+    } else if (lastCalc.time === 0 && totalDownloaded > 0) {
+      // 최초 계산
+      lastSpeedCalcRef.current = { time: now, bytes: totalDownloaded };
+    }
+
+    // 이동 평균 계산
+    const history = speedHistoryRef.current;
+    if (history.length === 0) {
+      // 히스토리가 없으면 전체 경과 시간 기반 평균 속도 반환
+      const elapsed = now - startTime;
+      return elapsed > 0 ? (totalDownloaded / elapsed) * 1000 : 0;
+    }
+
+    // 가중 이동 평균 (최근 값에 더 높은 가중치)
+    let weightedSum = 0;
+    let weightSum = 0;
+    history.forEach((speed, index) => {
+      const weight = index + 1; // 최근 값일수록 높은 가중치
+      weightedSum += speed * weight;
+      weightSum += weight;
+    });
+
+    return weightSum > 0 ? weightedSum / weightSum : 0;
+  }, [isDownloading, startTime, downloadItems]);
+
+  // 남은 시간 계산 (전체 용량/속도 기반)
   const calculateRemainingTime = useCallback(() => {
     if (!isDownloading) return null;
 
-    // 현재 총 다운로드 속도 (bytes/sec)
-    const currentSpeed = downloadItems
-      .filter((item) => item.status === 'downloading')
-      .reduce((sum, item) => sum + (item.speed || 0), 0);
-
-    if (currentSpeed === 0) return null;
+    const overallSpeed = calculateOverallSpeed();
+    if (overallSpeed <= 0) return null;
 
     // 총 예상 바이트와 다운로드된 바이트 계산
     const downloadedBytes = downloadItems.reduce((sum, item) => sum + (item.downloadedBytes || 0), 0);
@@ -479,7 +569,7 @@ const DownloadPage: React.FC = () => {
     if (remainingBytes <= 0) return null;
 
     // 남은 시간 (밀리초)
-    const remainingMs = (remainingBytes / currentSpeed) * 1000;
+    const remainingMs = (remainingBytes / overallSpeed) * 1000;
 
     if (remainingMs < 60000) {
       return `${Math.ceil(remainingMs / 1000)}초`;
@@ -488,7 +578,7 @@ const DownloadPage: React.FC = () => {
     } else {
       return `${Math.floor(remainingMs / 3600000)}시간 ${Math.ceil((remainingMs % 3600000) / 60000)}분`;
     }
-  }, [isDownloading, downloadItems]);
+  }, [isDownloading, downloadItems, calculateOverallSpeed]);
 
   // 출력 폴더 검사 및 삭제
   const checkOutputPath = async (): Promise<boolean> => {
@@ -757,6 +847,9 @@ const DownloadPage: React.FC = () => {
     setStartTime(Date.now());
     downloadCancelledRef.current = false;
     downloadPausedRef.current = false;
+    // 속도 계산 ref 초기화
+    lastSpeedCalcRef.current = { time: 0, bytes: 0 };
+    speedHistoryRef.current = [];
 
     // 출력 폴더 검사
     window.electronAPI?.log?.('info', '[TIMING] Calling checkOutputPath...');
@@ -1043,10 +1136,8 @@ const DownloadPage: React.FC = () => {
     downloadItems.every((item) => ['completed', 'skipped'].includes(item.status));
   const hasAnyCompleted = completedCount > 0;
 
-  // 현재 다운로드 속도 합계
-  const totalSpeed = downloadItems
-    .filter((item) => item.status === 'downloading')
-    .reduce((sum, item) => sum + item.speed, 0);
+  // 전체 다운로드 속도 (이동 평균 기반)
+  const totalSpeed = calculateOverallSpeed();
 
   // 크기 포맷팅 함수
   const formatBytes = (bytes: number) => {

@@ -51,6 +51,8 @@ interface DownloadState {
   // Actions
   setItems: (items: DownloadItem[]) => void;
   updateItem: (id: string, updates: Partial<DownloadItem>) => void;
+  updateItemsBatch: (updates: Map<string, Partial<DownloadItem>>) => void;
+  addLogsBatch: (logs: Array<{ level: LogEntry['level']; message: string; details?: string }>) => void;
   setIsDownloading: (isDownloading: boolean) => void;
   setIsPaused: (isPaused: boolean) => void;
   setOutputPath: (path: string) => void;
@@ -90,6 +92,30 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
       items: state.items.map((item) =>
         item.id === id ? { ...item, ...updates } : item
       ),
+    })),
+
+  // 여러 아이템을 한번에 업데이트 (배치)
+  updateItemsBatch: (updates) =>
+    set((state) => ({
+      items: state.items.map((item) => {
+        const update = updates.get(item.id);
+        return update ? { ...item, ...update } : item;
+      }),
+    })),
+
+  // 여러 로그를 한번에 추가 (배치)
+  addLogsBatch: (logs) =>
+    set((state) => ({
+      logs: [
+        ...state.logs,
+        ...logs.map((log) => ({
+          id: generateLogId(),
+          timestamp: Date.now(),
+          level: log.level,
+          message: log.message,
+          details: log.details,
+        })),
+      ],
     })),
 
   setIsDownloading: (isDownloading) => set({ isDownloading }),
