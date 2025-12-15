@@ -7,7 +7,7 @@
  * - https://pip.pypa.io/en/stable/development/architecture/package-finding/
  */
 
-import { compareVersions } from './version-utils';
+import { compareVersions, isVersionCompatible } from './version-utils';
 import {
   PlatformTag,
   getFullSupportedTags,
@@ -412,7 +412,9 @@ export function selectBestCandidateFromAllVersions(
     if (releases.length === 0) continue;
 
     // 버전 스펙 필터링 (있는 경우)
-    // TODO: 버전 스펙 파싱 및 필터링 구현
+    if (versionSpec && !isVersionCompatible(version, versionSpec)) {
+      continue;
+    }
 
     for (const release of releases) {
       allCandidates.push(createCandidateFromRelease(name, version, release));

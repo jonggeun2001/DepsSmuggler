@@ -6,9 +6,14 @@
 import axios, { AxiosInstance } from 'axios';
 import logger from '../../utils/logger';
 import { NpmPackument, PackumentCacheEntry } from './npm-types';
+import {
+  isCacheValid,
+  createPendingRequestManager,
+  DEFAULT_MEMORY_TTL_MS,
+} from './cache-utils';
 
 /** 기본 TTL: 5분 */
-const DEFAULT_TTL = 5 * 60 * 1000;
+const DEFAULT_TTL = DEFAULT_MEMORY_TTL_MS;
 
 /** 기본 레지스트리 URL */
 const DEFAULT_REGISTRY_URL = 'https://registry.npmjs.org';
@@ -20,8 +25,19 @@ const packumentCache: Map<string, PackumentCacheEntry> = new Map();
 
 /**
  * 진행 중인 요청 추적 (중복 요청 방지)
+ * createPendingRequestManager 사용
  */
-const pendingRequests: Map<string, Promise<NpmPackument>> = new Map();
+const pendingManager = createPendingRequestManager<NpmPackument>();
+
+// 하위 호환성을 위한 래퍼 (기존 API 유지)
+// npm 캐시는 에러 시 throw하므로 null 반환 없음
+const pendingRequests = {
+  get: (key: string) => pendingManager.get(key) as Promise<NpmPackument> | undefined,
+  set: (key: string, promise: Promise<NpmPackument | null>) =>
+    pendingManager.set(key, promise),
+  delete: (key: string) => pendingManager.delete(key),
+  clear: () => pendingManager.clear(),
+};
 
 /**
  * Axios 클라이언트 (싱글톤)
@@ -78,10 +94,10 @@ export async function fetchPackument(
   const cacheKey = `${registryUrl}:${name}`;
   const now = Date.now();
 
-  // 1. 캐시 확인
+  // 1. 캐시 확인 (공통 유틸리티 사용)
   if (!forceRefresh) {
     const cached = packumentCache.get(cacheKey);
-    if (cached && now - cached.fetchedAt < ttl) {
+    if (cached && isCacheValid(cached.fetchedAt, ttl)) {
       logger.debug('npm 캐시 히트', {
         package: name,
         age: Math.round((now - cached.fetchedAt) / 1000),
@@ -152,10 +168,10 @@ export async function fetchPackumentWithCacheInfo(
   const cacheKey = `${registryUrl}:${name}`;
   const now = Date.now();
 
-  // 캐시 확인
+  // 캐시 확인 (공통 유틸리티 사용)
   if (!forceRefresh) {
     const cached = packumentCache.get(cacheKey);
-    if (cached && now - cached.fetchedAt < ttl) {
+    if (cached && isCacheValid(cached.fetchedAt, ttl)) {
       return { packument: cached.packument, fromCache: true };
     }
   }
@@ -212,14 +228,13 @@ export function getNpmCacheStats(): NpmCacheStats {
 }
 
 /**
- * 만료된 캐시 정리
+ * 만료된 캐시 정리 (공통 유틸리티 사용)
  */
 export function pruneExpiredNpmCache(ttl: number = DEFAULT_TTL): number {
-  const now = Date.now();
   let pruned = 0;
 
   packumentCache.forEach((entry, key) => {
-    if (now - entry.fetchedAt >= ttl) {
+    if (!isCacheValid(entry.fetchedAt, ttl)) {
       packumentCache.delete(key);
       pruned++;
     }
@@ -245,7 +260,7 @@ export function getPackumentFromCache(
 }
 
 /**
- * 캐시 유효성 확인
+ * 캐시 유효성 확인 (공통 유틸리티 사용)
  */
 export function isPackumentCached(
   name: string,
@@ -255,5 +270,5 @@ export function isPackumentCached(
   const cacheKey = `${registryUrl}:${name}`;
   const cached = packumentCache.get(cacheKey);
   if (!cached) return false;
-  return Date.now() - cached.fetchedAt < ttl;
+  return isCacheValid(cached.fetchedAt, ttl);
 }

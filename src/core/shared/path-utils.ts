@@ -128,6 +128,75 @@ export function toScriptPath(p: string, scriptType: 'bash' | 'powershell'): stri
 }
 
 /**
+ * 경로 조작 공격(Path Traversal)을 방지하기 위해 입력값을 정규화합니다.
+ * 패키지명, 버전, 태그 등 외부 입력이 경로에 사용될 때 호출합니다.
+ *
+ * - 경로 구분자(/, \) 제거
+ * - 상위 디렉토리 이동(..) 제거
+ * - 현재 디렉토리(.) 제거
+ * - 널 바이트 제거
+ * - 허용되지 않은 특수문자를 언더스코어로 대체
+ *
+ * @param input - 정규화할 문자열 (패키지명, 버전 등)
+ * @param allowedChars - 추가로 허용할 문자 정규식 (기본: 알파벳, 숫자, 점, 하이픈, 언더스코어, @)
+ * @returns 정규화된 안전한 문자열
+ *
+ * @example
+ * sanitizePath('../etc/passwd') // 'etc_passwd'
+ * sanitizePath('package/../../secret') // 'package_secret'
+ * sanitizePath('@scope/package') // '@scope_package'
+ */
+export function sanitizePath(
+  input: string,
+  allowedChars: RegExp = /[^a-zA-Z0-9._\-@]/g
+): string {
+  if (!input || typeof input !== 'string') {
+    return '';
+  }
+
+  let sanitized = input
+    // 널 바이트 제거
+    .replace(/\0/g, '')
+    // 연속된 점(..) 제거 - 상위 디렉토리 이동 방지
+    .replace(/\.{2,}/g, '')
+    // 경로 구분자를 언더스코어로 대체
+    .replace(/[/\\]/g, '_')
+    // 허용되지 않은 문자를 언더스코어로 대체
+    .replace(allowedChars, '_')
+    // 연속된 언더스코어 정리
+    .replace(/_+/g, '_')
+    // 앞뒤 언더스코어 제거
+    .replace(/^_+|_+$/g, '');
+
+  // 빈 문자열이 되면 기본값 반환
+  if (!sanitized) {
+    return 'unnamed';
+  }
+
+  return sanitized;
+}
+
+/**
+ * 경로가 기준 디렉토리 내에 있는지 검증합니다.
+ * path.join() 후 결과가 기준 디렉토리를 벗어나지 않는지 확인합니다.
+ *
+ * @param basePath - 기준 디렉토리 (절대 경로)
+ * @param targetPath - 검증할 대상 경로 (절대 경로)
+ * @returns 기준 디렉토리 내에 있으면 true
+ *
+ * @example
+ * isPathWithinBase('/downloads', '/downloads/package') // true
+ * isPathWithinBase('/downloads', '/etc/passwd') // false
+ */
+export function isPathWithinBase(basePath: string, targetPath: string): boolean {
+  const normalizedBase = normalizePath(basePath);
+  const normalizedTarget = normalizePath(targetPath);
+
+  // 대상 경로가 기준 경로로 시작하는지 확인
+  return normalizedTarget.startsWith(normalizedBase + '/') || normalizedTarget === normalizedBase;
+}
+
+/**
  * 현재 플랫폼이 Windows인지 확인
  */
 export const isWindows = process.platform === 'win32';

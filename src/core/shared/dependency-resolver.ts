@@ -82,7 +82,12 @@ function getResolverByType(type: string) {
       return getYumResolver();
     case 'npm':
       return getNpmResolver();
-    // TODO: apt, apk 리졸버는 인터페이스가 달라 별도 어댑터 필요
+    // apt, apk: OS 패키지 관리자는 저장소 메타데이터 기반 의존성 해결 방식이 달라
+    // 별도 어댑터 구현 필요 (현재 다운로더에서 직접 의존성 해결)
+    case 'apt':
+    case 'apk':
+    case 'docker':
+      return null;
     default:
       return null;
   }
