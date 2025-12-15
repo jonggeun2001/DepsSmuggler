@@ -28,6 +28,42 @@ const log = createScopedLogger('Download');
 // 타입 별칭 (공통 모듈에서 가져온 타입 사용)
 type DownloadOptions = SharedDownloadOptions;
 
+// 진행 상황 스로틀링을 위한 마지막 전송 시간 추적
+const lastProgressTime = new Map<string, number>();
+const PROGRESS_THROTTLE_MS = 1000; // 1초 간격으로 스로틀링
+
+/**
+ * 진행 상황 전송 (스로틀링 적용)
+ * @param mainWindow BrowserWindow 인스턴스
+ * @param packageId 패키지 ID
+ * @param data 진행 상황 데이터
+ * @param force 스로틀링 무시하고 강제 전송 (완료/에러 상태)
+ */
+function sendProgressThrottled(
+  mainWindow: BrowserWindow | null,
+  packageId: string,
+  data: {
+    status: string;
+    progress: number;
+    downloadedBytes: number;
+    totalBytes: number;
+    speed?: number;
+  },
+  force = false
+): void {
+  const now = Date.now();
+  const lastTime = lastProgressTime.get(packageId) || 0;
+
+  // 강제 전송이거나 스로틀 간격이 지났으면 전송
+  if (force || now - lastTime >= PROGRESS_THROTTLE_MS) {
+    lastProgressTime.set(packageId, now);
+    mainWindow?.webContents.send('download:progress', {
+      packageId,
+      ...data,
+    });
+  }
+}
+
 // 다운로드 상태
 let downloadCancelled = false;
 let downloadPaused = false;
@@ -105,15 +141,14 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
         }
 
         try {
-          // 진행 상태 전송: 시작
-          mainWindow?.webContents.send('download:progress', {
-            packageId: pkg.id,
+          // 진행 상태 전송: 시작 (강제 전송)
+          sendProgressThrottled(mainWindow, pkg.id, {
             status: 'downloading',
             progress: 0,
             downloadedBytes: 0,
             totalBytes: 0,
             speed: 0,
-          });
+          }, true);
 
           let downloadUrl: { url: string; filename: string } | null = null;
 
@@ -191,8 +226,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                 m2RepoDir,
                 (progress) => {
                   mavenTotalBytes = progress.totalBytes;
-                  mainWindow?.webContents.send('download:progress', {
-                    packageId: pkg.id,
+                  sendProgressThrottled(mainWindow, pkg.id, {
                     status: 'downloading',
                     progress: progress.progress,
                     downloadedBytes: progress.downloadedBytes,
@@ -209,14 +243,13 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                 await fse.copy(jarPath, flatDestPath);
               }
 
-              // 완료 상태 전송
-              mainWindow?.webContents.send('download:progress', {
-                packageId: pkg.id,
+              // 완료 상태 전송 (강제 전송)
+              sendProgressThrottled(mainWindow, pkg.id, {
                 status: 'completed',
                 progress: 100,
                 downloadedBytes: mavenTotalBytes,
                 totalBytes: mavenTotalBytes,
-              });
+              }, true);
 
               return { id: pkg.id, success: true };
             }
@@ -255,8 +288,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
               packagesDir,
               (progress) => {
                 dockerTotalBytes = progress.totalBytes;
-                mainWindow?.webContents.send('download:progress', {
-                  packageId: pkg.id,
+                sendProgressThrottled(mainWindow, pkg.id, {
                   status: 'downloading',
                   progress: progress.progress,
                   downloadedBytes: progress.downloadedBytes,
@@ -267,14 +299,13 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
               registry
             );
 
-            // 완료 상태 전송
-            mainWindow?.webContents.send('download:progress', {
-              packageId: pkg.id,
+            // 완료 상태 전송 (강제 전송)
+            sendProgressThrottled(mainWindow, pkg.id, {
               status: 'completed',
               progress: 100,
               downloadedBytes: dockerTotalBytes,
               totalBytes: dockerTotalBytes,
-            });
+            }, true);
 
             return { id: pkg.id, success: true };
           }
@@ -284,68 +315,78 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           }
 
           const destPath = path.join(packagesDir, downloadUrl.filename);
-          let lastProgressUpdate = Date.now();
+          let lastSpeedUpdate = Date.now();
           let lastBytes = 0;
           let finalTotalBytes = 0;
+          let currentSpeed = 0;
 
           await downloadFile(downloadUrl.url, destPath, (downloaded, total) => {
             const now = Date.now();
-            const elapsed = (now - lastProgressUpdate) / 1000;
+            const elapsed = (now - lastSpeedUpdate) / 1000;
             finalTotalBytes = total;
 
-            // 일시정지 상태일 때 UI 업데이트
-            if (downloadPaused) {
-              mainWindow?.webContents.send('download:progress', {
-                packageId: pkg.id,
-                status: 'paused',
-                progress: total > 0 ? Math.round((downloaded / total) * 100) : 0,
-                downloadedBytes: downloaded,
-                totalBytes: total,
-                speed: 0,
-              });
-              return; // 일시정지 시 일반 업데이트 스킵
+            // 속도 계산 (0.3초마다)
+            if (elapsed >= 0.3) {
+              currentSpeed = (downloaded - lastBytes) / elapsed;
+              lastSpeedUpdate = now;
+              lastBytes = downloaded;
             }
 
-            if (elapsed >= 0.3) { // 0.3초마다 업데이트 (동시 다운로드 시 더 빈번하게)
-              const speed = (downloaded - lastBytes) / elapsed;
-              const progress = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+            const progress = total > 0 ? Math.round((downloaded / total) * 100) : 0;
 
-              mainWindow?.webContents.send('download:progress', {
-                packageId: pkg.id,
-                status: 'downloading',
+            // 일시정지 상태일 때 UI 업데이트 (강제 전송)
+            if (downloadPaused) {
+              sendProgressThrottled(mainWindow, pkg.id, {
+                status: 'paused',
                 progress,
                 downloadedBytes: downloaded,
                 totalBytes: total,
-                speed,
-              });
-
-              lastProgressUpdate = now;
-              lastBytes = downloaded;
+                speed: 0,
+              }, true);
+              return; // 일시정지 시 일반 업데이트 스킵
             }
+
+            // 스로틀링 적용된 진행 상황 전송
+            sendProgressThrottled(mainWindow, pkg.id, {
+              status: 'downloading',
+              progress,
+              downloadedBytes: downloaded,
+              totalBytes: total,
+              speed: currentSpeed,
+            });
           }, {
             signal: downloadAbortController?.signal,
             shouldPause: () => downloadPaused,  // 일시정지 콜백 전달
           });
 
-          // 완료 상태 전송
-          mainWindow?.webContents.send('download:progress', {
-            packageId: pkg.id,
+          // 완료 상태 전송 (강제 전송)
+          sendProgressThrottled(mainWindow, pkg.id, {
             status: 'completed',
             progress: 100,
             downloadedBytes: finalTotalBytes,
             totalBytes: finalTotalBytes,
-          });
+          }, true);
+
+          // 완료된 패키지의 스로틀 상태 정리
+          lastProgressTime.delete(pkg.id);
 
           return { id: pkg.id, success: true };
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           log.error(`Download failed for ${pkg.name}:`, errorMessage);
 
+          // 실패 상태 전송 (강제 전송)
           mainWindow?.webContents.send('download:progress', {
             packageId: pkg.id,
             status: 'failed',
+            progress: 0,
+            downloadedBytes: 0,
+            totalBytes: 0,
             error: errorMessage,
           });
+
+          // 실패한 패키지의 스로틀 상태 정리
+          lastProgressTime.delete(pkg.id);
 
           return { id: pkg.id, success: false, error: errorMessage };
         }
@@ -431,6 +472,8 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
     } else {
       log.warn('[CANCEL] No AbortController available!');
     }
+    // 스로틀 상태 정리
+    lastProgressTime.clear();
     return { success: true };
   });
 
