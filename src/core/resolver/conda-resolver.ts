@@ -143,8 +143,35 @@ export class CondaResolver implements IResolver {
       return this.visited.get(cacheKey)!;
     }
 
-    // 최대 깊이 도달
+    // 최대 깊이 도달 - 의존성은 해결하지 않지만 패키지 정보는 조회하여 downloadUrl 설정
     if (depth >= maxDepth) {
+      const targetSubdir = this.repoDataProcessor.targetSubdir;
+      const targetCacheKey = `${channel}/${targetSubdir}`;
+      const repodata = await this.repoDataProcessor.getRepoData(channel, targetSubdir);
+
+      if (repodata) {
+        const versionSpec = version === 'latest' ? undefined : `==${version}`;
+        const candidates = this.repoDataProcessor.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
+        if (candidates.length > 0) {
+          const downloadUrl = `${this.condaUrl}/${channel}/${candidates[0].subdir}/${candidates[0].filename}`;
+          return {
+            package: {
+              type: 'conda',
+              name,
+              version: candidates[0].version,
+              metadata: {
+                repository: `${channel}/${name}`,
+                subdir: candidates[0].subdir,
+                filename: candidates[0].filename,
+                downloadUrl,
+                size: candidates[0].size,
+              },
+            },
+            dependencies: [],
+          };
+        }
+      }
+
       return {
         package: { type: 'conda', name, version },
         dependencies: [],
@@ -163,9 +190,13 @@ export class CondaResolver implements IResolver {
       const targetSubdir = this.repoDataProcessor.targetSubdir;
       const targetCacheKey = `${channel}/${targetSubdir}`;
       const repodata = await this.repoDataProcessor.getRepoData(channel, targetSubdir);
+      let isPythonMatch = false;
       if (repodata) {
-        const candidates = this.repoDataProcessor.findPackageCandidates(repodata, name, version === 'latest' ? undefined : `==${version}`, targetCacheKey);
+        const versionSpec = version === 'latest' ? undefined : `==${version}`;
+        const candidates = this.repoDataProcessor.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
         if (candidates.length > 0) {
+          // 첫 번째 후보가 Python 버전과 호환되는지 확인 (정렬 우선순위에 따라 호환되는 것이 먼저 옴)
+          isPythonMatch = (candidates[0] as { isPythonMatch?: boolean }).isPythonMatch ?? true;
           depends = candidates[0].depends;
           resolvedVersion = candidates[0].version;
           resolvedSubdir = candidates[0].subdir;
@@ -174,13 +205,15 @@ export class CondaResolver implements IResolver {
         }
       }
 
-      // noarch도 확인
-      if (depends.length === 0) {
+      // noarch도 확인: 후보가 없거나 Python 버전이 맞지 않는 경우
+      if (depends.length === 0 || !isPythonMatch) {
         const noarchCacheKey = `${channel}/noarch`;
         const noarchRepodata = await this.repoDataProcessor.getRepoData(channel, 'noarch');
         if (noarchRepodata) {
           const candidates = this.repoDataProcessor.findPackageCandidates(noarchRepodata, name, version === 'latest' ? undefined : `==${version}`, noarchCacheKey);
           if (candidates.length > 0) {
+            // noarch 패키지는 모든 Python 버전과 호환되므로 우선 사용
+            isPythonMatch = true; // noarch는 항상 호환
             depends = candidates[0].depends;
             resolvedVersion = candidates[0].version;
             resolvedSubdir = candidates[0].subdir;
@@ -190,13 +223,18 @@ export class CondaResolver implements IResolver {
         }
       }
 
-      // repodata에서 못 찾으면 Anaconda API 폴백
-      if (depends.length === 0) {
-        const fallbackResult = await this.resolvePackageFallback(name, version, channel);
-        if (fallbackResult) {
-          depends = fallbackResult.depends;
-          resolvedVersion = fallbackResult.version;
-        }
+      // Python 버전 불일치 시 스킵 (strict mode)
+      if (!isPythonMatch && depends.length > 0) {
+        logger.warn(`Python 버전 불일치로 스킵: ${name}@${version} (Python ${this.pythonVersion}용 빌드 없음)`);
+        return {
+          package: { type: 'conda', name, version },
+          dependencies: [],
+        };
+      }
+
+      // repodata에서 못 찾은 경우 (API fallback 제거 - 플랫폼 불일치 방지)
+      if (depends.length === 0 && !resolvedSubdir) {
+        logger.debug(`repodata에서 찾지 못함: ${name}@${version} (${channel})`);
       }
 
       // 다운로드 URL 생성 (subdir과 filename이 있는 경우)
@@ -345,6 +383,9 @@ export class CondaResolver implements IResolver {
       '__glibc',
       '__linux',
       '__unix',
+      '__win',
+      '__osx',
+      '__macos',
     ];
     return systemPackages.includes(name.toLowerCase());
   }
