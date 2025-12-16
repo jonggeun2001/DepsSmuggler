@@ -512,6 +512,175 @@ return {
 - UI에서 다운로드 전 예상 크기 표시
 - 다운로드 완료 시 총 크기 로깅
 
+### 7.3 Python 버전 호환성
+
+빌드 문자열에서 Python 버전을 추출하여 타겟 Python 버전과 호환되는지 확인합니다.
+
+```typescript
+/**
+ * 빌드가 타겟 Python 버전과 호환되는지 확인
+ * @param build 빌드 문자열 (예: "py311h123abc_0")
+ * @returns Python 버전이 없거나 매칭되면 true
+ */
+isBuildCompatibleWithPython(build: string): boolean {
+  const pythonTag = this.getPythonBuildTag(); // 예: 'py313'
+  if (!pythonTag) return true;
+
+  // py\d+ (conda 스타일) 또는 cp\d+ (CPython 스타일) 패턴 검사
+  const pyMatch = build.match(/(py|cp)\d+/);
+  if (!pyMatch) return true; // Python 버전 없으면 네이티브 라이브러리로 간주
+
+  // Python 버전이 있으면 정확히 매칭 (py313 또는 cp313)
+  const pythonNumber = pythonTag.slice(2); // 'py313' -> '313'
+  return build.includes(`py${pythonNumber}`) || build.includes(`cp${pythonNumber}`);
+}
+```
+
+**지원 패턴**:
+| 패턴 | 설명 | 예시 |
+|------|------|------|
+| `py\d+` | Conda 스타일 | `py311`, `py312`, `py313` |
+| `cp\d+` | CPython 스타일 | `cp311`, `cp312`, `cp313` |
+
+### 7.4 플랫폼 호환성 체크
+
+의존성에 플랫폼 마커가 있으면 해당 플랫폼 전용 빌드로 판단하여 호환성을 확인합니다.
+
+```typescript
+/**
+ * 빌드가 타겟 플랫폼과 호환되는지 확인
+ * depends에 플랫폼 마커(__win, __unix, __linux, __osx)가 있으면 해당 플랫폼 전용
+ */
+isBuildCompatibleWithPlatform(depends: string[]): boolean {
+  const targetSubdir = this.config.targetSubdir;
+  const isLinux = targetSubdir.startsWith('linux-');
+  const isWindows = targetSubdir.startsWith('win-');
+  const isMacOS = targetSubdir.startsWith('osx-');
+
+  // 플랫폼 마커 확인 (버전 스펙 포함 가능: "__glibc >=2.17,<3.0.a0")
+  const hasWin = depends.some(d => d === '__win' || d.startsWith('__win '));
+  const hasUnix = depends.some(d => d === '__unix' || d.startsWith('__unix '));
+  const hasLinux = depends.some(d => d === '__linux' || d.startsWith('__linux '));
+  const hasOSX = depends.some(d => d === '__osx' || d.startsWith('__osx '));
+  const hasGlibc = depends.some(d => d === '__glibc' || d.startsWith('__glibc '));
+
+  // 플랫폼 마커가 없으면 모든 플랫폼과 호환
+  if (!hasWin && !hasUnix && !hasLinux && !hasOSX && !hasGlibc) return true;
+
+  // __glibc가 있으면 Linux 전용
+  if (hasGlibc && !isLinux) return false;
+
+  // 타겟 플랫폼에 따른 호환성 확인
+  if (isLinux) return !(hasWin || hasOSX);
+  if (isWindows) return !(hasUnix || hasLinux || hasOSX);
+  if (isMacOS) return !(hasWin || hasLinux);
+
+  return true; // noarch 등 기타
+}
+```
+
+**플랫폼 마커**:
+| 마커 | 설명 | 호환 플랫폼 |
+|------|------|------------|
+| `__win` | Windows 전용 | Windows |
+| `__unix` | Unix 계열 | Linux, macOS |
+| `__linux` | Linux 전용 | Linux |
+| `__osx`, `__macos` | macOS 전용 | macOS |
+| `__glibc` | glibc 필요 | Linux |
+
+### 7.5 noarch 폴백 처리
+
+타겟 플랫폼에서 패키지를 찾지 못하거나 Python 버전이 맞지 않으면 `noarch`를 확인합니다.
+
+```typescript
+// 타겟 플랫폼 repodata 확인
+const candidates = this.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
+let isPythonMatch = false;
+
+if (candidates.length > 0) {
+  isPythonMatch = candidates[0].isPythonMatch ?? true;
+  // ... 패키지 정보 추출
+}
+
+// noarch도 확인: 후보가 없거나 Python 버전이 맞지 않는 경우
+if (depends.length === 0 || !isPythonMatch) {
+  const noarchRepodata = await this.getRepoData(channel, 'noarch');
+  if (noarchRepodata) {
+    const noarchCandidates = this.findPackageCandidates(noarchRepodata, name, versionSpec, noarchCacheKey);
+    if (noarchCandidates.length > 0) {
+      // noarch 패키지는 모든 Python 버전과 호환되므로 우선 사용
+      isPythonMatch = true;
+      // ... 패키지 정보 추출
+    }
+  }
+}
+```
+
+**폴백 우선순위**:
+1. 타겟 플랫폼 (예: `linux-64`) - Python 버전 일치
+2. `noarch` - Python 버전 무관
+3. Python 버전 불일치 시 스킵 (strict mode)
+
+### 7.6 시스템 패키지 스킵
+
+conda 의존성 중 시스템 패키지는 다운로드하지 않고 스킵합니다.
+
+```typescript
+private isSystemPackage(name: string): boolean {
+  const systemPackages = [
+    'python',
+    'python_abi',
+    '__glibc',
+    '__linux',
+    '__unix',
+    '__win',
+    '__osx',
+    '__macos',
+  ];
+  return systemPackages.includes(name.toLowerCase());
+}
+```
+
+### 7.7 downloadUrl 전달 흐름
+
+의존성 해결 시 생성된 `downloadUrl`이 UI까지 전달되는 흐름:
+
+```
+CondaResolver.resolve()
+    │
+    ├── repodata에서 패키지 정보 조회
+    │   └── downloadUrl 생성: `${condaUrl}/${channel}/${subdir}/${filename}`
+    │
+    ├── DependencyResult.package.metadata.downloadUrl에 저장
+    │
+resolveAllDependencies()
+    │
+    ├── downloadUrl 전달
+    │   if (depPkg.metadata?.downloadUrl) {
+    │     downloadPkg.downloadUrl = depPkg.metadata.downloadUrl;
+    │   }
+    │
+    └── metadata 전달 (subdir, filename 등)
+        if (depPkg.metadata) {
+          downloadPkg.metadata = depPkg.metadata;
+        }
+    │
+DownloadPage.tsx
+    │
+    ├── DownloadItem에 downloadUrl, metadata 저장
+    │
+    └── IPC로 전달: pkg.downloadUrl, pkg.metadata
+    │
+download-handlers.ts
+    │
+    └── condaDownloadUrl = pkg.downloadUrl || pkg.metadata?.downloadUrl
+```
+
+**장점**:
+- 의존성 해결 시 이미 결정된 URL을 재사용
+- 다운로드 시 추가 API 호출 불필요
+- 플랫폼/Python 버전 일치 보장
+
 ## 8. 참고 자료
 
 - [conda Deep Dive: Solvers](https://docs.conda.io/projects/conda/en/4.13.x/dev-guide/deep-dive-solvers.html)
