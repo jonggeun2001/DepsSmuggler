@@ -148,16 +148,18 @@ export class CondaRepoDataProcessor {
     versionSpec?: string,
     cacheKey?: string
   ): PackageCandidate[] {
-    const candidates: Array<PackageCandidate & { isPythonMatch: boolean; timestamp: number }> = [];
+    const candidates: Array<
+      PackageCandidate & { pythonMatchScore: number; timestamp: number }
+    > = [];
     const normalizedName = packageName.toLowerCase();
 
-    // 인덱스가 있으면 O(1) 조회 사용
-    let packageEntries: Array<{ filename: string; pkg: RepoDataPackage }> | undefined;
+    let packageEntries:
+      | Array<{ filename: string; pkg: RepoDataPackage }>
+      | undefined;
     if (cacheKey && this.packageIndex.has(cacheKey)) {
       packageEntries = this.packageIndex.get(cacheKey)?.get(normalizedName);
     }
 
-    // 인덱스가 없으면 폴백: 전체 순회 (첫 로드 시)
     if (!packageEntries) {
       const allPackages = {
         ...repodata.packages,
@@ -172,12 +174,11 @@ export class CondaRepoDataProcessor {
     }
 
     for (const { filename, pkg } of packageEntries) {
-      // 버전 스펙 체크 (새로운 MatchSpec 파서 사용)
       if (versionSpec && !matchesVersionSpec(pkg.version, versionSpec)) {
         continue;
       }
 
-      const isPythonMatch = this.isBuildCompatibleWithPython(pkg.build);
+      const pythonMatchScore = this.getPythonMatchScore(pkg.build);
 
       candidates.push({
         filename,
@@ -188,31 +189,22 @@ export class CondaRepoDataProcessor {
         depends: pkg.depends || [],
         subdir: pkg.subdir || repodata.info?.subdir || 'noarch',
         size: pkg.size || 0,
-        isPythonMatch,
+        pythonMatchScore,
         timestamp: pkg.timestamp || 0,
       });
     }
 
-    // 정렬 우선순위 (Conda SAT solver 최적화 순서 참고):
-    // 1. Python 버전 매칭
-    // 2. 버전 (내림차순 - 최신 우선)
-    // 3. 빌드 번호 (내림차순)
-    // 4. 타임스탬프 (내림차순 - 최신 우선)
     candidates.sort((a, b) => {
-      // Python 매칭이 있는 것 우선
-      if (a.isPythonMatch !== b.isPythonMatch) {
-        return a.isPythonMatch ? -1 : 1;
+      if (a.pythonMatchScore !== b.pythonMatchScore) {
+        return b.pythonMatchScore - a.pythonMatchScore;
       }
 
-      // 버전 비교 (Conda 스타일)
       const versionCmp = compareCondaVersions(b.version, a.version);
       if (versionCmp !== 0) return versionCmp;
 
-      // 빌드 번호
       const buildCmp = b.buildNumber - a.buildNumber;
       if (buildCmp !== 0) return buildCmp;
 
-      // 타임스탬프
       return b.timestamp - a.timestamp;
     });
 
@@ -232,20 +224,18 @@ export class CondaRepoDataProcessor {
   }
 
   /**
-   * 빌드 문자열이 Python 버전과 호환되는지 확인
+   * 빌드 문자열과 Python 버전의 호환성 점수 계산
+   * @returns 2 (정확히 일치), 1 (범용), 0 (불일치)
    */
-  isBuildCompatibleWithPython(build: string): boolean {
+  getPythonMatchScore(build: string): number {
     const pythonTag = this.getPythonBuildTag();
 
-    // pythonTag가 없으면 필터링 안함
-    if (!pythonTag) return true;
+    if (!pythonTag) return 1;
 
-    // build에 python 버전이 없으면 (네이티브 라이브러리) 호환
     const pyMatch = build.match(/py\d+/);
-    if (!pyMatch) return true;
+    if (!pyMatch) return 1;
 
-    // Python 버전이 있으면 정확히 매칭
-    return build.includes(pythonTag);
+    return build.includes(pythonTag) ? 2 : 0;
   }
 
   /**
