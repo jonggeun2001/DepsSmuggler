@@ -10,7 +10,7 @@
 
 ### 개요
 - 목적: ZIP/tar.gz 압축 파일 생성
-- 위치: `src/core/packager/archivePackager.ts`
+- 위치: `src/core/packager/archive-packager.ts`
 
 ### 클래스 구조
 
@@ -65,7 +65,7 @@ interface PackageManifest {
 
 ### 사용 예시
 ```typescript
-import { getArchivePackager } from './core/packager/archivePackager';
+import { getArchivePackager } from './core/packager/archive-packager';
 
 const packager = getArchivePackager();
 const result = await packager.createArchive({
@@ -94,7 +94,7 @@ import archiver from 'archiver';
 const archive = archiver('zip', { zlib: { level: 9 } });
 ```
 
-이 패턴은 `archivePackager.ts`와 `file-utils.ts` 모두에 적용됨.
+이 패턴은 `archive-packager.ts`와 `file-utils.ts` 모두에 적용됨.
 
 ---
 
@@ -102,7 +102,7 @@ const archive = archiver('zip', { zlib: { level: 9 } });
 
 ### 개요
 - 목적: 설치 스크립트 생성 (Bash/PowerShell)
-- 위치: `src/core/packager/scriptGenerator.ts`
+- 위치: `src/core/packager/script-generator.ts`
 
 ### 클래스 구조
 
@@ -171,7 +171,7 @@ Write-Host "Installation completed!"
 
 ### 사용 예시
 ```typescript
-import { getScriptGenerator } from './core/packager/scriptGenerator';
+import { getScriptGenerator } from './core/packager/script-generator';
 
 const generator = getScriptGenerator();
 const scripts = await generator.generateAllScripts({
@@ -188,7 +188,7 @@ const scripts = await generator.generateAllScripts({
 
 ### 개요
 - 목적: 대용량 파일 분할 및 병합
-- 위치: `src/core/packager/fileSplitter.ts`
+- 위치: `src/core/packager/file-splitter.ts`
 
 ### 클래스 구조
 
@@ -270,7 +270,7 @@ split/
 
 ### 사용 예시
 ```typescript
-import { getFileSplitter } from './core/packager/fileSplitter';
+import { getFileSplitter } from './core/packager/file-splitter';
 
 const splitter = getFileSplitter();
 

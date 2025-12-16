@@ -3,7 +3,7 @@
 ## 개요
 - 목적: 다운로드 이력 관리 및 재다운로드 지원
 - 위치:
-  - 스토어: `src/renderer/stores/historyStore.ts`
+  - 스토어: `src/renderer/stores/history-store.ts`
   - 페이지: `src/renderer/pages/HistoryPage.tsx`
   - 타입: `src/types/index.ts`
   - IPC: `electron/main.ts`
@@ -75,7 +75,7 @@ interface DownloadHistory {
 ## Zustand Store
 
 ### 파일 위치
-`src/renderer/stores/historyStore.ts`
+`src/renderer/stores/history-store.ts`
 
 ### 상태
 
@@ -236,7 +236,7 @@ addHistory(
 ### 히스토리 조회
 
 ```tsx
-import { useHistoryStore } from '../stores/historyStore';
+import { useHistoryStore } from '../stores/history-store';
 
 function HistoryList() {
   const { histories, deleteHistory } = useHistoryStore();

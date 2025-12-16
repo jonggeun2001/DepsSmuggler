@@ -20,12 +20,19 @@ src/core/shared/
 ├── pypi-utils.ts                 # PyPI 다운로드 URL 조회
 ├── conda-utils.ts                # Conda 패키지 URL 조회
 ├── dependency-resolver.ts        # 의존성 해결 유틸리티
+├── dependency-tree-utils.ts      # 의존성 트리 유틸리티 (NEW)
 ├── file-utils.ts                 # 파일 다운로드/압축 유틸리티
 ├── script-utils.ts               # 설치 스크립트 생성
 ├── path-utils.ts                 # 크로스 플랫폼 경로 처리
 │
+│   # HTTP 클라이언트 추상화 (NEW)
+├── http-client.ts                # HttpClient 인터페이스 정의
+├── axios-http-client.ts          # Axios 기반 구현체
+├── mock-http-client.ts           # 테스트용 Mock 구현체
+│
 │   # 공유 캐시 모듈
-├── cache-utils.ts                # 캐시 공통 유틸리티 (NEW)
+├── cache-utils.ts                # 캐시 공통 유틸리티
+├── cache-manager.ts              # 범용 캐시 매니저 (NEW)
 ├── pip-cache.ts                  # PyPI 메타데이터 캐시 (메모리 + 디스크)
 ├── npm-cache.ts                  # npm packument 캐시 (메모리)
 ├── maven-cache.ts                # Maven POM 캐시 (메모리 + 디스크)
@@ -43,6 +50,8 @@ src/core/shared/
 │
 │   # maven 고급 모듈
 ├── maven-skipper.ts              # 의존성 스킵/캐시 관리
+├── maven-pom-utils.ts            # POM 파싱 유틸리티 (NEW)
+├── maven-bom-processor.ts        # BOM 처리기 (NEW)
 │
 │   # 검색 유틸리티
 └── search-utils.ts               # 검색 결과 정렬/관련성 점수 계산
@@ -2238,10 +2247,207 @@ class Logger {
 
 ---
 
+## HTTP 클라이언트 추상화 (`http-client.ts`)
+
+### 개요
+
+HTTP 요청을 위한 추상화 레이어로, 구현체 교체 및 테스트 용이성을 제공합니다.
+
+### HttpClient 인터페이스
+
+```typescript
+interface HttpClient {
+  get<T>(url: string, options?: RequestOptions): Promise<HttpResponse<T>>;
+  post<T>(url: string, data?: unknown, options?: RequestOptions): Promise<HttpResponse<T>>;
+  put<T>(url: string, data?: unknown, options?: RequestOptions): Promise<HttpResponse<T>>;
+  delete<T>(url: string, options?: RequestOptions): Promise<HttpResponse<T>>;
+  head(url: string, options?: RequestOptions): Promise<HttpResponse<void>>;
+  getStream(url: string, options?: RequestOptions): Promise<NodeJS.ReadableStream>;
+}
+```
+
+### RequestOptions
+
+```typescript
+interface RequestOptions {
+  headers?: Record<string, string>;
+  timeout?: number;
+  responseType?: 'json' | 'text' | 'arraybuffer' | 'stream';
+  onProgress?: (event: ProgressEvent) => void;
+}
+```
+
+### HttpResponse
+
+```typescript
+interface HttpResponse<T> {
+  data: T;
+  status: number;
+  headers: Record<string, string>;
+}
+```
+
+### ProgressEvent
+
+```typescript
+interface ProgressEvent {
+  loaded: number;      // 현재 다운로드된 바이트
+  total: number;       // 전체 바이트 (알 수 없으면 0)
+  percent: number;     // 진행률 (0-100)
+}
+```
+
+### HttpError
+
+```typescript
+class HttpError extends Error {
+  status: number;      // HTTP 상태 코드
+  statusText: string;  // 상태 메시지
+  url: string;         // 요청 URL
+  response?: unknown;  // 응답 본문 (있는 경우)
+}
+```
+
+### 구현체
+
+#### AxiosHttpClient (`axios-http-client.ts`)
+
+프로덕션용 Axios 기반 구현체:
+
+```typescript
+import { AxiosHttpClient } from './axios-http-client';
+
+const client = new AxiosHttpClient({
+  timeout: 30000,
+  headers: { 'User-Agent': 'DepsSmuggler/1.0' }
+});
+
+const response = await client.get('https://api.example.com/data');
+```
+
+#### MockHttpClient (`mock-http-client.ts`)
+
+테스트용 Mock 구현체:
+
+```typescript
+import { MockHttpClient } from './mock-http-client';
+
+const mockClient = new MockHttpClient();
+
+// 응답 설정
+mockClient.onGet('/api/packages').respond({
+  data: [{ name: 'lodash', version: '4.17.21' }],
+  status: 200
+});
+
+// 에러 시뮬레이션
+mockClient.onGet('/api/error').reject(new HttpError(500, 'Server Error'));
+
+// 테스트에서 사용
+const downloader = new PipDownloader({ httpClient: mockClient });
+```
+
+### 사용 예시
+
+```typescript
+import { AxiosHttpClient } from './shared/axios-http-client';
+import type { HttpClient } from './shared/http-client';
+
+class PipDownloader {
+  constructor(private httpClient: HttpClient = new AxiosHttpClient()) {}
+
+  async downloadPackage(url: string, destPath: string): Promise<void> {
+    const stream = await this.httpClient.getStream(url, {
+      onProgress: (event) => {
+        console.log(`${event.percent}% 완료`);
+      }
+    });
+
+    await pipeline(stream, fs.createWriteStream(destPath));
+  }
+}
+```
+
+---
+
+## 의존성 트리 유틸리티 (`dependency-tree-utils.ts`)
+
+### 개요
+
+의존성 트리 조작을 위한 유틸리티 함수 모음입니다.
+
+### 함수 목록
+
+| 함수 | 설명 |
+|------|------|
+| `flattenDependencyTree(node)` | 트리를 플랫 리스트로 변환 |
+| `flattenMultipleDependencyTrees(nodes)` | 여러 트리를 중복 제거하며 병합 |
+| `getDependencyTreeDepth(node)` | 트리의 최대 깊이 계산 |
+| `getDependencyTreeSize(node)` | 트리의 총 노드 개수 |
+
+### 사용 예시
+
+```typescript
+import {
+  flattenDependencyTree,
+  getDependencyTreeDepth
+} from './shared/dependency-tree-utils';
+
+const tree = await resolver.resolveDependencies('flask', '2.0.0');
+
+// 플랫 리스트로 변환
+const packages = flattenDependencyTree(tree);
+console.log(`총 ${packages.length}개 패키지`);
+
+// 트리 깊이 확인
+const depth = getDependencyTreeDepth(tree);
+console.log(`의존성 깊이: ${depth}`);
+```
+
+---
+
+## Maven 유틸리티
+
+### maven-pom-utils.ts
+
+POM 파일 파싱 및 속성 해석 유틸리티:
+
+| 함수 | 설명 |
+|------|------|
+| `resolveProperty(value, properties)` | `${property}` 형식 속성 해석 |
+| `resolveVersionRange(range, versions)` | Maven 버전 범위 해석 |
+| `resolveDependencyCoordinate(dep, props)` | 의존성 좌표 완전 해석 |
+| `extractDependencies(pom)` | POM에서 의존성 목록 추출 |
+| `extractExclusions(dependency)` | 의존성의 exclusions 추출 |
+
+### maven-bom-processor.ts
+
+Bill of Materials (BOM) 처리:
+
+```typescript
+import { MavenBomProcessor } from './shared/maven-bom-processor';
+
+const processor = new MavenBomProcessor(fetchPomFn);
+
+// BOM에서 버전 관리 정보 로드
+const managedVersions = await processor.processBom(
+  'org.springframework.boot',
+  'spring-boot-dependencies',
+  '3.2.0'
+);
+
+// 의존성 버전 조회
+const version = managedVersions.get('org.springframework:spring-core');
+```
+
+---
+
 ## 관련 문서
 - [아키텍처 개요](./architecture-overview.md)
 - [Downloaders 문서](./downloaders.md)
 - [Resolvers 문서](./resolvers.md)
+- [Docker 아키텍처](./docker-architecture.md)
+- [다운로드 유틸리티](./download-utilities.md)
 - [pip 의존성 해결 알고리즘](./pip-dependency-resolution.md)
 - [conda 의존성 해결 알고리즘](./conda-dependency-resolution.md)
 - [Maven 의존성 해결 알고리즘](./maven-dependency-resolution.md)

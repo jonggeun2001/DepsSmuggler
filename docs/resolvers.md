@@ -10,7 +10,7 @@
 
 ### 개요
 - 목적: Python/PyPI 패키지 의존성 해결
-- 위치: `src/core/resolver/pipResolver.ts`
+- 위치: `src/core/resolver/pip-resolver.ts`
 - 캐시: `src/core/shared/pip-cache.ts` 모듈 사용 (메모리 + 디스크 캐싱)
 
 ### 클래스 구조
@@ -76,7 +76,7 @@ PEP 508 환경 마커를 평가하여 플랫폼별 의존성 필터링:
 
 ### 사용 예시
 ```typescript
-import { getPipResolver } from './core/resolver/pipResolver';
+import { getPipResolver } from './core/resolver/pip-resolver';
 
 const resolver = getPipResolver();
 
@@ -114,8 +114,38 @@ pywin32>=300; sys_platform == 'win32'
 
 ### 개요
 - 목적: Conda/Anaconda 패키지 의존성 해결
-- 위치: `src/core/resolver/condaResolver.ts`
+- 위치: `src/core/resolver/conda-resolver.ts`
+- RepoData 처리: `src/core/resolver/conda-repodata-processor.ts` (분리된 모듈)
 - 캐시: `src/core/shared/conda-cache.ts` 모듈 사용 (디스크 캐싱 전용 - 350MB+ repodata)
+
+### 모듈 구조
+
+```
+conda-resolver.ts (501줄)
+├── CondaResolver 클래스
+│   ├── resolveDependencies() - 메인 진입점
+│   ├── resolvePackage() - 단일 패키지 해결
+│   ├── resolvePackageFallback() - Anaconda API 폴백
+│   ├── parseDependencyString() - 의존성 문자열 파싱
+│   ├── isSystemPackage() - 시스템 패키지 확인
+│   ├── getLatestVersion() - API 폴백 버전 조회
+│   ├── flattenDependencies() - 플랫 리스트 변환
+│   ├── clearCache() - 캐시 초기화 (프로세서 위임)
+│   └── parseFromText() - environment.yml 파싱
+└── getCondaResolver() - 싱글톤 팩토리
+
+conda-repodata-processor.ts (301줄)
+├── PackageCandidate 인터페이스
+├── RepoDataProcessorConfig 인터페이스
+└── CondaRepoDataProcessor 클래스
+    ├── getRepoData() - repodata 로드 (캐싱 포함)
+    ├── buildPackageIndex() - 패키지 인덱스 생성 (O(1) 조회용)
+    ├── findPackageCandidates() - 패키지 후보 검색 및 정렬
+    ├── getPythonBuildTag() - Python 빌드 태그 생성
+    ├── isBuildCompatibleWithPython() - Python 호환성 체크
+    ├── getLatestVersionFromRepoData() - repodata에서 최신 버전 조회
+    └── clearCache() - 캐시 초기화
+```
 
 ### 클래스 구조
 
@@ -239,7 +269,7 @@ if (!downloadUrl) {
 
 ### 사용 예시
 ```typescript
-import { getCondaResolver } from './core/resolver/condaResolver';
+import { getCondaResolver } from './core/resolver/conda-resolver';
 
 const resolver = getCondaResolver();
 
@@ -281,8 +311,39 @@ dependencies:
 
 ### 개요
 - 목적: Maven/Java 아티팩트 의존성 해결
-- 위치: `src/core/resolver/mavenResolver.ts`
+- 위치: `src/core/resolver/maven-resolver.ts`
+- 큐 처리: `src/core/resolver/maven-queue-processor.ts` (분리된 모듈)
+- BOM 처리: `src/core/shared/maven-bom-processor.ts`
+- POM 유틸리티: `src/core/shared/maven-pom-utils.ts`
 - 캐시: `src/core/shared/maven-cache.ts` 모듈 사용 (메모리 + 디스크 캐싱, 병렬 프리페치 지원)
+
+### 모듈 구조
+
+```
+maven-resolver.ts (589줄)
+├── MavenResolver 클래스
+│   ├── resolveDependencies() - 메인 진입점
+│   ├── resolveBF() - BFS 기반 의존성 해결 (큐 프로세서 사용)
+│   ├── fetchPomWithCache() - POM 가져오기 (캐싱)
+│   ├── prefetchPomsParallel() - POM 병렬 프리페치
+│   ├── fetchPackageSizes() - 패키지 크기 조회
+│   ├── shouldIncludeDependency() - 의존성 포함 여부
+│   ├── createDependencyNode() - 노드 생성
+│   ├── recordConflict() - 충돌 기록
+│   ├── parseFromText() - pom.xml 파싱
+│   └── flattenDependencies() - 플랫 리스트 변환
+└── getMavenResolver() - 싱글톤 팩토리
+
+maven-queue-processor.ts (302줄)
+├── MavenResolutionContext 인터페이스
+├── QueueProcessorDependencies 인터페이스
+└── MavenQueueProcessor 클래스
+    ├── processQueue() - 큐 처리 메인 루프
+    ├── processQueueItem() - 단일 아이템 처리
+    ├── enqueueRootDependencies() - 루트 의존성 큐 추가
+    ├── enqueueChildDependencies() - 자식 의존성 큐 추가
+    └── addChildToParent() - 부모에 자식 노드 추가
+```
 
 ### 클래스 구조
 
@@ -424,7 +485,7 @@ const deps = resolver.parseFromText(`
 
 ### 개요
 - 목적: npm 패키지 의존성 해결 (node_modules 트리 구축)
-- 위치: `src/core/resolver/npmResolver.ts`
+- 위치: `src/core/resolver/npm-resolver.ts`
 - 캐시: `src/core/shared/npm-cache.ts` 모듈 사용 (메모리 캐싱)
 
 ### 클래스 구조
@@ -504,7 +565,7 @@ project/
 ### 사용 예시
 
 ```typescript
-import { getNpmResolver } from './core/resolver/npmResolver';
+import { getNpmResolver } from './core/resolver/npm-resolver';
 
 const resolver = getNpmResolver();
 

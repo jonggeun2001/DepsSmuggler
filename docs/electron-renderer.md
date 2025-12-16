@@ -775,10 +775,10 @@ src/renderer/
 ├── layouts/           # 레이아웃 컴포넌트
 │   └── MainLayout.tsx
 ├── stores/            # Zustand 상태 관리
-│   ├── cartStore.ts
-│   ├── downloadStore.ts
+│   ├── cart-store.ts
+│   ├── download-store.ts
 │   ├── historyStore.ts    # 다운로드 히스토리
-│   └── settingsStore.ts
+│   └── settings-store.ts
 └── styles/
     └── global.css
 ```
@@ -1081,7 +1081,7 @@ DownloadPage에서 출력 형식은 설정 페이지(SettingsPage)의 값을 직
 
 - **출력 형식**: 읽기 전용 Tag로 표시 (선택 불가)
 - **설정 변경**: 설정 페이지로 이동하는 링크 제공
-- **자동 적용**: settingsStore의 `defaultOutputFormat` 값이 모든 다운로드에 자동 적용
+- **자동 적용**: settings-store의 `defaultOutputFormat` 값이 모든 다운로드에 자동 적용
 
 ```tsx
 // DownloadPage에서의 출력 형식 사용
@@ -1180,7 +1180,7 @@ const useHistoryStore = create<HistoryState>()(persist(...));
 - **최대 개수**: 100개 (초과 시 오래된 항목 삭제)
 - **자세한 내용**: [다운로드 히스토리 문서](./download-history.md) 참조
 
-### CartStore (`stores/cartStore.ts`)
+### CartStore (`stores/cart-store.ts`)
 
 장바구니 상태 관리
 
@@ -1209,7 +1209,7 @@ interface CartState {
 const useCartStore = create<CartState>(...);
 ```
 
-### DownloadStore (`stores/downloadStore.ts`)
+### DownloadStore (`stores/download-store.ts`)
 
 다운로드 진행 상태 관리
 
@@ -1311,7 +1311,7 @@ addLogsBatch: (logs) =>
   })),
 ```
 
-### SettingsStore (`stores/settingsStore.ts`)
+### SettingsStore (`stores/settings-store.ts`)
 
 앱 설정 상태 관리 - **파일 기반 영속성 지원**
 
@@ -1617,7 +1617,7 @@ interface OSDownloadResultProps {
                           ↓ useStore()
 ┌─────────────────────────────────────────────────────────┐
 │                    Zustand Stores                        │
-│     (cartStore, downloadStore, settingsStore)           │
+│     (cart-store, download-store, settings-store)           │
 └─────────────────────────────────────────────────────────┘
                           ↓ window.electronAPI
 ┌─────────────────────────────────────────────────────────┐
@@ -1637,7 +1637,7 @@ interface OSDownloadResultProps {
 
 ### 장바구니에 패키지 추가
 ```tsx
-import { useCartStore } from '../stores/cartStore';
+import { useCartStore } from '../stores/cart-store';
 
 function PackageSearchResult({ pkg }) {
   const addItem = useCartStore(state => state.addItem);
@@ -1657,7 +1657,7 @@ function PackageSearchResult({ pkg }) {
 
 ### 다운로드 진행 상황 표시
 ```tsx
-import { useDownloadStore } from '../stores/downloadStore';
+import { useDownloadStore } from '../stores/download-store';
 
 function DownloadProgress() {
   const { status, overallProgress, currentSpeed, items } = useDownloadStore();
@@ -1693,7 +1693,7 @@ function FolderSelector() {
 
 ### 언어 버전 설정 사용
 ```tsx
-import { useSettingsStore } from '../stores/settingsStore';
+import { useSettingsStore } from '../stores/settings-store';
 
 function LanguageVersionSelector() {
   const { languageVersions, setSetting } = useSettingsStore();
