@@ -1,0 +1,12 @@
+# Build outputs
+dist/
+build/
+coverage/
+
+# Dependencies
+node_modules/
+
+# Misc
+*.min.js
+*.min.css
+package-lock.json
