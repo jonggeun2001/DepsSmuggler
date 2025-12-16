@@ -1,6 +1,9 @@
 /**
  * PyPI 패키지 메타데이터 캐시 관리
  * 메모리 + 디스크 캐시로 중복 네트워크 요청 방지
+ *
+ * CacheManager를 사용하여 메모리 캐싱 로직 통합
+ * 디스크 캐시는 기존 형식 유지 (호환성)
  */
 
 import * as fs from 'fs';
@@ -8,6 +11,8 @@ import * as path from 'path';
 import * as os from 'os';
 import axios from 'axios';
 import logger from '../../utils/logger';
+import { CacheManager, createMemoryCache, CacheEntry } from './cache-manager';
+import { DEFAULT_MEMORY_TTL_MS, DEFAULT_DISK_TTL_MS } from './cache-utils';
 
 /**
  * PyPI 패키지 메타데이터 (JSON API 응답)
@@ -34,48 +39,28 @@ export interface PyPIRelease {
 
 export interface PyPIResponse {
   info: PyPIPackageInfo;
-  releases?: Record<string, PyPIRelease[]>;  // 특정 버전 조회 시 없을 수 있음
-  urls?: PyPIRelease[];  // 특정 버전 조회 시 포함
+  releases?: Record<string, PyPIRelease[]>; // 특정 버전 조회 시 없을 수 있음
+  urls?: PyPIRelease[]; // 특정 버전 조회 시 포함
 }
 
 /**
- * 캐시 메타데이터
+ * 디스크 캐시 항목 형식 (하위 호환성)
  */
-interface CacheMeta {
-  /** 캐시 저장 시간 (Unix timestamp ms) */
-  cachedAt: number;
-  /** TTL (초) */
-  ttl: number;
-  /** 패키지 이름 */
-  packageName: string;
-  /** 버전 (특정 버전 캐시 시) */
-  version?: string;
-}
-
-/**
- * 캐시 항목
- */
-interface CacheEntry<T> {
-  data: T;
-  meta: CacheMeta;
+interface DiskCacheEntry {
+  data: PyPIResponse;
+  meta: {
+    cachedAt: number;
+    ttl: number;
+    packageName: string;
+    version?: string;
+  };
 }
 
 /** 기본 TTL: 5분 (의존성 해결 세션 동안 유효) */
-const DEFAULT_TTL = 300;
+const DEFAULT_TTL = DEFAULT_MEMORY_TTL_MS / 1000; // 초 단위 (하위 호환성)
 
 /** 디스크 캐시 TTL: 1시간 (더 긴 유효기간) */
-const DISK_CACHE_TTL = 3600;
-
-/**
- * 모듈 레벨 메모리 캐시
- * key: packageName 또는 packageName@version
- */
-const memoryCache: Map<string, CacheEntry<PyPIResponse>> = new Map();
-
-/**
- * 진행 중인 요청 추적 (중복 요청 방지)
- */
-const pendingRequests: Map<string, Promise<PyPIResponse | null>> = new Map();
+const DISK_CACHE_TTL = DEFAULT_DISK_TTL_MS / 1000; // 초 단위
 
 /**
  * 기본 캐시 디렉토리
@@ -85,15 +70,9 @@ function getDefaultCacheDir(): string {
 }
 
 /**
- * 패키지별 캐시 파일 경로
+ * pip 메모리 캐시 매니저
  */
-function getCachePath(cacheDir: string, packageName: string, version?: string): string {
-  const normalizedName = packageName.toLowerCase().replace(/_/g, '-');
-  if (version) {
-    return path.join(cacheDir, normalizedName, `${version}.json`);
-  }
-  return path.join(cacheDir, normalizedName, 'latest.json');
-}
+const memCacheManager = createMemoryCache<PyPIResponse>('PyPI', DEFAULT_MEMORY_TTL_MS);
 
 /**
  * 캐시 키 생성
@@ -104,9 +83,20 @@ function getCacheKey(packageName: string, version?: string): string {
 }
 
 /**
- * 캐시가 유효한지 확인
+ * 패키지별 캐시 파일 경로 (기존 형식 유지)
  */
-function isCacheValid(meta: CacheMeta): boolean {
+function getCachePath(cacheDir: string, packageName: string, version?: string): string {
+  const normalizedName = packageName.toLowerCase().replace(/_/g, '-');
+  if (version) {
+    return path.join(cacheDir, normalizedName, `${version}.json`);
+  }
+  return path.join(cacheDir, normalizedName, 'latest.json');
+}
+
+/**
+ * 디스크 캐시 유효성 확인
+ */
+function isDiskCacheValid(meta: DiskCacheEntry['meta']): boolean {
   const now = Date.now();
   const age = (now - meta.cachedAt) / 1000;
   return age < meta.ttl;
@@ -115,12 +105,12 @@ function isCacheValid(meta: CacheMeta): boolean {
 /**
  * 디스크에서 캐시 읽기
  */
-function readDiskCache(cachePath: string): CacheEntry<PyPIResponse> | null {
+function readDiskCache(cachePath: string): DiskCacheEntry | null {
   try {
     if (fs.existsSync(cachePath)) {
       const content = fs.readFileSync(cachePath, 'utf-8');
-      const entry = JSON.parse(content) as CacheEntry<PyPIResponse>;
-      if (isCacheValid(entry.meta)) {
+      const entry = JSON.parse(content) as DiskCacheEntry;
+      if (isDiskCacheValid(entry.meta)) {
         return entry;
       }
     }
@@ -133,7 +123,7 @@ function readDiskCache(cachePath: string): CacheEntry<PyPIResponse> | null {
 /**
  * 디스크에 캐시 저장
  */
-function writeDiskCache(cachePath: string, entry: CacheEntry<PyPIResponse>): void {
+function writeDiskCache(cachePath: string, entry: DiskCacheEntry): void {
   try {
     const dir = path.dirname(cachePath);
     if (!fs.existsSync(dir)) {
@@ -198,17 +188,16 @@ export async function fetchPackageMetadata(
   const cacheKey = getCacheKey(packageName, version);
   const cachePath = getCachePath(cacheDir, packageName, version);
 
-  // 1. 메모리 캐시 확인
+  // 1. 메모리 캐시 확인 (CacheManager 사용)
   if (useMemoryCache && !forceRefresh) {
-    const memoryCached = memoryCache.get(cacheKey);
-    if (memoryCached && isCacheValid(memoryCached.meta)) {
+    const memoryCached = memCacheManager.get(cacheKey);
+    if (memoryCached) {
       logger.debug('PyPI 메모리 캐시 히트', {
         package: packageName,
         version,
-        age: Math.round((Date.now() - memoryCached.meta.cachedAt) / 1000),
       });
       return {
-        data: memoryCached.data,
+        data: memoryCached,
         fromCache: true,
         cacheType: 'memory',
       };
@@ -221,7 +210,7 @@ export async function fetchPackageMetadata(
     if (diskCached) {
       // 메모리 캐시에도 저장
       if (useMemoryCache) {
-        memoryCache.set(cacheKey, diskCached);
+        memCacheManager.set(cacheKey, diskCached.data);
       }
       logger.debug('PyPI 디스크 캐시 히트', {
         package: packageName,
@@ -236,113 +225,81 @@ export async function fetchPackageMetadata(
     }
   }
 
-  // 3. 진행 중인 동일 요청 대기 (중복 요청 방지)
-  const pendingKey = cacheKey;
-  const pending = pendingRequests.get(pendingKey);
-  if (pending) {
-    logger.debug('PyPI 중복 요청 대기', { package: packageName, version });
-    const result = await pending;
-    if (result) {
-      return { data: result, fromCache: true, cacheType: 'memory' };
+  // 3. CacheManager의 dedupeFetch 사용 (중복 요청 방지)
+  try {
+    const result = await memCacheManager.getOrFetch(
+      cacheKey,
+      async () => {
+        const url = version
+          ? `${baseUrl}/${packageName}/${version}/json`
+          : `${baseUrl}/${packageName}/json`;
+
+        logger.debug('PyPI API 요청', { package: packageName, version, url });
+
+        const response = await axios.get<PyPIResponse>(url, {
+          timeout,
+          headers: {
+            'User-Agent': 'DepsSmuggler/1.0',
+          },
+        });
+
+        const data = response.data;
+
+        // 디스크 캐시 저장
+        if (useDiskCache) {
+          const diskEntry: DiskCacheEntry = {
+            data,
+            meta: {
+              cachedAt: Date.now(),
+              ttl: diskTtl,
+              packageName,
+              version,
+            },
+          };
+          writeDiskCache(cachePath, diskEntry);
+        }
+
+        logger.debug('PyPI API 응답 캐시 저장', {
+          package: packageName,
+          version,
+          releases: data.releases ? Object.keys(data.releases).length : 0,
+        });
+
+        return data;
+      },
+      { forceRefresh }
+    );
+
+    return {
+      data: result.data,
+      fromCache: result.fromCache,
+      cacheType: result.fromCache ? 'memory' : undefined,
+    };
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      logger.debug('PyPI 패키지 없음', { package: packageName, version });
+    } else {
+      const errorInfo = axios.isAxiosError(error)
+        ? {
+            message: error.message,
+            code: error.code,
+            status: error.response?.status,
+            statusText: error.response?.statusText,
+          }
+        : error instanceof Error
+          ? { message: error.message, name: error.name }
+          : { message: String(error) };
+      logger.warn('PyPI API 요청 실패', { package: packageName, version, error: errorInfo });
     }
     return null;
   }
-
-  // 4. API 요청
-  const url = version
-    ? `${baseUrl}/${packageName}/${version}/json`
-    : `${baseUrl}/${packageName}/json`;
-
-  const requestPromise = (async (): Promise<PyPIResponse | null> => {
-    try {
-      logger.debug('PyPI API 요청', { package: packageName, version, url });
-
-      const response = await axios.get<PyPIResponse>(url, {
-        timeout,
-        headers: {
-          'User-Agent': 'DepsSmuggler/1.0',
-        },
-      });
-
-      const data = response.data;
-
-      // 캐시 저장
-      const now = Date.now();
-
-      // 메모리 캐시
-      if (useMemoryCache) {
-        const memoryEntry: CacheEntry<PyPIResponse> = {
-          data,
-          meta: {
-            cachedAt: now,
-            ttl: memoryTtl,
-            packageName,
-            version,
-          },
-        };
-        memoryCache.set(cacheKey, memoryEntry);
-      }
-
-      // 디스크 캐시
-      if (useDiskCache) {
-        const diskEntry: CacheEntry<PyPIResponse> = {
-          data,
-          meta: {
-            cachedAt: now,
-            ttl: diskTtl,
-            packageName,
-            version,
-          },
-        };
-        writeDiskCache(cachePath, diskEntry);
-      }
-
-      logger.debug('PyPI API 응답 캐시 저장', {
-        package: packageName,
-        version,
-        releases: data.releases ? Object.keys(data.releases).length : 0,
-      });
-
-      return data;
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        logger.debug('PyPI 패키지 없음', { package: packageName, version });
-      } else {
-        const errorInfo = axios.isAxiosError(error)
-          ? {
-              message: error.message,
-              code: error.code,
-              status: error.response?.status,
-              statusText: error.response?.statusText,
-            }
-          : error instanceof Error
-            ? { message: error.message, name: error.name }
-            : { message: String(error) };
-        logger.warn('PyPI API 요청 실패', { package: packageName, version, error: errorInfo });
-      }
-      return null;
-    } finally {
-      pendingRequests.delete(pendingKey);
-    }
-  })();
-
-  pendingRequests.set(pendingKey, requestPromise);
-  const result = await requestPromise;
-
-  if (result) {
-    return { data: result, fromCache: false };
-  }
-  return null;
 }
 
 /**
  * 메모리 캐시 초기화
  */
 export function clearMemoryCache(): void {
-  const size = memoryCache.size;
-  memoryCache.clear();
-  pendingRequests.clear();
-  logger.info('PyPI 메모리 캐시 초기화', { clearedEntries: size });
+  memCacheManager.clear();
 }
 
 /**
@@ -378,7 +335,7 @@ export interface PipCacheStats {
 
 export function getCacheStats(cacheDir: string = getDefaultCacheDir()): PipCacheStats {
   const stats: PipCacheStats = {
-    memoryEntries: memoryCache.size,
+    memoryEntries: memCacheManager.size,
     diskSize: 0,
     diskEntries: 0,
   };
@@ -413,12 +370,7 @@ export function pruneExpiredCache(cacheDir: string = getDefaultCacheDir()): numb
   let pruned = 0;
 
   // 메모리 캐시 정리
-  memoryCache.forEach((entry, key) => {
-    if (!isCacheValid(entry.meta)) {
-      memoryCache.delete(key);
-      pruned++;
-    }
-  });
+  pruned += memCacheManager.prune();
 
   // 디스크 캐시 정리
   try {
@@ -436,8 +388,8 @@ export function pruneExpiredCache(cacheDir: string = getDefaultCacheDir()): numb
           } else if (entry.name.endsWith('.json')) {
             try {
               const content = fs.readFileSync(fullPath, 'utf-8');
-              const cached = JSON.parse(content) as CacheEntry<PyPIResponse>;
-              if (!isCacheValid(cached.meta)) {
+              const cached = JSON.parse(content) as DiskCacheEntry;
+              if (!isDiskCacheValid(cached.meta)) {
                 fs.unlinkSync(fullPath);
                 pruned++;
               }
@@ -461,3 +413,25 @@ export function pruneExpiredCache(cacheDir: string = getDefaultCacheDir()): numb
 
   return pruned;
 }
+
+// ============================================================================
+// 하위 호환성을 위한 export (deprecated)
+// ============================================================================
+
+/** @deprecated CacheManager로 이전됨 */
+export const memoryCache = {
+  get size() {
+    return memCacheManager.size;
+  },
+  clear() {
+    memCacheManager.clear();
+  },
+};
+
+/** @deprecated CacheManager로 이전됨 */
+export const pendingRequests = {
+  get: () => undefined,
+  set: () => {},
+  delete: () => {},
+  clear: () => {},
+};

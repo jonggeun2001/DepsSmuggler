@@ -11,42 +11,42 @@ import {
 import { DownloadPackage } from './types';
 
 // Mock all resolvers
-vi.mock('../resolver/pipResolver', () => ({
+vi.mock('../resolver/pip-resolver', () => ({
   getPipResolver: vi.fn(() => ({
     resolveDependencies: vi.fn(),
   })),
 }));
 
-vi.mock('../resolver/mavenResolver', () => ({
+vi.mock('../resolver/maven-resolver', () => ({
   getMavenResolver: vi.fn(() => ({
     resolveDependencies: vi.fn(),
   })),
 }));
 
-vi.mock('../resolver/condaResolver', () => ({
+vi.mock('../resolver/conda-resolver', () => ({
   getCondaResolver: vi.fn(() => ({
     resolveDependencies: vi.fn(),
   })),
 }));
 
-vi.mock('../resolver/yumResolver', () => ({
+vi.mock('../resolver/yum-resolver', () => ({
   getYumResolver: vi.fn(() => ({
     resolveDependencies: vi.fn(),
   })),
 }));
 
-vi.mock('../resolver/npmResolver', () => ({
+vi.mock('../resolver/npm-resolver', () => ({
   getNpmResolver: vi.fn(() => ({
     resolveDependencies: vi.fn(),
   })),
 }));
 
 // Import mocked modules
-import { getPipResolver } from '../resolver/pipResolver';
-import { getMavenResolver } from '../resolver/mavenResolver';
-import { getCondaResolver } from '../resolver/condaResolver';
-import { getYumResolver } from '../resolver/yumResolver';
-import { getNpmResolver } from '../resolver/npmResolver';
+import { getPipResolver } from '../resolver/pip-resolver';
+import { getMavenResolver } from '../resolver/maven-resolver';
+import { getCondaResolver } from '../resolver/conda-resolver';
+import { getYumResolver } from '../resolver/yum-resolver';
+import { getNpmResolver } from '../resolver/npm-resolver';
 
 describe('dependency-resolver', () => {
   beforeEach(() => {

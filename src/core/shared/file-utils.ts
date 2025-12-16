@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as https from 'https';
 import * as http from 'http';
 import archiver from 'archiver';
+import logger from '../../utils/logger';
 
 export type ProgressCallback = (downloaded: number, total: number) => void;
 
@@ -62,7 +63,7 @@ export async function downloadFile(
           if (options?.shouldPause?.() && !isPaused) {
             isPaused = true;
             response.pause();
-            console.log(`[downloadFile] Stream paused at ${downloadedLength}/${totalLength} bytes`);
+            logger.debug('[downloadFile] Stream paused', { downloadedLength, totalLength });
 
             // 주기적으로 재개 여부 확인
             pauseCheckInterval = setInterval(() => {
@@ -70,7 +71,7 @@ export async function downloadFile(
                 isPaused = false;
                 cleanup();
                 response.resume();
-                console.log(`[downloadFile] Stream resumed at ${downloadedLength}/${totalLength} bytes`);
+                logger.debug('[downloadFile] Stream resumed', { downloadedLength, totalLength });
               }
             }, 100);
           }

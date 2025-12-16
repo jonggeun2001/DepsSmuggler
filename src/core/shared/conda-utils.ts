@@ -3,6 +3,7 @@ import axios from 'axios';
 import * as fzstd from 'fzstd';
 import type { DownloadUrlResult } from './types';
 import type { RepoData, RepoDataPackage, AnacondaFileInfo } from './conda-types';
+import logger from '../../utils/logger';
 
 // repodata 캐시 (channel/subdir -> RepoData)
 const repodataCache = new Map<string, RepoData>();
@@ -51,7 +52,7 @@ async function getRepoData(channel: string, subdir: string): Promise<RepoData | 
 
   for (const { url, compressed } of urls) {
     try {
-      console.log(`[conda-utils] repodata 가져오기: ${url}`);
+      logger.debug('[conda-utils] repodata 가져오기', { url });
 
       if (compressed) {
         // zstd 압축 파일 다운로드 및 해제
@@ -69,7 +70,7 @@ async function getRepoData(channel: string, subdir: string): Promise<RepoData | 
         // 캐시에 저장
         repodataCache.set(cacheKey, repodata);
 
-        console.log(`[conda-utils] repodata 가져오기 성공 (zstd): ${Object.keys(repodata.packages || {}).length} packages`);
+        logger.debug('[conda-utils] repodata 가져오기 성공 (zstd)', { packageCount: Object.keys(repodata.packages || {}).length });
 
         return repodata;
       } else {
@@ -82,7 +83,7 @@ async function getRepoData(channel: string, subdir: string): Promise<RepoData | 
         const repodata = response.data as RepoData;
         repodataCache.set(cacheKey, repodata);
 
-        console.log(`[conda-utils] repodata 가져오기 성공: ${Object.keys(repodata.packages || {}).length} packages`);
+        logger.debug('[conda-utils] repodata 가져오기 성공', { packageCount: Object.keys(repodata.packages || {}).length });
 
         return repodata;
       }
@@ -189,7 +190,7 @@ async function getPackageFromAnacondaApi(
   pythonVersion?: string
 ): Promise<DownloadUrlResult | null> {
   try {
-    console.log(`[conda-utils] Anaconda API fallback: ${packageName}@${version}, subdir=${subdir}`);
+    logger.debug('[conda-utils] Anaconda API fallback', { packageName, version, subdir });
 
     const response = await axios.get<AnacondaFileInfo[]>(
       `${ANACONDA_API_URL}/package/${channel}/${packageName}/files`,
@@ -218,7 +219,7 @@ async function getPackageFromAnacondaApi(
       if (noarchCandidates.length > 0) {
         const selected = noarchCandidates[0];
         const filename = selected.basename.split('/').pop() || selected.basename;
-        console.log(`[conda-utils] API에서 noarch 패키지 찾음: ${filename}`);
+        logger.debug('[conda-utils] API에서 noarch 패키지 찾음', { filename });
         return {
           url: `${CONDA_URL}/${channel}/noarch/${filename}`,
           filename,
@@ -226,7 +227,7 @@ async function getPackageFromAnacondaApi(
         };
       }
 
-      console.warn(`[conda-utils] API에서도 패키지를 찾을 수 없음: ${packageName}@${version} in ${subdir}`);
+      logger.warn('[conda-utils] API에서도 패키지를 찾을 수 없음', { packageName, version, subdir });
       return null;
     }
 
@@ -245,7 +246,7 @@ async function getPackageFromAnacondaApi(
         // Python 매칭이 없으면 build_number가 높은 것 선택
         candidates.sort((a, b) => b.attrs.build_number - a.attrs.build_number);
         selected = candidates[0];
-        console.warn(`[conda-utils] ${packageName}@${version}: Python ${pythonVersion} 호환 빌드 없음, ${selected.attrs.build} 사용`);
+        logger.warn('[conda-utils] Python 호환 빌드 없음', { packageName, version, pythonVersion, usedBuild: selected.attrs.build });
       }
     } else {
       candidates.sort((a, b) => b.attrs.build_number - a.attrs.build_number);
@@ -253,7 +254,7 @@ async function getPackageFromAnacondaApi(
     }
 
     const filename = selected.basename.split('/').pop() || selected.basename;
-    console.log(`[conda-utils] API에서 찾음: ${filename} (build: ${selected.attrs.build})`);
+    logger.debug('[conda-utils] API에서 찾음', { filename, build: selected.attrs.build });
 
     return {
       url: `${CONDA_URL}/${channel}/${subdir}/${filename}`,
@@ -261,7 +262,7 @@ async function getPackageFromAnacondaApi(
       size: selected.size || 0,
     };
   } catch (error) {
-    console.error(`[conda-utils] Anaconda API 조회 실패: ${packageName}@${version}`, error);
+    logger.error('[conda-utils] Anaconda API 조회 실패', { packageName, version, error });
     return null;
   }
 }
@@ -279,7 +280,7 @@ export async function getCondaDownloadUrl(
 ): Promise<DownloadUrlResult | null> {
   const subdir = getCondaSubdir(targetOS, architecture);
 
-  console.log(`[conda-utils] 패키지 검색: ${packageName}@${version}, subdir=${subdir}, python=${pythonVersion || 'any'}`);
+  logger.debug('[conda-utils] 패키지 검색', { packageName, version, subdir, pythonVersion: pythonVersion || 'any' });
 
   // repodata에서 패키지 찾기
   const repodata = await getRepoData(channel, subdir);
@@ -288,7 +289,7 @@ export async function getCondaDownloadUrl(
     if (found) {
       const { filename, pkg } = found;
       const downloadUrl = `${CONDA_URL}/${channel}/${subdir}/${filename}`;
-      console.log(`[conda-utils] 찾음: ${filename} (build: ${pkg.build})`);
+      logger.debug('[conda-utils] 찾음', { filename, build: pkg.build });
       return {
         url: downloadUrl,
         filename,
@@ -304,7 +305,7 @@ export async function getCondaDownloadUrl(
     if (found) {
       const { filename, pkg } = found;
       const downloadUrl = `${CONDA_URL}/${channel}/noarch/${filename}`;
-      console.log(`[conda-utils] noarch에서 찾음: ${filename}`);
+      logger.debug('[conda-utils] noarch에서 찾음', { filename });
       return {
         url: downloadUrl,
         filename,
@@ -315,12 +316,12 @@ export async function getCondaDownloadUrl(
 
   // repodata에서 못 찾으면 Anaconda API fallback 시도
   // (RC 버전 등 특수 라벨의 패키지 지원)
-  console.log(`[conda-utils] repodata에서 찾지 못함, Anaconda API 시도: ${packageName}@${version}`);
+  logger.debug('[conda-utils] repodata에서 찾지 못함, Anaconda API 시도', { packageName, version });
   const apiResult = await getPackageFromAnacondaApi(packageName, version, subdir, channel, pythonVersion);
   if (apiResult) {
     return apiResult;
   }
 
-  console.warn(`[conda-utils] 패키지를 찾을 수 없음: ${packageName}@${version} in ${channel}/${subdir}`);
+  logger.warn('[conda-utils] 패키지를 찾을 수 없음', { packageName, version, channel, subdir });
   return null;
 }

@@ -1,9 +1,9 @@
 // 공통 의존성 해결 모듈
-import { getPipResolver } from '../resolver/pipResolver';
-import { getMavenResolver } from '../resolver/mavenResolver';
-import { getCondaResolver } from '../resolver/condaResolver';
-import { getYumResolver } from '../resolver/yumResolver';
-import { getNpmResolver } from '../resolver/npmResolver';
+import { getPipResolver } from '../resolver/pip-resolver';
+import { getMavenResolver } from '../resolver/maven-resolver';
+import { getCondaResolver } from '../resolver/conda-resolver';
+import { getYumResolver } from '../resolver/yum-resolver';
+import { getNpmResolver } from '../resolver/npm-resolver';
 import { DownloadPackage } from './types';
 import { DependencyResolutionResult } from '../../types';
 import { NpmResolutionResult } from './npm-types';

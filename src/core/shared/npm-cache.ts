@@ -1,16 +1,15 @@
 /**
  * npm Registry Packument 공유 캐시
  * NpmDownloader와 NpmResolver가 공유하여 중복 API 호출 방지
+ *
+ * CacheManager를 사용하여 캐싱 로직 통합
  */
 
 import axios, { AxiosInstance } from 'axios';
 import logger from '../../utils/logger';
-import { NpmPackument, PackumentCacheEntry } from './npm-types';
-import {
-  isCacheValid,
-  createPendingRequestManager,
-  DEFAULT_MEMORY_TTL_MS,
-} from './cache-utils';
+import { NpmPackument } from './npm-types';
+import { CacheManager, createMemoryCache } from './cache-manager';
+import { DEFAULT_MEMORY_TTL_MS } from './cache-utils';
 
 /** 기본 TTL: 5분 */
 const DEFAULT_TTL = DEFAULT_MEMORY_TTL_MS;
@@ -19,25 +18,9 @@ const DEFAULT_TTL = DEFAULT_MEMORY_TTL_MS;
 const DEFAULT_REGISTRY_URL = 'https://registry.npmjs.org';
 
 /**
- * 모듈 레벨 공유 캐시
+ * npm packument 캐시 매니저
  */
-const packumentCache: Map<string, PackumentCacheEntry> = new Map();
-
-/**
- * 진행 중인 요청 추적 (중복 요청 방지)
- * createPendingRequestManager 사용
- */
-const pendingManager = createPendingRequestManager<NpmPackument>();
-
-// 하위 호환성을 위한 래퍼 (기존 API 유지)
-// npm 캐시는 에러 시 throw하므로 null 반환 없음
-const pendingRequests = {
-  get: (key: string) => pendingManager.get(key) as Promise<NpmPackument> | undefined,
-  set: (key: string, promise: Promise<NpmPackument | null>) =>
-    pendingManager.set(key, promise),
-  delete: (key: string) => pendingManager.delete(key),
-  clear: () => pendingManager.clear(),
-};
+const cacheManager = createMemoryCache<NpmPackument>('npm', DEFAULT_TTL);
 
 /**
  * Axios 클라이언트 (싱글톤)
@@ -45,7 +28,7 @@ const pendingRequests = {
 let sharedClient: AxiosInstance | null = null;
 
 function getClient(registryUrl: string = DEFAULT_REGISTRY_URL): AxiosInstance {
-  if (!sharedClient || (sharedClient.defaults.baseURL !== registryUrl)) {
+  if (!sharedClient || sharedClient.defaults.baseURL !== registryUrl) {
     sharedClient = axios.create({
       baseURL: registryUrl,
       timeout: 30000,
@@ -78,6 +61,13 @@ export interface NpmCacheResult {
 }
 
 /**
+ * 캐시 키 생성
+ */
+function getCacheKey(name: string, registryUrl: string): string {
+  return `${registryUrl}:${name}`;
+}
+
+/**
  * Packument 가져오기 (공유 캐시 사용)
  * NpmDownloader와 NpmResolver가 이 함수를 공유
  */
@@ -85,71 +75,41 @@ export async function fetchPackument(
   name: string,
   options: NpmCacheOptions = {}
 ): Promise<NpmPackument> {
-  const {
-    registryUrl = DEFAULT_REGISTRY_URL,
-    ttl = DEFAULT_TTL,
-    forceRefresh = false,
-  } = options;
+  const { registryUrl = DEFAULT_REGISTRY_URL, forceRefresh = false } = options;
 
-  const cacheKey = `${registryUrl}:${name}`;
-  const now = Date.now();
+  const cacheKey = getCacheKey(name, registryUrl);
 
-  // 1. 캐시 확인 (공통 유틸리티 사용)
-  if (!forceRefresh) {
-    const cached = packumentCache.get(cacheKey);
-    if (cached && isCacheValid(cached.fetchedAt, ttl)) {
-      logger.debug('npm 캐시 히트', {
-        package: name,
-        age: Math.round((now - cached.fetchedAt) / 1000),
-      });
-      return cached.packument;
-    }
-  }
-
-  // 2. 진행 중인 동일 요청 대기
-  const pendingKey = cacheKey;
-  const pending = pendingRequests.get(pendingKey);
-  if (pending) {
-    logger.debug('npm 중복 요청 대기', { package: name });
-    return pending;
-  }
-
-  // 3. API 요청
-  const requestPromise = (async (): Promise<NpmPackument> => {
-    try {
+  // CacheManager의 getOrFetch 사용
+  const result = await cacheManager.getOrFetch(
+    cacheKey,
+    async () => {
       // scoped 패키지 처리 (@scope/name -> @scope%2Fname)
       const encodedName = name.startsWith('@') ? name.replace('/', '%2F') : name;
       const client = getClient(registryUrl);
 
       logger.debug('npm API 요청', { package: name });
 
-      const response = await client.get<NpmPackument>(`/${encodedName}`);
-      const packument = response.data;
+      try {
+        const response = await client.get<NpmPackument>(`/${encodedName}`);
+        const packument = response.data;
 
-      // 캐시 저장
-      packumentCache.set(cacheKey, {
-        packument,
-        fetchedAt: Date.now(),
-      });
+        logger.debug('npm API 응답 캐시 저장', {
+          package: name,
+          versions: Object.keys(packument.versions).length,
+        });
 
-      logger.debug('npm API 응답 캐시 저장', {
-        package: name,
-        versions: Object.keys(packument.versions).length,
-      });
-
-      return packument;
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        throw new Error(`패키지를 찾을 수 없습니다: ${name}`);
+        return packument;
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+          throw new Error(`패키지를 찾을 수 없습니다: ${name}`);
+        }
+        throw error;
       }
-      throw error;
-    } finally {
-      pendingRequests.delete(pendingKey);
-    }
-  })();
+    },
+    { forceRefresh }
+  );
 
-  pendingRequests.set(pendingKey, requestPromise);
-  return requestPromise;
+  return result.data;
 }
 
 /**
@@ -159,43 +119,44 @@ export async function fetchPackumentWithCacheInfo(
   name: string,
   options: NpmCacheOptions = {}
 ): Promise<NpmCacheResult> {
-  const {
-    registryUrl = DEFAULT_REGISTRY_URL,
-    ttl = DEFAULT_TTL,
-    forceRefresh = false,
-  } = options;
+  const { registryUrl = DEFAULT_REGISTRY_URL, forceRefresh = false } = options;
 
-  const cacheKey = `${registryUrl}:${name}`;
-  const now = Date.now();
+  const cacheKey = getCacheKey(name, registryUrl);
 
-  // 캐시 확인 (공통 유틸리티 사용)
-  if (!forceRefresh) {
-    const cached = packumentCache.get(cacheKey);
-    if (cached && isCacheValid(cached.fetchedAt, ttl)) {
-      return { packument: cached.packument, fromCache: true };
-    }
-  }
+  const result = await cacheManager.getOrFetch(
+    cacheKey,
+    async () => {
+      const encodedName = name.startsWith('@') ? name.replace('/', '%2F') : name;
+      const client = getClient(registryUrl);
 
-  const packument = await fetchPackument(name, options);
-  return { packument, fromCache: false };
+      const response = await client.get<NpmPackument>(`/${encodedName}`);
+      return response.data;
+    },
+    { forceRefresh }
+  );
+
+  return {
+    packument: result.data,
+    fromCache: result.fromCache,
+  };
 }
 
 /**
  * 메모리 캐시 초기화
  */
 export function clearNpmCache(): void {
-  const size = packumentCache.size;
-  packumentCache.clear();
-  pendingRequests.clear();
-  logger.info('npm 캐시 초기화', { clearedEntries: size });
+  cacheManager.clear();
 }
 
 /**
  * 특정 패키지 캐시 삭제
  */
-export function invalidatePackage(name: string, registryUrl: string = DEFAULT_REGISTRY_URL): void {
-  const cacheKey = `${registryUrl}:${name}`;
-  packumentCache.delete(cacheKey);
+export function invalidatePackage(
+  name: string,
+  registryUrl: string = DEFAULT_REGISTRY_URL
+): void {
+  const cacheKey = getCacheKey(name, registryUrl);
+  cacheManager.delete(cacheKey);
 }
 
 /**
@@ -208,43 +169,19 @@ export interface NpmCacheStats {
 }
 
 export function getNpmCacheStats(): NpmCacheStats {
-  let oldest: number | null = null;
-  let newest: number | null = null;
-
-  packumentCache.forEach((entry) => {
-    if (oldest === null || entry.fetchedAt < oldest) {
-      oldest = entry.fetchedAt;
-    }
-    if (newest === null || entry.fetchedAt > newest) {
-      newest = entry.fetchedAt;
-    }
-  });
-
+  const stats = cacheManager.getStats();
   return {
-    entries: packumentCache.size,
-    oldestEntry: oldest,
-    newestEntry: newest,
+    entries: stats.memoryEntries,
+    oldestEntry: stats.oldestEntry,
+    newestEntry: stats.newestEntry,
   };
 }
 
 /**
- * 만료된 캐시 정리 (공통 유틸리티 사용)
+ * 만료된 캐시 정리
  */
 export function pruneExpiredNpmCache(ttl: number = DEFAULT_TTL): number {
-  let pruned = 0;
-
-  packumentCache.forEach((entry, key) => {
-    if (!isCacheValid(entry.fetchedAt, ttl)) {
-      packumentCache.delete(key);
-      pruned++;
-    }
-  });
-
-  if (pruned > 0) {
-    logger.info('npm 만료된 캐시 정리', { pruned });
-  }
-
-  return pruned;
+  return cacheManager.prune();
 }
 
 /**
@@ -254,21 +191,50 @@ export function getPackumentFromCache(
   name: string,
   registryUrl: string = DEFAULT_REGISTRY_URL
 ): NpmPackument | null {
-  const cacheKey = `${registryUrl}:${name}`;
-  const cached = packumentCache.get(cacheKey);
-  return cached?.packument ?? null;
+  const cacheKey = getCacheKey(name, registryUrl);
+  return cacheManager.get(cacheKey) ?? null;
 }
 
 /**
- * 캐시 유효성 확인 (공통 유틸리티 사용)
+ * 캐시 유효성 확인
  */
 export function isPackumentCached(
   name: string,
   registryUrl: string = DEFAULT_REGISTRY_URL,
   ttl: number = DEFAULT_TTL
 ): boolean {
-  const cacheKey = `${registryUrl}:${name}`;
-  const cached = packumentCache.get(cacheKey);
-  if (!cached) return false;
-  return isCacheValid(cached.fetchedAt, ttl);
+  const cacheKey = getCacheKey(name, registryUrl);
+  return cacheManager.has(cacheKey);
 }
+
+// ============================================================================
+// 하위 호환성을 위한 export (deprecated)
+// ============================================================================
+
+/** @deprecated CacheManager로 이전됨 */
+export const packumentCache = {
+  get size() {
+    return cacheManager.size;
+  },
+  clear() {
+    cacheManager.clear();
+  },
+};
+
+/** @deprecated CacheManager로 이전됨 */
+export const pendingManager = {
+  get size() {
+    return cacheManager.getStats().pendingRequests;
+  },
+  clear() {
+    // CacheManager 내부에서 관리됨
+  },
+};
+
+/** @deprecated CacheManager로 이전됨 */
+export const pendingRequests = {
+  get: () => undefined,
+  set: () => {},
+  delete: () => {},
+  clear: () => {},
+};
