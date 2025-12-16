@@ -3,9 +3,19 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { registerOSCommands } from './commands/os';
+import { logger } from '../utils/logger';
 
 // 버전 정보
 const VERSION = '1.0.0';
+
+// 로거 초기화 (파일 로깅 활성화)
+async function initializeLogger(): Promise<void> {
+  try {
+    await logger.initialize();
+  } catch {
+    // 로거 초기화 실패 시 콘솔에만 로깅 (기본 동작)
+  }
+}
 
 // 메인 프로그램
 const program = new Command();
@@ -134,26 +144,28 @@ program.exitOverride((err) => {
 // OS 패키지 명령어 등록
 registerOSCommands(program);
 
-// 파싱 및 실행
-program.parse(process.argv);
+// 로거 초기화 후 파싱 및 실행
+initializeLogger().then(() => {
+  // 명령어가 없으면 도움말 표시
+  if (process.argv.length <= 2) {
+    console.log(chalk.cyan('\n  DepsSmuggler - 폐쇄망을 위한 패키지 의존성 다운로더\n'));
+    console.log('  사용법: depssmuggler <명령어> [옵션]\n');
+    console.log('  명령어:');
+    console.log('    download    패키지 다운로드');
+    console.log('    search      패키지 검색');
+    console.log('    os          OS 패키지 다운로드 (yum, apt, apk)');
+    console.log('    config      설정 관리');
+    console.log('    cache       캐시 관리');
+    console.log('\n  예시:');
+    console.log(chalk.gray('    depssmuggler download -t pip -p requests -V 2.28.0'));
+    console.log(chalk.gray('    depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0'));
+    console.log(chalk.gray('    depssmuggler download -t docker -p nginx -V latest'));
+    console.log(chalk.gray('    depssmuggler search requests -t pip'));
+    console.log(chalk.gray('    depssmuggler os list-distros'));
+    console.log(chalk.gray('    depssmuggler os search nginx --distro rocky-9'));
+    console.log(chalk.gray('    depssmuggler os download httpd --distro rocky-9 --output ./packages'));
+    console.log('\n  자세한 내용: depssmuggler --help\n');
+  }
 
-// 명령어가 없으면 도움말 표시
-if (process.argv.length <= 2) {
-  console.log(chalk.cyan('\n  DepsSmuggler - 폐쇄망을 위한 패키지 의존성 다운로더\n'));
-  console.log('  사용법: depssmuggler <명령어> [옵션]\n');
-  console.log('  명령어:');
-  console.log('    download    패키지 다운로드');
-  console.log('    search      패키지 검색');
-  console.log('    os          OS 패키지 다운로드 (yum, apt, apk)');
-  console.log('    config      설정 관리');
-  console.log('    cache       캐시 관리');
-  console.log('\n  예시:');
-  console.log(chalk.gray('    depssmuggler download -t pip -p requests -V 2.28.0'));
-  console.log(chalk.gray('    depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0'));
-  console.log(chalk.gray('    depssmuggler download -t docker -p nginx -V latest'));
-  console.log(chalk.gray('    depssmuggler search requests -t pip'));
-  console.log(chalk.gray('    depssmuggler os list-distros'));
-  console.log(chalk.gray('    depssmuggler os search nginx --distro rocky-9'));
-  console.log(chalk.gray('    depssmuggler os download httpd --distro rocky-9 --output ./packages'));
-  console.log('\n  자세한 내용: depssmuggler --help\n');
-}
+  program.parse(process.argv);
+});

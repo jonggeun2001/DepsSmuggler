@@ -14,9 +14,15 @@ if (process.env.DEPSSMUGGLER_STRICT_SSL !== 'true') {
   });
 }
 import { createScopedLogger } from './utils/logger';
+import { logger as coreLogger } from '../src/utils/logger';
 
 // 스코프별 로거 생성
 const log = createScopedLogger('Main');
+
+// core 모듈 로거도 초기화 (파일 로깅 활성화)
+coreLogger.initialize().catch(() => {
+  log.warn('Core logger initialization failed');
+});
 
 // OS 패키지 핸들러
 import { registerOSPackageHandlers } from './os-package-handlers';
