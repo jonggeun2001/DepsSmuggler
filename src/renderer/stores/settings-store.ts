@@ -229,7 +229,7 @@ export const useSettingsStore = create<SettingsState>()(
               // 파일에 저장된 설정을 현재 상태와 병합 (새 설정 항목 대응)
               const mergedConfig = { ...defaultSettings, ...fileConfig, _initialized: true };
               set(mergedConfig);
-              console.log('설정 파일에서 로드 완료');
+              console.debug('[settings-store] 설정 파일에서 로드 완료');
               return;
             }
           } catch (error) {

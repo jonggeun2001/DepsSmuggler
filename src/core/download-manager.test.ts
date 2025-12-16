@@ -5,7 +5,35 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { DownloadManager, DownloadItem, OverallProgress } from './downloadManager';
+import { DownloadManager, DownloadItem, OverallProgress, DownloadOptions, DownloadResult } from './download-manager';
+import { IDownloader, PackageType, DownloadProgressEvent } from '../types';
+import { SpeedCalculator } from './speed-calculator';
+import PQueue from 'p-queue';
+
+/**
+ * 테스트용 DownloadManager 인터페이스
+ * private 멤버에 타입 안전하게 접근하기 위한 인터페이스
+ */
+interface DownloadManagerTestable {
+  items: Map<string, DownloadItem>;
+  isRunning: boolean;
+  isCancelled: boolean;
+  startTime: number;
+  options: DownloadOptions;
+  downloaders: Map<PackageType, IDownloader>;
+  queue: PQueue;
+  speedCalculator: SpeedCalculator;
+  createResult: () => DownloadResult;
+  updateItemProgress: (id: string, event: DownloadProgressEvent) => void;
+  initDownloaders: () => Promise<void>;
+}
+
+/**
+ * DownloadManager를 테스트 가능한 형태로 캐스팅
+ */
+const asTestable = (manager: DownloadManager): DownloadManagerTestable => {
+  return manager as unknown as DownloadManagerTestable;
+};
 
 // fs-extra 모킹
 vi.mock('fs-extra', () => ({
@@ -124,7 +152,7 @@ describe('DownloadManager 단위 테스트', () => {
       manager.addToQueue(packages);
 
       // items에 직접 접근하여 상태 변경
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'completed';
       itemsArray[1].status = 'downloading';
@@ -162,7 +190,7 @@ describe('DownloadManager 단위 테스트', () => {
       manager.addToQueue(packages);
 
       // items에 직접 접근하여 상태 변경
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'completed';
       itemsArray[0].totalBytes = 1000;
@@ -188,7 +216,7 @@ describe('DownloadManager 단위 테스트', () => {
 
       manager.addToQueue(packages);
 
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'completed';
       itemsArray[0].totalBytes = 1000;
@@ -210,7 +238,7 @@ describe('DownloadManager 단위 테스트', () => {
 
       manager.addToQueue(packages);
 
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'completed';
       itemsArray[1].status = 'failed';
@@ -245,21 +273,24 @@ describe('DownloadManager 단위 테스트', () => {
       ];
 
       manager.addToQueue(packages);
-      (manager as any).isRunning = true;
-      (manager as any).isCancelled = true;
+      asTestable(manager).isRunning = true;
+      asTestable(manager).isCancelled = true;
 
       manager.reset();
 
-      expect((manager as any).isRunning).toBe(false);
-      expect((manager as any).isCancelled).toBe(false);
+      expect(asTestable(manager).isRunning).toBe(false);
+      expect(asTestable(manager).isCancelled).toBe(false);
     });
 
     it('속도 샘플 초기화', () => {
-      (manager as any).speedSamples = [100, 200, 300];
+      const speedCalc = asTestable(manager).speedCalculator;
+      speedCalc.addSampleForced(100);
+      speedCalc.addSampleForced(200);
+      speedCalc.addSampleForced(300);
 
       manager.reset();
 
-      expect((manager as any).speedSamples).toHaveLength(0);
+      expect(speedCalc.sampleCount).toBe(0);
     });
   });
 
@@ -285,18 +316,18 @@ describe('DownloadManager 단위 테스트', () => {
     it('isRunning getter', () => {
       expect(manager.running).toBe(false);
 
-      (manager as any).isRunning = true;
+      asTestable(manager).isRunning = true;
       expect(manager.running).toBe(true);
     });
   });
 
   describe('createResult', () => {
-    const callCreateResult = (manager: DownloadManager): any => {
-      return (manager as any).createResult();
+    const callCreateResult = (manager: DownloadManager): DownloadResult => {
+      return asTestable(manager).createResult();
     };
 
     it('빈 결과', () => {
-      (manager as any).startTime = Date.now();
+      asTestable(manager).startTime = Date.now();
       const result = callCreateResult(manager);
 
       expect(result.success).toBe(true);
@@ -310,9 +341,9 @@ describe('DownloadManager 단위 테스트', () => {
       ];
 
       manager.addToQueue(packages);
-      (manager as any).startTime = Date.now() - 1000;
+      asTestable(manager).startTime = Date.now() - 1000;
 
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'completed';
       itemsArray[0].downloadedBytes = 1000;
@@ -325,8 +356,8 @@ describe('DownloadManager 단위 테스트', () => {
     });
 
     it('취소된 결과', () => {
-      (manager as any).startTime = Date.now();
-      (manager as any).isCancelled = true;
+      asTestable(manager).startTime = Date.now();
+      asTestable(manager).isCancelled = true;
 
       const result = callCreateResult(manager);
 
@@ -339,9 +370,9 @@ describe('DownloadManager 단위 테스트', () => {
       ];
 
       manager.addToQueue(packages);
-      (manager as any).startTime = Date.now();
+      asTestable(manager).startTime = Date.now();
 
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'failed';
 
@@ -356,9 +387,9 @@ describe('DownloadManager 단위 테스트', () => {
       ];
 
       manager.addToQueue(packages);
-      (manager as any).startTime = Date.now();
+      asTestable(manager).startTime = Date.now();
 
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'skipped';
 
@@ -373,9 +404,9 @@ describe('DownloadManager 단위 테스트', () => {
     const callUpdateItemProgress = (
       manager: DownloadManager,
       itemId: string,
-      event: any
+      event: DownloadProgressEvent
     ): void => {
-      return (manager as any).updateItemProgress(itemId, event);
+      return asTestable(manager).updateItemProgress(itemId, event);
     };
 
     it('진행률 업데이트', () => {
@@ -388,13 +419,14 @@ describe('DownloadManager 단위 테스트', () => {
       const itemId = items[0].id;
 
       callUpdateItemProgress(manager, itemId, {
+        itemId,
         progress: 50, // 퍼센트 값
         downloadedBytes: 500,
         totalBytes: 1000,
         speed: 100,
       });
 
-      const updatedItems = (manager as any).items as Map<string, DownloadItem>;
+      const updatedItems = asTestable(manager).items;
       const item = updatedItems.get(itemId);
 
       expect(item?.downloadedBytes).toBe(500);
@@ -413,13 +445,14 @@ describe('DownloadManager 단위 테스트', () => {
       const itemId = items[0].id;
 
       callUpdateItemProgress(manager, itemId, {
+        itemId,
         progress: 100, // 퍼센트 값
         downloadedBytes: 1000,
         totalBytes: 1000,
         speed: 100,
       });
 
-      const updatedItems = (manager as any).items as Map<string, DownloadItem>;
+      const updatedItems = asTestable(manager).items;
       const item = updatedItems.get(itemId);
 
       expect(item?.progress).toBe(100);
@@ -428,6 +461,7 @@ describe('DownloadManager 단위 테스트', () => {
     it('존재하지 않는 아이템 업데이트 시 에러 없음', () => {
       expect(() =>
         callUpdateItemProgress(manager, 'nonexistent', {
+          itemId: 'nonexistent',
           progress: 50,
           downloadedBytes: 500,
           totalBytes: 1000,
@@ -473,14 +507,14 @@ describe('DownloadManager 단위 테스트', () => {
   describe('동시성 옵션', () => {
     it('기본 동시성은 3', () => {
       const manager = createManager();
-      const queue = (manager as any).queue;
+      const queue = asTestable(manager).queue;
       expect(queue.concurrency).toBe(3);
     });
   });
 
   describe('pauseDownload', () => {
     it('다운로드 일시정지', () => {
-      const queue = (manager as any).queue;
+      const queue = asTestable(manager).queue;
       const pauseSpy = vi.spyOn(queue, 'pause');
 
       manager.pauseDownload();
@@ -491,7 +525,7 @@ describe('DownloadManager 단위 테스트', () => {
 
   describe('resumeDownload', () => {
     it('다운로드 재개', () => {
-      const queue = (manager as any).queue;
+      const queue = asTestable(manager).queue;
       const startSpy = vi.spyOn(queue, 'start');
 
       manager.resumeDownload();
@@ -504,11 +538,11 @@ describe('DownloadManager 단위 테스트', () => {
     it('다운로드 취소 시 플래그 설정', () => {
       manager.cancelDownload();
 
-      expect((manager as any).isCancelled).toBe(true);
+      expect(asTestable(manager).isCancelled).toBe(true);
     });
 
     it('다운로드 취소 시 큐 정리', () => {
-      const queue = (manager as any).queue;
+      const queue = asTestable(manager).queue;
       const clearSpy = vi.spyOn(queue, 'clear');
       const pauseSpy = vi.spyOn(queue, 'pause');
 
@@ -528,7 +562,7 @@ describe('DownloadManager 단위 테스트', () => {
       manager.addToQueue(packages);
 
       // 일부 아이템의 상태 변경
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'downloading';
       itemsArray[1].status = 'pending';
@@ -546,10 +580,10 @@ describe('DownloadManager 단위 테스트', () => {
     it('다운로더 초기화 호출', async () => {
       const manager = createManager();
       // initDownloaders는 private async 메서드이므로 직접 호출
-      await (manager as any).initDownloaders();
+      await asTestable(manager).initDownloaders();
 
       // 다운로더가 설정되었는지 확인 (에러 없이 완료)
-      expect((manager as any).downloaders).toBeDefined();
+      expect(asTestable(manager).downloaders).toBeDefined();
     });
   });
 
@@ -562,7 +596,7 @@ describe('DownloadManager 단위 테스트', () => {
 
       manager.addToQueue(packages);
 
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'cancelled';
       itemsArray[1].status = 'pending';
@@ -580,7 +614,7 @@ describe('DownloadManager 단위 테스트', () => {
 
       manager.addToQueue(packages);
 
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'skipped';
 
@@ -591,15 +625,18 @@ describe('DownloadManager 단위 테스트', () => {
   });
 
   describe('getOverallProgress 추가 케이스', () => {
-    it('currentSpeed 계산 (speedSamples 기반)', () => {
+    it('currentSpeed 계산 (SpeedCalculator 기반)', () => {
       const packages = [
         { type: 'pip' as const, name: 'requests', version: '2.28.0' },
       ];
 
       manager.addToQueue(packages);
 
-      // speedSamples에 직접 값 추가
-      (manager as any).speedSamples = [1000, 2000, 3000];
+      // SpeedCalculator에 샘플 추가
+      const speedCalc = asTestable(manager).speedCalculator;
+      speedCalc.addSampleForced(1000);
+      speedCalc.addSampleForced(2000);
+      speedCalc.addSampleForced(3000);
 
       const progress = manager.getOverallProgress();
 
@@ -614,14 +651,15 @@ describe('DownloadManager 단위 테스트', () => {
 
       manager.addToQueue(packages);
 
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'downloading';
       itemsArray[0].totalBytes = 10000;
       itemsArray[0].downloadedBytes = 5000;
 
-      // speedSamples 설정
-      (manager as any).speedSamples = [1000]; // 1000 bytes/sec
+      // SpeedCalculator에 샘플 설정
+      const speedCalc = asTestable(manager).speedCalculator;
+      speedCalc.addSampleForced(1000); // 1000 bytes/sec
 
       const progress = manager.getOverallProgress();
 
@@ -636,13 +674,14 @@ describe('DownloadManager 단위 테스트', () => {
 
       manager.addToQueue(packages);
 
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].totalBytes = 10000;
       itemsArray[0].downloadedBytes = 5000;
 
-      // speedSamples가 비어있으면 속도 0
-      (manager as any).speedSamples = [];
+      // SpeedCalculator가 비어있으면 속도 0 (reset 호출)
+      const speedCalc = asTestable(manager).speedCalculator;
+      speedCalc.reset();
 
       const progress = manager.getOverallProgress();
 
@@ -657,7 +696,7 @@ describe('DownloadManager 단위 테스트', () => {
     });
 
     it('이미 실행 중이면 에러 발생', async () => {
-      (manager as any).isRunning = true;
+      asTestable(manager).isRunning = true;
 
       await expect(
         manager.startDownload({ outputPath: '/test/output' })
@@ -674,10 +713,10 @@ describe('DownloadManager 단위 테스트', () => {
       const mockDownloader = {
         downloadPackage: vi.fn().mockResolvedValue('/path/to/file'),
       };
-      (manager as any).downloaders.set('pip', mockDownloader);
+      asTestable(manager).downloaders.set('pip', mockDownloader);
 
       // 아이템 상태를 completed로 설정하여 다운로드 스킵
-      const items = (manager as any).items as Map<string, DownloadItem>;
+      const items = asTestable(manager).items;
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'completed';
 
@@ -687,8 +726,8 @@ describe('DownloadManager 단위 테스트', () => {
         maxRetries: 2,
       });
 
-      expect((manager as any).options.concurrency).toBe(5);
-      expect((manager as any).options.maxRetries).toBe(2);
+      expect(asTestable(manager).options.concurrency).toBe(5);
+      expect(asTestable(manager).options.maxRetries).toBe(2);
     });
 
     it('allComplete 이벤트 발생', async () => {
@@ -711,7 +750,7 @@ describe('DownloadManager 단위 테스트', () => {
 
   describe('getDownloadManager 싱글톤', () => {
     it('싱글톤 인스턴스 반환', async () => {
-      const { getDownloadManager } = await import('./downloadManager');
+      const { getDownloadManager } = await import('./download-manager');
 
       const instance1 = getDownloadManager();
       const instance2 = getDownloadManager();

@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
-import { getArchivePackager, ArchivePackager, ArchiveFormat } from './archivePackager';
+import { getArchivePackager, ArchivePackager, ArchiveFormat } from './archive-packager';
 import { PackageInfo } from '../../types';
 
 describe('ArchivePackager', () => {

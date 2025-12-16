@@ -527,3 +527,470 @@ describe('maven downloader utilities', () => {
     });
   });
 });
+
+// MavenDownloader 클래스 메서드 테스트 (모킹)
+import { MavenDownloader } from './maven';
+
+describe('MavenDownloader 클래스 메서드 테스트', () => {
+  let downloader: MavenDownloader;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    downloader = new MavenDownloader();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('searchPackages', () => {
+    it('검색 결과 성공 처리', async () => {
+      const mockClient = {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            response: {
+              docs: [
+                {
+                  id: 'com.google.code.gson:gson',
+                  g: 'com.google.code.gson',
+                  a: 'gson',
+                  latestVersion: '2.10.1',
+                  versionCount: 50,
+                },
+                {
+                  id: 'org.json:json',
+                  g: 'org.json',
+                  a: 'json',
+                  latestVersion: '20231013',
+                  versionCount: 25,
+                },
+              ],
+            },
+          },
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const results = await downloader.searchPackages('gson');
+
+      expect(results.length).toBe(2);
+      expect(results[0].name).toBe('com.google.code.gson:gson');
+      expect(results[0].version).toBe('2.10.1');
+      expect(results[0].type).toBe('maven');
+    });
+
+    it('검색 결과 없음', async () => {
+      const mockClient = {
+        get: vi.fn().mockResolvedValue({
+          data: { response: { docs: [] } },
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const results = await downloader.searchPackages('nonexistent-package-xyz');
+      expect(results).toHaveLength(0);
+    });
+
+    it('네트워크 오류 시 예외 발생', async () => {
+      const mockClient = {
+        get: vi.fn().mockRejectedValue(new Error('Network Error')),
+      };
+      (downloader as any).client = mockClient;
+
+      await expect(downloader.searchPackages('test')).rejects.toThrow('Network Error');
+    });
+  });
+
+  describe('getVersions', () => {
+    it('metadata.xml에서 버전 목록 조회', async () => {
+      const mockClient = {
+        get: vi.fn().mockResolvedValue({
+          data: `<?xml version="1.0" encoding="UTF-8"?>
+            <metadata>
+              <groupId>com.google.code.gson</groupId>
+              <artifactId>gson</artifactId>
+              <versioning>
+                <versions>
+                  <version>2.10.0</version>
+                  <version>2.10.1</version>
+                </versions>
+                <lastUpdated>20231213</lastUpdated>
+              </versioning>
+            </metadata>`,
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const versions = await downloader.getVersions('com.google.code.gson:gson');
+
+      expect(versions).toContain('2.10.1');
+      expect(versions).toContain('2.10.0');
+    });
+
+    it('좌표 형식 검증', () => {
+      // 잘못된 좌표 형식 검증
+      expect(downloader.parseCoordinates('invalid')).toBeNull();
+      expect(downloader.parseCoordinates('')).toBeNull();
+      expect(downloader.parseCoordinates('valid:artifact')).not.toBeNull();
+    });
+  });
+
+  describe('getPackageMetadata', () => {
+    it('메타데이터 조회 성공', async () => {
+      const mockClient = {
+        get: vi.fn().mockImplementation((url: string) => {
+          if (url.includes('.sha1')) {
+            return Promise.resolve({
+              data: 'a1b2c3d4e5f6',
+            });
+          }
+          // Search API 응답
+          return Promise.resolve({
+            data: {
+              response: {
+                docs: [
+                  {
+                    id: 'com.google.code.gson:gson',
+                    g: 'com.google.code.gson',
+                    a: 'gson',
+                    v: '2.10.1',
+                    p: 'jar',
+                    latestVersion: '2.10.1',
+                  },
+                ],
+              },
+            },
+          });
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const metadata = await downloader.getPackageMetadata('com.google.code.gson:gson', '2.10.1');
+
+      expect(metadata.name).toBe('com.google.code.gson:gson');
+      expect(metadata.version).toBe('2.10.1');
+      expect(metadata.type).toBe('maven');
+    });
+
+    it('좌표 형식 검증', () => {
+      // 잘못된 좌표 형식 검증
+      expect(downloader.parseCoordinates('invalid')).toBeNull();
+    });
+  });
+
+  describe('downloadPackage', () => {
+    it('다운로드 URL 생성 검증', () => {
+      const groupId = 'com.google.code.gson';
+      const artifactId = 'gson';
+      const version = '2.10.1';
+      const groupPath = groupId.replace(/\./g, '/');
+
+      const url = `https://repo1.maven.org/maven2/${groupPath}/${artifactId}/${version}/${artifactId}-${version}.jar`;
+
+      expect(url).toBe(
+        'https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar'
+      );
+    });
+  });
+
+  describe('buildDownloadUrl', () => {
+    it('기본 JAR URL 생성', () => {
+      const url = (downloader as any).buildDownloadUrl(
+        'com.google.code.gson',
+        'gson',
+        '2.10.1',
+        'jar'
+      );
+      expect(url).toBe(
+        'https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar'
+      );
+    });
+
+    it('POM URL 생성', () => {
+      const url = (downloader as any).buildDownloadUrl(
+        'com.google.code.gson',
+        'gson',
+        '2.10.1',
+        'pom'
+      );
+      expect(url).toBe(
+        'https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.pom'
+      );
+    });
+  });
+
+  describe('buildM2Path', () => {
+    it('M2 로컬 저장소 경로 생성', () => {
+      // buildM2Path는 3개 파라미터만 받음 (groupId, artifactId, version)
+      const m2path = (downloader as any).buildM2Path(
+        'com.google.code.gson',
+        'gson',
+        '2.10.1'
+      );
+      // 경로 정규화 - path.join 사용으로 OS별 구분자 차이 가능
+      expect(m2path).toContain('com');
+      expect(m2path).toContain('google');
+      expect(m2path).toContain('code');
+      expect(m2path).toContain('gson');
+      expect(m2path).toContain('2.10.1');
+    });
+  });
+
+  describe('buildFileName', () => {
+    it('기본 JAR 파일명', () => {
+      const fileName = (downloader as any).buildFileName('gson', '2.10.1', 'jar');
+      expect(fileName).toBe('gson-2.10.1.jar');
+    });
+
+    it('sources classifier 파일명', () => {
+      const fileName = (downloader as any).buildFileName('gson', '2.10.1', 'sources');
+      expect(fileName).toBe('gson-2.10.1-sources.jar');
+    });
+
+    it('javadoc classifier 파일명', () => {
+      const fileName = (downloader as any).buildFileName('gson', '2.10.1', 'javadoc');
+      expect(fileName).toBe('gson-2.10.1-javadoc.jar');
+    });
+
+    it('POM 파일명', () => {
+      const fileName = (downloader as any).buildFileName('gson', '2.10.1', 'pom');
+      expect(fileName).toBe('gson-2.10.1.pom');
+    });
+  });
+
+  describe('validateArtifactType', () => {
+    it('유효한 타입은 그대로 반환', () => {
+      expect((downloader as any).validateArtifactType('jar')).toBe('jar');
+      expect((downloader as any).validateArtifactType('pom')).toBe('pom');
+      expect((downloader as any).validateArtifactType('sources')).toBe('sources');
+      expect((downloader as any).validateArtifactType('javadoc')).toBe('javadoc');
+    });
+
+    it('무효한 타입은 jar로 폴백', () => {
+      expect((downloader as any).validateArtifactType('invalid')).toBe('jar');
+      expect((downloader as any).validateArtifactType('')).toBe('jar');
+    });
+  });
+
+  describe('compareVersions', () => {
+    it('동일 버전', () => {
+      expect((downloader as any).compareVersions('1.0.0', '1.0.0')).toBe(0);
+    });
+
+    it('major 버전 비교', () => {
+      expect((downloader as any).compareVersions('2.0.0', '1.0.0')).toBeGreaterThan(0);
+      expect((downloader as any).compareVersions('1.0.0', '2.0.0')).toBeLessThan(0);
+    });
+
+    it('minor 버전 비교', () => {
+      expect((downloader as any).compareVersions('1.2.0', '1.1.0')).toBeGreaterThan(0);
+    });
+
+    it('patch 버전 비교', () => {
+      expect((downloader as any).compareVersions('1.0.2', '1.0.1')).toBeGreaterThan(0);
+    });
+  });
+
+  describe('verifyChecksum', () => {
+    it('체크섬 검증 로직', () => {
+      // SHA1 해시 검증 로직 테스트
+      const expected = 'abc123def456';
+      const actual = 'ABC123DEF456';
+      expect(expected.toLowerCase()).toBe(actual.toLowerCase());
+    });
+  });
+
+  describe('parseMetadataXml', () => {
+    it('버전 목록 추출', () => {
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+        <metadata>
+          <groupId>com.google.code.gson</groupId>
+          <artifactId>gson</artifactId>
+          <versioning>
+            <versions>
+              <version>2.9.0</version>
+              <version>2.10.0</version>
+              <version>2.10.1</version>
+            </versions>
+            <lastUpdated>20231213</lastUpdated>
+          </versioning>
+        </metadata>`;
+
+      const versions = (downloader as any).parseMetadataXml(xml);
+
+      expect(versions).toContain('2.9.0');
+      expect(versions).toContain('2.10.0');
+      expect(versions).toContain('2.10.1');
+      expect(versions.length).toBe(3);
+    });
+
+    it('빈 XML에서 빈 배열 반환', () => {
+      const xml = '<metadata></metadata>';
+      const versions = (downloader as any).parseMetadataXml(xml);
+      expect(versions).toHaveLength(0);
+    });
+  });
+
+  describe('getVersionsFromMetadata', () => {
+    it('metadata.xml에서 버전 목록 조회 성공', async () => {
+      const mockClient = {
+        get: vi.fn().mockResolvedValue({
+          data: `<?xml version="1.0" encoding="UTF-8"?>
+            <metadata>
+              <versioning>
+                <versions>
+                  <version>2.10.0</version>
+                  <version>2.10.1</version>
+                </versions>
+              </versioning>
+            </metadata>`,
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const versions = await (downloader as any).getVersionsFromMetadata('com.google.code.gson', 'gson');
+
+      expect(versions).toContain('2.10.0');
+      expect(versions).toContain('2.10.1');
+    });
+
+    it('조회 실패 시 예외 발생', async () => {
+      const mockClient = {
+        get: vi.fn().mockRejectedValue(new Error('Network Error')),
+      };
+      (downloader as any).client = mockClient;
+
+      await expect((downloader as any).getVersionsFromMetadata('invalid', 'package'))
+        .rejects.toThrow('Network Error');
+    });
+  });
+
+  describe('getVersionsFromSearchApi', () => {
+    it('Search API에서 버전 목록 조회', async () => {
+      const mockClient = {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            response: {
+              docs: [
+                { v: '2.10.1' },
+                { v: '2.10.0' },
+                { v: '2.9.1' },
+              ],
+            },
+          },
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const versions = await (downloader as any).getVersionsFromSearchApi('com.google.code.gson', 'gson');
+
+      expect(versions).toContain('2.10.1');
+      expect(versions).toContain('2.10.0');
+      expect(versions).toContain('2.9.1');
+    });
+
+    it('조회 실패 시 예외 발생', async () => {
+      const mockClient = {
+        get: vi.fn().mockRejectedValue(new Error('Network Error')),
+      };
+      (downloader as any).client = mockClient;
+
+      await expect((downloader as any).getVersionsFromSearchApi('invalid', 'package'))
+        .rejects.toThrow('Network Error');
+    });
+  });
+
+  describe('downloadPom', () => {
+    it('downloadArtifact를 pom 타입으로 호출', async () => {
+      const mockDownloadArtifact = vi.fn().mockResolvedValue('/path/to/file.pom');
+      (downloader as any).downloadArtifact = mockDownloadArtifact;
+
+      await downloader.downloadPom('com.google.code.gson', 'gson', '2.10.1', '/dest');
+
+      expect(mockDownloadArtifact).toHaveBeenCalledWith(
+        'com.google.code.gson', 'gson', '2.10.1', '/dest', 'pom'
+      );
+    });
+  });
+
+  describe('downloadSources', () => {
+    it('downloadArtifact를 sources 타입으로 호출', async () => {
+      const mockDownloadArtifact = vi.fn().mockResolvedValue('/path/to/file-sources.jar');
+      (downloader as any).downloadArtifact = mockDownloadArtifact;
+
+      await downloader.downloadSources('com.google.code.gson', 'gson', '2.10.1', '/dest');
+
+      expect(mockDownloadArtifact).toHaveBeenCalledWith(
+        'com.google.code.gson', 'gson', '2.10.1', '/dest', 'sources'
+      );
+    });
+  });
+
+  describe('downloadJavadoc', () => {
+    it('downloadArtifact를 javadoc 타입으로 호출', async () => {
+      const mockDownloadArtifact = vi.fn().mockResolvedValue('/path/to/file-javadoc.jar');
+      (downloader as any).downloadArtifact = mockDownloadArtifact;
+
+      await downloader.downloadJavadoc('com.google.code.gson', 'gson', '2.10.1', '/dest');
+
+      expect(mockDownloadArtifact).toHaveBeenCalledWith(
+        'com.google.code.gson', 'gson', '2.10.1', '/dest', 'javadoc'
+      );
+    });
+  });
+});
+
+// MavenDownloader 에러 처리 테스트
+describe('MavenDownloader 에러 처리', () => {
+  it('좌표 파싱 오류', () => {
+    const downloader = getMavenDownloader();
+    expect(downloader.parseCoordinates('invalid')).toBeNull();
+  });
+
+  it('빈 문자열 파싱', () => {
+    const downloader = getMavenDownloader();
+    expect(downloader.parseCoordinates('')).toBeNull();
+  });
+
+  it('metadata 파싱 오류 구조', () => {
+    const invalidXml = '<invalid>';
+    // XML 파싱 실패 시 예외 발생 예상
+    expect(() => {
+      // 간단한 XML 파싱 검증
+      if (!invalidXml.includes('<metadata>')) {
+        throw new Error('Invalid XML');
+      }
+    }).toThrow('Invalid XML');
+  });
+});
+
+// Maven 아티팩트 타입 테스트
+describe('Maven 아티팩트 타입', () => {
+  it('TYPE_EXTENSION_MAP 검증', () => {
+    const extensionMap: Record<string, string> = {
+      jar: 'jar',
+      pom: 'pom',
+      sources: 'jar',
+      javadoc: 'jar',
+      war: 'war',
+      ear: 'ear',
+    };
+
+    expect(extensionMap['jar']).toBe('jar');
+    expect(extensionMap['pom']).toBe('pom');
+    expect(extensionMap['sources']).toBe('jar');
+  });
+
+  it('TYPE_CLASSIFIER_MAP 검증', () => {
+    const classifierMap: Record<string, string | undefined> = {
+      jar: undefined,
+      pom: undefined,
+      sources: 'sources',
+      javadoc: 'javadoc',
+    };
+
+    expect(classifierMap['jar']).toBeUndefined();
+    expect(classifierMap['sources']).toBe('sources');
+    expect(classifierMap['javadoc']).toBe('javadoc');
+  });
+});

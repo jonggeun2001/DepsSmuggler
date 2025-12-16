@@ -1,6 +1,8 @@
 /**
  * npm 패키지 다운로더
  * npm Registry API를 사용하여 패키지 검색, 조회, 다운로드 수행
+ *
+ * 버전 해결 로직은 NpmVersionResolver에 위임
  */
 
 import axios, { AxiosInstance } from 'axios';
@@ -9,7 +11,6 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as ssri from 'ssri';
 import {
-  NpmPackument,
   NpmPackageVersion,
   NpmSearchResponse,
   NpmSearchResult,
@@ -20,8 +21,10 @@ import {
   DownloadProgressEvent,
 } from '../../types';
 import logger from '../../utils/logger';
-import { fetchPackument, clearNpmCache } from '../shared/npm-cache';
+import { clearNpmCache } from '../shared/npm-cache';
 import { sanitizePath } from '../shared/path-utils';
+import { NpmVersionResolver } from '../resolver/npm-version-resolver';
+import { NPM_CONSTANTS } from '../constants/npm';
 
 /**
  * npm 다운로더 클래스
@@ -31,16 +34,21 @@ export class NpmDownloader implements IDownloader {
   private client: AxiosInstance;
   private readonly registryUrl: string;
   private readonly searchUrl: string;
+  private versionResolver: NpmVersionResolver;
 
-  constructor(registryUrl = 'https://registry.npmjs.org', searchUrl = 'https://registry.npmjs.org/-/v1/search') {
+  constructor(
+    registryUrl = NPM_CONSTANTS.DEFAULT_REGISTRY_URL,
+    searchUrl = NPM_CONSTANTS.DEFAULT_SEARCH_URL
+  ) {
     this.registryUrl = registryUrl;
     this.searchUrl = searchUrl;
     this.client = axios.create({
-      timeout: 30000,
+      timeout: NPM_CONSTANTS.API_TIMEOUT_MS,
       headers: {
         Accept: 'application/json',
       },
     });
+    this.versionResolver = new NpmVersionResolver(registryUrl);
   }
 
   /**
@@ -75,18 +83,8 @@ export class NpmDownloader implements IDownloader {
    * 패키지 버전 목록 조회
    */
   async getVersions(packageName: string): Promise<string[]> {
-    try {
-      const packument = await this.fetchPackumentInternal(packageName);
-      const versions = Object.keys(packument.versions);
-
-      // 최신순 정렬 (semver)
-      return versions.sort((a, b) => {
-        return this.compareVersions(b, a);
-      });
-    } catch (error) {
-      logger.error('npm 버전 목록 조회 실패', { packageName, error });
-      throw error;
-    }
+    // NpmVersionResolver에 위임
+    return this.versionResolver.getVersions(packageName);
   }
 
   /**
@@ -94,8 +92,8 @@ export class NpmDownloader implements IDownloader {
    */
   async getPackageMetadata(name: string, version: string): Promise<PackageInfo> {
     try {
-      const packument = await this.fetchPackumentInternal(name);
-      const resolvedVersion = this.resolveVersion(version, packument);
+      const packument = await this.versionResolver.fetchPackument(name);
+      const resolvedVersion = this.versionResolver.resolveVersion(version, packument);
 
       if (!resolvedVersion || !packument.versions[resolvedVersion]) {
         throw new Error(`버전을 찾을 수 없습니다: ${name}@${version}`);
@@ -156,7 +154,7 @@ export class NpmDownloader implements IDownloader {
         method: 'GET',
         url: downloadUrl,
         responseType: 'stream',
-        timeout: 300000, // 5분
+        timeout: NPM_CONSTANTS.DOWNLOAD_TIMEOUT_MS,
       });
 
       const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
@@ -253,7 +251,7 @@ export class NpmDownloader implements IDownloader {
         method: 'GET',
         url: tarballUrl,
         responseType: 'stream',
-        timeout: 300000,
+        timeout: NPM_CONSTANTS.DOWNLOAD_TIMEOUT_MS,
       });
 
       const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
@@ -341,168 +339,18 @@ export class NpmDownloader implements IDownloader {
   }
 
   /**
-   * packument 조회 (캐싱)
-   */
-  private async fetchPackumentInternal(name: string): Promise<NpmPackument> {
-    // 공유 캐시 모듈 사용
-    return fetchPackument(name, { registryUrl: this.registryUrl });
-  }
-
-  /**
-   * 버전 해결 (dist-tag, semver 범위 등)
-   */
-  private resolveVersion(spec: string, packument: NpmPackument): string | null {
-    // dist-tag (latest, next 등)
-    if (packument['dist-tags'][spec]) {
-      return packument['dist-tags'][spec];
-    }
-
-    // 정확한 버전
-    if (packument.versions[spec]) {
-      return spec;
-    }
-
-    // semver 범위 - 최신 호환 버전 반환
-    const versions = Object.keys(packument.versions).sort((a, b) => this.compareVersions(b, a));
-
-    for (const v of versions) {
-      if (this.satisfies(v, spec)) {
-        return v;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * semver satisfies (간소화된 버전)
-   */
-  private satisfies(version: string, range: string): boolean {
-    // 정확한 버전
-    if (version === range) return true;
-
-    // 와일드카드
-    if (range === '*' || range === '' || range === 'x') return true;
-
-    // ^ 범위 (major 고정)
-    if (range.startsWith('^')) {
-      const rangeVersion = range.slice(1);
-      return this.satisfiesCaret(version, rangeVersion);
-    }
-
-    // ~ 범위 (minor 고정)
-    if (range.startsWith('~')) {
-      const rangeVersion = range.slice(1);
-      return this.satisfiesTilde(version, rangeVersion);
-    }
-
-    // >= 범위
-    if (range.startsWith('>=')) {
-      const rangeVersion = range.slice(2);
-      return this.compareVersions(version, rangeVersion) >= 0;
-    }
-
-    // > 범위
-    if (range.startsWith('>')) {
-      const rangeVersion = range.slice(1);
-      return this.compareVersions(version, rangeVersion) > 0;
-    }
-
-    // <= 범위
-    if (range.startsWith('<=')) {
-      const rangeVersion = range.slice(2);
-      return this.compareVersions(version, rangeVersion) <= 0;
-    }
-
-    // < 범위
-    if (range.startsWith('<')) {
-      const rangeVersion = range.slice(1);
-      return this.compareVersions(version, rangeVersion) < 0;
-    }
-
-    // = 또는 없음 (정확한 버전)
-    const cleanRange = range.startsWith('=') ? range.slice(1) : range;
-    return version === cleanRange;
-  }
-
-  /**
-   * ^ 범위 체크
-   */
-  private satisfiesCaret(version: string, rangeVersion: string): boolean {
-    const [vMajor, vMinor = 0, vPatch = 0] = this.parseVersion(version);
-    const [rMajor, rMinor = 0, rPatch = 0] = this.parseVersion(rangeVersion);
-
-    if (rMajor === 0) {
-      if (rMinor === 0) {
-        // ^0.0.x - patch만 허용
-        return vMajor === 0 && vMinor === 0 && vPatch >= rPatch;
-      }
-      // ^0.x.x - minor 고정
-      return vMajor === 0 && vMinor === rMinor && vPatch >= rPatch;
-    }
-
-    // ^x.x.x - major 고정
-    return vMajor === rMajor && (vMinor > rMinor || (vMinor === rMinor && vPatch >= rPatch));
-  }
-
-  /**
-   * ~ 범위 체크
-   */
-  private satisfiesTilde(version: string, rangeVersion: string): boolean {
-    const [vMajor, vMinor = 0, vPatch = 0] = this.parseVersion(version);
-    const [rMajor, rMinor = 0, rPatch = 0] = this.parseVersion(rangeVersion);
-
-    return vMajor === rMajor && vMinor === rMinor && vPatch >= rPatch;
-  }
-
-  /**
-   * 버전 파싱
-   */
-  private parseVersion(version: string): number[] {
-    // prerelease 제거
-    const clean = version.split('-')[0];
-    return clean.split('.').map((n) => parseInt(n, 10) || 0);
-  }
-
-  /**
-   * 버전 비교
-   */
-  private compareVersions(a: string, b: string): number {
-    const partsA = this.parseVersion(a);
-    const partsB = this.parseVersion(b);
-
-    for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-      const numA = partsA[i] || 0;
-      const numB = partsB[i] || 0;
-
-      if (numA !== numB) {
-        return numA - numB;
-      }
-    }
-
-    return 0;
-  }
-
-  /**
    * 특정 패키지 버전 정보 조회
    */
   async getPackageVersion(name: string, version: string): Promise<NpmPackageVersion | null> {
-    try {
-      const packument = await this.fetchPackumentInternal(name);
-      const resolvedVersion = this.resolveVersion(version, packument);
-
-      if (!resolvedVersion) return null;
-      return packument.versions[resolvedVersion] || null;
-    } catch {
-      return null;
-    }
+    // NpmVersionResolver에 위임
+    return this.versionResolver.getPackageInfo(name, version);
   }
 
   /**
    * dist-tags 조회
    */
   async getDistTags(packageName: string): Promise<Record<string, string>> {
-    const packument = await this.fetchPackumentInternal(packageName);
+    const packument = await this.versionResolver.fetchPackument(packageName);
     return packument['dist-tags'];
   }
 
@@ -512,6 +360,8 @@ export class NpmDownloader implements IDownloader {
   clearCache(): void {
     // 공유 캐시 모듈 초기화
     clearNpmCache();
+    // 버전 리졸버 캐시도 초기화
+    this.versionResolver.clearCache();
   }
 }
 

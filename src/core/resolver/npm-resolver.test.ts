@@ -5,7 +5,94 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { NpmResolver } from './npmResolver';
+import { NpmResolver } from './npm-resolver';
+import { NpmVersionResolver } from './npm-version-resolver';
+import { NpmTreeManager } from './npm-tree-manager';
+import { NpmPackument, NpmNode, DependencyType, DepsQueueItem, NpmPackageVersion, NpmFlatPackage, NpmResolvedNode, NpmDist } from '../shared/npm-types';
+
+/**
+ * 테스트용 NpmResolver 인터페이스
+ * private 멤버에 타입 안전하게 접근하기 위한 인터페이스
+ */
+interface NpmResolverTestable {
+  versionResolver: NpmVersionResolver;
+  treeManager: NpmTreeManager;
+}
+
+/**
+ * NpmResolver를 테스트 가능한 형태로 캐스팅
+ */
+const asTestable = (resolver: NpmResolver): NpmResolverTestable => {
+  return resolver as unknown as NpmResolverTestable;
+};
+
+/**
+ * 간단한 Packument 생성 헬퍼
+ */
+const createPackument = (
+  name: string,
+  versions: Record<string, Partial<NpmPackageVersion>>,
+  distTags: Record<string, string> = {}
+): NpmPackument => ({
+  name,
+  'dist-tags': { latest: Object.keys(versions)[0], ...distTags },
+  versions: Object.fromEntries(
+    Object.entries(versions).map(([v, data]) => [v, { version: v, ...data } as NpmPackageVersion])
+  ),
+});
+
+/**
+ * 테스트용 부분 NpmNode 생성 헬퍼
+ */
+const createMockNode = (partial: Partial<NpmNode>): NpmNode => ({
+  name: '',
+  version: '',
+  depth: 0,
+  path: '',
+  parent: null,
+  children: new Map(),
+  edgesOut: new Map(),
+  edgesIn: new Set(),
+  packageInfo: {} as NpmPackageVersion,
+  isRoot: false,
+  optional: false,
+  dev: false,
+  peer: false,
+  ...partial,
+});
+
+/**
+ * 테스트용 부분 DepsQueueItem 생성 헬퍼
+ */
+const createMockQueueItem = (partial: Partial<DepsQueueItem>): DepsQueueItem => ({
+  name: '',
+  spec: '',
+  type: 'prod',
+  depth: 0,
+  path: '',
+  parent: null,
+  edge: { name: '', spec: '', type: 'prod' } as unknown as import('../shared/npm-types').NpmEdge,
+  ...partial,
+});
+
+/**
+ * 테스트용 부분 NpmResolvedNode 생성 헬퍼 (Tree에서 사용)
+ */
+const createMockResolvedNode = (partial: Partial<NpmResolvedNode>): NpmResolvedNode => ({
+  name: '',
+  version: '',
+  dist: {
+    tarball: '',
+    integrity: '',
+    shasum: '',
+  } as NpmDist,
+  dependencies: [],
+  depth: 0,
+  hoistedPath: '',
+  type: 'prod',
+  optional: false,
+  ...partial,
+});
 
 // NpmResolver 인스턴스 생성
 const createResolver = () => {
@@ -20,13 +107,14 @@ describe('NpmResolver 단위 테스트', () => {
   });
 
   describe('resolveVersion', () => {
-    // private 메서드 테스트를 위해 리플렉션 사용
+    // versionResolver를 통해 접근
     const callResolveVersion = (
       resolver: NpmResolver,
       spec: string,
-      packument: any
+      packument: NpmPackument
     ): string | null => {
-      return (resolver as any).resolveVersion(spec, packument);
+      const versionResolver = asTestable(resolver).versionResolver;
+      return versionResolver.resolveVersion(spec, packument);
     };
 
     it('dist-tag로 버전 해결 (latest)', () => {
@@ -158,7 +246,8 @@ describe('NpmResolver 단위 테스트', () => {
 
   describe('getDepthFromPath', () => {
     const callGetDepthFromPath = (resolver: NpmResolver, path: string): number => {
-      return (resolver as any).getDepthFromPath(path);
+      const treeManager = asTestable(resolver).treeManager;
+      return treeManager.getDepthFromPath(path);
     };
 
     it('빈 경로는 depth 0', () => {
@@ -186,18 +275,20 @@ describe('NpmResolver 단위 테스트', () => {
       name: string,
       startPath: string | null
     ): string | null => {
-      return (resolver as any).findNodePath(name, startPath);
+      const treeManager = asTestable(resolver).treeManager;
+      return treeManager.findNodePath(name, startPath);
     };
 
     beforeEach(() => {
-      // tree에 직접 노드 추가
-      const tree = (resolver as any).tree as Map<string, any>;
-      tree.set('node_modules/lodash', { name: 'lodash', version: '4.17.21' });
-      tree.set('node_modules/express', { name: 'express', version: '4.18.0' });
-      tree.set('node_modules/express/node_modules/accepts', {
+      // treeManager의 tree에 직접 노드 추가
+      const treeManager = asTestable(resolver).treeManager;
+      const tree = treeManager.getTree();
+      tree.set('node_modules/lodash', createMockResolvedNode({ name: 'lodash', version: '4.17.21' }));
+      tree.set('node_modules/express', createMockResolvedNode({ name: 'express', version: '4.18.0' }));
+      tree.set('node_modules/express/node_modules/accepts', createMockResolvedNode({
         name: 'accepts',
         version: '1.3.7',
-      });
+      }));
     });
 
     it('루트에서 lodash 찾기', () => {
@@ -227,50 +318,49 @@ describe('NpmResolver 단위 테스트', () => {
   });
 
   describe('flattenTree', () => {
-    const callFlattenTree = (resolver: NpmResolver): any[] => {
-      return (resolver as any).flattenTree();
+    const callFlattenTree = (resolver: NpmResolver): NpmFlatPackage[] => {
+      const treeManager = asTestable(resolver).treeManager;
+      return treeManager.flattenTree();
     };
 
     beforeEach(() => {
-      // tree에 직접 노드 추가
-      const tree = (resolver as any).tree as Map<string, any>;
+      // treeManager의 tree에 직접 노드 추가
+      const treeManager = asTestable(resolver).treeManager;
+      const tree = treeManager.getTree();
 
       // 루트 노드 (제외됨)
-      tree.set('', { name: 'root', version: '1.0.0' });
+      tree.set('', createMockResolvedNode({ name: 'root', version: '1.0.0' }));
 
       // 실제 패키지 노드
-      tree.set('node_modules/lodash', {
+      tree.set('node_modules/lodash', createMockResolvedNode({
         name: 'lodash',
         version: '4.17.21',
         dist: {
           tarball: 'https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz',
           integrity: 'sha512-...',
           shasum: 'abc123',
-          unpackedSize: 1000000,
-        },
-      });
+        } as NpmDist,
+      }));
 
-      tree.set('node_modules/express', {
+      tree.set('node_modules/express', createMockResolvedNode({
         name: 'express',
         version: '4.18.0',
         dist: {
           tarball: 'https://registry.npmjs.org/express/-/express-4.18.0.tgz',
           integrity: 'sha512-...',
           shasum: 'def456',
-          unpackedSize: 500000,
-        },
-      });
+        } as NpmDist,
+      }));
 
-      tree.set('node_modules/express/node_modules/accepts', {
+      tree.set('node_modules/express/node_modules/accepts', createMockResolvedNode({
         name: 'accepts',
         version: '1.3.7',
         dist: {
           tarball: 'https://registry.npmjs.org/accepts/-/accepts-1.3.7.tgz',
           integrity: 'sha512-...',
           shasum: 'ghi789',
-          unpackedSize: 10000,
-        },
-      });
+        } as NpmDist,
+      }));
     });
 
     it('루트를 제외하고 모든 패키지 반환', () => {
@@ -308,7 +398,8 @@ describe('NpmResolver 단위 테스트', () => {
       version: string,
       path: string
     ): boolean => {
-      return (resolver as any).isVersionCompatibleWithExisting(name, version, path);
+      const treeManager = asTestable(resolver).treeManager;
+      return treeManager.isVersionCompatibleWithExisting(name, version, path);
     };
 
     it('기본 호환성 체크 (현재 구현은 항상 true)', () => {
@@ -316,32 +407,32 @@ describe('NpmResolver 단위 테스트', () => {
     });
 
     it('경로가 있을 때 호환성 체크', () => {
-      // tree에 노드 추가
-      const tree = (resolver as any).tree as Map<string, any>;
-      tree.set('node_modules/express', {
+      // treeManager의 tree에 노드 추가
+      const treeManager = asTestable(resolver).treeManager;
+      const tree = treeManager.getTree();
+      tree.set('node_modules/express', createMockResolvedNode({
         name: 'express',
         version: '4.18.0',
-        dependencies: [{ name: 'lodash', version: '^4.0.0' }],
-      });
+      }));
 
       expect(callIsVersionCompatible(resolver, 'lodash', '4.17.21', 'node_modules')).toBe(true);
     });
   });
 
   describe('addNodeToTree', () => {
-    // addNodeToTree는 7개의 파라미터를 받음:
-    // (name, version, pkgInfo, hoistedPath, depth, type, _item)
+    // addNodeToTree는 treeManager에 있음
     const callAddNodeToTree = (
       resolver: NpmResolver,
       name: string,
       version: string,
-      pkgInfo: any,
+      pkgInfo: Partial<NpmPackageVersion>,
       hoistedPath: string,
       depth: number,
-      type: string,
-      item: any
+      type: DependencyType,
+      item: DepsQueueItem
     ): void => {
-      return (resolver as any).addNodeToTree(name, version, pkgInfo, hoistedPath, depth, type, item);
+      const treeManager = asTestable(resolver).treeManager;
+      return treeManager.addNodeToTree(name, version, pkgInfo as NpmPackageVersion, hoistedPath, depth, type, item);
     };
 
     it('노드 추가', () => {
@@ -350,17 +441,17 @@ describe('NpmResolver 단위 테스트', () => {
           tarball: 'https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz',
           integrity: 'sha512-...',
           shasum: 'abc123',
-          unpackedSize: 1000000,
         },
       };
-      const item = { name: 'lodash', version: '^4.0.0' };
+      const item = createMockQueueItem({ name: 'lodash', spec: '^4.0.0' });
 
       callAddNodeToTree(resolver, 'lodash', '4.17.21', pkgInfo, 'node_modules/lodash', 1, 'prod', item);
 
-      const tree = (resolver as any).tree as Map<string, any>;
+      const treeManager = asTestable(resolver).treeManager;
+      const tree = treeManager.getTree();
       expect(tree.has('node_modules/lodash')).toBe(true);
-      expect(tree.get('node_modules/lodash').name).toBe('lodash');
-      expect(tree.get('node_modules/lodash').version).toBe('4.17.21');
+      expect(tree.get('node_modules/lodash')!.name).toBe('lodash');
+      expect(tree.get('node_modules/lodash')!.version).toBe('4.17.21');
     });
 
     it('중첩 노드 추가', () => {
@@ -369,10 +460,9 @@ describe('NpmResolver 단위 테스트', () => {
           tarball: 'https://registry.npmjs.org/accepts/-/accepts-1.3.7.tgz',
           integrity: 'sha512-...',
           shasum: 'def456',
-          unpackedSize: 10000,
         },
       };
-      const item = { name: 'accepts', version: '^1.3.0' };
+      const item = createMockQueueItem({ name: 'accepts', spec: '^1.3.0' });
 
       callAddNodeToTree(
         resolver,
@@ -385,9 +475,10 @@ describe('NpmResolver 단위 테스트', () => {
         item
       );
 
-      const tree = (resolver as any).tree as Map<string, any>;
+      const treeManager = asTestable(resolver).treeManager;
+      const tree = treeManager.getTree();
       expect(tree.has('node_modules/express/node_modules/accepts')).toBe(true);
-      expect(tree.get('node_modules/express/node_modules/accepts').depth).toBe(2);
+      expect(tree.get('node_modules/express/node_modules/accepts')!.depth).toBe(2);
     });
 
     it('optional 타입 노드 추가', () => {
@@ -412,8 +503,9 @@ describe('NpmResolver 단위 테스트', () => {
         item
       );
 
-      const tree = (resolver as any).tree as Map<string, any>;
-      expect(tree.get('node_modules/fsevents').optional).toBe(true);
+      const treeManager = asTestable(resolver).treeManager;
+      const tree = treeManager.getTree();
+      expect(tree.get('node_modules/fsevents')!.optional).toBe(true);
     });
   });
 

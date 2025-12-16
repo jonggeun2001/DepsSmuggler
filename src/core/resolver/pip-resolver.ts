@@ -8,7 +8,7 @@ import {
 } from '../../types';
 import logger from '../../utils/logger';
 import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
-import { compareVersions, isVersionCompatible } from '../shared';
+import { compareVersions, isVersionCompatible, flattenDependencyTree } from '../shared';
 import { fetchPackageMetadata, clearMemoryCache as clearPipCache, PipCacheOptions } from '../shared/pip-cache';
 
 // 의존성 파싱 결과
@@ -66,7 +66,7 @@ export class PipResolver implements IResolver {
 
     try {
       const root = await this.resolvePackage(packageName, version, 0, maxDepth);
-      const flatList = this.flattenDependencies(root);
+      const flatList = flattenDependencyTree(root);
 
       return {
         root,
@@ -358,24 +358,6 @@ export class PipResolver implements IResolver {
     } catch {
       return null;
     }
-  }
-
-  /**
-   * 의존성 트리를 평탄화
-   */
-  private flattenDependencies(node: DependencyNode): PackageInfo[] {
-    const result: Map<string, PackageInfo> = new Map();
-
-    const traverse = (n: DependencyNode) => {
-      const key = `${n.package.name.toLowerCase()}@${n.package.version}`;
-      if (!result.has(key)) {
-        result.set(key, n.package);
-        n.dependencies.forEach(traverse);
-      }
-    };
-
-    traverse(node);
-    return Array.from(result.values());
   }
 
   /**

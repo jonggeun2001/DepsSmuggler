@@ -7,7 +7,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { getFileSplitter, FileSplitter } from './fileSplitter';
+import { getFileSplitter, FileSplitter } from './file-splitter';
 
 describe('FileSplitter', () => {
   let splitter: FileSplitter;

@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MavenDownloader } from './maven';
-import { getMavenResolver, MavenResolver } from '../resolver/mavenResolver';
+import { getMavenResolver, MavenResolver } from '../resolver/maven-resolver';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

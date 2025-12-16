@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { PipResolver } from './pipResolver';
+import { PipResolver } from './pip-resolver';
 
 // PipResolver 인스턴스 생성 및 targetPlatform 설정
 const createResolver = (options?: { targetPlatform?: { system?: string; machine?: string } }) => {
@@ -259,80 +259,8 @@ describe('PipResolver 단위 테스트', () => {
     });
   });
 
-  describe('flattenDependencies', () => {
-    const callFlattenDependencies = (resolver: PipResolver, node: any): any[] => {
-      return (resolver as any).flattenDependencies(node);
-    };
-
-    it('단일 노드', () => {
-      const node = {
-        package: { type: 'pip', name: 'requests', version: '2.28.0' },
-        dependencies: [],
-      };
-      const result = callFlattenDependencies(resolver, node);
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('requests');
-    });
-
-    it('중첩 의존성', () => {
-      const node = {
-        package: { type: 'pip', name: 'requests', version: '2.28.0' },
-        dependencies: [
-          {
-            package: { type: 'pip', name: 'urllib3', version: '1.26.0' },
-            dependencies: [],
-          },
-          {
-            package: { type: 'pip', name: 'certifi', version: '2023.7.22' },
-            dependencies: [],
-          },
-        ],
-      };
-      const result = callFlattenDependencies(resolver, node);
-      expect(result).toHaveLength(3);
-      expect(result.map((p) => p.name).sort()).toEqual(['certifi', 'requests', 'urllib3']);
-    });
-
-    it('중복 의존성 제거', () => {
-      const node = {
-        package: { type: 'pip', name: 'a', version: '1.0.0' },
-        dependencies: [
-          {
-            package: { type: 'pip', name: 'b', version: '2.0.0' },
-            dependencies: [
-              {
-                package: { type: 'pip', name: 'c', version: '3.0.0' },
-                dependencies: [],
-              },
-            ],
-          },
-          {
-            package: { type: 'pip', name: 'c', version: '3.0.0' },
-            dependencies: [],
-          },
-        ],
-      };
-      const result = callFlattenDependencies(resolver, node);
-      expect(result).toHaveLength(3);
-      // c는 한 번만 포함되어야 함
-      expect(result.filter((p) => p.name === 'c')).toHaveLength(1);
-    });
-
-    it('대소문자 정규화된 중복 제거', () => {
-      const node = {
-        package: { type: 'pip', name: 'Package-A', version: '1.0.0' },
-        dependencies: [
-          {
-            package: { type: 'pip', name: 'package_a', version: '1.0.0' },
-            dependencies: [],
-          },
-        ],
-      };
-      const result = callFlattenDependencies(resolver, node);
-      // package-a와 package_a가 같은 버전이면 하나로 처리됨
-      expect(result).toHaveLength(2); // 이름이 다르므로 2개
-    });
-  });
+  // flattenDependencies는 이제 shared/dependency-tree-utils.ts로 이동
+  // 테스트는 dependency-tree-utils.test.ts에서 수행
 
   describe('캐시 관리', () => {
     it('clearCache 호출 시 에러 없음', () => {

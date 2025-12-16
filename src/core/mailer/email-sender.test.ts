@@ -7,7 +7,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
 import * as nodemailer from 'nodemailer';
-import { EmailSender, SmtpConfig, EmailOptions, initializeEmailSender, getEmailSender } from './emailSender';
+import { EmailSender, SmtpConfig, EmailOptions, initializeEmailSender, getEmailSender } from './email-sender';
 
 // nodemailer 모킹
 vi.mock('nodemailer', () => {
@@ -264,7 +264,7 @@ describe('싱글톤 팩토리 함수', () => {
   });
 
   it('initializeEmailSender가 새 인스턴스를 생성해야 함', async () => {
-    const { initializeEmailSender, EmailSender: ES } = await import('./emailSender');
+    const { initializeEmailSender, EmailSender: ES } = await import('./email-sender');
     const config: SmtpConfig = {
       host: 'smtp.test.com',
       port: 587,
@@ -278,7 +278,7 @@ describe('싱글톤 팩토리 함수', () => {
   });
 
   it('initializeEmailSender가 커스텀 최대 크기로 인스턴스를 생성해야 함', async () => {
-    const { initializeEmailSender, EmailSender: ES } = await import('./emailSender');
+    const { initializeEmailSender, EmailSender: ES } = await import('./email-sender');
     const config: SmtpConfig = {
       host: 'smtp.test.com',
       port: 587,
@@ -291,12 +291,12 @@ describe('싱글톤 팩토리 함수', () => {
   });
 
   it('getEmailSender가 초기화 없이 호출되면 에러를 발생시켜야 함', async () => {
-    const { getEmailSender } = await import('./emailSender');
+    const { getEmailSender } = await import('./email-sender');
     expect(() => getEmailSender()).toThrow('EmailSender가 초기화되지 않았습니다');
   });
 
   it('getEmailSender가 config와 함께 호출되면 인스턴스를 생성해야 함', async () => {
-    const { getEmailSender, EmailSender: ES } = await import('./emailSender');
+    const { getEmailSender, EmailSender: ES } = await import('./email-sender');
     const config: SmtpConfig = {
       host: 'smtp.test.com',
       port: 587,
@@ -309,7 +309,7 @@ describe('싱글톤 팩토리 함수', () => {
   });
 
   it('getEmailSender가 동일한 싱글톤 인스턴스를 반환해야 함', async () => {
-    const { getEmailSender, initializeEmailSender } = await import('./emailSender');
+    const { getEmailSender, initializeEmailSender } = await import('./email-sender');
     const config: SmtpConfig = {
       host: 'smtp.test.com',
       port: 587,

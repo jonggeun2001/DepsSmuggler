@@ -9,6 +9,8 @@ import {
   IDownloader,
 } from '../types';
 import logger from '../utils/logger';
+import { DOWNLOAD_CONSTANTS } from './constants/download';
+import { SpeedCalculator } from './speed-calculator';
 
 // 다운로더 가져오기
 import { getPipDownloader } from './downloaders/pip';
@@ -98,12 +100,11 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
   private isCancelled = false;
   private startTime = 0;
   private options: DownloadOptions = { outputPath: '' };
-  private speedSamples: number[] = [];
-  private lastSpeedUpdate = 0;
+  private speedCalculator = new SpeedCalculator();
 
   constructor() {
     super();
-    this.queue = new PQueue({ concurrency: 3 });
+    this.queue = new PQueue({ concurrency: DOWNLOAD_CONSTANTS.DEFAULT_CONCURRENT_DOWNLOADS });
     this.initDownloaders();
   }
 
@@ -150,8 +151,8 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
     }
 
     this.options = {
-      concurrency: 3,
-      maxRetries: 3,
+      concurrency: DOWNLOAD_CONSTANTS.DEFAULT_CONCURRENT_DOWNLOADS,
+      maxRetries: DOWNLOAD_CONSTANTS.MAX_RETRIES,
       ...options,
     };
 
@@ -159,7 +160,7 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
     this.isRunning = true;
     this.isCancelled = false;
     this.startTime = Date.now();
-    this.speedSamples = [];
+    this.speedCalculator.reset();
 
     // 출력 경로 생성
     await fs.ensureDir(this.options.outputPath);
@@ -254,7 +255,7 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
     if (!item) return;
 
     item.retryCount++;
-    const maxRetries = this.options.maxRetries || 3;
+    const maxRetries = this.options.maxRetries || DOWNLOAD_CONSTANTS.MAX_RETRIES;
 
     logger.warn('패키지 다운로드 실패', {
       name: item.package.name,
@@ -290,7 +291,7 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
         item.status = 'pending';
         item.progress = 0;
         item.downloadedBytes = 0;
-        await new Promise((resolve) => setTimeout(resolve, 1000 * item.retryCount));
+        await new Promise((resolve) => setTimeout(resolve, DOWNLOAD_CONSTANTS.RETRY_DELAY_MS * item.retryCount));
         await this.downloadItem(id);
         return;
       }
@@ -314,15 +315,8 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
     item.totalBytes = progress.totalBytes;
     item.speed = progress.speed;
 
-    // 속도 샘플 업데이트
-    const now = Date.now();
-    if (now - this.lastSpeedUpdate > 500) {
-      this.speedSamples.push(progress.speed);
-      if (this.speedSamples.length > 10) {
-        this.speedSamples.shift();
-      }
-      this.lastSpeedUpdate = now;
-    }
+    // 속도 샘플 업데이트 (SpeedCalculator가 간격 제한 관리)
+    this.speedCalculator.addSample(progress.speed);
 
     this.emit('progress', item, this.getOverallProgress());
   }
@@ -356,16 +350,11 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
       }
     }
 
-    // 평균 속도 계산
-    const currentSpeed =
-      this.speedSamples.length > 0
-        ? this.speedSamples.reduce((a, b) => a + b, 0) / this.speedSamples.length
-        : 0;
-
-    // 남은 시간 계산
+    // 속도 통계 계산 (SpeedCalculator 사용)
     const remainingBytes = totalBytes - downloadedBytes;
-    const estimatedTimeRemaining =
-      currentSpeed > 0 ? remainingBytes / currentSpeed : 0;
+    const speedStats = this.speedCalculator.getStats(remainingBytes);
+    const currentSpeed = speedStats.averageSpeed;
+    const estimatedTimeRemaining = speedStats.estimatedTimeRemaining;
 
     // 전체 진행률
     const overallProgress =
@@ -492,7 +481,7 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
     this.queue.clear();
     this.isRunning = false;
     this.isCancelled = false;
-    this.speedSamples = [];
+    this.speedCalculator.reset();
   }
 
   /**

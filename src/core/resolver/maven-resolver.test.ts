@@ -4,8 +4,15 @@
  * 네트워크 호출 없이 MavenResolver의 핵심 로직을 테스트합니다.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { MavenResolver } from './mavenResolver';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { MavenResolver } from './maven-resolver';
+// 분리된 유틸리티 함수 import
+import {
+  resolveProperty,
+  resolveVersionRange,
+  extractExclusions,
+  extractDependencies,
+} from '../shared/maven-pom-utils';
 
 // MavenResolver 인스턴스 생성
 const createResolver = () => {
@@ -19,65 +26,52 @@ describe('MavenResolver 단위 테스트', () => {
     resolver = createResolver();
   });
 
-  describe('resolveProperty', () => {
-    // private 메서드 테스트를 위해 리플렉션 사용
-    const callResolveProperty = (
-      resolver: MavenResolver,
-      value: string,
-      properties?: Record<string, string>
-    ): string => {
-      return (resolver as any).resolveProperty(value, properties);
-    };
-
+  describe('resolveProperty (유틸리티 함수)', () => {
     it('빈 값은 그대로 반환', () => {
-      expect(callResolveProperty(resolver, '')).toBe('');
+      expect(resolveProperty('')).toBe('');
     });
 
     it('플레이스홀더가 없으면 그대로 반환', () => {
-      expect(callResolveProperty(resolver, '1.0.0')).toBe('1.0.0');
+      expect(resolveProperty('1.0.0')).toBe('1.0.0');
     });
 
     it('단순 속성 치환', () => {
       const properties = { 'spring.version': '5.3.0' };
-      expect(callResolveProperty(resolver, '${spring.version}', properties)).toBe('5.3.0');
+      expect(resolveProperty('${spring.version}', properties)).toBe('5.3.0');
     });
 
     it('여러 속성 치환', () => {
       const properties = {
-        'major': '5',
-        'minor': '3',
-        'patch': '0',
+        major: '5',
+        minor: '3',
+        patch: '0',
       };
-      expect(callResolveProperty(resolver, '${major}.${minor}.${patch}', properties)).toBe(
-        '5.3.0'
-      );
+      expect(resolveProperty('${major}.${minor}.${patch}', properties)).toBe('5.3.0');
     });
 
     it('project.version 특수 처리', () => {
       const properties = { version: '1.0.0' };
-      expect(callResolveProperty(resolver, '${project.version}', properties)).toBe('1.0.0');
+      expect(resolveProperty('${project.version}', properties)).toBe('1.0.0');
     });
 
     it('pom.version 특수 처리', () => {
       const properties = { version: '2.0.0' };
-      expect(callResolveProperty(resolver, '${pom.version}', properties)).toBe('2.0.0');
+      expect(resolveProperty('${pom.version}', properties)).toBe('2.0.0');
     });
 
     it('project.groupId 특수 처리', () => {
       const properties = { groupId: 'org.example' };
-      expect(callResolveProperty(resolver, '${project.groupId}', properties)).toBe('org.example');
+      expect(resolveProperty('${project.groupId}', properties)).toBe('org.example');
     });
 
     it('project.artifactId 특수 처리', () => {
       const properties = { artifactId: 'my-artifact' };
-      expect(callResolveProperty(resolver, '${project.artifactId}', properties)).toBe(
-        'my-artifact'
-      );
+      expect(resolveProperty('${project.artifactId}', properties)).toBe('my-artifact');
     });
 
     it('존재하지 않는 속성은 치환하지 않음', () => {
       const properties = { existing: 'value' };
-      expect(callResolveProperty(resolver, '${nonexistent}', properties)).toBe('${nonexistent}');
+      expect(resolveProperty('${nonexistent}', properties)).toBe('${nonexistent}');
     });
 
     it('중첩 속성 치환 (최대 10회)', () => {
@@ -85,11 +79,11 @@ describe('MavenResolver 단위 테스트', () => {
         outer: '${inner}',
         inner: 'resolved',
       };
-      expect(callResolveProperty(resolver, '${outer}', properties)).toBe('resolved');
+      expect(resolveProperty('${outer}', properties)).toBe('resolved');
     });
 
     it('properties가 undefined인 경우', () => {
-      expect(callResolveProperty(resolver, '${any.property}', undefined)).toBe('${any.property}');
+      expect(resolveProperty('${any.property}', undefined)).toBe('${any.property}');
     });
   });
 
@@ -148,44 +142,36 @@ describe('MavenResolver 단위 테스트', () => {
     });
   });
 
-  describe('resolveVersionRange', () => {
-    const callResolveVersionRange = (resolver: MavenResolver, version: string): string => {
-      return (resolver as any).resolveVersionRange(version);
-    };
-
+  describe('resolveVersionRange (유틸리티 함수)', () => {
     it('일반 버전은 그대로 반환', () => {
-      expect(callResolveVersionRange(resolver, '1.0.0')).toBe('1.0.0');
+      expect(resolveVersionRange('1.0.0')).toBe('1.0.0');
     });
 
     it('[1.0,2.0) 범위에서 최소 버전 추출', () => {
-      expect(callResolveVersionRange(resolver, '[1.0,2.0)')).toBe('1.0');
+      expect(resolveVersionRange('[1.0,2.0)')).toBe('1.0');
     });
 
     it('[1.0,) 범위에서 최소 버전 추출', () => {
-      expect(callResolveVersionRange(resolver, '[1.0,)')).toBe('1.0');
+      expect(resolveVersionRange('[1.0,)')).toBe('1.0');
     });
 
     it('(1.0,2.0] 범위에서 최소 버전 추출', () => {
-      expect(callResolveVersionRange(resolver, '(1.0,2.0]')).toBe('1.0');
+      expect(resolveVersionRange('(1.0,2.0]')).toBe('1.0');
     });
 
     it('[1.5.0,2.0.0) 정확한 버전 범위', () => {
-      expect(callResolveVersionRange(resolver, '[1.5.0,2.0.0)')).toBe('1.5.0');
+      expect(resolveVersionRange('[1.5.0,2.0.0)')).toBe('1.5.0');
     });
 
     it('[1.0] 고정 버전 범위', () => {
-      expect(callResolveVersionRange(resolver, '[1.0]')).toBe('1.0');
+      expect(resolveVersionRange('[1.0]')).toBe('1.0');
     });
   });
 
-  describe('extractExclusions', () => {
-    const callExtractExclusions = (resolver: MavenResolver, dep: any): Set<string> => {
-      return (resolver as any).extractExclusions(dep);
-    };
-
+  describe('extractExclusions (유틸리티 함수)', () => {
     it('exclusions가 없으면 빈 Set 반환', () => {
       const dep = { groupId: 'org.example', artifactId: 'test' };
-      const result = callExtractExclusions(resolver, dep);
+      const result = extractExclusions(dep);
       expect(result.size).toBe(0);
     });
 
@@ -197,7 +183,7 @@ describe('MavenResolver 단위 테스트', () => {
           exclusion: { groupId: 'org.excluded', artifactId: 'artifact' },
         },
       };
-      const result = callExtractExclusions(resolver, dep);
+      const result = extractExclusions(dep);
       expect(result.size).toBe(1);
       expect(result.has('org.excluded:artifact')).toBe(true);
     });
@@ -213,7 +199,7 @@ describe('MavenResolver 단위 테스트', () => {
           ],
         },
       };
-      const result = callExtractExclusions(resolver, dep);
+      const result = extractExclusions(dep);
       expect(result.size).toBe(2);
       expect(result.has('org.excluded1:artifact1')).toBe(true);
       expect(result.has('org.excluded2:artifact2')).toBe(true);
@@ -227,7 +213,7 @@ describe('MavenResolver 단위 테스트', () => {
           exclusion: { groupId: '*', artifactId: '*' },
         },
       };
-      const result = callExtractExclusions(resolver, dep);
+      const result = extractExclusions(dep);
       expect(result.size).toBe(1);
       expect(result.has('*:*')).toBe(true);
     });
@@ -283,17 +269,7 @@ describe('MavenResolver 단위 테스트', () => {
     });
   });
 
-  describe('extractDependencies', () => {
-    const callExtractDependencies = (
-      resolver: MavenResolver,
-      pom: any,
-      coordinate: any,
-      isRoot?: boolean,
-      properties?: Record<string, string>
-    ): any[] => {
-      return (resolver as any).extractDependencies(pom, coordinate, isRoot, properties);
-    };
-
+  describe('extractDependencies (유틸리티 함수)', () => {
     it('dependencies가 있으면 배열로 반환', () => {
       const pom = {
         dependencies: {
@@ -304,7 +280,7 @@ describe('MavenResolver 단위 테스트', () => {
         },
       };
       const coordinate = { groupId: 'org.test', artifactId: 'test', version: '1.0.0' };
-      const result = callExtractDependencies(resolver, pom, coordinate, false);
+      const result = extractDependencies(pom, coordinate, false);
 
       expect(result).toHaveLength(2);
       expect(result[0].artifactId).toBe('dep1');
@@ -318,7 +294,7 @@ describe('MavenResolver 단위 테스트', () => {
         },
       };
       const coordinate = { groupId: 'org.test', artifactId: 'test', version: '1.0.0' };
-      const result = callExtractDependencies(resolver, pom, coordinate, false);
+      const result = extractDependencies(pom, coordinate, false);
 
       expect(result).toHaveLength(1);
       expect(result[0].artifactId).toBe('single');
@@ -327,7 +303,7 @@ describe('MavenResolver 단위 테스트', () => {
     it('dependencies가 없으면 빈 배열 반환', () => {
       const pom = {};
       const coordinate = { groupId: 'org.test', artifactId: 'test', version: '1.0.0' };
-      const result = callExtractDependencies(resolver, pom, coordinate, false);
+      const result = extractDependencies(pom as any, coordinate, false);
 
       expect(result).toHaveLength(0);
     });
@@ -345,7 +321,7 @@ describe('MavenResolver 단위 테스트', () => {
         },
       };
       const coordinate = { groupId: 'org.test', artifactId: 'test', version: '1.0.0' };
-      const result = callExtractDependencies(resolver, pom, coordinate, true);
+      const result = extractDependencies(pom as any, coordinate, true);
 
       // dependencyManagement는 버전 관리용이므로 의존성으로 반환하지 않음
       expect(result).toHaveLength(0);
@@ -366,7 +342,7 @@ describe('MavenResolver 단위 테스트', () => {
         },
       };
       const coordinate = { groupId: 'org.test', artifactId: 'test', version: '1.0.0' };
-      const result = callExtractDependencies(resolver, pom, coordinate, true);
+      const result = extractDependencies(pom as any, coordinate, true);
 
       // 실제 dependencies 섹션만 반환
       expect(result).toHaveLength(1);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { getCacheManager, initializeCacheManager, CacheManager } from './cacheManager';
+import { getCacheManager, initializeCacheManager, CacheManager } from './cache-manager';
 import * as path from 'path';
 import * as os from 'os';
 
