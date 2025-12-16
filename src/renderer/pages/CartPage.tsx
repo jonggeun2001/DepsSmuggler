@@ -34,9 +34,9 @@ import {
   InfoCircleOutlined,
   NodeIndexOutlined,
 } from '@ant-design/icons';
-import { useCartStore, CartItem, PackageType } from '../stores/cartStore';
-import { useSettingsStore } from '../stores/settingsStore';
-import { useDownloadStore } from '../stores/downloadStore';
+import { useCartStore, CartItem, PackageType } from '../stores/cart-store';
+import { useSettingsStore } from '../stores/settings-store';
+import { useDownloadStore } from '../stores/download-store';
 import { DependencyTree } from '../components';
 import { DependencyResolutionResult, DependencyNode, PackageType as CorePackageType } from '../../types';
 import type { DependencyAPI } from '../../types/electron';

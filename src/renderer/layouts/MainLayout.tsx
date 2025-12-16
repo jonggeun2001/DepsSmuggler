@@ -9,7 +9,7 @@ import {
   HistoryOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { useCartStore } from '../stores/cartStore';
+import { useCartStore } from '../stores/cart-store';
 
 const { Header, Sider, Content, Footer } = Layout;
 const { Title } = Typography;

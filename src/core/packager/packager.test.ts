@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { getArchivePackager } from './archivePackager';
-import { getFileSplitter } from './fileSplitter';
-import { getScriptGenerator } from './scriptGenerator';
+import { getArchivePackager } from './archive-packager';
+import { getFileSplitter } from './file-splitter';
+import { getScriptGenerator } from './script-generator';
 
 describe('archivePackager', () => {
   let packager: ReturnType<typeof getArchivePackager>;

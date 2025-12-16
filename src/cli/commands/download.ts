@@ -3,9 +3,9 @@ import chalk from 'chalk';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import { PackageInfo, PackageType, Architecture } from '../../types';
-import { getDownloadManager, OverallProgress } from '../../core/downloadManager';
-import { getArchivePackager, ArchiveFormat } from '../../core/packager/archivePackager';
-import { getScriptGenerator } from '../../core/packager/scriptGenerator';
+import { getDownloadManager, OverallProgress } from '../../core/download-manager';
+import { getArchivePackager, ArchiveFormat } from '../../core/packager/archive-packager';
+import { getScriptGenerator } from '../../core/packager/script-generator';
 
 // 다운로드 옵션
 interface DownloadOptions {

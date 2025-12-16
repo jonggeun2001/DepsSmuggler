@@ -114,10 +114,10 @@ export class ConfigManager {
 
         // 레거시 키로 복호화된 경우 새 키로 마이그레이션
         if (this.needsEncryptionMigration && config.smtpPassword) {
-          console.log('암호화 키 마이그레이션을 수행합니다...');
+          console.info('[config] 암호화 키 마이그레이션을 수행합니다...');
           await this.saveConfig(config);
           this.needsEncryptionMigration = false;
-          console.log('암호화 키 마이그레이션 완료.');
+          console.info('[config] 암호화 키 마이그레이션 완료.');
         }
 
         return config;
@@ -287,7 +287,7 @@ export class ConfigManager {
         let decrypted = legacyDecipher.update(encrypted, 'hex', 'utf8');
         decrypted += legacyDecipher.final('utf8');
         this.needsEncryptionMigration = true;
-        console.log('레거시 키로 복호화 성공 - 마이그레이션을 수행합니다.');
+        console.info('[config] 레거시 키로 복호화 성공 - 마이그레이션을 수행합니다.');
         return decrypted;
       }
     } catch {

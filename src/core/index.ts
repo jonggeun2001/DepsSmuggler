@@ -9,27 +9,27 @@ export { DockerDownloader, getDockerDownloader } from './downloaders/docker';
 export { NpmDownloader, getNpmDownloader } from './downloaders/npm';
 
 // Packager
-export { ArchivePackager, getArchivePackager } from './packager/archivePackager';
-export type { ArchiveOptions, ArchiveProgress, PackageManifest } from './packager/archivePackager';
+export { ArchivePackager, getArchivePackager } from './packager/archive-packager';
+export type { ArchiveOptions, ArchiveProgress, PackageManifest } from './packager/archive-packager';
 
-export { ScriptGenerator, getScriptGenerator } from './packager/scriptGenerator';
-export type { ScriptOptions, GeneratedScript } from './packager/scriptGenerator';
+export { ScriptGenerator, getScriptGenerator } from './packager/script-generator';
+export type { ScriptOptions, GeneratedScript } from './packager/script-generator';
 
-export { FileSplitter, getFileSplitter } from './packager/fileSplitter';
+export { FileSplitter, getFileSplitter } from './packager/file-splitter';
 
 // Download Manager
-export { DownloadManager, getDownloadManager } from './downloadManager';
-export type { DownloadItem, DownloadOptions, DownloadResult, OverallProgress, DownloadManagerEvents } from './downloadManager';
+export { DownloadManager, getDownloadManager } from './download-manager';
+export type { DownloadItem, DownloadOptions, DownloadResult, OverallProgress, DownloadManagerEvents } from './download-manager';
 
 // Resolvers
-export { PipResolver, getPipResolver } from './resolver/pipResolver';
-export { MavenResolver, getMavenResolver } from './resolver/mavenResolver';
-export { CondaResolver, getCondaResolver } from './resolver/condaResolver';
-export { YumResolver, getYumResolver } from './resolver/yumResolver';
-export { NpmResolver, getNpmResolver } from './resolver/npmResolver';
+export { PipResolver, getPipResolver } from './resolver/pip-resolver';
+export { MavenResolver, getMavenResolver } from './resolver/maven-resolver';
+export { CondaResolver, getCondaResolver } from './resolver/conda-resolver';
+export { YumResolver, getYumResolver } from './resolver/yum-resolver';
+export { NpmResolver, getNpmResolver } from './resolver/npm-resolver';
 
 // Cache Manager
-export { CacheManager, getCacheManager } from './cacheManager';
+export { CacheManager, getCacheManager } from './cache-manager';
 
 // Config
 export { ConfigManager, getConfigManager } from './config';

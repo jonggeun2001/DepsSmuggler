@@ -27,8 +27,8 @@ import {
   ContainerOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { useCartStore, PackageType, Architecture } from '../stores/cartStore';
-import { useSettingsStore, DockerRegistry } from '../stores/settingsStore';
+import { useCartStore, PackageType, Architecture } from '../stores/cart-store';
+import { useSettingsStore, DockerRegistry } from '../stores/settings-store';
 
 const { Title, Text } = Typography;
 

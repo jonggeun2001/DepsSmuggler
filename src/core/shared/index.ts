@@ -209,3 +209,33 @@ export {
   sortByRelevance,
 } from './search-utils';
 export type { SortableSearchResult, PackageType } from './search-utils';
+
+// HTTP 클라이언트 (http-client.ts)
+export type {
+  HttpClient,
+  HttpResponse,
+  RequestOptions,
+  ProgressEvent,
+} from './http-client';
+export { HttpError } from './http-client';
+
+// Axios HTTP 클라이언트 (axios-http-client.ts)
+export {
+  AxiosHttpClient,
+  getDefaultHttpClient,
+  setDefaultHttpClient,
+  resetDefaultHttpClient,
+} from './axios-http-client';
+export type { AxiosHttpClientOptions } from './axios-http-client';
+
+// Mock HTTP 클라이언트 (mock-http-client.ts) - 테스트용
+export { MockHttpClient } from './mock-http-client';
+export type { MockResponse, MockErrorConfig } from './mock-http-client';
+
+// 의존성 트리 유틸리티 (dependency-tree-utils.ts)
+export {
+  flattenDependencyTree,
+  flattenMultipleDependencyTrees,
+  getDependencyTreeDepth,
+  getDependencyTreeSize,
+} from './dependency-tree-utils';

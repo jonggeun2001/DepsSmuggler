@@ -29,9 +29,9 @@ import {
   HistoryOutlined,
   InfoCircleOutlined,
 } from '@ant-design/icons';
-import { useHistoryStore, DownloadHistory, HistoryStatus } from '../stores/historyStore';
-import { useCartStore, PackageType } from '../stores/cartStore';
-import { useSettingsStore } from '../stores/settingsStore';
+import { useHistoryStore, DownloadHistory, HistoryStatus } from '../stores/history-store';
+import { useCartStore, PackageType } from '../stores/cart-store';
+import { useSettingsStore } from '../stores/settings-store';
 
 const { Title, Text } = Typography;
 

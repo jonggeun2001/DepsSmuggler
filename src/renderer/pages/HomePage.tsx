@@ -9,7 +9,7 @@ import {
   CloudServerOutlined,
   ContainerOutlined,
 } from '@ant-design/icons';
-import { useCartStore } from '../stores/cartStore';
+import { useCartStore } from '../stores/cart-store';
 
 const { Title, Paragraph } = Typography;
 
@@ -46,7 +46,7 @@ const HomePage: React.FC = () => {
       <div style={{ textAlign: 'center', marginBottom: 48 }}>
         <Title level={2}>DepsSmuggler</Title>
         <Paragraph style={{ fontSize: 16, color: '#666' }}>
-        폐쇄망에서 일하시는 형님들을 위한 라이브러리/패키지 의존성 다운로드 애플리케이션
+        폐쇄망용 라이브러리/패키지 의존성 다운로드 애플리케이션
         </Paragraph>
         <Space size="large" style={{ marginTop: 24 }}>
           <Button

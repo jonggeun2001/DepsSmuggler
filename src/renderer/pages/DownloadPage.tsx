@@ -44,15 +44,15 @@ import {
   RightOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { useCartStore } from '../stores/cartStore';
+import { useCartStore } from '../stores/cart-store';
 import {
   useDownloadStore,
   DownloadItem,
   DownloadStatus,
   LogEntry,
-} from '../stores/downloadStore';
-import { useSettingsStore } from '../stores/settingsStore';
-import { useHistoryStore } from '../stores/historyStore';
+} from '../stores/download-store';
+import { useSettingsStore } from '../stores/settings-store';
+import { useHistoryStore } from '../stores/history-store';
 import type { HistoryPackageItem, HistorySettings, HistoryStatus } from '../../types';
 import type { DependencyAPI } from '../../types/electron';
 

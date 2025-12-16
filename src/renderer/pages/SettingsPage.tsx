@@ -33,7 +33,7 @@ import {
   SyncOutlined,
 } from '@ant-design/icons';
 
-import { useSettingsStore } from '../stores/settingsStore';
+import { useSettingsStore } from '../stores/settings-store';
 import type { OSDistribution } from '../global';
 
 // 컴팩트 레이아웃 상수
