@@ -15,6 +15,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DockerDownloader } from './docker';
+import { extractRegistry } from './docker-utils';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -183,25 +184,25 @@ describeIntegration('Docker 통합 테스트', () => {
   describe('이미지 이름 파싱', () => {
     it('레지스트리 추출', () => {
       // alpine만 입력 시 registry는 null (docker.io가 아님)
-      const result1 = (downloader as any).extractRegistry('alpine');
+      const result1 = extractRegistry('alpine');
       expect(result1.registry).toBeNull();
       expect(result1.imageName).toBe('alpine');
 
       // gcr.io/project/image 입력 시 gcr.io 레지스트리로 추출
-      const result2 = (downloader as any).extractRegistry('gcr.io/project/image');
+      const result2 = extractRegistry('gcr.io/project/image');
       expect(result2.registry).toBe('gcr.io');
       expect(result2.imageName).toBe('project/image');
     });
 
     it('이미지 이름 파싱 (extractRegistry로 테스트)', () => {
-      // extractRegistry 메서드를 사용하여 이미지 이름 파싱 테스트
-      const result1 = (downloader as any).extractRegistry('alpine');
+      // extractRegistry 함수를 사용하여 이미지 이름 파싱 테스트
+      const result1 = extractRegistry('alpine');
       expect(result1.imageName).toBe('alpine');
 
-      const result2 = (downloader as any).extractRegistry('nginx');
+      const result2 = extractRegistry('nginx');
       expect(result2.imageName).toBe('nginx');
 
-      const result3 = (downloader as any).extractRegistry('myuser/myimage');
+      const result3 = extractRegistry('myuser/myimage');
       expect(result3.imageName).toBe('myuser/myimage');
     });
   });
