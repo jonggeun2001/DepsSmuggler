@@ -24,7 +24,11 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
+    "lint:fix": "eslint . --ext .ts,.tsx,.js,.jsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json}\" \"electron/**/*.{ts,js}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json}\" \"electron/**/*.{ts,js}\""
   },
   "bin": {
     "depssmuggler": "./dist/src/cli/index.js"
@@ -60,19 +64,27 @@
     "@types/react-dom": "^19.2.3",
     "@types/semver": "^7.7.1",
     "@types/ssri": "^7.1.5",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "@typescript-eslint/parser": "^8.20.0",
     "@vitejs/plugin-react": "^5.1.1",
-    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/coverage-v8": "^4.0.15",
     "concurrently": "^9.2.1",
     "electron": "^39.2.4",
     "electron-builder": "^26.0.12",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^10.1.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "nodemon": "^3.1.11",
     "playwright": "^1.57.0",
+    "prettier": "^3.5.0",
     "sharp": "^0.34.5",
     "swagger-ui-dist": "^5.30.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vite": "^7.2.6",
-    "vitest": "^3.2.4"
+    "vitest": "^4.0.15"
   },
   "build": {
     "appId": "com.depssmuggler.app",
