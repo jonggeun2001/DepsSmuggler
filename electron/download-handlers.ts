@@ -166,8 +166,11 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
             const condaDownloader = getCondaDownloader();
             const channel = (pkg.metadata?.repository as string)?.split('/')[0] || 'conda-forge';
 
+            // 디버그: 전달받은 pkg 확인
+            log.info(`[DEBUG] conda pkg: ${pkg.name}@${pkg.version}, downloadUrl=${pkg.downloadUrl}, metadata.downloadUrl=${pkg.metadata?.downloadUrl}, metadata=${JSON.stringify(pkg.metadata)}`);
+
             // 1. 이미 downloadUrl이 있으면 사용
-            let condaDownloadUrl = pkg.metadata?.downloadUrl as string | undefined;
+            let condaDownloadUrl = pkg.downloadUrl || (pkg.metadata?.downloadUrl as string | undefined);
 
             // 2. 없으면 메타데이터 조회
             if (!condaDownloadUrl) {

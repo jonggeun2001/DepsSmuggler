@@ -283,9 +283,14 @@ export async function resolveAllDependencies(
               size: depPkg.metadata?.size as number | undefined,
             };
 
-            // OS 패키지 (yum/apt/apk)의 경우 downloadUrl 전달
-            if ((depPkg.type === 'yum' || depPkg.type === 'apt' || depPkg.type === 'apk') && depPkg.metadata?.downloadUrl) {
+            // downloadUrl 전달 (conda, yum, apt, apk 등)
+            if (depPkg.metadata?.downloadUrl) {
               downloadPkg.downloadUrl = depPkg.metadata.downloadUrl as string;
+            }
+
+            // metadata 전달 (conda의 subdir, filename 등)
+            if (depPkg.metadata) {
+              downloadPkg.metadata = depPkg.metadata as Record<string, unknown>;
             }
 
             resolvedSet.set(depKey, downloadPkg);

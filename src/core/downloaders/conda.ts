@@ -337,12 +337,22 @@ export class CondaDownloader implements IDownloader {
     try {
       const channel = (info.metadata?.repository as string)?.split('/')[0] || 'conda-forge';
 
+      // 디버그: 전달받은 info 확인
+      logger.info('[DEBUG] downloadPackage 호출', {
+        name: info.name,
+        version: info.version,
+        hasDownloadUrl: !!info.metadata?.downloadUrl,
+        downloadUrl: info.metadata?.downloadUrl,
+        metadata: info.metadata,
+      });
+
       // 1. resolver에서 이미 downloadUrl을 저장했으면 그대로 사용
       let downloadUrl = info.metadata?.downloadUrl as string | undefined;
       let packageInfo = info;
 
       // 2. downloadUrl이 없으면 다시 메타데이터 조회
       if (!downloadUrl) {
+        logger.info('[DEBUG] downloadUrl 없음, getPackageMetadata 호출');
         packageInfo = await this.getPackageMetadata(
           info.name,
           info.version,
@@ -350,6 +360,9 @@ export class CondaDownloader implements IDownloader {
           info.arch
         );
         downloadUrl = packageInfo.metadata?.downloadUrl as string | undefined;
+        logger.info('[DEBUG] getPackageMetadata 결과', {
+          downloadUrl,
+        });
       }
 
       if (!downloadUrl) {

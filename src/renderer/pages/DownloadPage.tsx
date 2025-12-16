@@ -705,8 +705,8 @@ const DownloadPage: React.FC = () => {
 
       // 응답 데이터 타입 정의
       type DependencyResolveResponse = {
-        originalPackages: Array<{ id: string; name: string; version: string; type: string; size?: number }>;
-        allPackages: Array<{ id: string; name: string; version: string; type: string; size?: number }>;
+        originalPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; metadata?: Record<string, unknown> }>;
+        allPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; metadata?: Record<string, unknown> }>;
         dependencyTrees: Array<{
           root: {
             package: { name: string; version: string; type?: string };
@@ -790,6 +790,9 @@ const DownloadPage: React.FC = () => {
           isDependency: !isOriginal,
           parentId: depInfo?.parentId,
           dependencyOf: depInfo?.parentName,
+          // 패키지 다운로드 정보 전달 (conda, yum, apt, apk 등에서 사용)
+          downloadUrl: pkg.downloadUrl,
+          metadata: pkg.metadata,
         };
       });
 
@@ -882,12 +885,12 @@ const DownloadPage: React.FC = () => {
         name: item.name,
         version: item.version,
         architecture: (item as unknown as { arch?: string }).arch,
-        // OS 패키지용 필드
-        downloadUrl: (item as unknown as { downloadUrl?: string }).downloadUrl,
+        // 패키지 다운로드 정보 (conda, yum, apt, apk 등에서 사용)
+        downloadUrl: item.downloadUrl,
+        metadata: item.metadata,
+        // OS 패키지용 필드 (레거시 호환)
         repository: (item as unknown as { repository?: string }).repository,
         location: (item as unknown as { location?: string }).location,
-        // Docker 레지스트리 등 추가 메타데이터
-        metadata: (item as unknown as { metadata?: unknown }).metadata,
       }));
 
       const options = {

@@ -33,6 +33,9 @@ export interface DownloadItem {
   isDependency?: boolean; // 이 패키지가 다른 패키지의 의존성인지 여부
   parentId?: string; // 부모 패키지 ID (원본 패키지)
   dependencyOf?: string; // 어떤 패키지의 의존성인지 (패키지명)
+  // 패키지 다운로드 정보 (conda: subdir/filename, yum/apt/apk: 필수)
+  downloadUrl?: string;
+  metadata?: Record<string, unknown>;
 }
 
 // 다운로드 상태
