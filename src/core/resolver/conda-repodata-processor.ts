@@ -171,9 +171,18 @@ export class CondaRepoDataProcessor {
       }
     }
 
+    // 디버그: Python 버전 설정 확인
+    const pythonTag = this.getPythonBuildTag();
+    logger.info(`[DEBUG] findPackageCandidates: ${packageName}, pythonTag=${pythonTag}, entries=${packageEntries.length}`);
+
     for (const { filename, pkg } of packageEntries) {
       // 버전 스펙 체크 (새로운 MatchSpec 파서 사용)
       if (versionSpec && !matchesVersionSpec(pkg.version, versionSpec)) {
+        continue;
+      }
+
+      // 플랫폼 호환성 체크 (depends에 플랫폼 마커가 있으면 해당 플랫폼 전용)
+      if (!this.isBuildCompatibleWithPlatform(pkg.depends || [])) {
         continue;
       }
 
@@ -216,6 +225,12 @@ export class CondaRepoDataProcessor {
       return b.timestamp - a.timestamp;
     });
 
+    // 디버그: 상위 5개 후보 출력
+    if (candidates.length > 0) {
+      const top5 = candidates.slice(0, 5).map(c => `${c.build}(match=${c.isPythonMatch})`).join(', ');
+      logger.info(`[DEBUG] ${packageName} top5: ${top5}`);
+    }
+
     return candidates;
   }
 
@@ -241,11 +256,66 @@ export class CondaRepoDataProcessor {
     if (!pythonTag) return true;
 
     // build에 python 버전이 없으면 (네이티브 라이브러리) 호환
-    const pyMatch = build.match(/py\d+/);
+    // py\d+ (conda 스타일) 또는 cp\d+ (CPython 스타일) 패턴 검사
+    const pyMatch = build.match(/(py|cp)\d+/);
     if (!pyMatch) return true;
 
-    // Python 버전이 있으면 정확히 매칭
-    return build.includes(pythonTag);
+    // Python 버전이 있으면 정확히 매칭 (py313 또는 cp313)
+    const pythonNumber = pythonTag.slice(2); // 'py313' -> '313'
+    return build.includes(`py${pythonNumber}`) || build.includes(`cp${pythonNumber}`);
+  }
+
+  /**
+   * 빌드가 타겟 플랫폼과 호환되는지 확인
+   * depends에 플랫폼 마커(__win, __unix, __linux, __osx)가 있으면 해당 플랫폼 전용
+   */
+  isBuildCompatibleWithPlatform(depends: string[]): boolean {
+    const targetSubdir = this.config.targetSubdir;
+    const isLinux = targetSubdir.startsWith('linux-');
+    const isWindows = targetSubdir.startsWith('win-');
+    const isMacOS = targetSubdir.startsWith('osx-');
+
+    // 플랫폼 마커 확인 (버전 스펙 포함 가능: "__glibc >=2.17,<3.0.a0")
+    const hasWin = depends.some(d => d === '__win' || d.startsWith('__win '));
+    const hasUnix = depends.some(d => d === '__unix' || d.startsWith('__unix '));
+    const hasLinux = depends.some(d => d === '__linux' || d.startsWith('__linux '));
+    const hasOSX = depends.some(d => d === '__osx' || d.startsWith('__osx ') || d === '__macos' || d.startsWith('__macos '));
+    const hasGlibc = depends.some(d => d === '__glibc' || d.startsWith('__glibc '));
+
+    // 플랫폼 마커가 없으면 모든 플랫폼과 호환 (__glibc는 Linux 전용이므로 Linux에서 호환)
+    if (!hasWin && !hasUnix && !hasLinux && !hasOSX && !hasGlibc) {
+      return true;
+    }
+
+    // __glibc가 있으면 Linux 전용
+    if (hasGlibc && !isLinux) {
+      return false;
+    }
+
+    // 타겟 플랫폼에 따른 호환성 확인
+    if (isLinux) {
+      // Linux: __win이나 __osx 전용 빌드는 제외
+      if (hasWin || hasOSX) return false;
+      // __unix나 __linux 전용은 호환
+      return true;
+    }
+
+    if (isWindows) {
+      // Windows: __unix, __linux, __osx 전용 빌드는 제외
+      if (hasUnix || hasLinux || hasOSX) return false;
+      // __win 전용은 호환
+      return true;
+    }
+
+    if (isMacOS) {
+      // macOS: __win이나 __linux 전용 빌드는 제외 (__unix는 macOS도 포함)
+      if (hasWin || hasLinux) return false;
+      // __unix나 __osx 전용은 호환
+      return true;
+    }
+
+    // noarch 등 기타: 모든 빌드 허용
+    return true;
   }
 
   /**
@@ -260,33 +330,50 @@ export class CondaRepoDataProcessor {
     // 타겟 플랫폼 repodata 확인
     const targetCacheKey = `${channel}/${this.config.targetSubdir}`;
     const repodata = await this.getRepoData(channel, this.config.targetSubdir);
+    let targetCandidate: { version: string; isPythonMatch: boolean } | null = null;
+
     if (repodata) {
       const candidates = this.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
       if (candidates.length > 0) {
-        return candidates[0].version;
+        // 첫 번째 후보가 Python 버전과 호환되는지 확인
+        const firstCandidate = candidates[0] as { version: string; isPythonMatch?: boolean };
+        targetCandidate = {
+          version: firstCandidate.version,
+          isPythonMatch: firstCandidate.isPythonMatch ?? true,
+        };
       }
     }
 
-    // noarch 확인
-    const noarchCacheKey = `${channel}/noarch`;
-    const noarchRepodata = await this.getRepoData(channel, 'noarch');
-    if (noarchRepodata) {
-      const candidates = this.findPackageCandidates(
-        noarchRepodata,
-        name,
-        versionSpec,
-        noarchCacheKey
-      );
-      if (candidates.length > 0) {
-        return candidates[0].version;
+    // noarch 확인: 후보가 없거나 Python 버전이 맞지 않는 경우
+    if (!targetCandidate || !targetCandidate.isPythonMatch) {
+      const noarchCacheKey = `${channel}/noarch`;
+      const noarchRepodata = await this.getRepoData(channel, 'noarch');
+      if (noarchRepodata) {
+        const candidates = this.findPackageCandidates(
+          noarchRepodata,
+          name,
+          versionSpec,
+          noarchCacheKey
+        );
+        if (candidates.length > 0) {
+          // noarch 패키지는 모든 Python 버전과 호환되므로 우선 사용
+          return candidates[0].version;
+        }
       }
     }
 
-    // 폴백: 외부 함수 호출 (예: Anaconda API)
-    if (fallbackFn) {
-      return fallbackFn(name, channel, versionSpec);
+    // Python 버전이 일치하는 후보만 반환 (strict mode)
+    if (targetCandidate && targetCandidate.isPythonMatch) {
+      return targetCandidate.version;
     }
 
+    // Python 버전 불일치 시 null 반환 (다운로드하지 않음)
+    if (targetCandidate && !targetCandidate.isPythonMatch) {
+      logger.warn(`Python 버전 불일치로 스킵: ${name} (${versionSpec || 'latest'})`);
+      return null;
+    }
+
+    // repodata에서 찾지 못함 (API fallback 제거 - 플랫폼 불일치 방지)
     return null;
   }
 

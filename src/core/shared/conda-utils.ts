@@ -119,11 +119,13 @@ function isBuildCompatibleWithPython(build: string, pythonTag: string | null): b
   if (!pythonTag) return true;
 
   // build에 python 버전이 없으면 (네이티브 라이브러리) 호환
-  const pyMatch = build.match(/py\d+/);
+  // py\d+ (conda 스타일) 또는 cp\d+ (CPython 스타일) 패턴 검사
+  const pyMatch = build.match(/(py|cp)\d+/);
   if (!pyMatch) return true;
 
-  // Python 버전이 있으면 정확히 매칭
-  return build.includes(pythonTag);
+  // Python 버전이 있으면 정확히 매칭 (py313 또는 cp313)
+  const pythonNumber = pythonTag.slice(2); // 'py313' -> '313'
+  return build.includes(`py${pythonNumber}`) || build.includes(`cp${pythonNumber}`);
 }
 
 /**
