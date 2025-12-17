@@ -20,19 +20,19 @@ src/core/shared/
 ├── pypi-utils.ts                 # PyPI 다운로드 URL 조회
 ├── conda-utils.ts                # Conda 패키지 URL 조회
 ├── dependency-resolver.ts        # 의존성 해결 유틸리티
-├── dependency-tree-utils.ts      # 의존성 트리 유틸리티 (NEW)
+├── dependency-tree-utils.ts      # 의존성 트리 유틸리티
 ├── file-utils.ts                 # 파일 다운로드/압축 유틸리티
 ├── script-utils.ts               # 설치 스크립트 생성
 ├── path-utils.ts                 # 크로스 플랫폼 경로 처리
 │
-│   # HTTP 클라이언트 추상화 (NEW)
+│   # HTTP 클라이언트 추상화
 ├── http-client.ts                # HttpClient 인터페이스 정의
 ├── axios-http-client.ts          # Axios 기반 구현체
 ├── mock-http-client.ts           # 테스트용 Mock 구현체
 │
 │   # 공유 캐시 모듈
 ├── cache-utils.ts                # 캐시 공통 유틸리티
-├── cache-manager.ts              # 범용 캐시 매니저 (NEW)
+├── cache-manager.ts              # 범용 캐시 매니저
 ├── pip-cache.ts                  # PyPI 메타데이터 캐시 (메모리 + 디스크)
 ├── npm-cache.ts                  # npm packument 캐시 (메모리)
 ├── maven-cache.ts                # Maven POM 캐시 (메모리 + 디스크)
@@ -47,18 +47,31 @@ src/core/shared/
 │
 │   # conda 고급 모듈
 ├── conda-matchspec.ts            # MatchSpec 파싱/매칭
+├── conda-validator.ts            # Conda 채널 검증 (NEW)
 │
 │   # maven 고급 모듈
 ├── maven-skipper.ts              # 의존성 스킵/캐시 관리
-├── maven-pom-utils.ts            # POM 파싱 유틸리티 (NEW)
-├── maven-bom-processor.ts        # BOM 처리기 (NEW)
+├── maven-pom-utils.ts            # POM 파싱 유틸리티
+├── maven-bom-processor.ts        # BOM 처리기
+├── maven-utils.ts                # Maven classifier 빌드 유틸리티 (NEW)
+│
+│   # 플랫폼/버전 관련 유틸리티 (NEW)
+├── platform-mappings.ts          # Linux 배포판/macOS 버전 매핑
+├── version-fetcher.ts            # Python/Node/Java/CUDA 버전 조회
+├── version-preloader.ts          # 버전 정보 프리로드/캐싱
+│
+│   # 재시도 유틸리티 (NEW)
+├── retry-utils.ts                # 지수 백오프 재시도
 │
 │   # 검색 유틸리티
 └── search-utils.ts               # 검색 결과 정렬/관련성 점수 계산
 
+src/core/resolver/
+└── pip-simple-api.ts             # PyPI Simple API 파싱 (NEW)
+
 src/utils/
 ├── logger.ts                     # 로깅 유틸리티
-└── mask.ts                       # 민감 정보 마스킹 (NEW)
+└── mask.ts                       # 민감 정보 마스킹
 ```
 
 ---
@@ -2438,6 +2451,278 @@ const managedVersions = await processor.processBom(
 
 // 의존성 버전 조회
 const version = managedVersions.get('org.springframework:spring-core');
+```
+
+---
+
+## 플랫폼 매핑 (`platform-mappings.ts`) (NEW)
+
+Linux 배포판 및 macOS 버전에 대한 매핑 정보를 제공합니다.
+
+### Linux 배포판 정보
+
+```typescript
+interface LinuxDistroInfo {
+  id: string;           // 'rocky-9', 'ubuntu-22.04'
+  name: string;         // 표시 이름
+  family: string;       // 'rhel', 'debian', 'alpine'
+  glibcVersion: string; // glibc 버전
+  eolDate?: string;     // EOL 날짜
+}
+
+// 배포판별 glibc 버전 매핑
+const LINUX_DISTRO_GLIBC_MAP: Record<string, LinuxDistroInfo>;
+
+// glibc 버전 역방향 매핑
+const GLIBC_VERSION_MAP: Record<string, string[]>;
+```
+
+### macOS 버전 정보
+
+```typescript
+interface MacOSVersionInfo {
+  version: string;      // '15.0', '14.0'
+  name: string;         // 'Sequoia', 'Sonoma'
+  x86_64: boolean;      // x86_64 지원
+  arm64: boolean;       // arm64 지원
+}
+
+const MACOS_VERSIONS: MacOSVersionInfo[];
+```
+
+### 주요 함수
+
+| 함수 | 설명 |
+|------|------|
+| `getDistrosByFamily(family)` | 패밀리별 배포판 목록 조회 |
+| `getDistrosByGlibcVersion(version)` | glibc 버전 호환 배포판 조회 |
+| `isDistroEOL(distroId)` | EOL 여부 확인 |
+| `isDistroEOLSoon(distroId, daysThreshold)` | 곧 EOL 예정 여부 확인 |
+| `getMacOSVersionInfo(version)` | macOS 버전 정보 조회 |
+| `getMacOSVersionsSorted()` | 정렬된 macOS 버전 목록 |
+| `isMacOSVersionCompatibleWithArch(version, arch)` | 아키텍처 호환성 확인 |
+
+---
+
+## 버전 조회 (`version-fetcher.ts`) (NEW)
+
+Python, Node.js, Java, CUDA 등의 버전 정보를 원격에서 조회하고 캐싱합니다.
+
+### 주요 함수
+
+| 함수 | 반환값 | 설명 |
+|------|--------|------|
+| `fetchPythonVersions()` | Promise<string[]> | Python 버전 목록 (python.org API) |
+| `fetchNodeVersions()` | Promise<string[]> | Node.js 버전 목록 (nodejs.org API) |
+| `fetchJavaVersions()` | Promise<string[]> | Java 버전 목록 (Adoptium API) |
+| `fetchCudaVersions()` | Promise<string[]> | CUDA 버전 목록 (Conda에서 추출) |
+
+### 캐싱
+
+```typescript
+// 캐시 TTL
+const CACHE_TTL = 86400000;        // 24시간 (Python)
+const NODE_CACHE_TTL = 86400000;   // 24시간
+const JAVA_CACHE_TTL = 86400000;   // 24시간
+const CUDA_CACHE_TTL = 604800000;  // 7일
+
+// 캐시 저장 위치: ~/.depssmuggler/cache/
+```
+
+### 사용 예시
+
+```typescript
+import { fetchPythonVersions, fetchCudaVersions } from './version-fetcher';
+
+const pythonVersions = await fetchPythonVersions();
+// ['3.13.1', '3.12.8', '3.11.11', ...]
+
+const cudaVersions = await fetchCudaVersions();
+// ['12.6', '12.5', '12.4', '11.8', ...]
+```
+
+---
+
+## 버전 프리로드 (`version-preloader.ts`) (NEW)
+
+앱 시작 시 버전 정보를 미리 로드하여 UI 응답성을 개선합니다.
+
+### 주요 함수
+
+| 함수 | 설명 |
+|------|------|
+| `preloadAllVersions()` | 모든 버전 정보 프리로드 |
+| `loadPythonVersions()` | Python 버전 로드 (캐시 우선) |
+| `loadCudaVersions()` | CUDA 버전 로드 (캐시 우선) |
+| `refreshExpiredCaches()` | 만료된 캐시 갱신 |
+| `isCacheValid(key)` | 캐시 유효성 확인 |
+| `getCacheAge(key)` | 캐시 경과 시간 조회 |
+
+### PreloadResult
+
+```typescript
+interface PreloadResult {
+  python: VersionLoadingStatus;
+  cuda: VersionLoadingStatus;
+}
+
+interface VersionLoadingStatus {
+  versions: string[];
+  fromCache: boolean;
+  error?: VersionLoadingError;
+}
+```
+
+---
+
+## 재시도 유틸리티 (`retry-utils.ts`) (NEW)
+
+네트워크 요청 등에서 사용할 수 있는 지수 백오프 재시도 유틸리티입니다.
+
+### RetryOptions
+
+```typescript
+interface RetryOptions {
+  maxRetries?: number;      // 최대 재시도 횟수 (기본: 3)
+  initialDelay?: number;    // 초기 지연 시간 ms (기본: 1000)
+  maxDelay?: number;        // 최대 지연 시간 ms (기본: 30000)
+  backoffMultiplier?: number; // 지연 증가 배수 (기본: 2)
+  retryOn?: (error: Error) => boolean; // 재시도 조건 함수
+}
+```
+
+### 주요 함수
+
+| 함수 | 설명 |
+|------|------|
+| `retryWithExponentialBackoff<T>(fn, options)` | 지수 백오프로 함수 재시도 |
+| `isRetryableHttpError(error)` | HTTP 오류 재시도 가능 여부 확인 |
+
+### 사용 예시
+
+```typescript
+import { retryWithExponentialBackoff, isRetryableHttpError } from './retry-utils';
+
+const result = await retryWithExponentialBackoff(
+  async () => {
+    const response = await axios.get('https://api.example.com/data');
+    return response.data;
+  },
+  {
+    maxRetries: 3,
+    initialDelay: 1000,
+    retryOn: isRetryableHttpError,
+  }
+);
+```
+
+---
+
+## Maven 유틸리티 (`maven-utils.ts`) (NEW)
+
+Maven classifier 빌드 및 네이티브 아티팩트 판별 유틸리티입니다.
+
+### 주요 함수
+
+| 함수 | 설명 |
+|------|------|
+| `buildMavenClassifier(os, arch)` | OS/아키텍처에 맞는 classifier 생성 |
+| `isNativeArtifact(artifactId)` | 네이티브 아티팩트 여부 확인 |
+
+### Classifier 생성 규칙
+
+```typescript
+// OS 매핑
+// 'windows' -> 'windows'
+// 'macos' -> 'osx'
+// 'linux' -> 'linux'
+
+// 아키텍처 매핑
+// 'x86_64' -> 'x86_64'
+// 'arm64' -> 'aarch_64'
+
+buildMavenClassifier('linux', 'x86_64');   // 'linux-x86_64'
+buildMavenClassifier('macos', 'arm64');    // 'osx-aarch_64'
+```
+
+---
+
+## Conda 채널 검증 (`conda-validator.ts`) (NEW)
+
+Conda 채널 URL 유효성 검증 유틸리티입니다.
+
+### 주요 함수
+
+| 함수 | 설명 |
+|------|------|
+| `validateCondaChannel(channel)` | 채널 유효성 검증 (간략) |
+| `validateCondaChannelStrict(channel)` | 채널 유효성 검증 (엄격) |
+
+### 사용 예시
+
+```typescript
+import { validateCondaChannel, validateCondaChannelStrict } from './conda-validator';
+
+validateCondaChannel('conda-forge');     // { valid: true, normalized: 'conda-forge' }
+validateCondaChannel('invalid/channel'); // { valid: false, error: '...' }
+
+// 엄격 모드: 실제 repodata 존재 확인
+const result = await validateCondaChannelStrict('conda-forge');
+```
+
+---
+
+## PyPI Simple API (`pip-simple-api.ts`) (NEW)
+
+PyPI Simple API (PEP 503)를 파싱하여 패키지 파일 정보를 조회합니다.
+
+### 위치
+`src/core/resolver/pip-simple-api.ts`
+
+### 주요 타입
+
+```typescript
+interface SimpleApiPackageFile {
+  filename: string;
+  url: string;
+  hash?: string;
+  hashAlgorithm?: string;
+  requiresPython?: string;
+}
+
+interface WheelInfo {
+  name: string;
+  version: string;
+  pythonTag: string;      // 'cp311', 'py3'
+  abiTag: string;         // 'cp311', 'none'
+  platformTag: string;    // 'linux_x86_64', 'any'
+}
+```
+
+### 주요 함수
+
+| 함수 | 설명 |
+|------|------|
+| `parseSimpleApiHtml(html)` | Simple API HTML 파싱 |
+| `fetchPackageFiles(packageName)` | 패키지 파일 목록 조회 |
+| `parseWheelFilename(filename)` | Wheel 파일명 파싱 |
+| `isWheelFile(filename)` | Wheel 파일 여부 확인 |
+| `isSourceDistribution(filename)` | sdist 여부 확인 |
+| `extractVersionFromFilename(filename, packageName)` | 파일명에서 버전 추출 |
+| `findLatestVersion(files)` | 최신 버전 찾기 |
+| `fetchWheelMetadata(url)` | Wheel METADATA 조회 |
+| `parseRequiresDist(metadata)` | Requires-Dist 파싱 |
+
+### 사용 예시
+
+```typescript
+import { fetchPackageFiles, parseWheelFilename } from './pip-simple-api';
+
+const files = await fetchPackageFiles('requests');
+// [{ filename: 'requests-2.31.0-py3-none-any.whl', url: '...', ... }, ...]
+
+const wheelInfo = parseWheelFilename('numpy-1.26.0-cp311-cp311-linux_x86_64.whl');
+// { name: 'numpy', version: '1.26.0', pythonTag: 'cp311', abiTag: 'cp311', platformTag: 'linux_x86_64' }
 ```
 
 ---
