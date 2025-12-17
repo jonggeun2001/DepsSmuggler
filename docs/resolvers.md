@@ -108,6 +108,98 @@ pywin32>=300; sys_platform == 'win32'
 // ]
 ```
 
+### 의존성 해결 메커니즘
+
+pip은 **패키지명 파싱이 아닌 메타데이터**에서 의존성을 가져옵니다.
+
+#### 의존성 정보 출처
+
+```
+wheel (.whl)
+└── {package}-{version}.dist-info/
+    └── METADATA          ← Requires-Dist 필드에서 의존성 추출
+
+source distribution (.tar.gz)
+└── 빌드 후 메타데이터 추출  ← 비용이 큼 (backtracking 원인)
+```
+
+#### METADATA 파일 예시
+
+```
+Metadata-Version: 2.1
+Name: requests
+Version: 2.31.0
+Requires-Dist: charset-normalizer <4,>=2
+Requires-Dist: idna <4,>=2.5
+Requires-Dist: urllib3 <3,>=1.21.1
+Requires-Dist: certifi >=2017.4.17
+Requires-Dist: PySocks !=1.5.7,>=1.5.6 ; extra == 'socks'
+```
+
+#### DepsSmuggler 구현
+
+PyPI JSON API를 사용하여 메타데이터 조회:
+
+```typescript
+// pip-cache.ts
+const url = `https://pypi.org/pypi/${packageName}/${version}/json`;
+const response = await axios.get(url);
+const requiresDist = response.data.info.requires_dist;  // 의존성 목록
+```
+
+### GPU/CPU 패키지 처리
+
+#### PEP 440 로컬 버전 식별자
+
+PyTorch 등 GPU 패키지는 **로컬 버전(+cu118)**으로 구분되며, 의존성 매칭에서 **무시**됩니다:
+
+```python
+# PEP 440 규칙: 로컬 버전은 의존성 매칭에서 무시됨
+torch>=2.0.0  # 다음 모두와 매칭:
+              # - torch 2.0.0
+              # - torch 2.0.0+cpu
+              # - torch 2.0.0+cu118
+              # - torch 2.0.0+cu121
+```
+
+#### GPU 패키지 배포 방식
+
+```bash
+# CPU 버전
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+# CUDA 11.8 버전
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+
+# CUDA 12.1 버전
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+```
+
+각각 **다른 wheel 파일**이고, 각자의 METADATA에 **다른 의존성**이 있습니다:
+
+```
+torch-2.1.0+cpu-cp311-cp311-linux_x86_64.whl
+torch-2.1.0+cu118-cp311-cp311-linux_x86_64.whl
+torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl
+```
+
+#### pip vs conda GPU 처리 비교
+
+| 구분 | conda | pip |
+|------|-------|-----|
+| **GPU 구분** | 같은 패키지, `__cuda` 마커로 필터링 | 별도 패키지/인덱스 |
+| **선택 방식** | solver가 자동 선택 | 사용자가 index-url 지정 |
+| **의존성 전파** | 있음 (`__cuda` 마커) | 없음 (로컬 버전 무시) |
+
+#### CUDA 필터링이 불필요한 이유
+
+1. GPU/CPU가 **이미 분리된 상태**로 배포됨
+2. 메타데이터에 GPU/CPU 조건 분기가 없음
+3. `torch+cu118`을 명시적으로 의존하는 라이브러리 없음 (PEP 440 규칙)
+4. **사용자가 직접 선택**해야 함 (index-url 또는 패키지명)
+
+따라서 DepsSmuggler에서 pip 패키지의 CUDA 필터링은 **불필요**합니다.
+
 ---
 
 ## CondaResolver
@@ -478,6 +570,99 @@ const deps = resolver.parseFromText(`
 | `providerCache` | Map<string, PrimaryPackage \| null> | Capability 캐시 |
 | `metadataLoaded` | boolean | 메타데이터 로드 상태 |
 | `currentRepoUrl` | string | 현재 저장소 URL |
+
+---
+
+## AptResolver
+
+### 개요
+- 목적: APT/DEB 패키지 의존성 해결 (Ubuntu, Debian)
+- 위치: `src/core/resolver/apt-resolver.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `loadMetadata` | repos, architecture | Promise<void> | APT 저장소 메타데이터 로드 (Packages.gz, Release) |
+| `searchPackages` | query | OSPackageInfo[] | 패키지 검색 |
+| `findPackagesForDependency` | dependency, arch | Promise<OSPackageInfo[]> | 의존성에 해당하는 패키지 찾기 |
+
+### 내부 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `extractComponents` | URL에서 component 추출 (main, universe 등) |
+| `addToPackageCache` | 패키지 캐시에 추가 |
+| `addToProvidesCache` | Provides 캐시에 추가 (가상 패키지) |
+| `fetchDependenciesFromAPI` | API를 통한 의존성 조회 (미지원) |
+| `fetchDependenciesFromMetadata` | 메타데이터에서 의존성 조회 |
+
+### 속성
+
+| 속성 | 타입 | 설명 |
+|------|------|------|
+| `parsers` | Map<string, AptMetadataParser> | 저장소별 메타데이터 파서 |
+| `allPackages` | Map<string, OSPackageInfo[]> | 패키지 캐시 |
+| `providesMap` | Map<string, OSPackageInfo[]> | Provides 매핑 (가상 패키지) |
+
+### 특징
+
+- **Debian Control 파일 형식**: `Package:`, `Version:`, `Depends:` 등 파싱
+- **Provides 지원**: 가상 패키지 (예: `mail-transport-agent`)
+- **Component 자동 추출**: URL에서 main, universe, multiverse 등 추출
+- **Release 파일 파싱**: 저장소 메타데이터 검증
+
+---
+
+## ApkResolver
+
+### 개요
+- 목적: APK 패키지 의존성 해결 (Alpine Linux)
+- 위치: `src/core/resolver/apk-resolver.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `loadMetadata` | repos, architecture | Promise<void> | APK 저장소 메타데이터 로드 (APKINDEX.tar.gz) |
+| `searchPackages` | query | OSPackageInfo[] | 패키지 검색 |
+| `findPackagesForDependency` | dependency, arch | Promise<OSPackageInfo[]> | 의존성에 해당하는 패키지 찾기 |
+
+### 내부 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `addToPackageCache` | 패키지 캐시에 추가 |
+| `addToProvidesCache` | Provides 캐시에 추가 |
+| `fetchDependenciesFromAPI` | API를 통한 의존성 조회 (미지원) |
+| `fetchDependenciesFromMetadata` | 메타데이터에서 의존성 조회 |
+
+### 속성
+
+| 속성 | 타입 | 설명 |
+|------|------|------|
+| `parsers` | Map<string, ApkMetadataParser> | 저장소별 메타데이터 파서 |
+| `allPackages` | Map<string, OSPackageInfo[]> | 패키지 캐시 |
+| `providesMap` | Map<string, OSPackageInfo[]> | Provides 매핑 |
+
+### APKINDEX 형식
+
+```
+P:nginx
+V:1.24.0-r6
+A:x86_64
+D:pcre2 zlib
+p:nginx=1.24.0-r6
+```
+
+필드 매핑:
+- `P`: Package name
+- `V`: Version
+- `A`: Architecture
+- `D`: Dependencies
+- `S`: Size
+- `p`: Provides
+- `C`: Checksum
 
 ---
 
