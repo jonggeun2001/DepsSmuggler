@@ -13,56 +13,60 @@
 ### 디렉토리 구조
 
 ```
-src/core/downloaders/os/
-├── index.ts                 # 통합 익스포트
-├── types.ts                 # 공통 타입 정의
-├── downloader.ts            # OSPackageDownloader 통합 클래스
-├── base-downloader.ts       # BaseOSDownloader 추상 클래스
-├── base-resolver.ts         # BaseOSDependencyResolver 추상 클래스
-├── dependency-tree.ts       # OSDependencyTree 의존성 트리
-├── repositories.ts          # OS 배포판 및 저장소 프리셋
-├── distribution-fetcher.ts  # 동적 배포판 버전 정보 조회
-├── yum/                     # YUM/RPM 구현
-│   ├── index.ts
-│   ├── downloader.ts        # YumDownloader
-│   ├── metadata-parser.ts   # YumMetadataParser
-│   └── resolver.ts          # YumDependencyResolver
-├── apt/                     # APT/DEB 구현
-│   ├── index.ts
-│   ├── downloader.ts        # AptDownloader
-│   ├── metadata-parser.ts   # AptMetadataParser
-│   └── resolver.ts          # AptDependencyResolver
-├── apk/                     # APK 구현
-│   ├── index.ts
-│   ├── downloader.ts        # ApkDownloader
-│   ├── metadata-parser.ts   # ApkMetadataParser
-│   └── resolver.ts          # ApkDependencyResolver
-├── utils/
-│   ├── index.ts
-│   ├── cache-manager.ts     # OSCacheManager (LRU + TTL)
-│   ├── gpg-verifier.ts      # GPGVerifier
-│   └── script-generator.ts  # OSScriptGenerator
-└── packager/
-    ├── index.ts
+src/core/downloaders/
+├── yum.ts                   # YumDownloader + YumMetadataParser
+├── apt.ts                   # AptDownloader + AptMetadataParser
+├── apk.ts                   # ApkDownloader + ApkMetadataParser
+└── os-shared/               # OS 패키지 공유 모듈
+    ├── index.ts             # 통합 익스포트
+    ├── types.ts             # 공통 타입 정의
+    ├── base-downloader.ts   # BaseOSDownloader 추상 클래스
+    ├── base-resolver.ts     # BaseOSDependencyResolver 추상 클래스
+    ├── dependency-tree.ts   # OSDependencyTree 의존성 트리
+    ├── repositories.ts      # OS 배포판 및 저장소 프리셋
+    ├── distribution-fetcher.ts  # 동적 배포판 버전 정보 조회
+    ├── cache-manager.ts     # OSCacheManager (LRU + TTL)
+    ├── gpg-verifier.ts      # GPGVerifier
+    ├── script-generator.ts  # OSScriptGenerator
     ├── archive-packager.ts  # OSArchivePackager (zip/tar.gz)
-    └── repo-packager.ts     # OSRepoPackager (로컬 저장소)
+    ├── repo-packager.ts     # OSRepoPackager (로컬 저장소)
+    └── repos/               # 저장소 설정
+        ├── index.ts
+        ├── repository-utils.ts
+        ├── rhel-repos.ts    # RHEL 계열 저장소
+        ├── debian-repos.ts  # Debian/Ubuntu 저장소
+        └── alpine-repos.ts  # Alpine 저장소
+
+src/core/resolver/
+├── yum-resolver.ts          # YumDependencyResolver
+├── apt-resolver.ts          # AptDependencyResolver (NEW)
+└── apk-resolver.ts          # ApkDependencyResolver (NEW)
 ```
 
 ### 클래스 다이어그램
 
 ```
-OSPackageDownloader (통합 인터페이스)
-    ├── YumDownloader ─── YumMetadataParser
-    │                 └── YumDependencyResolver
-    ├── AptDownloader ─── AptMetadataParser
-    │                 └── AptDependencyResolver
-    ├── ApkDownloader ─── ApkMetadataParser
-    │                 └── ApkDependencyResolver
-    ├── OSCacheManager
-    ├── GPGVerifier
-    ├── OSScriptGenerator
-    ├── OSArchivePackager
-    └── OSRepoPackager
+                         ┌─────────────────────────────────────┐
+                         │        BaseOSDownloader             │
+                         │        (os-shared/)                 │
+                         └──────────────┬──────────────────────┘
+                                        │
+        ┌───────────────────────────────┼───────────────────────────────┐
+        │                               │                               │
+        ▼                               ▼                               ▼
+┌───────────────┐              ┌───────────────┐              ┌───────────────┐
+│ YumDownloader │              │ AptDownloader │              │ ApkDownloader │
+│   (yum.ts)    │              │   (apt.ts)    │              │   (apk.ts)    │
+├───────────────┤              ├───────────────┤              ├───────────────┤
+│YumMetadataParser│            │AptMetadataParser│            │ApkMetadataParser│
+└───────┬───────┘              └───────┬───────┘              └───────┬───────┘
+        │                               │                               │
+        ▼                               ▼                               ▼
+┌───────────────┐              ┌───────────────┐              ┌───────────────┐
+│YumDependency  │              │AptDependency  │              │ApkDependency  │
+│  Resolver     │              │  Resolver     │              │  Resolver     │
+│(yum-resolver) │              │(apt-resolver) │              │(apk-resolver) │
+└───────────────┘              └───────────────┘              └───────────────┘
 ```
 
 ---
@@ -277,7 +281,8 @@ const downloadResult = await downloader.download({
 
 ### YumDownloader
 
-- **위치**: `src/core/downloaders/os/yum/downloader.ts`
+- **위치**: `src/core/downloaders/yum.ts`
+- **Resolver 위치**: `src/core/resolver/yum-resolver.ts`
 - **지원 배포판**: CentOS 7, Rocky Linux 8/9, AlmaLinux 8/9, Fedora
 - **파일 형식**: `.rpm`
 - **메타데이터**: `repodata/repomd.xml`, `primary.xml.gz`
@@ -305,7 +310,8 @@ ${baseUrl}/Packages/${filename}.rpm
 
 ### AptDownloader
 
-- **위치**: `src/core/downloaders/os/apt/downloader.ts`
+- **위치**: `src/core/downloaders/apt.ts`
+- **Resolver 위치**: `src/core/resolver/apt-resolver.ts`
 - **지원 배포판**: Ubuntu 20.04/22.04/24.04, Debian 11/12
 - **파일 형식**: `.deb`
 - **메타데이터**: `Packages.gz`, `Release`, `InRelease`
@@ -334,7 +340,8 @@ ${baseUrl}/pool/${component}/${prefix}/${name}/${filename}.deb
 
 ### ApkDownloader
 
-- **위치**: `src/core/downloaders/os/apk/downloader.ts`
+- **위치**: `src/core/downloaders/apk.ts`
+- **Resolver 위치**: `src/core/resolver/apk-resolver.ts`
 - **지원 배포판**: Alpine Linux 3.18/3.19/3.20
 - **파일 형식**: `.apk`
 - **메타데이터**: `APKINDEX.tar.gz`
@@ -366,7 +373,7 @@ D:pcre2 zlib
 
 ### BaseOSDependencyResolver
 
-- **위치**: `src/core/downloaders/os/base-resolver.ts`
+- **위치**: `src/core/downloaders/os-shared/base-resolver.ts`
 - **방식**: 하이브리드 (API 우선 → 메타데이터 파싱 폴백)
 
 #### 알고리즘
@@ -390,7 +397,7 @@ interface DependencyResolutionResult {
 
 ### OSDependencyTree
 
-- **위치**: `src/core/downloaders/os/dependency-tree.ts`
+- **위치**: `src/core/downloaders/os-shared/dependency-tree.ts`
 - **기능**: 의존성 그래프 관리 및 시각화 데이터 제공
 
 ```typescript
@@ -413,7 +420,7 @@ class OSDependencyTree {
 
 ### OSCacheManager
 
-- **위치**: `src/core/downloaders/os/utils/cache-manager.ts`
+- **위치**: `src/core/downloaders/os-shared/cache-manager.ts`
 - **특징**: LRU 캐시 + TTL 지원
 
 ```typescript
@@ -436,7 +443,7 @@ class OSCacheManager {
 
 ### GPGVerifier
 
-- **위치**: `src/core/downloaders/os/utils/gpg-verifier.ts`
+- **위치**: `src/core/downloaders/os-shared/gpg-verifier.ts`
 - **기능**: 패키지 서명 검증 (공식 저장소만)
 
 ```typescript
@@ -455,7 +462,7 @@ class GPGVerifier {
 
 ### OSScriptGenerator
 
-- **위치**: `src/core/downloaders/os/utils/script-generator.ts`
+- **위치**: `src/core/downloaders/os-shared/script-generator.ts`
 - **기능**: 설치 스크립트 생성 (bash + PowerShell)
 
 ```typescript
@@ -486,7 +493,7 @@ class OSScriptGenerator {
 
 ### OSArchivePackager
 
-- **위치**: `src/core/downloaders/os/packager/archive-packager.ts`
+- **위치**: `src/core/downloaders/os-shared/archive-packager.ts`
 - **기능**: 패키지를 zip 또는 tar.gz 아카이브로 패키징
 
 ```typescript
@@ -525,7 +532,7 @@ output.zip/
 
 ### OSRepoPackager
 
-- **위치**: `src/core/downloaders/os/packager/repo-packager.ts`
+- **위치**: `src/core/downloaders/os-shared/repo-packager.ts`
 - **기능**: 로컬 저장소 구조 생성
 
 ```typescript
@@ -563,7 +570,7 @@ class OSRepoPackager {
 ## Distribution Fetcher (동적 배포판 정보)
 
 ### 위치
-`src/core/downloaders/os/distribution-fetcher.ts`
+`src/core/downloaders/os-shared/distribution-fetcher.ts`
 
 ### 개요
 인터넷에서 OS 배포판의 최신 버전 정보를 동적으로 가져오는 모듈. 정적 프리셋(`repositories.ts`)과 달리 실시간 데이터를 제공합니다.
@@ -705,44 +712,21 @@ createCustomRepository(options: Partial<Repository>): Repository;
 ## IPC 핸들러 (Electron)
 
 ### 위치
-`electron/os-package-handlers.ts`
+- `electron/search-handlers.ts` - OS 패키지 검색 핸들러
+- `electron/download-handlers.ts` - OS 패키지 다운로드 핸들러
 
 ### 등록된 핸들러
 
 | 채널 | 파라미터 | 반환값 | 설명 |
 |------|----------|--------|------|
-| `os:getDistributions` | osType: OSPackageManager | OSDistribution[] | 배포판 목록 |
-| `os:getAllDistributions` | - | OSDistribution[] | 전체 배포판 |
-| `os:getDistribution` | distributionId: string | OSDistribution \| undefined | 특정 배포판 |
-| `os:search` | options | OSPackageSearchResult | 패키지 검색 |
-| `os:resolveDependencies` | options | DependencyResolutionResult | 의존성 해결 |
-| `os:download:start` | options | OSPackageDownloadResult | 다운로드 시작 |
-| `os:cache:stats` | - | CacheStats | 캐시 통계 |
-| `os:cache:clear` | - | { success: boolean } | 캐시 초기화 |
+| `search:os` | options | OSPackageSearchResponse | OS 패키지 검색 |
+| `download:start` | packages, options | DownloadResult | 다운로드 시작 (OS 패키지 포함) |
 
 ### 진행 상황 이벤트
 
 | 이벤트 | 데이터 | 설명 |
 |--------|--------|------|
-| `os:resolveDependencies:progress` | { message, current, total } | 의존성 해결 진행 |
-| `os:download:progress` | OSDownloadProgress | 다운로드 진행 |
-
----
-
-## Vite 개발 서버 API
-
-### 위치
-`vite-plugin-download-api.ts`
-
-### 엔드포인트
-
-| 경로 | 메서드 | 설명 |
-|------|--------|------|
-| `/api/os/distributions` | GET | 모든 배포판 조회 |
-| `/api/os/distributions/:type` | GET | 타입별 배포판 조회 |
-| `/api/os/search` | POST | 패키지 검색 |
-| `/api/os/resolve-dependencies` | POST | 의존성 해결 |
-| `/api/os/download/start` | POST | 다운로드 시작 |
+| `download:progress` | DownloadProgress | 다운로드 진행 |
 
 ---
 

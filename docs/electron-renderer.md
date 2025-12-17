@@ -1317,8 +1317,7 @@ addLogsBatch: (logs) =>
 
 #### 저장 방식
 
-- **Electron 환경**: IPC를 통해 `~/.depssmuggler/settings.json` 파일에 저장
-- **브라우저 환경**: localStorage 사용 (백업용)
+- IPC를 통해 `~/.depssmuggler/settings.json` 파일에 저장
 
 ```typescript
 // Electron IPC 기반 커스텀 스토리지
