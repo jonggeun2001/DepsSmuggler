@@ -5,9 +5,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as archiver from 'archiver';
-import type { OSPackageInfo, OSPackageManager, ArchiveFormat } from '../types';
-import { OSScriptGenerator, type GeneratedScripts } from '../utils/script-generator';
+import archiver from 'archiver';
+import type { OSPackageInfo, OSPackageManager, ArchiveFormat } from './types';
+import { OSScriptGenerator, type GeneratedScripts } from './script-generator';
 
 /**
  * 아카이브 옵션
@@ -106,8 +106,8 @@ export class OSArchivePackager {
     return new Promise((resolve, reject) => {
       const output = fs.createWriteStream(archivePath);
       const archive = options.format === 'zip'
-        ? archiver.default('zip', { zlib: { level: 9 } })
-        : archiver.default('tar', { gzip: true, gzipOptions: { level: 9 } });
+        ? archiver('zip', { zlib: { level: 9 } })
+        : archiver('tar', { gzip: true, gzipOptions: { level: 9 } });
 
       output.on('close', () => resolve());
       archive.on('error', (err) => reject(err));

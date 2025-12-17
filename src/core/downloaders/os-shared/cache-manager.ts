@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
-import type { CacheMode, Repository, OSArchitecture } from '../types';
+import type { CacheMode, Repository, OSArchitecture } from './types';
 
 /**
  * 캐시 설정

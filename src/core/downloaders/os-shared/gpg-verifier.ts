@@ -5,7 +5,7 @@
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
-import type { OSPackageInfo, Repository, OSPackageManager } from '../types';
+import type { OSPackageInfo, Repository, OSPackageManager } from './types';
 
 /**
  * GPG 키 정보

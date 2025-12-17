@@ -1,6 +1,9 @@
 /**
- * APT/DEB Metadata Parser
- * Ubuntu/Debian용 Packages.gz, Release 파일 파싱 모듈
+ * APT/DEB Package Downloader
+ * Ubuntu/Debian 계열 OS 패키지 다운로더 (플랫 구조)
+ *
+ * @module downloaders/apt
+ * @exports AptDownloader, AptMetadataParser, ReleaseInfo, getAptDownloader
  */
 
 import { gunzipSync } from 'zlib';
@@ -11,9 +14,9 @@ import type {
   OSArchitecture,
   VersionOperator,
   Checksum,
-  ChecksumType,
   OSPackageSearchResult,
-} from '../types';
+} from './os-shared/types';
+import { BaseOSDownloader, type BaseDownloaderOptions } from './os-shared/base-downloader';
 
 /**
  * Release 파일 정보
@@ -453,4 +456,50 @@ export class AptMetadataParser {
 
     return 0;
   }
+}
+
+/**
+ * APT 패키지 다운로더
+ */
+export class AptDownloader extends BaseOSDownloader {
+  constructor(options: BaseDownloaderOptions) {
+    super(options);
+  }
+
+  /**
+   * 다운로드 URL 생성
+   */
+  protected getDownloadUrl(pkg: OSPackageInfo): string {
+    // APT의 경우 baseUrl은 dists/codename/component/ 형태
+    // location은 pool/... 형태의 전체 경로
+    const baseUrl = pkg.repository.baseUrl;
+
+    // dists/codename/component 부분을 제거하고 pool 경로 추가
+    const match = baseUrl.match(/^(https?:\/\/[^/]+)/);
+    const domain = match ? match[1] : baseUrl;
+
+    return `${domain}/${pkg.location}`;
+  }
+
+  /**
+   * 파일명 생성
+   */
+  protected getFilename(pkg: OSPackageInfo): string {
+    // DEB 파일명 형식: name_version_arch.deb
+    return `${pkg.name}_${pkg.version}_${pkg.architecture}.deb`;
+  }
+}
+
+// 싱글톤 인스턴스
+let aptDownloaderInstance: AptDownloader | null = null;
+
+export function getAptDownloader(options?: BaseDownloaderOptions): AptDownloader {
+  if (!aptDownloaderInstance && options) {
+    aptDownloaderInstance = new AptDownloader(options);
+  }
+  // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
+  if (!aptDownloaderInstance) {
+    throw new Error('AptDownloader requires BaseDownloaderOptions');
+  }
+  return aptDownloaderInstance;
 }

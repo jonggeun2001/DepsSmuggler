@@ -1,6 +1,9 @@
 /**
- * APK Metadata Parser
- * Alpine Linux용 APKINDEX.tar.gz 파싱 모듈
+ * APK Package Downloader
+ * Alpine Linux 패키지 다운로더 (플랫 구조)
+ *
+ * @module downloaders/apk
+ * @exports ApkDownloader, ApkMetadataParser, getApkDownloader
  */
 
 import { gunzipSync } from 'zlib';
@@ -14,7 +17,8 @@ import type {
   VersionOperator,
   Checksum,
   OSPackageSearchResult,
-} from '../types';
+} from './os-shared/types';
+import { BaseOSDownloader, type BaseDownloaderOptions } from './os-shared/base-downloader';
 
 /**
  * APK 메타데이터 파서
@@ -406,4 +410,44 @@ export class ApkMetadataParser {
 
     return 0;
   }
+}
+
+/**
+ * APK 패키지 다운로더
+ */
+export class ApkDownloader extends BaseOSDownloader {
+  constructor(options: BaseDownloaderOptions) {
+    super(options);
+  }
+
+  /**
+   * 다운로드 URL 생성
+   */
+  protected getDownloadUrl(pkg: OSPackageInfo): string {
+    const baseUrl = pkg.repository.baseUrl.replace(/\/$/, '');
+    // location은 arch/filename.apk 형태
+    return `${baseUrl}/${pkg.location}`;
+  }
+
+  /**
+   * 파일명 생성
+   */
+  protected getFilename(pkg: OSPackageInfo): string {
+    // APK 파일명 형식: name-version.apk
+    return `${pkg.name}-${pkg.version}.apk`;
+  }
+}
+
+// 싱글톤 인스턴스
+let apkDownloaderInstance: ApkDownloader | null = null;
+
+export function getApkDownloader(options?: BaseDownloaderOptions): ApkDownloader {
+  if (!apkDownloaderInstance && options) {
+    apkDownloaderInstance = new ApkDownloader(options);
+  }
+  // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
+  if (!apkDownloaderInstance) {
+    throw new Error('ApkDownloader requires BaseDownloaderOptions');
+  }
+  return apkDownloaderInstance;
 }

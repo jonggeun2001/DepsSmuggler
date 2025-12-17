@@ -14,7 +14,7 @@ import type {
   OSDownloadError,
   OSErrorAction,
 } from './types';
-import { GPGVerifier, type VerificationResult } from './utils/gpg-verifier';
+import { GPGVerifier, type VerificationResult } from './gpg-verifier';
 
 /**
  * 다운로드 결과

@@ -3,8 +3,8 @@
  * 의존성 순서 설치 스크립트 및 로컬 저장소 설정 스크립트 생성
  */
 
-import type { OSPackageInfo, OSPackageManager, ScriptType } from '../types';
-import { stripLeadingDotSlash, toUnixPath } from '../../../shared/path-utils';
+import type { OSPackageInfo, OSPackageManager, ScriptType } from './types';
+import { stripLeadingDotSlash, toUnixPath } from '../../shared/path-utils';
 
 /**
  * 생성된 스크립트
