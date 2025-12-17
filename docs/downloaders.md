@@ -397,31 +397,30 @@ const downloadResult = await downloader.download({
 
 ---
 
-## YumDownloader (레거시)
-
-> **참고**: 새로운 OS 패키지 다운로더(`src/core/downloaders/os/`)를 사용하세요.
+## YumDownloader
 
 ### 개요
-- 목적: YUM/RPM 패키지 검색 및 다운로드 (단순 구현)
+- 목적: YUM/RPM 패키지 검색 및 다운로드 (RHEL, CentOS, Rocky, AlmaLinux)
 - 위치: `src/core/downloaders/yum.ts`
+- Resolver: `src/core/resolver/yum-resolver.ts`
 
 ### 클래스 구조
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `searchPackages` | query: string | Promise<PackageInfo[]> | YUM 저장소에서 패키지 검색 |
+| `searchPackages` | query: string | Promise<OSPackageInfo[]> | YUM 저장소에서 패키지 검색 |
 | `getVersions` | packageName: string | Promise<string[]> | 패키지 버전 목록 조회 |
 | `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
-| `downloadPackage` | name: string, version: string, destDir: string | Promise<DownloadResult> | RPM 패키지 다운로드 |
+| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | RPM 패키지 다운로드 |
 
-### 기본 저장소
-```typescript
-const DEFAULT_REPOS = [
-  'https://mirror.centos.org/centos/7/os/x86_64/',
-  'https://mirror.centos.org/centos/7/updates/x86_64/',
-  'https://mirror.centos.org/centos/7/extras/x86_64/'
-];
-```
+### 메타데이터 파서 (YumMetadataParser)
+
+| 메서드 | 설명 |
+|--------|------|
+| `parseRepomd(url)` | repomd.xml 파싱 |
+| `parsePrimary(url)` | primary.xml.gz 파싱 |
+| `searchPackages(query)` | 패키지 검색 |
+| `getPackageVersions(name)` | 버전 목록 조회 |
 
 ### 타입 정의
 
@@ -431,6 +430,111 @@ const DEFAULT_REPOS = [
 | `RepoMdData` | 저장소 데이터 정보 |
 | `PrimaryPackage` | primary.xml 패키지 정보 |
 | `RpmEntry` | RPM 의존성 엔트리 |
+
+---
+
+## AptDownloader
+
+### 개요
+- 목적: APT/DEB 패키지 검색 및 다운로드 (Ubuntu, Debian)
+- 위치: `src/core/downloaders/apt.ts`
+- Resolver: `src/core/resolver/apt-resolver.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `searchPackages` | query: string | Promise<OSPackageInfo[]> | APT 저장소에서 패키지 검색 |
+| `getVersions` | packageName: string | Promise<string[]> | 패키지 버전 목록 조회 |
+| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
+| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | DEB 패키지 다운로드 |
+
+### 메타데이터 파서 (AptMetadataParser)
+
+| 메서드 | 설명 |
+|--------|------|
+| `parseRelease()` | Release 파일 파싱 (저장소 정보) |
+| `parsePackages()` | Packages.gz 파싱 |
+| `searchPackages(query)` | 패키지 검색 |
+| `getPackageVersions(name)` | 버전 목록 조회 |
+| `parseDebControlFields(content)` | Debian Control 형식 파싱 |
+| `parseDebDepends(depends)` | Depends 필드 파싱 |
+
+### 지원 배포판
+
+- Ubuntu 20.04 LTS (Focal)
+- Ubuntu 22.04 LTS (Jammy)
+- Ubuntu 24.04 LTS (Noble)
+- Debian 11 (Bullseye)
+- Debian 12 (Bookworm)
+
+### 사용 예시
+
+```typescript
+import { getAptDownloader } from './core/downloaders/apt';
+
+const downloader = getAptDownloader();
+const results = await downloader.searchPackages('nginx');
+const versions = await downloader.getVersions('nginx');
+```
+
+---
+
+## ApkDownloader
+
+### 개요
+- 목적: APK 패키지 검색 및 다운로드 (Alpine Linux)
+- 위치: `src/core/downloaders/apk.ts`
+- Resolver: `src/core/resolver/apk-resolver.ts`
+
+### 클래스 구조
+
+| 메서드 | 파라미터 | 반환값 | 설명 |
+|--------|----------|--------|------|
+| `searchPackages` | query: string | Promise<OSPackageInfo[]> | APK 저장소에서 패키지 검색 |
+| `getVersions` | packageName: string | Promise<string[]> | 패키지 버전 목록 조회 |
+| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
+| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | APK 패키지 다운로드 |
+
+### 메타데이터 파서 (ApkMetadataParser)
+
+| 메서드 | 설명 |
+|--------|------|
+| `parseIndex()` | APKINDEX.tar.gz 파싱 |
+| `searchPackages(query)` | 패키지 검색 |
+| `getPackageVersions(name)` | 버전 목록 조회 |
+| `parseApkEntry(entry)` | APK 엔트리 파싱 |
+| `parseApkDepends(depends)` | 의존성 필드 파싱 |
+
+### APKINDEX 필드
+
+| 필드 | 설명 |
+|------|------|
+| `P` | Package name |
+| `V` | Version |
+| `A` | Architecture |
+| `D` | Dependencies |
+| `S` | Size |
+| `p` | Provides |
+| `C` | Checksum (SHA1) |
+| `T` | Description |
+
+### 지원 배포판
+
+- Alpine Linux 3.18
+- Alpine Linux 3.19
+- Alpine Linux 3.20
+- Alpine Linux 3.21
+
+### 사용 예시
+
+```typescript
+import { getApkDownloader } from './core/downloaders/apk';
+
+const downloader = getApkDownloader();
+const results = await downloader.searchPackages('nginx');
+const versions = await downloader.getVersions('nginx');
+```
 
 ---
 
