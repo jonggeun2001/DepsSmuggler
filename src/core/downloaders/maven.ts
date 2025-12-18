@@ -51,6 +51,7 @@ interface SonatypeSearchResponse {
     latestVersionInfo?: {
       version: string;
     };
+    nsPopularityAppCount?: number; // 인기도 (앱 사용 수)
   }>;
   totalResultCount: number;
 }
@@ -223,7 +224,7 @@ export class MavenDownloader implements IDownloader {
               sortField: 'nsPopularityAppCount', // 인기순 정렬
               sortDirection: 'desc',
               page: 0,
-              size: 50,
+              size: 20, // API 최대값
             },
             {
               timeout: 15000,
@@ -243,6 +244,7 @@ export class MavenDownloader implements IDownloader {
               metadata: {
                 groupId: comp.namespace,
                 artifactId: comp.name,
+                popularityCount: comp.nsPopularityAppCount,
               },
             }));
         },
@@ -254,11 +256,21 @@ export class MavenDownloader implements IDownloader {
       );
     } catch (error) {
       logger.error('Maven 아티팩트 검색 실패 (Sonatype API)', { query, error });
-      throw new Error(
-        `Maven 검색 실패: ${query}\n` +
-          `central.sonatype.com API에 연결할 수 없습니다.\n` +
-          `잠시 후 다시 시도해주세요.`
-      );
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT');
+      const isNetworkError = errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND');
+
+      let userMessage = `Maven 검색 실패: ${query}\n`;
+      if (isTimeout) {
+        userMessage += `API 요청 시간이 초과되었습니다.\n`;
+      } else if (isNetworkError) {
+        userMessage += `네트워크에 연결할 수 없습니다.\n`;
+      } else {
+        userMessage += `central.sonatype.com API에 연결할 수 없습니다.\n`;
+      }
+      userMessage += `잠시 후 다시 시도해주세요. (${errorMessage.substring(0, 100)})`;
+
+      throw new Error(userMessage);
     }
   }
 

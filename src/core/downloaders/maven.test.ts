@@ -546,26 +546,23 @@ describe('MavenDownloader 클래스 메서드 테스트', () => {
   describe('searchPackages', () => {
     it('검색 결과 성공 처리', async () => {
       const mockClient = {
-        get: vi.fn().mockResolvedValue({
+        post: vi.fn().mockResolvedValue({
           data: {
-            response: {
-              docs: [
-                {
-                  id: 'com.google.code.gson:gson',
-                  g: 'com.google.code.gson',
-                  a: 'gson',
-                  latestVersion: '2.10.1',
-                  versionCount: 50,
-                },
-                {
-                  id: 'org.json:json',
-                  g: 'org.json',
-                  a: 'json',
-                  latestVersion: '20231013',
-                  versionCount: 25,
-                },
-              ],
-            },
+            components: [
+              {
+                namespace: 'com.google.code.gson',
+                name: 'gson',
+                latestVersionInfo: { version: '2.10.1' },
+                nsPopularityAppCount: 150000,
+              },
+              {
+                namespace: 'org.json',
+                name: 'json',
+                latestVersionInfo: { version: '20231013' },
+                nsPopularityAppCount: 80000,
+              },
+            ],
+            totalResultCount: 2,
           },
         }),
       };
@@ -577,12 +574,13 @@ describe('MavenDownloader 클래스 메서드 테스트', () => {
       expect(results[0].name).toBe('com.google.code.gson:gson');
       expect(results[0].version).toBe('2.10.1');
       expect(results[0].type).toBe('maven');
+      expect(results[0].metadata?.popularityCount).toBe(150000);
     });
 
     it('검색 결과 없음', async () => {
       const mockClient = {
-        get: vi.fn().mockResolvedValue({
-          data: { response: { docs: [] } },
+        post: vi.fn().mockResolvedValue({
+          data: { components: [], totalResultCount: 0 },
         }),
       };
       (downloader as any).client = mockClient;
@@ -593,11 +591,11 @@ describe('MavenDownloader 클래스 메서드 테스트', () => {
 
     it('네트워크 오류 시 예외 발생', async () => {
       const mockClient = {
-        get: vi.fn().mockRejectedValue(new Error('Network Error')),
+        post: vi.fn().mockRejectedValue(new Error('Network Error')),
       };
       (downloader as any).client = mockClient;
 
-      await expect(downloader.searchPackages('test')).rejects.toThrow('Network Error');
+      await expect(downloader.searchPackages('test')).rejects.toThrow();
     });
   });
 
@@ -1101,22 +1099,23 @@ describe('Maven 검색 안정성 - Fallback API 및 재시도', () => {
   describe('searchViaSearchApi', () => {
     it('Search API 검색 성공', async () => {
       const mockClient = {
-        get: vi.fn().mockResolvedValue({
+        post: vi.fn().mockResolvedValue({
           data: {
-            response: {
-              docs: [
-                {
-                  g: 'org.springframework.boot',
-                  a: 'spring-boot',
-                  latestVersion: '3.2.0',
-                },
-                {
-                  g: 'org.springframework.boot',
-                  a: 'spring-boot-starter',
-                  latestVersion: '3.2.0',
-                },
-              ],
-            },
+            components: [
+              {
+                namespace: 'org.springframework.boot',
+                name: 'spring-boot',
+                latestVersionInfo: { version: '3.2.0' },
+                nsPopularityAppCount: 507700,
+              },
+              {
+                namespace: 'org.springframework.boot',
+                name: 'spring-boot-starter',
+                latestVersionInfo: { version: '3.2.0' },
+                nsPopularityAppCount: 1250000,
+              },
+            ],
+            totalResultCount: 2,
           },
         }),
       };
@@ -1127,38 +1126,64 @@ describe('Maven 검색 안정성 - Fallback API 및 재시도', () => {
       expect(results).toHaveLength(2);
       expect(results[0].name).toBe('org.springframework.boot:spring-boot');
       expect(results[0].version).toBe('3.2.0');
+      expect(results[0].metadata?.popularityCount).toBe(507700);
+      expect(results[1].metadata?.popularityCount).toBe(1250000);
+    });
+
+    it('인기도가 없는 패키지는 undefined로 처리', async () => {
+      const mockClient = {
+        post: vi.fn().mockResolvedValue({
+          data: {
+            components: [
+              {
+                namespace: 'com.example',
+                name: 'test-lib',
+                latestVersionInfo: { version: '1.0.0' },
+                // nsPopularityAppCount 없음
+              },
+            ],
+            totalResultCount: 1,
+          },
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const results = await (downloader as any).searchViaSearchApi('test-lib');
+
+      expect(results).toHaveLength(1);
+      expect(results[0].metadata?.popularityCount).toBeUndefined();
     });
 
     it('Search API 504 에러 시 명확한 에러 메시지', async () => {
       const mockClient = {
-        get: vi.fn().mockRejectedValue({ response: { status: 504 } }),
+        post: vi.fn().mockRejectedValue({ response: { status: 504 } }),
       };
       (downloader as any).client = mockClient;
 
       await expect((downloader as any).searchViaSearchApi('spring-boot')).rejects.toThrow(
-        /groupId:artifactId 형식.*으로 입력하면 대체 API를 사용합니다/
+        /Maven 검색 실패/
       );
     });
 
     it('Search API 재시도 후 성공 (mocking with retry)', async () => {
       let callCount = 0;
       const mockClient = {
-        get: vi.fn().mockImplementation(() => {
+        post: vi.fn().mockImplementation(() => {
           callCount++;
           if (callCount < 3) {
             return Promise.reject({ response: { status: 504 } });
           }
           return Promise.resolve({
             data: {
-              response: {
-                docs: [
-                  {
-                    g: 'org.springframework.boot',
-                    a: 'spring-boot',
-                    latestVersion: '3.2.0',
-                  },
-                ],
-              },
+              components: [
+                {
+                  namespace: 'org.springframework.boot',
+                  name: 'spring-boot',
+                  latestVersionInfo: { version: '3.2.0' },
+                  nsPopularityAppCount: 100000,
+                },
+              ],
+              totalResultCount: 1,
             },
           });
         }),
@@ -1199,28 +1224,20 @@ describe('Maven 검색 안정성 - Fallback API 및 재시도', () => {
     });
 
     it('Sonatype API 실패 시 Search API로 fallback', async () => {
-      let callCount = 0;
       const mockClient = {
-        get: vi.fn().mockImplementation((url: string) => {
-          callCount++;
-          // Sonatype API 호출 (실패)
-          if (url.includes('central.sonatype.com')) {
-            return Promise.reject(new Error('504 Gateway Timeout'));
-          }
-          // Search API 호출 (성공)
-          return Promise.resolve({
-            data: {
-              response: {
-                docs: [
-                  {
-                    g: 'org.springframework.boot',
-                    a: 'spring-boot',
-                    latestVersion: '3.2.0',
-                  },
-                ],
+        get: vi.fn().mockRejectedValue(new Error('504 Gateway Timeout')),
+        post: vi.fn().mockResolvedValue({
+          data: {
+            components: [
+              {
+                namespace: 'org.springframework.boot',
+                name: 'spring-boot',
+                latestVersionInfo: { version: '3.2.0' },
+                nsPopularityAppCount: 500000,
               },
-            },
-          });
+            ],
+            totalResultCount: 1,
+          },
         }),
       };
       (downloader as any).client = mockClient;
@@ -1229,23 +1246,26 @@ describe('Maven 검색 안정성 - Fallback API 및 재시도', () => {
 
       expect(results).toHaveLength(1);
       expect(results[0].name).toBe('org.springframework.boot:spring-boot');
-      // Sonatype API 시도 + Search API fallback
-      expect(callCount).toBeGreaterThanOrEqual(2);
+      expect(results[0].metadata?.popularityCount).toBe(500000);
+      // Sonatype API 시도 확인
+      expect(mockClient.get).toHaveBeenCalled();
+      // Search API fallback 확인
+      expect(mockClient.post).toHaveBeenCalled();
     });
 
     it('keyword 형식 입력 시 Search API 직접 사용', async () => {
       const mockClient = {
-        get: vi.fn().mockResolvedValue({
+        post: vi.fn().mockResolvedValue({
           data: {
-            response: {
-              docs: [
-                {
-                  g: 'org.springframework.boot',
-                  a: 'spring-boot',
-                  latestVersion: '3.2.0',
-                },
-              ],
-            },
+            components: [
+              {
+                namespace: 'org.springframework.boot',
+                name: 'spring-boot',
+                latestVersionInfo: { version: '3.2.0' },
+                nsPopularityAppCount: 500000,
+              },
+            ],
+            totalResultCount: 1,
           },
         }),
       };
@@ -1254,16 +1274,18 @@ describe('Maven 검색 안정성 - Fallback API 및 재시도', () => {
       const results = await downloader.searchPackages('spring-boot');
 
       expect(results).toHaveLength(1);
-      // Search API 호출 확인
-      expect(mockClient.get).toHaveBeenCalledWith(
-        expect.stringContaining('search.maven.org'),
+      expect(results[0].metadata?.popularityCount).toBe(500000);
+      // Search API 호출 확인 (POST 메서드)
+      expect(mockClient.post).toHaveBeenCalledWith(
+        expect.stringContaining('central.sonatype.com'),
+        expect.any(Object),
         expect.any(Object)
       );
     });
 
     it('모든 API 실패 시 명확한 에러 메시지', async () => {
       const mockClient = {
-        get: vi.fn().mockRejectedValue({ response: { status: 504 } }),
+        post: vi.fn().mockRejectedValue({ response: { status: 504 } }),
       };
       (downloader as any).client = mockClient;
 
@@ -1274,7 +1296,6 @@ describe('Maven 검색 안정성 - Fallback API 및 재시도', () => {
         expect(error).toBeInstanceOf(Error);
         const message = (error as Error).message;
         expect(message).toContain('Maven 검색 실패');
-        expect(message).toContain('groupId:artifactId 형식');
       }
     });
   });

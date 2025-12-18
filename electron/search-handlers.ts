@@ -213,6 +213,7 @@ async function searchMaven(query: string) {
       name: pkg.name,
       version: pkg.version,
       description: `Maven artifact: ${pkg.name}`,
+      popularityCount: pkg.metadata?.popularityCount,
     }));
   } catch (error) {
     log.error('Maven search failed:', error);
