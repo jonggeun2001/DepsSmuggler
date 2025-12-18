@@ -10,13 +10,14 @@ import * as fs from 'fs';
 import axios from 'axios';
 
 /**
- * Python 릴리스 정보
+ * Python 릴리스 정보 (python.org API 응답)
  */
 interface PythonRelease {
-  version: string;
-  releaseDate: string;
-  isPrerelease: boolean;
-  isEol: boolean; // End of Life
+  name: string; // "Python 3.12.0"
+  version: number; // 메이저 버전 (3)
+  pre_release: boolean;
+  release_date: string;
+  is_published: boolean;
 }
 
 // 메모리 캐시
@@ -62,16 +63,23 @@ export async function fetchPythonVersions(): Promise<string[]> {
 
     const releases = (await response.json()) as PythonRelease[];
 
-    // 필터링: 3.9 이상, EOL 제외, 정식 릴리스만
+    // 필터링: Python 3.9 이상, 정식 릴리스만
     const versions = releases
-      .filter((r) => !r.isPrerelease && !r.isEol)
-      .map((r) => r.version)
-      .filter((v) => {
+      .filter((r) => r.is_published && !r.pre_release && r.version >= 3)
+      .map((r) => {
+        // name에서 버전 추출: "Python 3.12.0" → "3.12"
+        const match = r.name.match(/Python (\d+\.\d+)/);
+        return match ? match[1] : null;
+      })
+      .filter((v): v is string => {
+        if (!v) return false;
         const match = v.match(/^(\d+)\.(\d+)/);
         if (!match) return false;
         const [, major, minor] = match;
         return Number(major) === 3 && Number(minor) >= 9;
       })
+      // 중복 제거 (3.12.0, 3.12.1 → 3.12 하나만)
+      .filter((v, i, arr) => arr.indexOf(v) === i)
       .sort((a, b) => {
         // 버전 번호로 내림차순 정렬
         const [aMajor, aMinor] = a.split('.').map(Number);
@@ -484,13 +492,13 @@ let cudaCacheTimestamp: number = 0;
 const CUDA_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7일 (CUDA 릴리스 빈도 낮음)
 
 /**
- * conda-forge repodata에서 __cuda 패키지 버전 추출
+ * NVIDIA conda 채널에서 CUDA 버전 추출
  */
 async function fetchCudaVersionsFromConda(): Promise<string[]> {
   try {
-    logger.debug('conda-forge에서 CUDA 버전 가져오기 시도');
+    logger.debug('NVIDIA conda 채널에서 CUDA 버전 가져오기 시도');
     const response = await axios.get(
-      'https://conda.anaconda.org/conda-forge/linux-64/repodata.json',
+      'https://conda.anaconda.org/nvidia/linux-64/repodata.json',
       { timeout: 30000 }
     );
 
@@ -498,12 +506,13 @@ async function fetchCudaVersionsFromConda(): Promise<string[]> {
     const condaPackages = response.data['packages.conda'] || {};
     const allPackages = { ...packages, ...condaPackages };
 
-    // __cuda 패키지 찾기
+    // cuda-toolkit 또는 cuda-cudart 패키지에서 버전 추출
     const cudaVersions = new Set<string>();
+    const cudaPackageNames = ['cuda-toolkit', 'cuda-cudart', 'cuda-runtime'];
 
     for (const [, pkg] of Object.entries<{ name?: string; version?: string }>(allPackages)) {
-      if (pkg.name === '__cuda' && pkg.version) {
-        // "11.8.0" -> "11.8", "12.1.0" -> "12.1"
+      if (pkg.name && cudaPackageNames.includes(pkg.name) && pkg.version) {
+        // "12.6.68" -> "12.6", "11.8.0" -> "11.8"
         const match = pkg.version.match(/^(\d+\.\d+)/);
         if (match) {
           cudaVersions.add(match[1]);
@@ -519,11 +528,11 @@ async function fetchCudaVersionsFromConda(): Promise<string[]> {
       return bMinor - aMinor;
     });
 
-    logger.info(`conda-forge에서 CUDA 버전 ${sorted.length}개 추출 완료`);
+    logger.info(`NVIDIA 채널에서 CUDA 버전 ${sorted.length}개 추출 완료`);
     return sorted;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    logger.error('conda-forge에서 CUDA 버전 가져오기 실패', { error: errorMsg });
+    logger.error('NVIDIA 채널에서 CUDA 버전 가져오기 실패', { error: errorMsg });
     throw error;
   }
 }
