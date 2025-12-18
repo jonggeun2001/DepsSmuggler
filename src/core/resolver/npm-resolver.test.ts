@@ -520,4 +520,149 @@ describe('NpmResolver 단위 테스트', () => {
       expect(typeof resolver.getPackageInfo).toBe('function');
     });
   });
+
+  describe('플랫폼 필터링', () => {
+    it('타겟 OS에 맞지 않는 패키지는 제외해야 함', async () => {
+      // @esbuild/linux-x64 패키지 (linux, x64 전용)
+      const esbuildLinux = createPackument('esbuild-linux-x64', {
+        '1.0.0': {
+          name: 'esbuild-linux-x64',
+          os: ['linux'],
+          cpu: ['x64'],
+          dist: { tarball: 'https://registry.npmjs.org/esbuild-linux-x64/-/esbuild-linux-x64-1.0.0.tgz', shasum: 'abc' },
+        },
+      });
+
+      // @esbuild/darwin-arm64 패키지 (darwin, arm64 전용)
+      const esbuildDarwin = createPackument('esbuild-darwin-arm64', {
+        '1.0.0': {
+          name: 'esbuild-darwin-arm64',
+          os: ['darwin'],
+          cpu: ['arm64'],
+          dist: { tarball: 'https://registry.npmjs.org/esbuild-darwin-arm64/-/esbuild-darwin-arm64-1.0.0.tgz', shasum: 'def' },
+        },
+      });
+
+      // esbuild 메인 패키지
+      const esbuild = createPackument('esbuild', {
+        '0.19.0': {
+          name: 'esbuild',
+          optionalDependencies: {
+            'esbuild-linux-x64': '1.0.0',
+            'esbuild-darwin-arm64': '1.0.0',
+          },
+          dist: { tarball: 'https://registry.npmjs.org/esbuild/-/esbuild-0.19.0.tgz', shasum: 'ghi' },
+        },
+      });
+
+      vi.spyOn(asTestable(resolver).versionResolver, 'fetchPackument').mockImplementation(
+        async (name: string) => {
+          if (name === 'esbuild') return esbuild;
+          if (name === 'esbuild-linux-x64') return esbuildLinux;
+          if (name === 'esbuild-darwin-arm64') return esbuildDarwin;
+          throw new Error(`Unknown package: ${name}`);
+        }
+      );
+
+      // Linux x64 타겟으로 설정
+      const result = await resolver.resolveDependencies('esbuild', '0.19.0', {
+        includeOptional: true,
+        targetOS: 'linux',
+        targetArchitecture: 'x86_64',
+      });
+
+      // esbuild-linux-x64만 포함되어야 함
+      const packageNames = result.flatList.map((p) => p.name);
+      expect(packageNames).toContain('esbuild-linux-x64');
+      expect(packageNames).not.toContain('esbuild-darwin-arm64');
+    });
+
+    it('타겟 플랫폼이 설정되지 않으면 모든 패키지 포함', async () => {
+      const esbuildLinux = createPackument('esbuild-linux-x64', {
+        '1.0.0': {
+          name: 'esbuild-linux-x64',
+          os: ['linux'],
+          cpu: ['x64'],
+          dist: { tarball: 'https://registry.npmjs.org/esbuild-linux-x64/-/esbuild-linux-x64-1.0.0.tgz', shasum: 'abc' },
+        },
+      });
+
+      const esbuildDarwin = createPackument('esbuild-darwin-arm64', {
+        '1.0.0': {
+          name: 'esbuild-darwin-arm64',
+          os: ['darwin'],
+          cpu: ['arm64'],
+          dist: { tarball: 'https://registry.npmjs.org/esbuild-darwin-arm64/-/esbuild-darwin-arm64-1.0.0.tgz', shasum: 'def' },
+        },
+      });
+
+      const esbuild = createPackument('esbuild', {
+        '0.19.0': {
+          name: 'esbuild',
+          optionalDependencies: {
+            'esbuild-linux-x64': '1.0.0',
+            'esbuild-darwin-arm64': '1.0.0',
+          },
+          dist: { tarball: 'https://registry.npmjs.org/esbuild/-/esbuild-0.19.0.tgz', shasum: 'ghi' },
+        },
+      });
+
+      vi.spyOn(asTestable(resolver).versionResolver, 'fetchPackument').mockImplementation(
+        async (name: string) => {
+          if (name === 'esbuild') return esbuild;
+          if (name === 'esbuild-linux-x64') return esbuildLinux;
+          if (name === 'esbuild-darwin-arm64') return esbuildDarwin;
+          throw new Error(`Unknown package: ${name}`);
+        }
+      );
+
+      // 타겟 플랫폼 없이 실행
+      const result = await resolver.resolveDependencies('esbuild', '0.19.0', {
+        includeOptional: true,
+      });
+
+      // 모든 플랫폼별 패키지가 포함되어야 함
+      const packageNames = result.flatList.map((p) => p.name);
+      expect(packageNames).toContain('esbuild-linux-x64');
+      expect(packageNames).toContain('esbuild-darwin-arm64');
+    });
+
+    it('os/cpu 필드가 없는 패키지는 항상 포함', async () => {
+      // lodash (순수 JS, os/cpu 제약 없음)
+      const lodash = createPackument('lodash', {
+        '4.17.21': {
+          name: 'lodash',
+          // os, cpu 필드 없음
+          dist: { tarball: 'https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz', shasum: 'xyz' },
+        },
+      });
+
+      // test-package (lodash를 의존성으로 가짐)
+      const testPackage = createPackument('test-package', {
+        '1.0.0': {
+          name: 'test-package',
+          dependencies: {
+            lodash: '4.17.21',
+          },
+          dist: { tarball: 'https://registry.npmjs.org/test-package/-/test-package-1.0.0.tgz', shasum: 'abc' },
+        },
+      });
+
+      vi.spyOn(asTestable(resolver).versionResolver, 'fetchPackument').mockImplementation(
+        async (name: string) => {
+          if (name === 'test-package') return testPackage;
+          if (name === 'lodash') return lodash;
+          throw new Error(`Unknown package: ${name}`);
+        }
+      );
+
+      // Linux 타겟으로 설정해도 lodash는 포함되어야 함
+      const result = await resolver.resolveDependencies('test-package', '1.0.0', {
+        targetOS: 'linux',
+        targetArchitecture: 'x86_64',
+      });
+
+      expect(result.flatList.some((p) => p.name === 'lodash')).toBe(true);
+    });
+  });
 });

@@ -64,6 +64,7 @@ export class CondaResolver implements IResolver {
       condaUrl: this.condaUrl,
       targetSubdir: 'linux-64',
       pythonVersion: null,
+      cudaVersion: null,
     });
   }
 
@@ -92,10 +93,14 @@ export class CondaResolver implements IResolver {
     // Python 버전 설정
     this.pythonVersion = (options as { pythonVersion?: string })?.pythonVersion || null;
 
+    // CUDA 버전 설정
+    const cudaVersion = (options as { cudaVersion?: string })?.cudaVersion || null;
+
     // RepoData 프로세서 설정 업데이트
     this.repoDataProcessor.updateConfig({
       targetSubdir,
       pythonVersion: this.pythonVersion,
+      cudaVersion,
     });
     
     const startTime = Date.now();

@@ -1,19 +1,19 @@
 /**
- * YUM/RPM Dependency Resolver
- * RHEL/CentOS 계열 의존성 해결기 (플랫 구조)
+ * APT/DEB Dependency Resolver
+ * Ubuntu/Debian 계열 의존성 해결기 (플랫 구조)
  */
 
 import type { OSPackageInfo, PackageDependency, Repository, OSPackageSearchResult } from '../downloaders/os-shared/types';
 import { BaseOSDependencyResolver, type DependencyResolverOptions } from '../downloaders/os-shared/base-resolver';
 import { compareVersions } from '../shared/version-utils';
-import { YumMetadataParser } from '../downloaders/yum';
+import { AptMetadataParser } from '../downloaders/apt';
 import { isArchitectureCompatible } from '../downloaders/os-shared/repositories';
 
 /**
- * YUM 의존성 해결기
+ * APT 의존성 해결기
  */
-export class YumDependencyResolver extends BaseOSDependencyResolver {
-  private parsers: Map<string, YumMetadataParser> = new Map();
+export class AptDependencyResolver extends BaseOSDependencyResolver {
+  private parsers: Map<string, AptMetadataParser> = new Map();
   private allPackages: OSPackageInfo[] = [];
   private providesMap: Map<string, OSPackageInfo[]> = new Map();
 
@@ -31,50 +31,70 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
 
     const activeRepos = this.options.repositories.filter((r) => r.enabled);
 
+    // 각 저장소의 각 컴포넌트 로드
     for (const repo of activeRepos) {
-      try {
-        const parser = new YumMetadataParser(repo, this.options.architecture);
-        this.parsers.set(repo.id, parser);
+      // URL에서 컴포넌트 추출 (예: main, universe, restricted)
+      const components = this.extractComponents(repo);
 
-        // repomd.xml 파싱
-        const repomd = await parser.parseRepomd();
-        if (!repomd.primary) {
-          console.warn(`No primary metadata found for ${repo.name}`);
-          continue;
-        }
+      for (const component of components) {
+        try {
+          const parser = new AptMetadataParser(
+            repo,
+            component,
+            this.options.architecture
+          );
 
-        // primary.xml 파싱
-        const packages = await parser.parsePrimary(repomd.primary.location);
+          const key = `${repo.id}-${component}`;
+          this.parsers.set(key, parser);
 
-        // 아키텍처 필터링
-        const compatiblePackages = packages.filter((pkg) =>
-          isArchitectureCompatible(pkg.architecture, this.options.architecture)
-        );
+          // Packages.gz 파싱
+          const packages = await parser.parsePackages();
 
-        this.allPackages.push(...compatiblePackages);
+          // 아키텍처 필터링
+          const compatiblePackages = packages.filter((pkg) =>
+            isArchitectureCompatible(pkg.architecture, this.options.architecture)
+          );
 
-        // provides 맵 구축
-        for (const pkg of compatiblePackages) {
-          // 패키지 이름으로 등록
-          this.addToPackageCache(pkg.name, pkg);
+          this.allPackages.push(...compatiblePackages);
 
-          // provides 등록
-          if (pkg.provides) {
-            for (const provide of pkg.provides) {
-              this.addToProvidesCache(provide, pkg);
+          // 캐시 구축
+          for (const pkg of compatiblePackages) {
+            // 패키지 이름으로 등록
+            this.addToPackageCache(pkg.name, pkg);
+
+            // provides 등록
+            if (pkg.provides) {
+              for (const provide of pkg.provides) {
+                this.addToProvidesCache(provide, pkg);
+              }
             }
           }
-        }
 
-        this.options.onProgress?.(
-          `Loaded ${compatiblePackages.length} packages from ${repo.name}`,
-          0,
-          0
-        );
-      } catch (error) {
-        console.error(`Failed to load metadata from ${repo.name}:`, error);
+          this.options.onProgress?.(
+            `Loaded ${compatiblePackages.length} packages from ${repo.name}/${component}`,
+            0,
+            0
+          );
+        } catch (error) {
+          console.warn(`Failed to load ${component} from ${repo.name}:`, error);
+        }
       }
     }
+  }
+
+  /**
+   * 저장소 URL에서 컴포넌트 추출
+   */
+  private extractComponents(repo: Repository): string[] {
+    // URL 패턴에서 컴포넌트 추출
+    // 예: http://archive.ubuntu.com/ubuntu/dists/jammy/main/
+    const match = repo.baseUrl.match(/dists\/[^/]+\/([^/]+)/);
+    if (match) {
+      return [match[1]];
+    }
+
+    // 기본 컴포넌트
+    return ['main'];
   }
 
   /**
@@ -90,28 +110,21 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
    * provides 캐시에 추가
    */
   private addToProvidesCache(provide: string, pkg: OSPackageInfo): void {
-    // 버전 제거 (예: "libfoo.so.1()(64bit)" -> "libfoo.so.1")
-    const baseName = provide.split('(')[0];
+    // 버전 및 아키텍처 정보 제거
+    const baseName = provide.split(/[\s(]/)[0].trim();
 
     const existing = this.providesMap.get(baseName) || [];
     existing.push(pkg);
     this.providesMap.set(baseName, existing);
-
-    // 전체 이름으로도 등록
-    if (provide !== baseName) {
-      const fullExisting = this.providesMap.get(provide) || [];
-      fullExisting.push(pkg);
-      this.providesMap.set(provide, fullExisting);
-    }
   }
 
   /**
-   * API에서 의존성 가져오기 (YUM은 API 없음, null 반환)
+   * API에서 의존성 가져오기 (APT는 API 없음, null 반환)
    */
   protected async fetchDependenciesFromAPI(
     _pkg: OSPackageInfo
   ): Promise<PackageDependency[] | null> {
-    // YUM/RPM은 공개 API가 없으므로 항상 메타데이터 사용
+    // APT는 공개 API가 없으므로 항상 메타데이터 사용
     return null;
   }
 
@@ -121,13 +134,19 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
   protected async fetchDependenciesFromMetadata(
     pkg: OSPackageInfo
   ): Promise<PackageDependency[]> {
-    // 패키지에 이미 의존성 정보가 있음
-    const deps = pkg.dependencies || [];
+    const deps = [...(pkg.dependencies || [])];
 
     // 권장 의존성 추가
     if (this.options.includeRecommends && pkg.recommends) {
       for (const rec of pkg.recommends) {
         deps.push({ name: rec, isOptional: true });
+      }
+    }
+
+    // 제안 의존성 추가 (선택적)
+    if (this.options.includeOptional && pkg.suggests) {
+      for (const sug of pkg.suggests) {
+        deps.push({ name: sug, isOptional: true });
       }
     }
 
@@ -148,7 +167,7 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
       candidates.push(...byName);
     }
 
-    // 2. provides로 검색
+    // 2. provides로 검색 (virtual packages)
     const byProvides = this.providesMap.get(dep.name);
     if (byProvides) {
       for (const pkg of byProvides) {
@@ -158,12 +177,12 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
       }
     }
 
-    // 3. 라이브러리 패턴 검색 (예: libfoo.so.1()(64bit))
-    if (dep.name.includes('.so')) {
-      const libName = dep.name.split('(')[0];
-      const byLib = this.providesMap.get(libName);
-      if (byLib) {
-        for (const pkg of byLib) {
+    // 3. 아키텍처 접미사 처리 (예: libc6:amd64)
+    if (dep.name.includes(':')) {
+      const [baseName] = dep.name.split(':');
+      const byBaseName = this.metadataCache.packages.get(baseName);
+      if (byBaseName) {
+        for (const pkg of byBaseName) {
           if (!candidates.find((c) => this.getPackageKey(c) === this.getPackageKey(pkg))) {
             candidates.push(pkg);
           }
@@ -233,18 +252,18 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
 }
 
 // 싱글톤 인스턴스
-let yumResolverInstance: YumDependencyResolver | null = null;
+let aptResolverInstance: AptDependencyResolver | null = null;
 
-export function getYumResolver(options?: DependencyResolverOptions): YumDependencyResolver {
-  if (!yumResolverInstance && options) {
-    yumResolverInstance = new YumDependencyResolver(options);
+export function getAptResolver(options?: DependencyResolverOptions): AptDependencyResolver {
+  if (!aptResolverInstance && options) {
+    aptResolverInstance = new AptDependencyResolver(options);
   }
   // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
-  if (!yumResolverInstance) {
-    throw new Error('YumDependencyResolver requires DependencyResolverOptions');
+  if (!aptResolverInstance) {
+    throw new Error('AptDependencyResolver requires DependencyResolverOptions');
   }
-  return yumResolverInstance;
+  return aptResolverInstance;
 }
 
-// 기존 YumResolver export (호환성 유지를 위해 YumDependencyResolver를 YumResolver로도 export)
-export { YumDependencyResolver as YumResolver };
+// 기존 AptResolver export (호환성 유지를 위해 AptDependencyResolver를 AptResolver로도 export)
+export { AptDependencyResolver as AptResolver };

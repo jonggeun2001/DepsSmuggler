@@ -48,6 +48,7 @@ import {
 } from '../shared/maven-pom-utils';
 import { MavenBomProcessor } from '../shared/maven-bom-processor';
 import { MAVEN_CONSTANTS } from '../constants/maven';
+import { buildMavenClassifier, isNativeArtifact } from '../shared/maven-utils';
 
 /** Maven Resolver 옵션 */
 export interface MavenResolverOptions extends ResolverOptions {
@@ -57,6 +58,10 @@ export interface MavenResolverOptions extends ResolverOptions {
   parallelThreads?: number;
   /** POM 캐시 TTL (ms, 기본값: 5분) */
   pomCacheTtl?: number;
+  /** 대상 OS (네이티브 라이브러리 classifier 자동 설정용) */
+  targetOS?: string;
+  /** 대상 아키텍처 (네이티브 라이브러리 classifier 자동 설정용) */
+  targetArchitecture?: string;
 }
 
 // MavenResolutionContext는 maven-queue-processor.ts에서 import됨
@@ -172,6 +177,18 @@ export class MavenResolver implements IResolver {
       artifactId,
       version,
     };
+
+    // 네이티브 패키지 판별 및 classifier 자동 설정
+    if (isNativeArtifact(groupId, artifactId) && !rootCoordinate.classifier) {
+      const autoClassifier = buildMavenClassifier(opts.targetOS, opts.targetArchitecture);
+      if (autoClassifier) {
+        rootCoordinate.classifier = autoClassifier;
+        logger.info('네이티브 패키지 classifier 자동 설정', {
+          package: packageName,
+          classifier: autoClassifier,
+        });
+      }
+    }
 
     try {
       logger.info('Maven 의존성 해결 시작', {

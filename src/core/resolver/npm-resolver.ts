@@ -27,6 +27,39 @@ import { NPM_CONSTANTS } from '../constants/npm';
 import logger from '../../utils/logger';
 
 /**
+ * 플랫폼 매핑 (설정값 → npm 값)
+ */
+const OS_MAPPING: Record<string, string> = {
+  linux: 'linux',
+  macos: 'darwin',
+  windows: 'win32',
+};
+
+const CPU_MAPPING: Record<string, string> = {
+  x86_64: 'x64',
+  amd64: 'x64',
+  aarch64: 'arm64',
+  arm64: 'arm64',
+};
+
+/**
+ * 네이티브 바이너리 패키지명 패턴
+ * 패키지명에서 플랫폼 정보를 추출하기 위한 정규식 패턴
+ */
+const PLATFORM_PACKAGE_PATTERNS = [
+  // @esbuild/linux-x64, @esbuild/darwin-arm64
+  /^@[\w-]+\/(linux|darwin|win32)-(x64|arm64|ia32)$/,
+  // @img/sharp-linux-x64, @img/sharp-darwin-arm64
+  /^@[\w-]+\/[\w-]+-((linux|darwin|win32)-(x64|arm64|ia32))$/,
+  // @swc/core-linux-x64-gnu, @swc/core-darwin-arm64
+  /^@[\w-]+\/[\w-]+-((linux|darwin|win32)-(x64|arm64|ia32)(-gnu|-musl)?)$/,
+  // lightningcss-linux-x64-gnu, rollup-linux-x64-gnu
+  /^[\w-]+-((linux|darwin|win32)-(x64|arm64|ia32)(-gnu|-musl)?)$/,
+  // @rollup/rollup-linux-x64-gnu
+  /^@rollup\/rollup-((linux|darwin|win32)-(x64|arm64|ia32)(-gnu|-musl)?)$/,
+];
+
+/**
  * BFS 빌드 옵션
  */
 interface BuildDepsOptions {
@@ -56,6 +89,10 @@ export class NpmResolver {
   private depsQueue: DepsQueueItem[] = [];
   private depsSeen: Set<string> = new Set();
 
+  // 플랫폼 필터링용
+  private targetOS: string | null = null;
+  private targetArchitecture: string | null = null;
+
   constructor(registryUrl = 'https://registry.npmjs.org') {
     this.versionResolver = new NpmVersionResolver(registryUrl);
     this.treeManager = new NpmTreeManager();
@@ -82,7 +119,13 @@ export class NpmResolver {
       preferDedupe = false,
       legacyPeerDeps = false,
       installStrategy = 'hoisted',
+      targetOS,
+      targetArchitecture,
     } = options;
+
+    // 플랫폼 필터링 설정
+    this.targetOS = targetOS || null;
+    this.targetArchitecture = targetArchitecture || null;
 
     try {
       // 1. 루트 패키지 정보 조회
@@ -210,6 +253,12 @@ export class NpmResolver {
       throw new Error(`패키지 버전 정보를 찾을 수 없습니다: ${name}@${resolvedVersion}`);
     }
 
+    // 플랫폼 호환성 체크
+    if (!this.isPlatformCompatible(pkgInfo)) {
+      logger.debug(`플랫폼 불일치로 스킵: ${name}@${resolvedVersion}`);
+      return;
+    }
+
     // 배치 위치 결정 (hoisting)
     const treeOptions: TreeManagerOptions = {
       preferDedupe: options.preferDedupe,
@@ -262,6 +311,110 @@ export class NpmResolver {
   }
 
   /**
+   * 플랫폼 호환성 체크
+   * package.json의 os, cpu 필드를 확인하여 타겟 플랫폼과 호환되는지 검사
+   */
+  private isPlatformCompatible(pkgInfo: NpmPackageVersion): boolean {
+    // 타겟 플랫폼이 설정되지 않았으면 모든 패키지 허용
+    if (!this.targetOS && !this.targetArchitecture) {
+      return true;
+    }
+
+    const { os: pkgOs, cpu: pkgCpu } = pkgInfo;
+
+    // OS 체크
+    if (this.targetOS && pkgOs && pkgOs.length > 0) {
+      const npmOs = OS_MAPPING[this.targetOS];
+      if (!npmOs || !pkgOs.includes(npmOs)) {
+        logger.debug(`플랫폼 불일치로 스킵: ${pkgInfo.name} (os: ${pkgOs})`);
+        return false;
+      }
+    }
+
+    // CPU 체크
+    if (this.targetArchitecture && pkgCpu && pkgCpu.length > 0) {
+      const npmCpu = CPU_MAPPING[this.targetArchitecture];
+      if (!npmCpu || !pkgCpu.includes(npmCpu)) {
+        logger.debug(`플랫폼 불일치로 스킵: ${pkgInfo.name} (cpu: ${pkgCpu})`);
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * 패키지명에서 플랫폼 정보 추출
+   * @param pkgName - 패키지명 (예: @esbuild/linux-x64, @img/sharp-darwin-arm64)
+   * @returns { os: string, cpu: string } | null
+   */
+  private extractPlatformFromPackageName(pkgName: string): { os: string; cpu: string } | null {
+    for (const pattern of PLATFORM_PACKAGE_PATTERNS) {
+      const match = pkgName.match(pattern);
+      if (match) {
+        // 매칭된 그룹에서 OS와 CPU 추출
+        const groups = match.slice(1).filter(Boolean);
+
+        // darwin|linux|win32 찾기
+        const os = groups.find((g) => ['linux', 'darwin', 'win32'].includes(g));
+        // x64|arm64|ia32 찾기
+        const cpu = groups.find((g) => ['x64', 'arm64', 'ia32'].includes(g));
+
+        if (os && cpu) {
+          return { os, cpu };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * optionalDependency가 타겟 플랫폼과 호환되는지 확인
+   * @param pkgName - 패키지명
+   * @returns 호환 여부
+   */
+  private isOptionalDepCompatible(pkgName: string): boolean {
+    // 타겟 플랫폼이 설정되지 않았으면 모든 패키지 허용
+    if (!this.targetOS && !this.targetArchitecture) {
+      return true;
+    }
+
+    // 패키지명에서 플랫폼 정보 추출
+    const platformInfo = this.extractPlatformFromPackageName(pkgName);
+
+    // 플랫폼 정보가 없으면 플랫폼 무관 패키지로 간주 (허용)
+    if (!platformInfo) {
+      return true;
+    }
+
+    // OS 매칭
+    if (this.targetOS) {
+      const npmOs = OS_MAPPING[this.targetOS];
+      if (npmOs && platformInfo.os !== npmOs) {
+        logger.debug(
+          `플랫폼 불일치로 스킵 (OS): ${pkgName} (expected: ${npmOs}, found: ${platformInfo.os})`
+        );
+        return false;
+      }
+    }
+
+    // CPU 매칭
+    if (this.targetArchitecture) {
+      const npmCpu = CPU_MAPPING[this.targetArchitecture];
+      if (npmCpu && platformInfo.cpu !== npmCpu) {
+        logger.debug(
+          `플랫폼 불일치로 스킵 (CPU): ${pkgName} (expected: ${npmCpu}, found: ${platformInfo.cpu})`
+        );
+        return false;
+      }
+    }
+
+    logger.debug(`플랫폼 호환 optionalDependency: ${pkgName}`);
+    return true;
+  }
+
+  /**
    * 의존성을 큐에 추가
    */
   private enqueueDependencies(
@@ -280,9 +433,19 @@ export class NpmResolver {
       this.enqueueDepType(pkgInfo.devDependencies, 'dev', depth, parentPath);
     }
 
-    // optional 의존성
+    // optional 의존성 (플랫폼 필터링 적용)
     if (options.includeOptional && pkgInfo.optionalDependencies) {
-      this.enqueueDepType(pkgInfo.optionalDependencies, 'optional', depth, parentPath);
+      const filteredOptionalDeps: Record<string, string> = {};
+
+      for (const [name, version] of Object.entries(pkgInfo.optionalDependencies)) {
+        if (this.isOptionalDepCompatible(name)) {
+          filteredOptionalDeps[name] = version;
+        }
+      }
+
+      if (Object.keys(filteredOptionalDeps).length > 0) {
+        this.enqueueDepType(filteredOptionalDeps, 'optional', depth, parentPath);
+      }
     }
 
     // peer 의존성 (npm v7+ 자동 설치)

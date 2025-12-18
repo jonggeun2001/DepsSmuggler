@@ -34,6 +34,8 @@ export interface RepoDataProcessorConfig {
   targetSubdir: string;
   /** Python 버전 (빌드 필터링용) */
   pythonVersion: string | null;
+  /** CUDA 버전 (null = CPU only, CUDA 의존성 있는 패키지 제외) */
+  cudaVersion: string | null;
 }
 
 /**
@@ -186,6 +188,11 @@ export class CondaRepoDataProcessor {
         continue;
       }
 
+      // CUDA 호환성 체크 (depends에 __cuda 마커가 있으면 해당 CUDA 버전 필요)
+      if (!this.isBuildCompatibleWithCuda(pkg.depends || [])) {
+        continue;
+      }
+
       const isPythonMatch = this.isBuildCompatibleWithPython(pkg.build);
 
       candidates.push({
@@ -315,6 +322,109 @@ export class CondaRepoDataProcessor {
     }
 
     // noarch 등 기타: 모든 빌드 허용
+    return true;
+  }
+
+
+  /**
+   * 빌드가 타겟 CUDA 버전과 호환되는지 확인
+   * depends에 __cuda 마커가 있으면 해당 CUDA 버전 요구
+   * @param depends 패키지의 의존성 목록
+   * @returns CUDA 호환 여부
+   */
+  isBuildCompatibleWithCuda(depends: string[]): boolean {
+    // __cuda 의존성 찾기 (예: "__cuda", "__cuda >=11.8", "__cuda >=12.0,<13")
+    const cudaDeps = depends.filter(d => d === '__cuda' || d.startsWith('__cuda '));
+
+    // CUDA 의존성이 없으면 모든 환경과 호환 (CPU 패키지)
+    if (cudaDeps.length === 0) {
+      return true;
+    }
+
+    // 타겟 CUDA 버전이 없으면 (CPU only) CUDA 의존성 있는 패키지 제외
+    if (!this.config.cudaVersion) {
+      return false;
+    }
+
+    // CUDA 버전 파싱 (예: "11.8" -> [11, 8])
+    const parseVersion = (v: string): number[] => {
+      return v.split('.').map(n => parseInt(n, 10));
+    };
+
+    const targetVersion = parseVersion(this.config.cudaVersion);
+
+    // 모든 __cuda 의존성에 대해 버전 제약 확인
+    for (const dep of cudaDeps) {
+      // "__cuda" (버전 제약 없음) → 모든 CUDA 버전과 호환
+      if (dep === '__cuda') continue;
+
+      // "__cuda >=11.8" 형태 파싱
+      const versionSpec = dep.replace('__cuda ', '').trim();
+
+      // 버전 제약 파싱 (>=, <, ==, != 등)
+      const constraints = versionSpec.split(',').map(c => c.trim());
+
+      for (const constraint of constraints) {
+        let operator = '';
+        let versionStr = '';
+
+        if (constraint.startsWith('>=')) {
+          operator = '>=';
+          versionStr = constraint.slice(2).trim();
+        } else if (constraint.startsWith('<=')) {
+          operator = '<=';
+          versionStr = constraint.slice(2).trim();
+        } else if (constraint.startsWith('==')) {
+          operator = '==';
+          versionStr = constraint.slice(2).trim();
+        } else if (constraint.startsWith('!=')) {
+          operator = '!=';
+          versionStr = constraint.slice(2).trim();
+        } else if (constraint.startsWith('>')) {
+          operator = '>';
+          versionStr = constraint.slice(1).trim();
+        } else if (constraint.startsWith('<')) {
+          operator = '<';
+          versionStr = constraint.slice(1).trim();
+        } else {
+          // 알 수 없는 제약, 무시
+          continue;
+        }
+
+        // 버전 문자열에서 추가 태그 제거 (예: "12.0.a0" -> "12.0")
+        const cleanVersion = versionStr.replace(/\.[a-z]+\d*$/, '');
+        const constraintVersion = parseVersion(cleanVersion);
+
+        // 버전 비교
+        const compare = (a: number[], b: number[]): number => {
+          const len = Math.max(a.length, b.length);
+          for (let i = 0; i < len; i++) {
+            const av = a[i] || 0;
+            const bv = b[i] || 0;
+            if (av < bv) return -1;
+            if (av > bv) return 1;
+          }
+          return 0;
+        };
+
+        const cmp = compare(targetVersion, constraintVersion);
+
+        let satisfied = false;
+        switch (operator) {
+          case '>=': satisfied = cmp >= 0; break;
+          case '<=': satisfied = cmp <= 0; break;
+          case '==': satisfied = cmp === 0; break;
+          case '!=': satisfied = cmp !== 0; break;
+          case '>': satisfied = cmp > 0; break;
+          case '<': satisfied = cmp < 0; break;
+        }
+
+        if (!satisfied) {
+          return false;
+        }
+      }
+    }
+
     return true;
   }
 

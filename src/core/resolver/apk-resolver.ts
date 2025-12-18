@@ -1,19 +1,19 @@
 /**
- * YUM/RPM Dependency Resolver
- * RHEL/CentOS 계열 의존성 해결기 (플랫 구조)
+ * APK Dependency Resolver
+ * Alpine Linux 의존성 해결기 (플랫 구조)
  */
 
 import type { OSPackageInfo, PackageDependency, Repository, OSPackageSearchResult } from '../downloaders/os-shared/types';
 import { BaseOSDependencyResolver, type DependencyResolverOptions } from '../downloaders/os-shared/base-resolver';
 import { compareVersions } from '../shared/version-utils';
-import { YumMetadataParser } from '../downloaders/yum';
+import { ApkMetadataParser } from '../downloaders/apk';
 import { isArchitectureCompatible } from '../downloaders/os-shared/repositories';
 
 /**
- * YUM 의존성 해결기
+ * APK 의존성 해결기
  */
-export class YumDependencyResolver extends BaseOSDependencyResolver {
-  private parsers: Map<string, YumMetadataParser> = new Map();
+export class ApkDependencyResolver extends BaseOSDependencyResolver {
+  private parsers: Map<string, ApkMetadataParser> = new Map();
   private allPackages: OSPackageInfo[] = [];
   private providesMap: Map<string, OSPackageInfo[]> = new Map();
 
@@ -33,18 +33,11 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
 
     for (const repo of activeRepos) {
       try {
-        const parser = new YumMetadataParser(repo, this.options.architecture);
+        const parser = new ApkMetadataParser(repo, this.options.architecture);
         this.parsers.set(repo.id, parser);
 
-        // repomd.xml 파싱
-        const repomd = await parser.parseRepomd();
-        if (!repomd.primary) {
-          console.warn(`No primary metadata found for ${repo.name}`);
-          continue;
-        }
-
-        // primary.xml 파싱
-        const packages = await parser.parsePrimary(repomd.primary.location);
+        // APKINDEX 파싱
+        const packages = await parser.parseIndex();
 
         // 아키텍처 필터링
         const compatiblePackages = packages.filter((pkg) =>
@@ -53,7 +46,7 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
 
         this.allPackages.push(...compatiblePackages);
 
-        // provides 맵 구축
+        // 캐시 구축
         for (const pkg of compatiblePackages) {
           // 패키지 이름으로 등록
           this.addToPackageCache(pkg.name, pkg);
@@ -90,8 +83,8 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
    * provides 캐시에 추가
    */
   private addToProvidesCache(provide: string, pkg: OSPackageInfo): void {
-    // 버전 제거 (예: "libfoo.so.1()(64bit)" -> "libfoo.so.1")
-    const baseName = provide.split('(')[0];
+    // 버전 정보 제거 (예: "so:libssl.so.3=3.0.0" -> "so:libssl.so.3")
+    const baseName = provide.split('=')[0];
 
     const existing = this.providesMap.get(baseName) || [];
     existing.push(pkg);
@@ -106,12 +99,12 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
   }
 
   /**
-   * API에서 의존성 가져오기 (YUM은 API 없음, null 반환)
+   * API에서 의존성 가져오기 (APK는 API 없음, null 반환)
    */
   protected async fetchDependenciesFromAPI(
     _pkg: OSPackageInfo
   ): Promise<PackageDependency[] | null> {
-    // YUM/RPM은 공개 API가 없으므로 항상 메타데이터 사용
+    // APK는 공개 API가 없으므로 항상 메타데이터 사용
     return null;
   }
 
@@ -121,17 +114,7 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
   protected async fetchDependenciesFromMetadata(
     pkg: OSPackageInfo
   ): Promise<PackageDependency[]> {
-    // 패키지에 이미 의존성 정보가 있음
-    const deps = pkg.dependencies || [];
-
-    // 권장 의존성 추가
-    if (this.options.includeRecommends && pkg.recommends) {
-      for (const rec of pkg.recommends) {
-        deps.push({ name: rec, isOptional: true });
-      }
-    }
-
-    return deps;
+    return pkg.dependencies || [];
   }
 
   /**
@@ -158,12 +141,25 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
       }
     }
 
-    // 3. 라이브러리 패턴 검색 (예: libfoo.so.1()(64bit))
-    if (dep.name.includes('.so')) {
-      const libName = dep.name.split('(')[0];
-      const byLib = this.providesMap.get(libName);
-      if (byLib) {
-        for (const pkg of byLib) {
+    // 3. so: 의존성 처리 (예: so:libc.musl-x86_64.so.1)
+    if (dep.name.startsWith('so:')) {
+      const soName = dep.name;
+      const bySo = this.providesMap.get(soName);
+      if (bySo) {
+        for (const pkg of bySo) {
+          if (!candidates.find((c) => this.getPackageKey(c) === this.getPackageKey(pkg))) {
+            candidates.push(pkg);
+          }
+        }
+      }
+    }
+
+    // 4. cmd: 의존성 처리 (예: cmd:sh)
+    if (dep.name.startsWith('cmd:')) {
+      const cmdName = dep.name;
+      const byCmd = this.providesMap.get(cmdName);
+      if (byCmd) {
+        for (const pkg of byCmd) {
           if (!candidates.find((c) => this.getPackageKey(c) === this.getPackageKey(pkg))) {
             candidates.push(pkg);
           }
@@ -233,18 +229,18 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
 }
 
 // 싱글톤 인스턴스
-let yumResolverInstance: YumDependencyResolver | null = null;
+let apkResolverInstance: ApkDependencyResolver | null = null;
 
-export function getYumResolver(options?: DependencyResolverOptions): YumDependencyResolver {
-  if (!yumResolverInstance && options) {
-    yumResolverInstance = new YumDependencyResolver(options);
+export function getApkResolver(options?: DependencyResolverOptions): ApkDependencyResolver {
+  if (!apkResolverInstance && options) {
+    apkResolverInstance = new ApkDependencyResolver(options);
   }
   // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
-  if (!yumResolverInstance) {
-    throw new Error('YumDependencyResolver requires DependencyResolverOptions');
+  if (!apkResolverInstance) {
+    throw new Error('ApkDependencyResolver requires DependencyResolverOptions');
   }
-  return yumResolverInstance;
+  return apkResolverInstance;
 }
 
-// 기존 YumResolver export (호환성 유지를 위해 YumDependencyResolver를 YumResolver로도 export)
-export { YumDependencyResolver as YumResolver };
+// 기존 ApkResolver export (호환성 유지를 위해 ApkDependencyResolver를 ApkResolver로도 export)
+export { ApkDependencyResolver as ApkResolver };

@@ -9,7 +9,21 @@ import {
 import logger from '../../utils/logger';
 import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
 import { compareVersions, isVersionCompatible, flattenDependencyTree } from '../shared';
-import { fetchPackageMetadata, clearMemoryCache as clearPipCache, PipCacheOptions } from '../shared/pip-cache';
+import {
+  fetchPackageMetadata,
+  clearMemoryCache as clearPipCache,
+  PipCacheOptions,
+  PyPIRelease,
+  PyPIPackageInfo,
+} from '../shared/pip-cache';
+import type { PipTargetPlatform } from '../../types/pip-target-platform';
+import {
+  fetchPackageFiles,
+  extractVersionFromFilename,
+  findLatestVersion as findLatestVersionFromSimpleApi,
+  SimpleApiPackageFile,
+  fetchWheelMetadata,
+} from './pip-simple-api';
 
 // 의존성 파싱 결과
 interface ParsedDependency {
@@ -33,12 +47,20 @@ export class PipResolver implements IResolver {
   private targetPlatform: TargetPlatform | null = null;
   private pythonVersion: string | null = null;
   private cacheOptions: PipCacheOptions = {};
+  private pipTargetPlatform: PipTargetPlatform | null = null;
 
   /**
    * 캐시 옵션 설정
    */
   setCacheOptions(options: PipCacheOptions): void {
     this.cacheOptions = options;
+  }
+
+  /**
+   * pip 타겟 플랫폼 설정
+   */
+  setPipTargetPlatform(platform: PipTargetPlatform | null): void {
+    this.pipTargetPlatform = platform;
   }
 
   /**
@@ -54,7 +76,7 @@ export class PipResolver implements IResolver {
   async resolveDependencies(
     packageName: string,
     version: string,
-    options?: ResolverOptions & { pythonVersion?: string }
+    options?: ResolverOptions & { pythonVersion?: string; indexUrl?: string; extras?: string[] }
   ): Promise<DependencyResolutionResult> {
     // 상태 초기화
     this.visited.clear();
@@ -63,9 +85,11 @@ export class PipResolver implements IResolver {
     this.pythonVersion = options?.pythonVersion ?? null;
 
     const maxDepth = options?.maxDepth ?? 10;
+    const indexUrl = options?.indexUrl;
+    const extras = options?.extras;
 
     try {
-      const root = await this.resolvePackage(packageName, version, 0, maxDepth);
+      const root = await this.resolvePackage(packageName, version, 0, maxDepth, indexUrl, extras);
       const flatList = flattenDependencyTree(root);
 
       return {
@@ -90,12 +114,14 @@ export class PipResolver implements IResolver {
     name: string,
     version: string,
     depth: number,
-    maxDepth: number
+    maxDepth: number,
+    indexUrl?: string,
+    extras?: string[]
   ): Promise<DependencyNode> {
     // "latest" 버전인 경우 실제 최신 버전 조회
     let actualVersion = version;
     if (version === 'latest' || !version) {
-      const latestVersion = await this.getLatestVersion(name);
+      const latestVersion = await this.getLatestVersion(name, undefined, indexUrl);
       if (!latestVersion) {
         throw new Error(`패키지를 찾을 수 없음: ${name}@${version}`);
       }
@@ -103,7 +129,7 @@ export class PipResolver implements IResolver {
       logger.debug('"latest" 버전을 실제 버전으로 변환', { name, version, actualVersion });
     }
 
-    const cacheKey = `${name.toLowerCase()}@${actualVersion}`;
+    const cacheKey = `${name.toLowerCase()}@${actualVersion}@${indexUrl || 'pypi'}`;
 
     // 이미 방문한 패키지인 경우 캐시된 결과 반환 (순환 의존성 방지)
     if (this.visited.has(cacheKey)) {
@@ -120,31 +146,117 @@ export class PipResolver implements IResolver {
     }
 
     try {
-      // PyPI에서 패키지 정보 조회 (캐시 사용)
-      const cacheResult = await fetchPackageMetadata(name, actualVersion, this.cacheOptions);
-      if (!cacheResult) {
-        throw new Error(`패키지를 찾을 수 없음: ${name}@${actualVersion}`);
-      }
-      const { info, urls } = cacheResult.data;
+      let packageInfo: PackageInfo;
+      let requiresDist: string[] = [];
 
-      // 패키지 크기 계산 (wheel 또는 sdist 중 가장 적합한 것 선택)
-      let packageSize = 0;
-      if (urls && urls.length > 0) {
-        // wheel 파일 우선, 없으면 sdist
-        const wheel = urls.find((u) => u.packagetype === 'bdist_wheel');
-        const sdist = urls.find((u) => u.packagetype === 'sdist');
-        packageSize = (wheel || sdist || urls[0]).size || 0;
-      }
+      if (indexUrl) {
+        // Simple API 사용 (커스텀 인덱스)
+        // 1) Simple API에서 파일 정보 조회 (다운로드 URL용)
+        const files = await fetchPackageFiles(indexUrl, name);
+        const targetFiles = files.filter(
+          (f) => extractVersionFromFilename(f.filename) === actualVersion
+        );
 
-      const packageInfo: PackageInfo = {
-        type: 'pip',
-        name: info.name,
-        version: info.version,
-        metadata: {
-          description: '',
-          size: packageSize,
-        },
-      };
+        if (targetFiles.length === 0) {
+          throw new Error(`패키지를 찾을 수 없음: ${name}@${actualVersion} (인덱스: ${indexUrl})`);
+        }
+
+        // 최적의 wheel 선택
+        const selectedFile = this.selectBestWheelFromSimpleApi(targetFiles);
+        const packageSize = 0; // Simple API는 파일 크기 정보 미제공
+
+        // 2) PEP 658 메타데이터에서 의존성 정보 조회 (커스텀 인덱스 우선)
+        if (selectedFile?.metadataHash) {
+          logger.debug('PEP 658 메타데이터 조회 시도', {
+            name,
+            version: actualVersion,
+            filename: selectedFile.filename,
+          });
+          requiresDist = await fetchWheelMetadata(selectedFile);
+        }
+
+        // 3) PEP 658 실패 시 PyPI 폴백 (기본 버전으로 조회)
+        if (requiresDist.length === 0) {
+          try {
+            // 로컬 버전 지정자 제거 (예: 2.9.1+cu130 → 2.9.1)
+            const baseVersion = actualVersion.split('+')[0];
+            const pypiResult = await fetchPackageMetadata(name, baseVersion, this.cacheOptions);
+            if (pypiResult) {
+              requiresDist = pypiResult.data.info.requires_dist || [];
+              logger.debug('PyPI 폴백으로 의존성 정보 조회 성공', {
+                name,
+                originalVersion: actualVersion,
+                baseVersion,
+                dependenciesCount: requiresDist.length,
+              });
+            }
+          } catch (error) {
+            logger.warn('PyPI 폴백 조회 실패 (커스텀 전용 패키지일 수 있음)', {
+              name,
+              version: actualVersion,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+
+        packageInfo = {
+          type: 'pip',
+          name,
+          version: actualVersion,
+          metadata: {
+            description: '',
+            size: packageSize,
+            filename: selectedFile?.filename,
+            indexUrl, // 커스텀 인덱스 URL 저장 (다운로드 시 사용)
+          },
+        };
+
+        if (requiresDist.length === 0) {
+          logger.info('의존성 없음 (PEP 658 미지원 및 PyPI 미등록)', {
+            name,
+            version: actualVersion,
+          });
+        } else {
+          logger.info('의존성 정보 조회 성공', {
+            name,
+            version: actualVersion,
+            dependenciesCount: requiresDist.length,
+            source: selectedFile?.metadataHash ? 'PEP 658' : 'PyPI 폴백',
+          });
+        }
+      } else {
+        // PyPI JSON API 사용 (기존 로직)
+        const cacheResult = await fetchPackageMetadata(name, actualVersion, this.cacheOptions);
+        if (!cacheResult) {
+          throw new Error(`패키지를 찾을 수 없음: ${name}@${actualVersion}`);
+        }
+        const { info, urls } = cacheResult.data;
+
+        // 패키지 크기 및 파일명 결정 (wheel 또는 sdist 중 가장 적합한 것 선택)
+        let packageSize = 0;
+        let packageFilename: string | undefined;
+        if (urls && urls.length > 0) {
+          // 타겟 플랫폼에 맞는 최적의 wheel 선택
+          const selectedFile = this.selectBestWheel(urls);
+          if (selectedFile) {
+            packageSize = selectedFile.size || 0;
+            packageFilename = selectedFile.filename;
+          }
+        }
+
+        packageInfo = {
+          type: 'pip',
+          name: info.name,
+          version: info.version,
+          metadata: {
+            description: '',
+            size: packageSize,
+            filename: packageFilename,
+          },
+        };
+
+        requiresDist = info.requires_dist || [];
+      }
 
       const node: DependencyNode = {
         package: packageInfo,
@@ -155,10 +267,10 @@ export class PipResolver implements IResolver {
       this.visited.set(cacheKey, node);
 
       // requires_dist 파싱 및 의존성 해결
-      if (info.requires_dist) {
-        const parsedDeps = info.requires_dist
+      if (requiresDist.length > 0) {
+        const parsedDeps = requiresDist
           .map((dep) => this.parseDependencyString(dep))
-          .filter((dep) => dep !== null && this.evaluateMarker(dep.markers)); // 환경 마커 평가
+          .filter((dep) => dep !== null && this.evaluateMarker(dep.markers, extras)); // 환경 마커 평가 (extras 전달)
 
         for (const dep of parsedDeps) {
           if (!dep) continue;
@@ -167,14 +279,17 @@ export class PipResolver implements IResolver {
             // 최신 버전 조회
             const depVersion = await this.getLatestVersion(
               dep.name,
-              dep.versionSpec
+              dep.versionSpec,
+              indexUrl // 부모와 동일한 인덱스 사용
             );
             if (depVersion) {
               const childNode = await this.resolvePackage(
                 dep.name,
                 depVersion,
                 depth + 1,
-                maxDepth
+                maxDepth,
+                indexUrl, // 부모와 동일한 인덱스 전파
+                dep.extras // 파싱된 extras 전달
               );
               node.dependencies.push(childNode);
             }
@@ -251,7 +366,7 @@ export class PipResolver implements IResolver {
    * targetPlatform이 설정된 경우 해당 플랫폼에 맞는 마커만 통과
    * targetPlatform이 없으면 마커가 없는 의존성만 통과 (기존 동작)
    */
-  private evaluateMarker(marker?: string): boolean {
+  private evaluateMarker(marker?: string, extras?: string[]): boolean {
     // 마커가 없으면 항상 포함
     if (!marker) return true;
 
@@ -260,8 +375,12 @@ export class PipResolver implements IResolver {
 
     const { system, machine } = this.targetPlatform;
 
-    // extra 마커는 제외 (예: extra == "dev")
-    if (marker.includes('extra')) return false;
+    // extra 마커 평가 (예: extra == "cuda")
+    const extraMatch = marker.match(/extra\s*==\s*["'](\w+)["']/);
+    if (extraMatch) {
+      const requiredExtra = extraMatch[1];
+      return extras?.includes(requiredExtra) ?? false;
+    }
 
     // platform_system 평가
     const systemMatch = marker.match(/platform_system\s*==\s*["'](\w+)["']/);
@@ -314,47 +433,95 @@ export class PipResolver implements IResolver {
    */
   private async getLatestVersion(
     name: string,
-    versionSpec?: string
+    versionSpec?: string,
+    indexUrl?: string
   ): Promise<string | null> {
     try {
-      // 캐시에서 패키지 메타데이터 조회 (버전 없이 조회해야 releases 포함)
-      const cacheResult = await fetchPackageMetadata(name, undefined, this.cacheOptions);
-      if (!cacheResult) return null;
+      if (indexUrl) {
+        // Simple API 사용
+        const files = await fetchPackageFiles(indexUrl, name);
+        if (files.length === 0) return null;
 
-      const { data } = cacheResult;
-      if (!data.releases) return null;
+        // versionSpec이 없으면 최신 버전 반환
+        if (!versionSpec) {
+          return findLatestVersionFromSimpleApi(files);
+        }
 
-      const versions = Object.keys(data.releases).filter(
-        (v) => data.releases![v].length > 0 // 실제 릴리스가 있는 버전만
-      );
+        // versionSpec과 호환되는 버전 필터링
+        const versions = new Set<string>();
+        for (const file of files) {
+          try {
+            const version = extractVersionFromFilename(file.filename);
+            if (!file.yanked) {
+              versions.add(version);
+            }
+          } catch {
+            // 버전 추출 실패 시 무시
+          }
+        }
 
-      if (versions.length === 0) return null;
+        const compatibleVersions = Array.from(versions).filter((v) =>
+          isVersionCompatible(v, versionSpec)
+        );
 
-      // 버전 스펙이 없으면 최신 버전
-      if (!versionSpec) {
-        return data.info.version;
+        if (compatibleVersions.length === 0) {
+          // 호환 버전이 없으면 최신 버전 사용 (충돌 기록)
+          const latestVersion = findLatestVersionFromSimpleApi(files);
+          if (latestVersion) {
+            this.conflicts.push({
+              type: 'version',
+              packageName: name,
+              versions: [versionSpec, latestVersion],
+              resolvedVersion: latestVersion,
+            });
+            return latestVersion;
+          }
+          return null;
+        }
+
+        // 최신 호환 버전 반환
+        return compatibleVersions.sort((a, b) => compareVersions(b, a))[0];
+      } else {
+        // PyPI JSON API 사용 (기존 로직)
+        // 캐시에서 패키지 메타데이터 조회 (버전 없이 조회해야 releases 포함)
+        const cacheResult = await fetchPackageMetadata(name, undefined, this.cacheOptions);
+        if (!cacheResult) return null;
+
+        const { data } = cacheResult;
+        if (!data.releases) return null;
+
+        const versions = Object.keys(data.releases).filter(
+          (v) => data.releases![v].length > 0 // 실제 릴리스가 있는 버전만
+        );
+
+        if (versions.length === 0) return null;
+
+        // 버전 스펙이 없으면 최신 버전
+        if (!versionSpec) {
+          return data.info.version;
+        }
+
+        // 버전 스펙 파싱 및 필터링
+        const compatibleVersions = versions.filter((v) =>
+          isVersionCompatible(v, versionSpec)
+        );
+
+        if (compatibleVersions.length === 0) {
+          // 호환 버전이 없으면 최신 버전 사용 (충돌 기록)
+          this.conflicts.push({
+            type: 'version',
+            packageName: name,
+            versions: [versionSpec, data.info.version],
+            resolvedVersion: data.info.version,
+          });
+          return data.info.version;
+        }
+
+        // 최신 호환 버전 반환
+        return compatibleVersions.sort((a, b) =>
+          compareVersions(b, a)
+        )[0];
       }
-
-      // 버전 스펙 파싱 및 필터링
-      const compatibleVersions = versions.filter((v) =>
-        isVersionCompatible(v, versionSpec)
-      );
-
-      if (compatibleVersions.length === 0) {
-        // 호환 버전이 없으면 최신 버전 사용 (충돌 기록)
-        this.conflicts.push({
-          type: 'version',
-          packageName: name,
-          versions: [versionSpec, data.info.version],
-          resolvedVersion: data.info.version,
-        });
-        return data.info.version;
-      }
-
-      // 최신 호환 버전 반환
-      return compatibleVersions.sort((a, b) =>
-        compareVersions(b, a)
-      )[0];
     } catch {
       return null;
     }
@@ -418,6 +585,338 @@ export class PipResolver implements IResolver {
     }
 
     return packages;
+  }
+
+  /**
+   * wheel 파일명에서 플랫폼 태그 추출
+   * 예: numpy-1.24.0-cp311-cp311-manylinux_2_17_x86_64.whl -> ['manylinux_2_17_x86_64']
+   */
+  private extractPlatformTags(filename: string): string[] {
+    // wheel 파일명 형식: {distribution}-{version}(-{build})?-{python}-{abi}-{platform}.whl
+    const parts = filename.replace('.whl', '').split('-');
+    if (parts.length < 5) return [];
+
+    // 마지막 부분이 플랫폼 태그 (여러 개일 수 있음, . 으로 구분)
+    const platformPart = parts[parts.length - 1];
+    return platformPart.split('.');
+  }
+
+  /**
+   * glibc 버전 비교 (버전 문자열을 숫자 배열로 변환하여 비교)
+   * @returns wheelGlibc가 targetGlibc보다 작거나 같으면 true (호환)
+   */
+  private compareGlibcVersions(wheelGlibc: string, targetGlibc: string): boolean {
+    const parseVersion = (v: string): number[] => {
+      return v.split('.').map(n => parseInt(n, 10));
+    };
+
+    const wheel = parseVersion(wheelGlibc);
+    const target = parseVersion(targetGlibc);
+
+    for (let i = 0; i < Math.max(wheel.length, target.length); i++) {
+      const w = wheel[i] || 0;
+      const t = target[i] || 0;
+      if (w < t) return true;  // wheel이 더 낮은 버전 -> 호환
+      if (w > t) return false; // wheel이 더 높은 버전 -> 비호환
+    }
+    return true; // 같은 버전 -> 호환
+  }
+
+  /**
+   * macOS 버전 비교
+   * @returns wheelMacOS가 targetMacOS보다 작거나 같으면 true (호환)
+   */
+  private compareMacOSVersions(wheelMacOS: string, targetMacOS: string): boolean {
+    const parseVersion = (v: string): number[] => {
+      return v.split('_').map(n => parseInt(n, 10));
+    };
+
+    const wheel = parseVersion(wheelMacOS);
+    const target = parseVersion(targetMacOS);
+
+    for (let i = 0; i < Math.max(wheel.length, target.length); i++) {
+      const w = wheel[i] || 0;
+      const t = target[i] || 0;
+      if (w < t) return true;
+      if (w > t) return false;
+    }
+    return true;
+  }
+
+  /**
+   * wheel이 타겟 플랫폼과 호환되는지 확인
+   */
+  private isWheelCompatible(release: PyPIRelease): boolean {
+    if (!this.pipTargetPlatform) {
+      // 타겟 플랫폼이 설정되지 않으면 기본 동작 (wheel 우선)
+      return true;
+    }
+
+    if (release.packagetype !== 'bdist_wheel') {
+      // wheel이 아니면 호환성 체크 불필요 (sdist는 항상 호환)
+      return true;
+    }
+
+    const platformTags = this.extractPlatformTags(release.filename);
+    if (platformTags.length === 0) return false;
+
+    const { os, arch, glibcVersion, macosVersion } = this.pipTargetPlatform;
+
+    // 플랫폼 무관 wheel (pure Python)
+    if (platformTags.some(tag => tag === 'any')) {
+      return true;
+    }
+
+    // 아키텍처 정규화
+    const normalizeArch = (a: string): string => {
+      if (a === 'x86_64' || a === 'amd64') return 'x86_64';
+      if (a === 'aarch64' || a === 'arm64') return 'aarch64';
+      return a;
+    };
+
+    const targetArch = normalizeArch(arch);
+
+    for (const tag of platformTags) {
+      // Linux manylinux 태그
+      if (os === 'linux') {
+        // manylinux_X_Y_arch 형식 파싱
+        const manylinuxMatch = tag.match(/^manylinux[_\d]*_(\d+)_(\d+)_(.+)$/);
+        if (manylinuxMatch) {
+          const wheelGlibc = `${manylinuxMatch[1]}.${manylinuxMatch[2]}`;
+          const wheelArch = normalizeArch(manylinuxMatch[3]);
+
+          // 아키텍처 체크
+          if (wheelArch !== targetArch) continue;
+
+          // glibc 버전 체크
+          if (glibcVersion && !this.compareGlibcVersions(wheelGlibc, glibcVersion)) {
+            continue;
+          }
+
+          return true;
+        }
+
+        // manylinux2014 (glibc 2.17), manylinux2010 (glibc 2.12), manylinux1 (glibc 2.5) 등
+        const legacyMatch = tag.match(/^(manylinux\d+)_(.+)$/);
+        if (legacyMatch) {
+          const wheelArch = normalizeArch(legacyMatch[2]);
+          if (wheelArch !== targetArch) continue;
+
+          // manylinux2014 = glibc 2.17
+          const legacyGlibcMap: Record<string, string> = {
+            'manylinux1': '2.5',
+            'manylinux2010': '2.12',
+            'manylinux2014': '2.17',
+          };
+
+          const wheelGlibc = legacyGlibcMap[legacyMatch[1]];
+          if (wheelGlibc && glibcVersion && !this.compareGlibcVersions(wheelGlibc, glibcVersion)) {
+            continue;
+          }
+
+          return true;
+        }
+
+        // linux_arch 형식 (일반 리눅스)
+        const linuxMatch = tag.match(/^linux_(.+)$/);
+        if (linuxMatch) {
+          const wheelArch = normalizeArch(linuxMatch[1]);
+          return wheelArch === targetArch;
+        }
+      }
+
+      // macOS 태그
+      if (os === 'macos') {
+        // macosx_X_Y_arch 형식
+        const macosMatch = tag.match(/^macosx_(\d+)_(\d+)_(.+)$/);
+        if (macosMatch) {
+          const wheelMacOS = `${macosMatch[1]}_${macosMatch[2]}`;
+          const wheelArch = normalizeArch(macosMatch[3]);
+
+          // 아키텍처 체크
+          if (wheelArch !== targetArch) continue;
+
+          // macOS 버전 체크
+          if (macosVersion && !this.compareMacOSVersions(wheelMacOS, macosVersion.replace('.', '_'))) {
+            continue;
+          }
+
+          return true;
+        }
+      }
+
+      // Windows 태그
+      if (os === 'windows') {
+        if (tag === 'win_amd64' && (arch === 'x86_64' || arch === 'amd64')) return true;
+        if (tag === 'win32' && arch === 'i386') return true;
+        if (tag === 'win_arm64' && (arch === 'arm64' || arch === 'aarch64')) return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * 호환되는 wheel 중 최적의 wheel 선택
+   * 우선순위: 1) wheel (호환되는 것 중 가장 높은 버전), 2) sdist
+   */
+  private selectBestWheel(urls: PyPIRelease[]): PyPIRelease | null {
+    if (!urls || urls.length === 0) return null;
+
+    // wheel과 sdist 분리
+    const wheels = urls.filter(u => u.packagetype === 'bdist_wheel');
+    const sdist = urls.find(u => u.packagetype === 'sdist');
+
+    if (!this.pipTargetPlatform) {
+      // 타겟 플랫폼 미설정 시 기본 동작: 첫 번째 wheel 또는 sdist
+      return wheels[0] || sdist || urls[0];
+    }
+
+    // 호환되는 wheel 필터링
+    const compatibleWheels = wheels.filter(w => this.isWheelCompatible(w));
+
+    if (compatibleWheels.length === 0) {
+      // 호환되는 wheel이 없으면 sdist 선택
+      return sdist || null;
+    }
+
+    // 호환되는 wheel 중 우선순위 선택
+    // 우선순위: 1) 정확히 일치하는 glibc/macOS 버전, 2) 가장 높은 호환 버전, 3) pure Python (any)
+    const { os, glibcVersion, macosVersion } = this.pipTargetPlatform;
+
+    // 정확히 일치하는 버전 찾기
+    if (os === 'linux' && glibcVersion) {
+      const exactMatch = compatibleWheels.find(w => {
+        const tags = this.extractPlatformTags(w.filename);
+        return tags.some(tag => {
+          const match = tag.match(/^manylinux[_\d]*_(\d+)_(\d+)_/);
+          if (match) {
+            return `${match[1]}.${match[2]}` === glibcVersion;
+          }
+          return false;
+        });
+      });
+      if (exactMatch) return exactMatch;
+    }
+
+    if (os === 'macos' && macosVersion) {
+      const exactMatch = compatibleWheels.find(w => {
+        const tags = this.extractPlatformTags(w.filename);
+        return tags.some(tag => {
+          const match = tag.match(/^macosx_(\d+)_(\d+)_/);
+          if (match) {
+            return `${match[1]}.${match[2]}` === macosVersion.replace('.', '_');
+          }
+          return false;
+        });
+      });
+      if (exactMatch) return exactMatch;
+    }
+
+    // 호환되는 wheel 중 첫 번째 (PyPI는 보통 최신/가장 일반적인 것을 먼저 반환)
+    return compatibleWheels[0];
+  }
+
+  /**
+   * Simple API 파일 목록에서 최적의 wheel 선택
+   * PyPI JSON API의 selectBestWheel과 유사하지만 SimpleApiPackageFile 타입 사용
+   */
+  private selectBestWheelFromSimpleApi(
+    files: SimpleApiPackageFile[]
+  ): SimpleApiPackageFile | null {
+    if (!this.pipTargetPlatform) {
+      // 플랫폼 정보가 없으면 첫 번째 wheel 반환
+      return files.find((f) => f.filename.endsWith('.whl')) || null;
+    }
+
+    // wheel 파일만 필터링
+    const wheels = files.filter((f) => f.filename.endsWith('.whl'));
+
+    for (const wheel of wheels) {
+      try {
+        // parseWheelFilename을 직접 구현 대신 import에서 가져오기
+        const wheelInfo = this.parseWheelFilenameSimple(wheel.filename);
+        
+        // Python 버전 호환성 체크
+        if (this.pythonVersion) {
+          const pyVersion = this.pythonVersion.replace('.', '');
+          if (!wheelInfo.pythonTag.includes(pyVersion) && !wheelInfo.pythonTag.includes('py3') && !wheelInfo.pythonTag.includes('py2.py3')) {
+            continue;
+          }
+        }
+
+        // 플랫폼 호환성 체크
+        const platformTag = wheelInfo.platformTag.toLowerCase();
+        const targetOs = this.pipTargetPlatform.os.toLowerCase();
+        const targetArch = this.pipTargetPlatform.arch.toLowerCase();
+
+        // 플랫폼 매칭 로직
+        if (platformTag === 'any') {
+          return wheel;
+        }
+
+        // Linux
+        if (targetOs === 'linux') {
+          if (platformTag.includes('manylinux') || platformTag.includes('linux')) {
+            if (targetArch === 'x86_64' && platformTag.includes('x86_64')) {
+              return wheel;
+            }
+            if (targetArch === 'aarch64' && platformTag.includes('aarch64')) {
+              return wheel;
+            }
+          }
+        }
+
+        // Windows
+        if (targetOs === 'windows') {
+          if (platformTag.includes('win')) {
+            if (targetArch === 'x86_64' && (platformTag.includes('amd64') || platformTag.includes('win_amd64'))) {
+              return wheel;
+            }
+            if (targetArch === 'arm64' && platformTag.includes('arm64')) {
+              return wheel;
+            }
+          }
+        }
+
+        // macOS
+        if (targetOs === 'macos') {
+          if (platformTag.includes('macosx')) {
+            if (targetArch === 'x86_64' && platformTag.includes('x86_64')) {
+              return wheel;
+            }
+            if (targetArch === 'arm64' && platformTag.includes('arm64')) {
+              return wheel;
+            }
+          }
+        }
+      } catch {
+        // 파싱 실패 시 다음 wheel 확인
+        continue;
+      }
+    }
+
+    // 호환되는 wheel이 없으면 첫 번째 wheel 또는 source dist 반환
+    return wheels[0] || files.find((f) => f.filename.endsWith('.tar.gz')) || files[0];
+  }
+
+  /**
+   * wheel 파일명 간단 파싱 (Simple API용)
+   */
+  private parseWheelFilenameSimple(filename: string): {
+    pythonTag: string;
+    abiTag: string;
+    platformTag: string;
+  } {
+    const match = /^[^-]+-[^-]+-([^-]+)-([^-]+)-(.+)\.whl$/.exec(filename);
+    if (!match) {
+      throw new Error(`Invalid wheel filename: ${filename}`);
+    }
+    return {
+      pythonTag: match[1],
+      abiTag: match[2],
+      platformTag: match[3],
+    };
   }
 }
 
