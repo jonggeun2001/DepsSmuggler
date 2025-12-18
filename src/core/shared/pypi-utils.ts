@@ -1,6 +1,7 @@
 // PyPI 관련 유틸리티 함수 (PEP 425 기반 태그 우선순위 구현)
 import * as https from 'https';
 import type { DownloadUrlResult } from './types';
+import { fetchPackageFiles } from '../resolver/pip-simple-api';
 
 /**
  * Wheel 태그 파싱 결과
@@ -252,6 +253,26 @@ function isCompatiblePlatform(filename: string, targetOS?: string, architecture?
   return true;
 }
 
+/**
+ * 파일명에서 버전 추출
+ * 예: torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl → 2.1.0+cu121
+ */
+export function extractVersionFromFilename(filename: string): string | null {
+  // wheel 파일: {name}-{version}[-{build}]-{pyver}-{abi}-{platform}.whl
+  const wheelMatch = filename.match(/^(.+?)-([0-9][^-]*?)(?:-([^-]+)-([^-]+)-(.+))?\.whl$/);
+  if (wheelMatch) {
+    return wheelMatch[2];  // 버전 부분
+  }
+
+  // sdist 파일: {name}-{version}.tar.gz 또는 {name}-{version}.zip
+  const sdistMatch = filename.match(/^(.+?)-([0-9].+?)\.(tar\.gz|zip)$/);
+  if (sdistMatch) {
+    return sdistMatch[2];
+  }
+
+  return null;
+}
+
 interface PyPIRelease {
   packagetype: string;
   python_version: string;
@@ -268,8 +289,42 @@ export async function getPyPIDownloadUrl(
   version: string,
   architecture?: string,
   targetOS?: string,
-  pythonVersion?: string
+  pythonVersion?: string,
+  indexUrl?: string
 ): Promise<DownloadUrlResult | null> {
+  // Case 1: indexUrl이 있는 경우 - Simple API 사용
+  if (indexUrl) {
+    try {
+      // Simple API로 파일 목록 조회
+      const files = await fetchPackageFiles(indexUrl, packageName);
+
+      // 버전 필터링
+      const versionFiles = files.filter((file) => {
+        const fileVersion = extractVersionFromFilename(file.filename);
+        return fileVersion === version;
+      });
+
+      if (versionFiles.length === 0) {
+        return null;
+      }
+
+      // PyPIRelease 형식으로 변환 (selectBestRelease 재사용 위함)
+      const releases: PyPIRelease[] = versionFiles.map((file) => ({
+        filename: file.filename,
+        url: file.url,
+        packagetype: file.filename.endsWith('.whl') ? 'bdist_wheel' : 'sdist',
+        size: 0, // Simple API는 size 정보 없음
+        python_version: 'source',
+      }));
+
+      // 기존 selectBestRelease 함수로 최적 파일 선택
+      return selectBestRelease(releases, architecture, targetOS, pythonVersion);
+    } catch {
+      return null;
+    }
+  }
+
+  // Case 2: indexUrl이 없는 경우 - 기존 PyPI JSON API 사용 (하위 호환성)
   return new Promise((resolve) => {
     const url = `https://pypi.org/pypi/${packageName}/${version}/json`;
 

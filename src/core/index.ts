@@ -5,6 +5,8 @@ export { PipDownloader, getPipDownloader } from './downloaders/pip';
 export { MavenDownloader, getMavenDownloader } from './downloaders/maven';
 export { CondaDownloader, getCondaDownloader } from './downloaders/conda';
 export { YumDownloader, getYumDownloader } from './downloaders/yum';
+export { AptDownloader, getAptDownloader } from './downloaders/apt';
+export { ApkDownloader, getApkDownloader } from './downloaders/apk';
 export { DockerDownloader, getDockerDownloader } from './downloaders/docker';
 export { NpmDownloader, getNpmDownloader } from './downloaders/npm';
 
@@ -26,6 +28,8 @@ export { PipResolver, getPipResolver } from './resolver/pip-resolver';
 export { MavenResolver, getMavenResolver } from './resolver/maven-resolver';
 export { CondaResolver, getCondaResolver } from './resolver/conda-resolver';
 export { YumResolver, getYumResolver } from './resolver/yum-resolver';
+export { AptResolver, getAptResolver } from './resolver/apt-resolver';
+export { ApkResolver, getApkResolver } from './resolver/apk-resolver';
 export { NpmResolver, getNpmResolver } from './resolver/npm-resolver';
 
 // Cache Manager

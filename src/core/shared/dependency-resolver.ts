@@ -2,7 +2,6 @@
 import { getPipResolver } from '../resolver/pip-resolver';
 import { getMavenResolver } from '../resolver/maven-resolver';
 import { getCondaResolver } from '../resolver/conda-resolver';
-import { getYumResolver } from '../resolver/yum-resolver';
 import { getNpmResolver } from '../resolver/npm-resolver';
 import { DownloadPackage } from './types';
 import { DependencyResolutionResult } from '../../types';
@@ -63,6 +62,8 @@ export interface DependencyResolverOptions {
   targetOS?: 'any' | 'windows' | 'macos' | 'linux';
   /** Python 버전 (pip 휠 필터링용, 예: '3.11', '3.12') */
   pythonVersion?: string;
+  /** CUDA 버전 (conda 패키지의 __cuda 의존성 필터링용, 예: '11.8', '12.4') */
+  cudaVersion?: string | null;
   /** 진행 상황 콜백 */
   onProgress?: DependencyProgressCallback;
 }
@@ -78,12 +79,11 @@ function getResolverByType(type: string) {
       return getCondaResolver();
     case 'maven':
       return getMavenResolver();
-    case 'yum':
-      return getYumResolver();
     case 'npm':
       return getNpmResolver();
-    // apt, apk: OS 패키지 관리자는 저장소 메타데이터 기반 의존성 해결 방식이 달라
-    // 별도 어댑터 구현 필요 (현재 다운로더에서 직접 의존성 해결)
+    // yum, apt, apk: OS 패키지 관리자는 저장소 메타데이터 기반 의존성 해결 방식이 달라
+    // 별도 IPC 핸들러(os:resolveDependencies)에서 처리됨
+    case 'yum':
     case 'apt':
     case 'apk':
     case 'docker':
@@ -163,9 +163,11 @@ export async function resolveAllDependencies(
           ...resolverOptions,
           targetPlatform,
           pythonVersion: options?.pythonVersion,
+          indexUrl: pkg.indexUrl, // 커스텀 인덱스 URL 전파
+          extras: pkg.extras, // extras 전달
         };
       } else if (pkg.type === 'conda') {
-        // conda: 채널, 타겟 플랫폼 및 Python 버전 전달
+        // conda: 채널, 타겟 플랫폼, Python 버전 및 CUDA 버전 전달
         resolverOptions = {
           ...resolverOptions,
           channel: condaChannel,
@@ -174,12 +176,20 @@ export async function resolveAllDependencies(
             machine: architecture,
           },
           pythonVersion: options?.pythonVersion,
+          cudaVersion: options?.cudaVersion,
         };
       } else if (pkg.type === 'yum') {
         resolverOptions = {
           ...resolverOptions,
           repoUrl: options?.yumRepoUrl,
           architecture,
+        };
+      } else if (pkg.type === 'maven') {
+        // maven: 네이티브 라이브러리 classifier 자동 설정을 위한 targetOS, targetArchitecture 전달
+        resolverOptions = {
+          ...resolverOptions,
+          targetOS: options?.targetOS !== 'any' ? options?.targetOS : undefined,
+          targetArchitecture: architecture,
         };
       }
 
@@ -288,9 +298,20 @@ export async function resolveAllDependencies(
               downloadPkg.downloadUrl = depPkg.metadata.downloadUrl as string;
             }
 
+            // indexUrl 전달 (pip 커스텀 인덱스)
+            if (depPkg.type === 'pip') {
+              // 부모 패키지의 indexUrl 또는 의존성 메타데이터의 indexUrl 사용
+              downloadPkg.indexUrl = pkg.indexUrl || (depPkg.metadata?.indexUrl as string | undefined);
+            }
+
             // metadata 전달 (conda의 subdir, filename 등)
             if (depPkg.metadata) {
               downloadPkg.metadata = depPkg.metadata as Record<string, unknown>;
+
+              // filename을 최상위 필드로 추출 (conda, pip 등에서 사용)
+              if (depPkg.metadata.filename) {
+                downloadPkg.filename = depPkg.metadata.filename as string;
+              }
             }
 
             resolvedSet.set(depKey, downloadPkg);

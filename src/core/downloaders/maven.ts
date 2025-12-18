@@ -10,6 +10,11 @@ import {
 } from '../../types';
 import logger from '../../utils/logger';
 import { sanitizePath } from '../shared/path-utils';
+import { buildMavenClassifier, isNativeArtifact } from '../shared/maven-utils';
+import {
+  retryWithExponentialBackoff,
+  isRetryableHttpError,
+} from '../shared/retry-utils';
 
 // Maven Central Search API 응답 타입
 interface MavenSearchResponse {
@@ -29,6 +34,33 @@ interface MavenArtifact {
   ec?: string[]; // extensions/classifiers
   latestVersion?: string;
   repositoryId?: string;
+}
+
+// Sonatype API 응답 타입
+interface SonatypeVersionResponse {
+  versions: Array<{
+    version: string;
+  }>;
+}
+
+// Sonatype 키워드 검색 응답 타입
+interface SonatypeSearchResponse {
+  components: Array<{
+    namespace: string;
+    name: string;
+    latestVersionInfo?: {
+      version: string;
+    };
+  }>;
+  totalResultCount: number;
+}
+
+// 파싱된 Maven 쿼리 타입
+interface ParsedMavenQuery {
+  type: 'keyword' | 'coordinates';
+  groupId?: string;
+  artifactId?: string;
+  keyword?: string;
 }
 
 // 아티팩트 타입
@@ -93,30 +125,140 @@ export class MavenDownloader implements IDownloader {
   }
 
   /**
-   * 아티팩트 검색
+   * 아티팩트 검색 (입력 형식에 따라 최적 API 선택)
    */
   async searchPackages(query: string): Promise<PackageInfo[]> {
-    try {
-      const response = await this.client.get<MavenSearchResponse>(this.searchUrl, {
-        params: {
-          q: query,
-          rows: 50,
-          wt: 'json',
-        },
-      });
+    const parsed = this.parseMavenQuery(query);
 
-      return response.data.response.docs.map((artifact) => ({
+    // coordinates 형식이면 Sonatype API 우선 사용
+    if (parsed.type === 'coordinates' && parsed.groupId && parsed.artifactId) {
+      try {
+        return await retryWithExponentialBackoff(
+          () => this.searchViaSonatypeApi(parsed.groupId!, parsed.artifactId!),
+          {
+            maxRetries: 2,
+            delayMs: 1000,
+            shouldRetry: isRetryableHttpError,
+          }
+        );
+      } catch (sonatypeError) {
+        logger.warn('Sonatype API 실패, Search API로 fallback', {
+          query,
+          sonatypeError,
+        });
+        // fallback: Search API 시도
+        return await this.searchViaSearchApi(query);
+      }
+    }
+
+    // keyword 형식이면 Search API 사용
+    return await this.searchViaSearchApi(query);
+  }
+
+  /**
+   * 쿼리 형식 파싱 (coordinates vs keyword)
+   */
+  private parseMavenQuery(query: string): ParsedMavenQuery {
+    // "org.springframework.boot:spring-boot" 형식 감지
+    if (query.includes(':')) {
+      const parts = query.split(':');
+      if (parts.length >= 2) {
+        return {
+          type: 'coordinates',
+          groupId: parts[0].trim(),
+          artifactId: parts[1].trim(),
+        };
+      }
+    }
+
+    return {
+      type: 'keyword',
+      keyword: query.trim(),
+    };
+  }
+
+  /**
+   * Sonatype API를 사용한 검색 (coordinates 형식용)
+   */
+  private async searchViaSonatypeApi(
+    groupId: string,
+    artifactId: string
+  ): Promise<PackageInfo[]> {
+    try {
+      const response = await this.client.get<SonatypeVersionResponse>(
+        `https://central.sonatype.com/api/internal/browse/component/versions`,
+        {
+          params: {
+            namespace: groupId,
+            name: artifactId,
+          },
+          timeout: 10000,
+        }
+      );
+
+      return response.data.versions.map((version) => ({
         type: 'maven',
-        name: `${artifact.g}:${artifact.a}`,
-        version: artifact.latestVersion || artifact.v,
-        metadata: {
-          groupId: artifact.g,
-          artifactId: artifact.a,
-        },
+        name: `${groupId}:${artifactId}`,
+        version: version.version,
+        metadata: { groupId, artifactId },
       }));
     } catch (error) {
-      logger.error('Maven 아티팩트 검색 실패', { query, error });
+      logger.error('Sonatype API 검색 실패', { groupId, artifactId, error });
       throw error;
+    }
+  }
+
+  /**
+   * Sonatype Central API로 키워드 검색 (POST 요청)
+   * search.maven.org가 불안정하여 대체 API 사용
+   */
+  private async searchViaSearchApi(query: string): Promise<PackageInfo[]> {
+    try {
+      return await retryWithExponentialBackoff(
+        async () => {
+          const response = await this.client.post<SonatypeSearchResponse>(
+            'https://central.sonatype.com/api/internal/browse/components',
+            {
+              searchTerm: query,
+              sortField: 'nsPopularityAppCount', // 인기순 정렬
+              sortDirection: 'desc',
+              page: 0,
+              size: 50,
+            },
+            {
+              timeout: 15000,
+              headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+              },
+            }
+          );
+
+          return response.data.components
+            .filter((comp) => comp.latestVersionInfo?.version) // 버전이 있는 것만
+            .map((comp) => ({
+              type: 'maven' as const,
+              name: `${comp.namespace}:${comp.name}`,
+              version: comp.latestVersionInfo!.version,
+              metadata: {
+                groupId: comp.namespace,
+                artifactId: comp.name,
+              },
+            }));
+        },
+        {
+          maxRetries: 2,
+          delayMs: 1000,
+          shouldRetry: isRetryableHttpError,
+        }
+      );
+    } catch (error) {
+      logger.error('Maven 아티팩트 검색 실패 (Sonatype API)', { query, error });
+      throw new Error(
+        `Maven 검색 실패: ${query}\n` +
+          `central.sonatype.com API에 연결할 수 없습니다.\n` +
+          `잠시 후 다시 시도해주세요.`
+      );
     }
   }
 
@@ -252,11 +394,28 @@ export class MavenDownloader implements IDownloader {
   async downloadPackage(
     info: PackageInfo,
     destPath: string,
-    onProgress?: (progress: DownloadProgressEvent) => void
+    onProgress?: (progress: DownloadProgressEvent) => void,
+    options?: {
+      targetOS?: string;
+      targetArchitecture?: string;
+    }
   ): Promise<string> {
     const groupId = (info.metadata?.groupId as string) || info.name.split(':')[0];
     const artifactId = (info.metadata?.artifactId as string) || info.name.split(':')[1];
-    const classifier = info.metadata?.classifier as string | undefined;
+    let classifier = info.metadata?.classifier as string | undefined;
+
+    // 네이티브 패키지이고 classifier가 없으면 자동 설정
+    if (!classifier && isNativeArtifact(groupId, artifactId)) {
+      const autoClassifier = buildMavenClassifier(options?.targetOS, options?.targetArchitecture);
+      if (autoClassifier) {
+        classifier = autoClassifier;
+        logger.info('네이티브 패키지 classifier 자동 설정', {
+          groupId,
+          artifactId,
+          classifier: autoClassifier,
+        });
+      }
+    }
 
     // packaging 타입 확인 (pom이면 JAR가 없는 POM-only 패키지: BOM, parent POM 등)
     // getPackageMetadata에서는 packaging으로, resolver에서는 type으로 저장

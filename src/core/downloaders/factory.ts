@@ -217,14 +217,12 @@ export async function initializeDownloaders(): Promise<void> {
     { MavenDownloader },
     { NpmDownloader },
     { DockerDownloader },
-    { YumDownloader: YumDL },
   ] = await Promise.all([
     import('./pip'),
     import('./conda'),
     import('./maven'),
     import('./npm'),
     import('./docker'),
-    import('./yum'),
   ]);
 
   registry.registerCreator('pip', () => new PipDownloader());
@@ -232,7 +230,7 @@ export async function initializeDownloaders(): Promise<void> {
   registry.registerCreator('maven', () => new MavenDownloader());
   registry.registerCreator('npm', () => new NpmDownloader());
   registry.registerCreator('docker', () => new DockerDownloader());
-  registry.registerCreator('yum', () => new YumDL());
+  // yum, apt, apk는 별도의 OS 패키지 다운로더로 처리됨
 
   initialized = true;
 }

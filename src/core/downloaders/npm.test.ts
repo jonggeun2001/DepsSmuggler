@@ -669,6 +669,137 @@ describe('NpmDownloader 추가 테스트', () => {
   });
 });
 
+// verifyIntegrity 및 verifyShasum 테스트 (실제 파일 사용)
+describe('NpmDownloader 파일 검증 테스트', () => {
+  let downloader: NpmDownloader;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    downloader = new NpmDownloader();
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+  });
+
+  describe('downloadPackage 에러 케이스', () => {
+    it('다운로드 URL 없으면 에러', async () => {
+      const mockGetPackageMetadata = vi.fn().mockResolvedValue({
+        name: 'test-pkg',
+        version: '1.0.0',
+        type: 'npm',
+        metadata: {
+          // downloadUrl 없음
+        },
+      });
+      (downloader as any).getPackageMetadata = mockGetPackageMetadata;
+
+      const info = { type: 'npm' as const, name: 'test-pkg', version: '1.0.0' };
+
+      await expect(downloader.downloadPackage(info, '/tmp/test')).rejects.toThrow(
+        '다운로드 URL을 찾을 수 없습니다'
+      );
+    });
+  });
+
+  describe('verifyIntegrity (실제 파일 테스트)', () => {
+    const testFilePath = '/tmp/npm-test-integrity.txt';
+
+    it('유효한 무결성 검증 성공', async () => {
+      const testContent = 'test content for integrity verification';
+      const fs = await import('fs-extra');
+      const ssriModule = await import('ssri');
+
+      // 테스트 파일 생성
+      await fs.writeFile(testFilePath, testContent);
+
+      // 예상 무결성 계산
+      const expectedIntegrity = ssriModule.fromData(testContent).toString();
+
+      const result = await downloader.verifyIntegrity(testFilePath, expectedIntegrity);
+      expect(result).toBe(true);
+
+      // 정리
+      await fs.remove(testFilePath);
+    });
+
+    it('무효한 무결성 검증 실패', async () => {
+      const testContent = 'actual content';
+      const fs = await import('fs-extra');
+
+      // 테스트 파일 생성
+      await fs.writeFile(testFilePath, testContent);
+
+      const result = await downloader.verifyIntegrity(testFilePath, 'sha512-invalidhash');
+      expect(result).toBe(false);
+
+      // 정리
+      await fs.remove(testFilePath);
+    });
+
+    it('파일이 존재하지 않으면 false 반환', async () => {
+      const result = await downloader.verifyIntegrity('/tmp/nonexistent-file-xyz.tgz', 'sha512-abc');
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('verifyShasum (실제 파일 테스트)', () => {
+    const testFilePath = '/tmp/npm-test-shasum.txt';
+
+    it('유효한 SHA1 검증 성공', async () => {
+      const testContent = 'test content for sha1 verification';
+      const fs = await import('fs-extra');
+
+      // 테스트 파일 생성
+      await fs.writeFile(testFilePath, testContent);
+
+      // 예상 SHA1 계산
+      const hash = crypto.createHash('sha1');
+      hash.update(testContent);
+      const expectedSha1 = hash.digest('hex');
+
+      const result = await downloader.verifyShasum(testFilePath, expectedSha1);
+      expect(result).toBe(true);
+
+      // 정리
+      await fs.remove(testFilePath);
+    });
+
+    it('무효한 SHA1 검증 실패', async () => {
+      const testContent = 'actual content';
+      const fs = await import('fs-extra');
+
+      // 테스트 파일 생성
+      await fs.writeFile(testFilePath, testContent);
+
+      const result = await downloader.verifyShasum(testFilePath, 'invalid-sha1-hash');
+      expect(result).toBe(false);
+
+      // 정리
+      await fs.remove(testFilePath);
+    });
+
+    it('대소문자 무관 비교', async () => {
+      const testContent = 'test';
+      const fs = await import('fs-extra');
+
+      // 테스트 파일 생성
+      await fs.writeFile(testFilePath, testContent);
+
+      // 예상 SHA1 계산 (대문자)
+      const hash = crypto.createHash('sha1');
+      hash.update(testContent);
+      const expectedSha1 = hash.digest('hex').toUpperCase();
+
+      const result = await downloader.verifyShasum(testFilePath, expectedSha1);
+      expect(result).toBe(true);
+
+      // 정리
+      await fs.remove(testFilePath);
+    });
+  });
+});
+
 // npm semver 로직 테스트
 describe('npm semver utilities', () => {
   // parseVersion 로직

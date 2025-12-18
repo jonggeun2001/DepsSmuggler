@@ -250,6 +250,12 @@ export interface NpmResolverOptions {
 
   /** package-lock.json 내용 (있으면 버전 고정) */
   lockfile?: NpmLockfile;
+
+  /** 타겟 OS (플랫폼별 패키지 필터링용) */
+  targetOS?: 'windows' | 'macos' | 'linux';
+
+  /** 타겟 아키텍처 (플랫폼별 패키지 필터링용) */
+  targetArchitecture?: 'x86_64' | 'amd64' | 'arm64' | 'aarch64';
 }
 
 // ====================

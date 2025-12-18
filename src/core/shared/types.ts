@@ -14,6 +14,12 @@ export interface DownloadPackage {
   repository?: { baseUrl: string; name?: string };
   /** OS 패키지의 파일 경로 (저장소 내 위치) */
   location?: string;
+  /** 실제 다운로드될 파일명 (예: numpy-1.24.0-py311h64a7726_0.conda, requests-2.28.0-py3-none-any.whl) */
+  filename?: string;
+  /** pip 커스텀 인덱스 URL (예: https://download.pytorch.org/whl/cu121) */
+  indexUrl?: string;
+  /** pip extras 의존성 (예: ['cuda'], ['security', 'socks']) */
+  extras?: string[];
   /** 추가 메타데이터 (Docker registry 등) */
   metadata?: Record<string, unknown>;
 }

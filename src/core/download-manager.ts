@@ -16,7 +16,6 @@ import { SpeedCalculator } from './speed-calculator';
 import { getPipDownloader } from './downloaders/pip';
 import { getCondaDownloader } from './downloaders/conda';
 import { getMavenDownloader } from './downloaders/maven';
-import { getYumDownloader } from './downloaders/yum';
 import { getDockerDownloader } from './downloaders/docker';
 import { getNpmDownloader } from './downloaders/npm';
 
@@ -115,7 +114,7 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
     this.downloaders.set('pip', getPipDownloader());
     this.downloaders.set('conda', getCondaDownloader());
     this.downloaders.set('maven', getMavenDownloader());
-    this.downloaders.set('yum', getYumDownloader());
+    // yum, apt, apk는 별도의 OS 패키지 다운로더로 처리됨
     this.downloaders.set('docker', getDockerDownloader());
     this.downloaders.set('npm', getNpmDownloader());
   }

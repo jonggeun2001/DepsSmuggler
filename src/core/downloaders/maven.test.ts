@@ -994,3 +994,288 @@ describe('Maven 아티팩트 타입', () => {
     expect(classifierMap['javadoc']).toBe('javadoc');
   });
 });
+
+// Maven 검색 안정성 개선 테스트
+describe('Maven 검색 안정성 - Fallback API 및 재시도', () => {
+  let downloader: MavenDownloader;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    downloader = new MavenDownloader();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('parseMavenQuery', () => {
+    it('keyword 형식 파싱', () => {
+      const result = (downloader as any).parseMavenQuery('spring-boot');
+      expect(result).toEqual({
+        type: 'keyword',
+        keyword: 'spring-boot',
+      });
+    });
+
+    it('coordinates 형식 파싱 (colon 포함)', () => {
+      const result = (downloader as any).parseMavenQuery('org.springframework.boot:spring-boot');
+      expect(result).toEqual({
+        type: 'coordinates',
+        groupId: 'org.springframework.boot',
+        artifactId: 'spring-boot',
+      });
+    });
+
+    it('coordinates 형식 공백 제거', () => {
+      const result = (downloader as any).parseMavenQuery('  org.springframework.boot : spring-boot  ');
+      expect(result).toEqual({
+        type: 'coordinates',
+        groupId: 'org.springframework.boot',
+        artifactId: 'spring-boot',
+      });
+    });
+
+    it('colon이 하나만 있는 경우도 coordinates로 처리', () => {
+      const result = (downloader as any).parseMavenQuery('group:artifact');
+      expect(result).toEqual({
+        type: 'coordinates',
+        groupId: 'group',
+        artifactId: 'artifact',
+      });
+    });
+  });
+
+  describe('searchViaSonatypeApi', () => {
+    it('Sonatype API 검색 성공', async () => {
+      const mockClient = {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            versions: [
+              { version: '3.2.0' },
+              { version: '3.1.5' },
+              { version: '3.1.0' },
+            ],
+          },
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const results = await (downloader as any).searchViaSonatypeApi(
+        'org.springframework.boot',
+        'spring-boot'
+      );
+
+      expect(results).toHaveLength(3);
+      expect(results[0].name).toBe('org.springframework.boot:spring-boot');
+      expect(results[0].version).toBe('3.2.0');
+      expect(results[0].type).toBe('maven');
+      expect(results[0].metadata).toEqual({
+        groupId: 'org.springframework.boot',
+        artifactId: 'spring-boot',
+      });
+
+      expect(mockClient.get).toHaveBeenCalledWith(
+        'https://central.sonatype.com/api/internal/browse/component/versions',
+        {
+          params: {
+            namespace: 'org.springframework.boot',
+            name: 'spring-boot',
+          },
+          timeout: 10000,
+        }
+      );
+    });
+
+    it('Sonatype API 네트워크 오류 시 예외 발생', async () => {
+      const mockClient = {
+        get: vi.fn().mockRejectedValue(new Error('Network Error')),
+      };
+      (downloader as any).client = mockClient;
+
+      await expect(
+        (downloader as any).searchViaSonatypeApi('org.test', 'artifact')
+      ).rejects.toThrow('Network Error');
+    });
+  });
+
+  describe('searchViaSearchApi', () => {
+    it('Search API 검색 성공', async () => {
+      const mockClient = {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            response: {
+              docs: [
+                {
+                  g: 'org.springframework.boot',
+                  a: 'spring-boot',
+                  latestVersion: '3.2.0',
+                },
+                {
+                  g: 'org.springframework.boot',
+                  a: 'spring-boot-starter',
+                  latestVersion: '3.2.0',
+                },
+              ],
+            },
+          },
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const results = await (downloader as any).searchViaSearchApi('spring-boot');
+
+      expect(results).toHaveLength(2);
+      expect(results[0].name).toBe('org.springframework.boot:spring-boot');
+      expect(results[0].version).toBe('3.2.0');
+    });
+
+    it('Search API 504 에러 시 명확한 에러 메시지', async () => {
+      const mockClient = {
+        get: vi.fn().mockRejectedValue({ response: { status: 504 } }),
+      };
+      (downloader as any).client = mockClient;
+
+      await expect((downloader as any).searchViaSearchApi('spring-boot')).rejects.toThrow(
+        /groupId:artifactId 형식.*으로 입력하면 대체 API를 사용합니다/
+      );
+    });
+
+    it('Search API 재시도 후 성공 (mocking with retry)', async () => {
+      let callCount = 0;
+      const mockClient = {
+        get: vi.fn().mockImplementation(() => {
+          callCount++;
+          if (callCount < 3) {
+            return Promise.reject({ response: { status: 504 } });
+          }
+          return Promise.resolve({
+            data: {
+              response: {
+                docs: [
+                  {
+                    g: 'org.springframework.boot',
+                    a: 'spring-boot',
+                    latestVersion: '3.2.0',
+                  },
+                ],
+              },
+            },
+          });
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const results = await (downloader as any).searchViaSearchApi('spring-boot');
+
+      expect(results).toHaveLength(1);
+      expect(callCount).toBe(3); // 초기 + 2회 재시도
+    });
+  });
+
+  describe('searchPackages - 통합 검색 로직', () => {
+    it('coordinates 형식 입력 시 Sonatype API 우선 사용', async () => {
+      const mockSonatypeResponse = {
+        data: {
+          versions: [{ version: '3.2.0' }, { version: '3.1.5' }],
+        },
+      };
+
+      const mockClient = {
+        get: vi.fn().mockResolvedValue(mockSonatypeResponse),
+      };
+      (downloader as any).client = mockClient;
+
+      const results = await downloader.searchPackages('org.springframework.boot:spring-boot');
+
+      expect(results).toHaveLength(2);
+      expect(results[0].name).toBe('org.springframework.boot:spring-boot');
+      expect(results[0].version).toBe('3.2.0');
+
+      // Sonatype API 호출 확인
+      expect(mockClient.get).toHaveBeenCalledWith(
+        expect.stringContaining('central.sonatype.com'),
+        expect.any(Object)
+      );
+    });
+
+    it('Sonatype API 실패 시 Search API로 fallback', async () => {
+      let callCount = 0;
+      const mockClient = {
+        get: vi.fn().mockImplementation((url: string) => {
+          callCount++;
+          // Sonatype API 호출 (실패)
+          if (url.includes('central.sonatype.com')) {
+            return Promise.reject(new Error('504 Gateway Timeout'));
+          }
+          // Search API 호출 (성공)
+          return Promise.resolve({
+            data: {
+              response: {
+                docs: [
+                  {
+                    g: 'org.springframework.boot',
+                    a: 'spring-boot',
+                    latestVersion: '3.2.0',
+                  },
+                ],
+              },
+            },
+          });
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const results = await downloader.searchPackages('org.springframework.boot:spring-boot');
+
+      expect(results).toHaveLength(1);
+      expect(results[0].name).toBe('org.springframework.boot:spring-boot');
+      // Sonatype API 시도 + Search API fallback
+      expect(callCount).toBeGreaterThanOrEqual(2);
+    });
+
+    it('keyword 형식 입력 시 Search API 직접 사용', async () => {
+      const mockClient = {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            response: {
+              docs: [
+                {
+                  g: 'org.springframework.boot',
+                  a: 'spring-boot',
+                  latestVersion: '3.2.0',
+                },
+              ],
+            },
+          },
+        }),
+      };
+      (downloader as any).client = mockClient;
+
+      const results = await downloader.searchPackages('spring-boot');
+
+      expect(results).toHaveLength(1);
+      // Search API 호출 확인
+      expect(mockClient.get).toHaveBeenCalledWith(
+        expect.stringContaining('search.maven.org'),
+        expect.any(Object)
+      );
+    });
+
+    it('모든 API 실패 시 명확한 에러 메시지', async () => {
+      const mockClient = {
+        get: vi.fn().mockRejectedValue({ response: { status: 504 } }),
+      };
+      (downloader as any).client = mockClient;
+
+      try {
+        await downloader.searchPackages('spring-boot');
+        expect.fail('Expected error to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        const message = (error as Error).message;
+        expect(message).toContain('Maven 검색 실패');
+        expect(message).toContain('groupId:artifactId 형식');
+      }
+    });
+  });
+});
