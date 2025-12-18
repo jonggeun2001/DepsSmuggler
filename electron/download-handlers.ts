@@ -225,6 +225,8 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
             if (parts.length >= 2) {
               const groupId = parts[0];
               const artifactId = parts[1];
+              // 사용자가 선택한 classifier (WizardPage에서 전달)
+              const classifier = (pkg as { classifier?: string }).classifier;
               let mavenTotalBytes = 0;
 
               // .m2 구조로 m2repo 디렉토리에 다운로드
@@ -239,6 +241,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                   metadata: {
                     groupId,
                     artifactId,
+                    classifier, // 사용자 선택 classifier 전달
                   },
                 },
                 m2RepoDir,
@@ -259,7 +262,10 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
               );
 
               // flat 구조로도 복사 (packagesDir 루트에 jar 파일)
-              const flatFileName = `${artifactId}-${pkg.version}.jar`;
+              // classifier가 있으면 파일명에 포함 (예: lwjgl-3.3.1-natives-linux.jar)
+              const flatFileName = classifier
+                ? `${artifactId}-${pkg.version}-${classifier}.jar`
+                : `${artifactId}-${pkg.version}.jar`;
               const flatDestPath = path.join(packagesDir, flatFileName);
               if (jarPath && (await fse.pathExists(jarPath))) {
                 await fse.copy(jarPath, flatDestPath);
