@@ -48,7 +48,7 @@ import {
 } from '../shared/maven-pom-utils';
 import { MavenBomProcessor } from '../shared/maven-bom-processor';
 import { MAVEN_CONSTANTS } from '../constants/maven';
-import { buildMavenClassifier, isNativeArtifact } from '../shared/maven-utils';
+import { isNativeArtifact } from '../shared/maven-utils';
 
 /** Maven Resolver 옵션 */
 export interface MavenResolverOptions extends ResolverOptions {
@@ -58,10 +58,12 @@ export interface MavenResolverOptions extends ResolverOptions {
   parallelThreads?: number;
   /** POM 캐시 TTL (ms, 기본값: 5분) */
   pomCacheTtl?: number;
-  /** 대상 OS (네이티브 라이브러리 classifier 자동 설정용) */
+  /** 대상 OS (네이티브 라이브러리 classifier 자동 설정용) - deprecated, use classifier instead */
   targetOS?: string;
-  /** 대상 아키텍처 (네이티브 라이브러리 classifier 자동 설정용) */
+  /** 대상 아키텍처 (네이티브 라이브러리 classifier 자동 설정용) - deprecated, use classifier instead */
   targetArchitecture?: string;
+  /** 사용자 지정 classifier (예: natives-linux, linux-x86_64) */
+  classifier?: string;
 }
 
 // MavenResolutionContext는 maven-queue-processor.ts에서 import됨
@@ -176,18 +178,23 @@ export class MavenResolver implements IResolver {
       groupId,
       artifactId,
       version,
+      // 사용자가 UI에서 선택한 classifier 사용
+      classifier: opts.classifier,
     };
 
-    // 네이티브 패키지 판별 및 classifier 자동 설정
+    // 네이티브 패키지이고 classifier가 없으면 경고만 표시 (자동 생성하지 않음)
+    // 각 라이브러리마다 classifier 형식이 다르므로 (LWJGL: natives-linux, Netty: linux-x86_64)
+    // 자동 생성 대신 UI에서 사용자가 직접 선택하도록 함
     if (isNativeArtifact(groupId, artifactId) && !rootCoordinate.classifier) {
-      const autoClassifier = buildMavenClassifier(opts.targetOS, opts.targetArchitecture);
-      if (autoClassifier) {
-        rootCoordinate.classifier = autoClassifier;
-        logger.info('네이티브 패키지 classifier 자동 설정', {
-          package: packageName,
-          classifier: autoClassifier,
-        });
-      }
+      logger.warn('네이티브 패키지이지만 classifier가 지정되지 않음. 기본 JAR만 해결됩니다.', {
+        package: packageName,
+        hint: 'UI에서 classifier를 선택하세요',
+      });
+    } else if (rootCoordinate.classifier) {
+      logger.info('사용자 지정 classifier 사용', {
+        package: packageName,
+        classifier: rootCoordinate.classifier,
+      });
     }
 
     try {

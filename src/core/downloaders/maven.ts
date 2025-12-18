@@ -10,7 +10,7 @@ import {
 } from '../../types';
 import logger from '../../utils/logger';
 import { sanitizePath } from '../shared/path-utils';
-import { buildMavenClassifier, isNativeArtifact } from '../shared/maven-utils';
+import { isNativeArtifact } from '../shared/maven-utils';
 import {
   retryWithExponentialBackoff,
   isRetryableHttpError,
@@ -196,6 +196,16 @@ export class MavenDownloader implements IDownloader {
           timeout: 10000,
         }
       );
+
+      // API 응답 구조 검증
+      if (!response.data?.versions || !Array.isArray(response.data.versions)) {
+        logger.warn('Sonatype API 응답에 versions 배열 없음', {
+          groupId,
+          artifactId,
+          responseData: JSON.stringify(response.data).slice(0, 200),
+        });
+        throw new Error('Invalid Sonatype API response: missing versions array');
+      }
 
       return response.data.versions.map((version) => ({
         type: 'maven',
@@ -407,7 +417,7 @@ export class MavenDownloader implements IDownloader {
     info: PackageInfo,
     destPath: string,
     onProgress?: (progress: DownloadProgressEvent) => void,
-    options?: {
+    _options?: {
       targetOS?: string;
       targetArchitecture?: string;
     }
@@ -416,17 +426,15 @@ export class MavenDownloader implements IDownloader {
     const artifactId = (info.metadata?.artifactId as string) || info.name.split(':')[1];
     let classifier = info.metadata?.classifier as string | undefined;
 
-    // 네이티브 패키지이고 classifier가 없으면 자동 설정
+    // 네이티브 패키지이고 classifier가 없으면 경고만 표시 (자동 생성하지 않음)
+    // 각 라이브러리마다 classifier 형식이 다르므로 (LWJGL: natives-linux, Netty: linux-x86_64)
+    // 자동 생성 대신 UI에서 사용자가 직접 선택하도록 함
     if (!classifier && isNativeArtifact(groupId, artifactId)) {
-      const autoClassifier = buildMavenClassifier(options?.targetOS, options?.targetArchitecture);
-      if (autoClassifier) {
-        classifier = autoClassifier;
-        logger.info('네이티브 패키지 classifier 자동 설정', {
-          groupId,
-          artifactId,
-          classifier: autoClassifier,
-        });
-      }
+      logger.warn('네이티브 패키지이지만 classifier가 지정되지 않음. 기본 JAR만 다운로드됩니다.', {
+        groupId,
+        artifactId,
+        hint: 'UI에서 classifier를 선택하세요',
+      });
     }
 
     // packaging 타입 확인 (pom이면 JAR가 없는 POM-only 패키지: BOM, parent POM 등)
