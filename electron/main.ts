@@ -25,7 +25,6 @@ coreLogger.initialize().catch(() => {
 });
 
 // OS 패키지 핸들러
-import { registerOSPackageHandlers } from './os-package-handlers';
 
 // 분리된 핸들러 모듈 import
 import { registerConfigHandlers } from './config-handlers';
@@ -33,6 +32,10 @@ import { registerCacheHandlers } from './cache-handlers';
 import { registerHistoryHandlers } from './history-handlers';
 import { registerSearchHandlers } from './search-handlers';
 import { registerDownloadHandlers } from './download-handlers';
+import { registerVersionHandlers } from './version-handlers';
+
+// 버전 사전 로딩
+import { preloadAllVersions } from '../src/core/shared/version-preloader';
 
 // 자동 업데이트 모듈
 import { initAutoUpdater, checkForUpdatesOnStartup, registerDevModeHandlers } from './updater';
@@ -118,6 +121,19 @@ async function createWindow(): Promise<void> {
 app.whenReady().then(async () => {
   await createWindow();
 
+  // 버전 목록 사전 로딩 (백그라운드, 비차단)
+  preloadAllVersions()
+    .then((result) => {
+      if (!result.success) {
+        log.warn('Version preload completed with errors:', result.errors);
+      } else {
+        log.info('Version preload completed successfully');
+      }
+    })
+    .catch((error) => {
+      log.error('Version preload failed:', error);
+    });
+
   // 자동 업데이트 초기화
   if (!isDev && mainWindow) {
     // 프로덕션 모드: 전체 업데이트 기능
@@ -160,11 +176,11 @@ registerHistoryHandlers();
 // 검색 및 의존성 해결 핸들러 등록
 registerSearchHandlers();
 
+// 버전 정보 핸들러 등록
+registerVersionHandlers();
+
 // 다운로드 핸들러 등록 (mainWindow getter 전달)
 registerDownloadHandlers(getMainWindow);
-
-// OS 패키지 핸들러 등록 (mainWindow getter 전달)
-registerOSPackageHandlers(getMainWindow);
 
 // =====================================================
 // 기본 IPC 핸들러 (앱 정보, 다이얼로그 등)

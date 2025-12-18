@@ -169,7 +169,7 @@ const electronAPI = {
     packages: (
       type: string,
       query: string,
-      options?: { channel?: string; registry?: string }
+      options?: { channel?: string; registry?: string; indexUrl?: string }
     ): Promise<{
       results: Array<{
         name: string;
@@ -183,7 +183,7 @@ const electronAPI = {
     versions: (
       type: string,
       packageName: string,
-      options?: { channel?: string; registry?: string }
+      options?: { channel?: string; registry?: string; indexUrl?: string }
     ): Promise<{ versions: string[] }> =>
       ipcRenderer.invoke('search:versions', type, packageName, options),
   },
@@ -304,6 +304,24 @@ const electronAPI = {
       clear: (): Promise<{ success: boolean }> =>
         ipcRenderer.invoke('os:cache:clear'),
     },
+  },
+
+  // 버전 정보 관련
+  versions: {
+    python: (): Promise<string[]> => ipcRenderer.invoke('versions:python'),
+    java: (): Promise<Array<{ version: string; lts: boolean }>> => ipcRenderer.invoke('versions:java'),
+    node: (): Promise<Array<{ version: string; lts: string | false }>> => ipcRenderer.invoke('versions:node'),
+    cuda: (): Promise<string[]> => ipcRenderer.invoke('versions:cuda'),
+    // 버전 사전 로딩 및 캐시 관리
+    preload: (): Promise<{
+      success: boolean;
+      status: { python: string; cuda: string };
+      errors: Array<{ source: string; error: string; timestamp: number }>;
+      duration: number;
+    }> => ipcRenderer.invoke('versions:preload'),
+    refreshExpired: (): Promise<void> => ipcRenderer.invoke('versions:refresh-expired'),
+    cacheStatus: (): Promise<Record<string, { valid: boolean; age?: number }>> =>
+      ipcRenderer.invoke('versions:cache-status'),
   },
 };
 

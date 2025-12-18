@@ -16,14 +16,36 @@ import {
   getCondaDownloader,
   getDockerDownloader,
   getYumDownloader,
+  getAptDownloader,
+  getApkDownloader,
   getNpmDownloader,
   PipDownloader,
   MavenDownloader,
   CondaDownloader,
   DockerDownloader,
   YumDownloader,
+  AptDownloader,
+  ApkDownloader,
   NpmDownloader,
+  getYumResolver,
+  getAptResolver,
+  getApkResolver,
 } from '../src/core';
+import {
+  OS_DISTRIBUTIONS,
+  getDistributionsByPackageManager,
+  getDistributionById,
+} from '../src/core/downloaders/os-shared/repositories';
+import {
+  getSimplifiedDistributions,
+  invalidateDistributionCache,
+} from '../src/core/downloaders/os-shared/distribution-fetcher';
+import type {
+  OSPackageManager,
+  OSDistribution,
+  OSArchitecture,
+  MatchType,
+} from '../src/core/downloaders/os-shared/types';
 
 const log = createScopedLogger('Search');
 
@@ -34,6 +56,8 @@ const downloaderMap = {
   maven: getMavenDownloader,
   docker: getDockerDownloader,
   yum: getYumDownloader,
+  apt: getAptDownloader,
+  apk: getApkDownloader,
   npm: getNpmDownloader,
 } as const;
 
@@ -107,9 +131,20 @@ async function loadPyPIPackageList(): Promise<void> {
 }
 
 // PyPI 패키지 검색 (like 검색)
-async function searchPyPI(query: string) {
+async function searchPyPI(query: string, indexUrl?: string) {
   const results: Array<{ name: string; version: string; description: string }> = [];
   const lowerQuery = query.toLowerCase();
+
+  // 커스텀 인덱스 URL을 사용하는 경우 PipDownloader 직접 사용
+  if (indexUrl) {
+    const pipDownloader = getPipDownloader();
+    const indexResults = await pipDownloader.searchPackages(query, indexUrl);
+    return indexResults.map(pkg => ({
+      name: pkg.name,
+      version: pkg.version,
+      description: pkg.metadata?.description || `커스텀 인덱스: ${new URL(indexUrl).hostname}`,
+    }));
+  }
 
   // 캐시에서 prefix 검색 (대소문자 무시, 앞부분 일치)
   if (pypiCacheLoaded && pypiPackageCache.length > 0) {
@@ -154,26 +189,40 @@ async function searchPyPI(query: string) {
 }
 
 // PyPI 버전 목록 조회
-async function getPyPIVersions(packageName: string): Promise<string[]> {
+async function getPyPIVersions(packageName: string, indexUrl?: string): Promise<string[]> {
+  // 커스텀 인덱스 URL을 사용하는 경우 PipDownloader 직접 사용
+  if (indexUrl) {
+    const pipDownloader = getPipDownloader();
+    return await pipDownloader.getVersions(packageName, indexUrl);
+  }
+
+  // 기본 PyPI JSON API 사용
   const response = await axios.get(`https://pypi.org/pypi/${packageName}/json`, { timeout: 10000 });
   const versions = Object.keys(response.data.releases);
   return versions.sort((a, b) => compareVersions(b, a));
 }
 
-// Maven 패키지 검색
+// Maven 패키지 검색 (MavenDownloader 사용, 재시도 로직 및 fallback API 포함)
 async function searchMaven(query: string) {
   try {
-    const response = await axios.get('https://search.maven.org/solrsearch/select', {
-      params: { q: query, rows: 20, wt: 'json' },
-      timeout: 10000,
-    });
-    return response.data.response.docs.map((doc: { g: string; a: string; latestVersion: string }) => ({
-      name: `${doc.g}:${doc.a}`,
-      version: doc.latestVersion,
-      description: `Maven artifact: ${doc.g}:${doc.a}`,
+    // MavenDownloader 인스턴스 사용 (재시도 로직 및 Sonatype API fallback 포함)
+    const mavenDownloader = getMavenDownloader();
+    const results = await mavenDownloader.searchPackages(query);
+
+    return results.map((pkg) => ({
+      name: pkg.name,
+      version: pkg.version,
+      description: `Maven artifact: ${pkg.name}`,
     }));
-  } catch {
-    return [];
+  } catch (error) {
+    log.error('Maven search failed:', error);
+
+    // 에러 메시지 사용자에게 전달
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : 'Maven 검색 중 알 수 없는 오류가 발생했습니다.'
+    );
   }
 }
 
@@ -241,7 +290,7 @@ export function registerSearchHandlers(): void {
   loadPyPIPackageList();
 
   // 패키지 검색 핸들러 (실제 API 호출)
-  ipcMain.handle('search:packages', async (_, type: string, query: string, options?: { channel?: string; registry?: string }) => {
+  ipcMain.handle('search:packages', async (_, type: string, query: string, options?: { channel?: string; registry?: string; indexUrl?: string }) => {
     log.debug(`Searching ${type} packages: ${query}`, options);
 
     try {
@@ -249,7 +298,7 @@ export function registerSearchHandlers(): void {
 
       switch (type) {
         case 'pip':
-          results = await searchPyPI(query);
+          results = await searchPyPI(query, options?.indexUrl);
           results = sortByRelevance(results, query, 'pip');
           break;
         case 'conda':
@@ -302,7 +351,7 @@ export function registerSearchHandlers(): void {
   });
 
   // 패키지 버전 목록 조회 핸들러
-  ipcMain.handle('search:versions', async (_, type: string, packageName: string, options?: { channel?: string; registry?: string }) => {
+  ipcMain.handle('search:versions', async (_, type: string, packageName: string, options?: { channel?: string; registry?: string; indexUrl?: string }) => {
     log.debug(`Getting versions for ${type} package: ${packageName}`, options);
 
     try {
@@ -310,7 +359,7 @@ export function registerSearchHandlers(): void {
 
       switch (type) {
         case 'pip':
-          versions = await getPyPIVersions(packageName);
+          versions = await getPyPIVersions(packageName, options?.indexUrl);
           break;
         case 'conda':
           // conda는 실제 Anaconda API 사용
@@ -391,8 +440,11 @@ export function registerSearchHandlers(): void {
           searchPromise = (downloader as NpmDownloader).searchPackages(query);
           break;
         case 'yum':
-          searchPromise = (downloader as YumDownloader).searchPackages(query);
-          break;
+        case 'apt':
+        case 'apk':
+          // OS 패키지는 os:search 핸들러를 사용해야 함
+          log.warn(`OS package type ${packageType} does not support suggest`);
+          return [];
         default:
           return [];
       }
@@ -434,16 +486,18 @@ export function registerSearchHandlers(): void {
       targetOS?: string;
       architecture?: string;
       pythonVersion?: string;
+      cudaVersion?: string | null;
     };
   }) => {
     const { packages, options } = data;
-    log.info(`Resolving dependencies for ${packages.length} packages (targetOS: ${options?.targetOS || 'any'}, python: ${options?.pythonVersion || 'any'})`);
+    log.info(`Resolving dependencies for ${packages.length} packages (targetOS: ${options?.targetOS || 'any'}, python: ${options?.pythonVersion || 'any'}, cuda: ${options?.cudaVersion || 'none'})`);
 
     try {
       const resolved = await resolveAllDependencies(packages, {
         targetOS: options?.targetOS as 'any' | 'windows' | 'macos' | 'linux' | undefined,
         architecture: options?.architecture,
         pythonVersion: options?.pythonVersion,
+        cudaVersion: options?.cudaVersion,
         // 진행 상황을 렌더러로 전송
         onProgress: (progress) => {
           event.sender.send('dependency:progress', progress);
@@ -462,6 +516,137 @@ export function registerSearchHandlers(): void {
       throw error;
     }
   });
+
+  // OS 패키지 배포판 목록 조회
+  ipcMain.handle(
+    'os:getDistributions',
+    async (_event, osType: OSPackageManager): Promise<OSDistribution[]> => {
+      return getDistributionsByPackageManager(osType);
+    }
+  );
+
+  // 전체 배포판 목록 (인터넷에서 가져오기)
+  ipcMain.handle(
+    'os:getAllDistributions',
+    async (
+      _event,
+      options?: { source?: 'internet' | 'local'; refresh?: boolean }
+    ): Promise<{
+      id: string;
+      name: string;
+      version: string;
+      osType: string;
+      packageManager: string;
+      architectures: string[];
+    }[]> => {
+      const source = options?.source || 'internet';
+      const refresh = options?.refresh || false;
+
+      if (source === 'internet') {
+        try {
+          if (refresh) {
+            invalidateDistributionCache();
+          }
+          return await getSimplifiedDistributions();
+        } catch (error) {
+          log.error('Failed to fetch distributions from internet, falling back to local:', error);
+          // 폴백: 로컬 데이터
+          return OS_DISTRIBUTIONS.map(d => ({
+            id: d.id,
+            name: d.name,
+            version: d.version,
+            osType: 'linux',
+            packageManager: d.packageManager,
+            architectures: d.architectures as string[],
+          }));
+        }
+      } else {
+        // 로컬 하드코딩된 목록
+        return OS_DISTRIBUTIONS.map(d => ({
+          id: d.id,
+          name: d.name,
+          version: d.version,
+          osType: 'linux',
+          packageManager: d.packageManager,
+          architectures: d.architectures as string[],
+        }));
+      }
+    }
+  );
+
+  // 특정 배포판 조회
+  ipcMain.handle(
+    'os:getDistribution',
+    async (_event, distributionId: string): Promise<OSDistribution | undefined> => {
+      return getDistributionById(distributionId);
+    }
+  );
+
+  // OS 패키지 검색
+  ipcMain.handle(
+    'os:search',
+    async (
+      _event,
+      options: {
+        query: string;
+        distribution: OSDistribution;
+        architecture: OSArchitecture;
+        matchType?: MatchType;
+        limit?: number;
+      }
+    ) => {
+      const { query, distribution, architecture, matchType, limit } = options;
+
+      log.info(`OS package search: ${query} on ${distribution.id} (${architecture})`);
+
+      // packageManager에 따라 적절한 resolver 선택
+      let searchResults;
+      switch (distribution.packageManager) {
+        case 'yum':
+          const yumResolver = getYumResolver({
+            repositories: distribution.defaultRepos,
+            architecture,
+            distribution,
+            includeOptional: false,
+            includeRecommends: false,
+          });
+          searchResults = await yumResolver.searchPackages(query, matchType === 'exact' ? 'exact' : 'partial');
+          break;
+
+        case 'apt':
+          const aptResolver = getAptResolver({
+            repositories: distribution.defaultRepos,
+            architecture,
+            distribution,
+            includeOptional: false,
+            includeRecommends: false,
+          });
+          searchResults = await aptResolver.searchPackages(query, matchType === 'exact' ? 'exact' : 'partial');
+          break;
+
+        case 'apk':
+          const apkResolver = getApkResolver({
+            repositories: distribution.defaultRepos,
+            architecture,
+            distribution,
+            includeOptional: false,
+            includeRecommends: false,
+          });
+          searchResults = await apkResolver.searchPackages(query, matchType === 'exact' ? 'exact' : 'partial');
+          break;
+
+        default:
+          throw new Error(`Unsupported package manager: ${distribution.packageManager}`);
+      }
+
+      // limit 적용
+      if (limit && searchResults.length > limit) {
+        searchResults = searchResults.slice(0, limit);
+      }
+
+      return searchResults;
+    }
+  );
 
   log.info('검색 핸들러 등록 완료');
 }

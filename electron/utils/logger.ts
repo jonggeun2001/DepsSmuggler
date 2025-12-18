@@ -7,18 +7,14 @@ import log from 'electron-log';
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { maskSensitiveData } from '../../src/utils/mask';
 
-// 로그 디렉토리 설정 (앱 실행 디렉토리/logs)
+// 로그 디렉토리 설정 (~/.depssmuggler/logs로 통합)
 const getLogPath = (): string => {
-  const isDev = !app.isPackaged;
-  if (isDev) {
-    // 개발 환경: 프로젝트 루트/logs
-    return path.join(process.cwd(), 'logs');
-  } else {
-    // 프로덕션: 앱 실행 디렉토리/logs
-    return path.join(path.dirname(app.getPath('exe')), 'logs');
-  }
+  // Core logger와 동일한 경로 사용: ~/.depssmuggler/logs
+  const homeDir = os.homedir();
+  return path.join(homeDir, '.depssmuggler', 'logs');
 };
 
 // 로그 디렉토리 생성

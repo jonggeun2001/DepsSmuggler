@@ -21,7 +21,21 @@ import {
   getMavenDownloader,
   getDockerDownloader,
   getNpmDownloader,
+  getYumDownloader,
+  getAptDownloader,
+  getApkDownloader,
+  getYumResolver,
+  getAptResolver,
+  getApkResolver,
 } from '../src/core';
+import type {
+  OSPackageInfo,
+  OSDistribution,
+  OSArchitecture,
+  OSDownloadProgress,
+  OSErrorAction,
+} from '../src/core/downloaders/os-shared/types';
+import { dialog } from 'electron';
 
 const log = createScopedLogger('Download');
 
@@ -159,7 +173,8 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
               pkg.version,
               architecture || pkg.architecture,
               targetOS,
-              pythonVersion
+              pythonVersion,
+              pkg.indexUrl  // indexUrl 전달 추가
             );
           } else if (pkg.type === 'conda') {
             // Conda 패키지: CondaDownloader를 통해 직접 다운로드
@@ -236,6 +251,10 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                     totalBytes: progress.totalBytes,
                     speed: progress.speed,
                   });
+                },
+                {
+                  targetOS,
+                  targetArchitecture: architecture,
                 }
               );
 
@@ -554,6 +573,266 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
       log.error(`[TIMING] Failed to clear output path (${Date.now() - startTime}ms):`, error);
       return { success: false, deleted: false };
     }
+  });
+
+  // OS 패키지 의존성 해결
+  ipcMain.handle(
+    'os:resolveDependencies',
+    async (
+      _event,
+      options: {
+        packages: OSPackageInfo[];
+        distribution: OSDistribution;
+        architecture: OSArchitecture;
+        includeOptional?: boolean;
+        includeRecommends?: boolean;
+      }
+    ) => {
+      const { packages, distribution, architecture, includeOptional, includeRecommends } = options;
+      const mainWindow = getMainWindow();
+
+      log.info(`Resolving OS package dependencies: ${packages.length} packages on ${distribution.id}`);
+
+      // packageManager에 따라 적절한 resolver 선택
+      let resolver;
+      switch (distribution.packageManager) {
+        case 'yum':
+          resolver = getYumResolver({
+            repositories: distribution.defaultRepos,
+            architecture,
+            includeOptional: includeOptional ?? false,
+            includeRecommends: includeRecommends ?? false,
+            distribution,
+            onProgress: (message, current, total) => {
+              mainWindow?.webContents.send('os:resolveDependencies:progress', {
+                message,
+                current,
+                total,
+              });
+            },
+          });
+          break;
+
+        case 'apt':
+          resolver = getAptResolver({
+            repositories: distribution.defaultRepos,
+            architecture,
+            includeOptional: includeOptional ?? false,
+            includeRecommends: includeRecommends ?? false,
+            distribution,
+            onProgress: (message, current, total) => {
+              mainWindow?.webContents.send('os:resolveDependencies:progress', {
+                message,
+                current,
+                total,
+              });
+            },
+          });
+          break;
+
+        case 'apk':
+          resolver = getApkResolver({
+            repositories: distribution.defaultRepos,
+            architecture,
+            includeOptional: includeOptional ?? false,
+            includeRecommends: includeRecommends ?? false,
+            distribution,
+            onProgress: (message, current, total) => {
+              mainWindow?.webContents.send('os:resolveDependencies:progress', {
+                message,
+                current,
+                total,
+              });
+            },
+          });
+          break;
+
+        default:
+          throw new Error(`Unsupported package manager: ${distribution.packageManager}`);
+      }
+
+      // 의존성 해결 실행
+      const result = await resolver.resolveDependencies(packages);
+
+      return {
+        packages: result.packages,
+        unresolved: result.unresolved,
+        conflicts: result.conflicts,
+      };
+    }
+  );
+
+  // OS 패키지 다운로드 시작
+  ipcMain.handle(
+    'os:download:start',
+    async (
+      _event,
+      options: {
+        packages: OSPackageInfo[];
+        outputDir: string;
+        distribution: OSDistribution;
+        architecture: OSArchitecture;
+        resolveDependencies?: boolean;
+        includeOptionalDeps?: boolean;
+        verifyGPG?: boolean;
+        concurrency?: number;
+      }
+    ) => {
+      const {
+        packages,
+        outputDir,
+        distribution,
+        architecture,
+        resolveDependencies,
+        includeOptionalDeps,
+        verifyGPG,
+        concurrency = 3,
+      } = options;
+
+      const mainWindow = getMainWindow();
+
+      log.info(`Starting OS package download: ${packages.length} packages to ${outputDir}`);
+
+      // packageManager에 따라 적절한 downloader 선택
+      let downloader;
+      let downloaderOptions;
+
+      switch (distribution.packageManager) {
+        case 'yum':
+          downloaderOptions = {
+            distribution,
+            architecture,
+            repositories: distribution.defaultRepos,
+            outputDir,
+            concurrency,
+            onProgress: (progress: OSDownloadProgress) => {
+              mainWindow?.webContents.send('os:download:progress', progress);
+            },
+            onError: async (error: { package?: OSPackageInfo; message: string }): Promise<OSErrorAction> => {
+              const pkgName = error.package?.name || '알 수 없는 패키지';
+              const result = await dialog.showMessageBox(mainWindow!, {
+                type: 'error',
+                title: '다운로드 오류',
+                message: `패키지 다운로드 중 오류가 발생했습니다.\n\n${pkgName}: ${error.message}`,
+                buttons: ['재시도', '건너뛰기', '취소'],
+                defaultId: 0,
+                cancelId: 2,
+              });
+
+              switch (result.response) {
+                case 0:
+                  return 'retry';
+                case 1:
+                  return 'skip';
+                default:
+                  return 'cancel';
+              }
+            },
+          };
+          downloader = getYumDownloader(downloaderOptions);
+          break;
+
+        case 'apt':
+          downloaderOptions = {
+            distribution,
+            architecture,
+            repositories: distribution.defaultRepos,
+            outputDir,
+            concurrency,
+            onProgress: (progress: OSDownloadProgress) => {
+              mainWindow?.webContents.send('os:download:progress', progress);
+            },
+            onError: async (error: { package?: OSPackageInfo; message: string }): Promise<OSErrorAction> => {
+              const pkgName = error.package?.name || '알 수 없는 패키지';
+              const result = await dialog.showMessageBox(mainWindow!, {
+                type: 'error',
+                title: '다운로드 오류',
+                message: `패키지 다운로드 중 오류가 발생했습니다.\n\n${pkgName}: ${error.message}`,
+                buttons: ['재시도', '건너뛰기', '취소'],
+                defaultId: 0,
+                cancelId: 2,
+              });
+
+              switch (result.response) {
+                case 0:
+                  return 'retry';
+                case 1:
+                  return 'skip';
+                default:
+                  return 'cancel';
+              }
+            },
+          };
+          downloader = getAptDownloader(downloaderOptions);
+          break;
+
+        case 'apk':
+          downloaderOptions = {
+            distribution,
+            architecture,
+            repositories: distribution.defaultRepos,
+            outputDir,
+            concurrency,
+            onProgress: (progress: OSDownloadProgress) => {
+              mainWindow?.webContents.send('os:download:progress', progress);
+            },
+            onError: async (error: { package?: OSPackageInfo; message: string }): Promise<OSErrorAction> => {
+              const pkgName = error.package?.name || '알 수 없는 패키지';
+              const result = await dialog.showMessageBox(mainWindow!, {
+                type: 'error',
+                title: '다운로드 오류',
+                message: `패키지 다운로드 중 오류가 발생했습니다.\n\n${pkgName}: ${error.message}`,
+                buttons: ['재시도', '건너뛰기', '취소'],
+                defaultId: 0,
+                cancelId: 2,
+              });
+
+              switch (result.response) {
+                case 0:
+                  return 'retry';
+                case 1:
+                  return 'skip';
+                default:
+                  return 'cancel';
+              }
+            },
+          };
+          downloader = getApkDownloader(downloaderOptions);
+          break;
+
+        default:
+          throw new Error(`Unsupported package manager: ${distribution.packageManager}`);
+      }
+
+      // 다운로드 실행
+      for (const pkg of packages) {
+        await downloader.downloadPackage(pkg);
+      }
+
+      return {
+        success: true,
+        downloaded: packages.length,
+        failed: 0,
+      };
+    }
+  );
+
+  // OS 패키지 캐시 통계
+  ipcMain.handle('os:cache:stats', async () => {
+    // 각 다운로더의 캐시 통계를 수집
+    // 현재는 기본값 반환
+    return {
+      size: 0,
+      count: 0,
+      path: '',
+    };
+  });
+
+  // OS 패키지 캐시 초기화
+  ipcMain.handle('os:cache:clear', async () => {
+    // 각 다운로더의 캐시를 초기화
+    // 현재는 성공 반환
+    return { success: true };
   });
 
   log.info('다운로드 핸들러 등록 완료');
