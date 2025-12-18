@@ -158,6 +158,8 @@ interface SearchResult {
   pullCount?: number;
   // Maven 아티팩트용 추가 필드
   popularityCount?: number;
+  groupId?: string;
+  artifactId?: string;
 }
 
 const WizardPage: React.FC = () => {
@@ -239,6 +241,12 @@ const WizardPage: React.FC = () => {
   // pip extras 상태 (예: jax[cuda] → ['cuda'])
   const [extras, setExtras] = useState<string[]>([]);
 
+  // Maven classifier 관련 상태
+  const [isNativeLibrary, setIsNativeLibrary] = useState(false);
+  const [selectedClassifier, setSelectedClassifier] = useState<string | undefined>();
+  const [availableClassifiers, setAvailableClassifiers] = useState<string[]>([]);
+  const [customClassifier, setCustomClassifier] = useState('');
+
   // 라이브러리 패키지 타입 (설정 기본값 적용 대상)
   const libraryPackageTypes: PackageType[] = ['pip', 'conda', 'maven', 'npm'];
 
@@ -275,6 +283,11 @@ const WizardPage: React.FC = () => {
     setSuggestions([]);
     setShowSuggestions(false);
     setUsedIndexUrl(undefined); // 사용한 indexUrl 초기화
+    // Maven classifier 초기화
+    setIsNativeLibrary(false);
+    setSelectedClassifier(undefined);
+    setAvailableClassifiers([]);
+    setCustomClassifier('');
     // 언어 버전은 초기화하지 않음 (설정에서 가져온 기본값 유지)
   };
 
@@ -291,8 +304,8 @@ const WizardPage: React.FC = () => {
   // 패키지 타입 변경 시 기본 언어 버전 설정
   React.useEffect(() => {
     const langKey = getLanguageKey(packageType);
-    if (langKey && languageVersions[langKey]) {
-      setLanguageVersion(languageVersions[langKey]);
+    if (langKey && langKey in languageVersions) {
+      setLanguageVersion(languageVersions[langKey as keyof typeof languageVersions]);
     } else {
       setLanguageVersion('');
     }
@@ -683,7 +696,7 @@ const WizardPage: React.FC = () => {
             osType: 'linux',
             packageManager: distInfo.packageManager,
           },
-          architecture: distInfo.architecture as import('../../core/downloaders/os/types').OSArchitecture,
+          architecture: distInfo.architecture as import('../../core/downloaders/os-shared/types').OSArchitecture,
           matchType: 'partial',
           limit: 50,
         });
@@ -806,6 +819,37 @@ const WizardPage: React.FC = () => {
         } else {
           setAvailableVersions([record.version]);
         }
+
+        // Maven: Electron 환경에서도 네이티브 아티팩트 여부 확인 및 classifier 조회
+        if (packageType === 'maven' && window.electronAPI?.maven) {
+          const groupId = record.groupId || record.name.split(':')[0];
+          const artifactId = record.artifactId || record.name.split(':')[1] || record.name;
+          const version = record.version;
+
+          console.log('[Classifier] Checking native artifact (Electron):', { groupId, artifactId, version, record });
+
+          try {
+            const isNative = await window.electronAPI.maven.isNativeArtifact(groupId, artifactId, version);
+            console.log('[Classifier] isNativeArtifact result:', isNative);
+            setIsNativeLibrary(isNative);
+
+            if (isNative) {
+              const classifiers = await window.electronAPI.maven.getAvailableClassifiers(groupId, artifactId, version);
+              console.log('[Classifier] Available classifiers:', classifiers);
+              setAvailableClassifiers(classifiers);
+              // 기본값: 선택 안함 (사용자가 명시적으로 선택)
+              setSelectedClassifier(undefined);
+            } else {
+              setAvailableClassifiers([]);
+              setSelectedClassifier(undefined);
+            }
+          } catch (err) {
+            console.error('Maven native check error:', err);
+            setIsNativeLibrary(false);
+            setAvailableClassifiers([]);
+            setSelectedClassifier(undefined);
+          }
+        }
       } else if (packageType === 'pip' || packageType === 'conda') {
         // 브라우저 환경: PyPI API 직접 호출
         const versions = await fetchPyPIVersions(record.name);
@@ -835,6 +879,39 @@ const WizardPage: React.FC = () => {
         } catch (err) {
           console.error('Maven version fetch error:', err);
           setAvailableVersions([record.version]);
+        }
+
+        // Maven: 네이티브 아티팩트 여부 확인 및 classifier 조회
+        if (window.electronAPI?.maven) {
+          const groupId = record.groupId || record.name.split(':')[0];
+          const artifactId = record.artifactId || record.name.split(':')[1] || record.name;
+          const version = record.version;
+
+          console.log('[Classifier] Checking native artifact:', { groupId, artifactId, version, record });
+
+          try {
+            const isNative = await window.electronAPI.maven.isNativeArtifact(groupId, artifactId, version);
+            console.log('[Classifier] isNativeArtifact result:', isNative);
+            setIsNativeLibrary(isNative);
+
+            if (isNative) {
+              const classifiers = await window.electronAPI.maven.getAvailableClassifiers(groupId, artifactId, version);
+              console.log('[Classifier] Available classifiers:', classifiers);
+              setAvailableClassifiers(classifiers);
+              // 기본값: 선택 안함 (사용자가 명시적으로 선택)
+              setSelectedClassifier(undefined);
+            } else {
+              setAvailableClassifiers([]);
+              setSelectedClassifier(undefined);
+            }
+          } catch (err) {
+            console.error('Maven native check error:', err);
+            setIsNativeLibrary(false);
+            setAvailableClassifiers([]);
+            setSelectedClassifier(undefined);
+          }
+        } else {
+          console.log('[Classifier] electronAPI.maven not available');
         }
       } else if (packageType === 'docker') {
         // Docker: 태그 목록 조회
@@ -922,6 +999,8 @@ const WizardPage: React.FC = () => {
       ...(packageType === 'pip' && usedIndexUrl && { indexUrl: usedIndexUrl }),
       // pip extras 포함
       ...(packageType === 'pip' && extras.length > 0 && { extras }),
+      // Maven classifier 포함
+      ...(packageType === 'maven' && selectedClassifier && { classifier: selectedClassifier }),
     });
 
     message.success(`${selectedPackage.name}@${selectedVersion}이(가) 장바구니에 추가되었습니다`);
@@ -1048,7 +1127,7 @@ const WizardPage: React.FC = () => {
           if (!libraryPackageTypes.includes(packageType)) return null;
 
           const langKey = getLanguageKey(packageType);
-          const langVersion = langKey ? languageVersions[langKey] : '';
+          const langVersion = (langKey && langKey in languageVersions) ? languageVersions[langKey as keyof typeof languageVersions] : '';
           const versionLabel = languageVersionOptions[packageType]?.find(
             v => v.value === langVersion
           )?.label || langVersion;
@@ -1219,8 +1298,8 @@ const WizardPage: React.FC = () => {
                         }))}
                         placeholder="인덱스 URL 입력 (예: https://download.pytorch.org/whl/cu121)"
                         filterOption={(inputValue, option) =>
-                          option?.value.toLowerCase().includes(inputValue.toLowerCase()) ||
-                          option?.label.toLowerCase().includes(inputValue.toLowerCase())
+                          !!(option?.value.toLowerCase().includes(inputValue.toLowerCase()) ||
+                          option?.label.toLowerCase().includes(inputValue.toLowerCase()))
                         }
                       >
                         <Input.Search
@@ -1360,6 +1439,81 @@ const WizardPage: React.FC = () => {
                     </Text>
                   )}
                 </div>
+
+                {/* Maven Native Library Classifier 선택 */}
+                {packageType === 'maven' && isNativeLibrary && (
+                  <Alert
+                    type="warning"
+                    icon={<SettingOutlined />}
+                    message="Native Library 감지"
+                    description={
+                      <div style={{ marginTop: 8 }}>
+                        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                          이 패키지는 플랫폼별 네이티브 라이브러리가 필요합니다.
+                          대상 환경에 맞는 classifier를 선택하세요.
+                        </Text>
+
+                        <Text strong style={{ display: 'block', marginBottom: 8 }}>Classifier 선택</Text>
+                        <Select
+                          value={selectedClassifier}
+                          onChange={(value) => setSelectedClassifier(value || undefined)}
+                          style={{ width: '100%', marginBottom: 12 }}
+                          placeholder="classifier 선택"
+                          allowClear
+                          dropdownRender={(menu) => (
+                            <>
+                              {menu}
+                              <Divider style={{ margin: '8px 0' }} />
+                              <div style={{ padding: '0 8px 4px' }}>
+                                <Input
+                                  placeholder="직접 입력"
+                                  value={customClassifier}
+                                  onChange={(e) => setCustomClassifier(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && customClassifier.trim()) {
+                                      setSelectedClassifier(customClassifier.trim());
+                                      setCustomClassifier('');
+                                    }
+                                  }}
+                                  style={{ flex: 1 }}
+                                />
+                                <Button
+                                  type="text"
+                                  icon={<PlusOutlined />}
+                                  onClick={() => {
+                                    if (customClassifier.trim()) {
+                                      setSelectedClassifier(customClassifier.trim());
+                                      setCustomClassifier('');
+                                    }
+                                  }}
+                                  style={{ marginLeft: 8 }}
+                                >
+                                  추가
+                                </Button>
+                              </div>
+                            </>
+                          )}
+                        >
+                          <Select.Option key="__none__" value="">
+                            <span style={{ color: '#888' }}>선택 안함 (기본 JAR만)</span>
+                          </Select.Option>
+                          {availableClassifiers.map((c) => (
+                            <Select.Option key={c} value={c}>
+                              {c}
+                            </Select.Option>
+                          ))}
+                        </Select>
+
+                        {selectedClassifier && (
+                          <Tag color="blue" style={{ marginTop: 4 }}>
+                            선택됨: {selectedClassifier}
+                          </Tag>
+                        )}
+                      </div>
+                    }
+                    style={{ marginTop: 16 }}
+                  />
+                )}
 
                 {selectedPackage.description && (
                   <Alert

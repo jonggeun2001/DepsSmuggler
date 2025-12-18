@@ -738,6 +738,12 @@ interface ElectronAPI {
     };
   };
 
+  // Maven 네이티브 아티팩트 유틸리티
+  maven: {
+    isNativeArtifact(groupId: string, artifactId: string, version?: string): Promise<boolean>;
+    getAvailableClassifiers(groupId: string, artifactId: string, version?: string): Promise<string[]>;
+  };
+
   // 의존성 해결
   dependency: {
     resolve(packages: unknown[]): Promise<{
@@ -857,23 +863,63 @@ useEffect(() => {
 }, []);
 ```
 
-#### Maven 검색 결과 인기도 표시
+#### Maven 검색 결과 인기도 및 좌표 정보
 
-Maven 검색 결과에 `popularityCount` (사용 앱 수)가 표시됩니다:
+Maven 검색 결과에 `popularityCount` (사용 앱 수)와 `groupId`/`artifactId` 정보가 표시됩니다:
 
 ```typescript
 interface SearchResult {
   name: string;
   version: string;
   description?: string;
-  popularityCount?: number; // Maven 아티팩트용
+  popularityCount?: number; // Maven 아티팩트용 (사용 앱 수)
+  groupId?: string;         // Maven groupId
+  artifactId?: string;      // Maven artifactId
 }
 ```
+
+`groupId`와 `artifactId`는 네이티브 아티팩트 확인 및 classifier 조회에 사용됩니다.
 
 #### 언어 버전 선택
 
 pip/conda 선택 시 Python 버전 선택 UI 표시:
 - 지원 버전: 3.8 ~ 3.13
+
+#### Maven Classifier 선택
+
+Maven 네이티브 라이브러리(LWJGL, Netty, JavaCPP 등) 선택 시 classifier 선택 UI 표시:
+
+```typescript
+// 네이티브 라이브러리 여부 확인
+const isNative = await window.electronAPI.maven.isNativeArtifact(groupId, artifactId, version);
+
+if (isNative) {
+  // 사용 가능한 classifier 목록 조회
+  const classifiers = await window.electronAPI.maven.getAvailableClassifiers(groupId, artifactId, version);
+  setAvailableClassifiers(classifiers);
+}
+```
+
+- **Native Library 감지**: Maven Central API로 네이티브 아티팩트 여부 자동 확인
+- **Classifier 선택 UI**: 사용 가능한 classifier 드롭다운 표시
+- **커스텀 입력**: 목록에 없는 classifier 직접 입력 가능
+- **장바구니 전달**: 선택된 classifier가 `DownloadPackage.classifier` 필드로 전달됨
+
+```tsx
+// 네이티브 라이브러리 상태
+const [isNativeLibrary, setIsNativeLibrary] = useState(false);
+const [selectedClassifier, setSelectedClassifier] = useState<string | undefined>();
+const [availableClassifiers, setAvailableClassifiers] = useState<string[]>([]);
+const [customClassifier, setCustomClassifier] = useState('');
+
+// 장바구니에 추가 시 classifier 포함
+addItem({
+  type: 'maven',
+  name: selectedPackage.name,
+  version: selectedVersion,
+  classifier: selectedClassifier,  // 네이티브 라이브러리의 경우 classifier 포함
+});
+```
 
 #### Docker 레지스트리 선택 (신규)
 
