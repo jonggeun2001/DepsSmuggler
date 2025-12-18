@@ -356,7 +356,8 @@ export class CacheManager<T> {
         return data;
       } catch (error) {
         fetchError = error as Error;
-        logger.warn(`${this.name} 데이터 요청 실패`, { key, error });
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.warn(`${this.name} 데이터 요청 실패`, { key, error: errorMsg });
         return null;
       } finally {
         this.pendingRequests.delete(key);

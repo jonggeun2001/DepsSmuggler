@@ -128,6 +128,7 @@ export async function resolveAllDependencies(
 
   for (const pkg of packages) {
     currentIndex++;
+    console.log('[DEBUG-CONSOLE] Processing package:', { type: pkg.type, name: pkg.name, classifier: pkg.classifier });
 
     // 원본 패키지 추가
     const key = `${pkg.type}:${pkg.name}@${pkg.version}`;
@@ -185,11 +186,17 @@ export async function resolveAllDependencies(
           architecture,
         };
       } else if (pkg.type === 'maven') {
-        // maven: 네이티브 라이브러리 classifier 자동 설정을 위한 targetOS, targetArchitecture 전달
+        // maven: 사용자 선택 classifier 또는 targetOS/targetArchitecture 전달
+        console.log('[DEBUG-CONSOLE] Maven package classifier in dependency-resolver:', {
+          name: pkg.name,
+          classifier: pkg.classifier,
+        });
         resolverOptions = {
           ...resolverOptions,
           targetOS: options?.targetOS !== 'any' ? options?.targetOS : undefined,
           targetArchitecture: architecture,
+          // 사용자가 UI에서 선택한 classifier 전달
+          classifier: pkg.classifier,
         };
       }
 

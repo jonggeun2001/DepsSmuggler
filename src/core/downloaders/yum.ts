@@ -494,6 +494,8 @@ export class YumMetadataParser {
  * YUM 패키지 다운로더
  */
 export class YumDownloader extends BaseOSDownloader {
+  readonly type = 'yum' as const;
+
   constructor(options: BaseDownloaderOptions) {
     super(options);
   }
