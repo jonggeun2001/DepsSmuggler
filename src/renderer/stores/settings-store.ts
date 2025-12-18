@@ -4,8 +4,7 @@ import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 // 언어 버전 타입 정의
 export interface LanguageVersions {
   python: string;  // 예: '3.11', '3.10', '3.9'
-  java: string;    // 예: '21', '17', '11', '8'
-  node: string;    // 예: '20', '18', '16'
+  // java와 node 제거: JAR/tarball은 런타임 버전과 무관하게 동일 파일
 }
 
 // 대상 OS 타입 정의 (라이브러리 패키지용)
@@ -14,8 +13,11 @@ export type TargetOS = 'windows' | 'macos' | 'linux';
 // 기본 아키텍처 타입 정의
 export type DefaultArchitecture = 'x86_64' | 'amd64' | 'arm64' | 'aarch64' | 'noarch';
 
-// Conda 채널 타입 정의
-export type CondaChannel = 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch';
+// Conda 채널 타입 정의 (기본 채널 + 사용자 커스텀 채널 지원)
+export type CondaChannel = 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch' | string;
+
+// CUDA 버전 타입 정의 (null = CPU only, 즉 CUDA 없음, 커스텀 입력 지원)
+export type CudaVersion = string | null;
 
 // Docker 레지스트리 타입 정의
 export type DockerRegistry = 'docker.io' | 'ghcr.io' | 'ecr' | 'quay.io' | 'custom';
@@ -28,6 +30,9 @@ export type DockerRetryStrategy = 'layer' | 'full';
 
 // Docker 아키텍처 타입 정의
 export type DockerArchitecture = 'amd64' | 'arm64' | 'arm/v7' | '386';
+
+// pip 타겟 플랫폼 타입 정의 (타입은 별도 파일에서 import)
+export type { PipTargetPlatform } from '../../types/pip-target-platform';
 
 // OS 배포판 설정 타입 정의
 // id: 배포판 식별자 (예: 'rocky-9', 'almalinux-8', 'ubuntu-22.04', 'debian-12', 'alpine-3.18')
@@ -68,8 +73,18 @@ interface SettingsState {
   defaultTargetOS: TargetOS;
   defaultArchitecture: DefaultArchitecture;
 
+  // pip 타겟 플랫폼 설정 (wheel 호환성용)
+  pipTargetPlatform: PipTargetPlatform;
+
   // Conda 채널 설정
   condaChannel: CondaChannel;
+  customCondaChannels: string[];  // 사용자가 추가한 커스텀 채널 목록
+
+  // pip 커스텀 인덱스 URL 설정
+  customPipIndexUrls: Array<{ label: string; url: string }>;
+
+  // CUDA 버전 설정 (null = CPU only)
+  cudaVersion: CudaVersion;
 
   // OS 패키지 배포판 설정
   yumDistribution: OSDistributionSetting;  // YUM (RHEL 계열)
@@ -98,6 +113,10 @@ interface SettingsState {
   updateSettings: (updates: Partial<SettingsState>) => void;
   resetSettings: () => void;
   initializeFromFile: () => Promise<void>;
+  addCustomCondaChannel: (channel: string) => void;
+  removeCustomCondaChannel: (channel: string) => void;
+  addCustomPipIndexUrl: (label: string, url: string) => void;
+  removeCustomPipIndexUrl: (url: string) => void;
 }
 
 const defaultSettings = {
@@ -121,14 +140,32 @@ const defaultSettings = {
 
   languageVersions: {
     python: '3.11',
-    java: '17',
-    node: '20',
   },
 
   defaultTargetOS: 'linux' as const,
   defaultArchitecture: 'x86_64' as const,
 
+  // pip 타겟 플랫폼 기본값 (RHEL 9 / Rocky 9 기준)
+  pipTargetPlatform: {
+    os: 'linux' as const,
+    arch: 'x86_64' as const,
+    linuxDistro: 'rocky9',
+    glibcVersion: '2.34',
+  },
+
   condaChannel: 'conda-forge' as const,
+  customCondaChannels: [],
+
+  // pip 커스텀 인덱스 URL 기본값 (PyTorch 예시)
+  customPipIndexUrls: [
+    { label: 'PyTorch CUDA 12.4', url: 'https://download.pytorch.org/whl/cu124' },
+    { label: 'PyTorch CUDA 12.1', url: 'https://download.pytorch.org/whl/cu121' },
+    { label: 'PyTorch CUDA 11.8', url: 'https://download.pytorch.org/whl/cu118' },
+    { label: 'PyTorch CPU', url: 'https://download.pytorch.org/whl/cpu' },
+  ],
+
+  // CUDA 버전 기본값 (null = CPU only)
+  cudaVersion: null as CudaVersion,
 
   // OS 패키지 배포판 기본값 (LTS 안정 버전)
   yumDistribution: { id: 'rocky-9', architecture: 'x86_64' },
@@ -183,7 +220,7 @@ const electronStorage: StateStorage = {
         const state = parsed.state;
         // 액션 함수와 내부 상태는 제외하고 저장
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { updateSettings, resetSettings, initializeFromFile, _initialized, ...settingsToSave } = state;
+        const { updateSettings, resetSettings, initializeFromFile, addCustomCondaChannel, removeCustomCondaChannel, addCustomPipIndexUrl, removeCustomPipIndexUrl, _initialized, ...settingsToSave } = state;
         await window.electronAPI.config.set(settingsToSave);
       } catch (error) {
         console.error('설정 저장 실패:', error);
@@ -218,6 +255,32 @@ export const useSettingsStore = create<SettingsState>()(
         set({ ...defaultSettings, _initialized: true });
       },
 
+      addCustomCondaChannel: (channel: string) =>
+        set((state) => ({
+          customCondaChannels: [...new Set([...state.customCondaChannels, channel])],
+        })),
+
+      removeCustomCondaChannel: (channel: string) =>
+        set((state) => ({
+          customCondaChannels: state.customCondaChannels.filter((c) => c !== channel),
+        })),
+
+      addCustomPipIndexUrl: (label: string, url: string) =>
+        set((state) => {
+          // 중복 URL 체크
+          if (state.customPipIndexUrls.some((item) => item.url === url)) {
+            return state;
+          }
+          return {
+            customPipIndexUrls: [...state.customPipIndexUrls, { label, url }],
+          };
+        }),
+
+      removeCustomPipIndexUrl: (url: string) =>
+        set((state) => ({
+          customPipIndexUrls: state.customPipIndexUrls.filter((item) => item.url !== url),
+        })),
+
       // 앱 시작 시 파일에서 설정 로드
       initializeFromFile: async () => {
         if (get()._initialized) return;
@@ -245,7 +308,7 @@ export const useSettingsStore = create<SettingsState>()(
       // 저장할 때 액션 함수 제외
       partialize: (state) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { updateSettings, resetSettings, initializeFromFile, ...rest } = state;
+        const { updateSettings, resetSettings, initializeFromFile, addCustomCondaChannel, removeCustomCondaChannel, addCustomPipIndexUrl, removeCustomPipIndexUrl, ...rest } = state;
         return rest;
       },
     }

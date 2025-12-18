@@ -16,6 +16,10 @@ import {
   Divider,
   Alert,
   Dropdown,
+  Checkbox,
+  AutoComplete,
+  Tooltip,
+  Modal,
 } from 'antd';
 import {
   SearchOutlined,
@@ -197,11 +201,22 @@ const WizardPage: React.FC = () => {
     dockerRegistry: defaultDockerRegistry,
     dockerCustomRegistry,
     dockerArchitecture,
+    customPipIndexUrls,
+    addCustomPipIndexUrl,
   } = useSettingsStore();
 
   // Docker 레지스트리 상태
   const [dockerRegistry, setDockerRegistry] = useState<DockerRegistry>(defaultDockerRegistry);
   const [customRegistryUrl, setCustomRegistryUrl] = useState(dockerCustomRegistry);
+
+  // pip 커스텀 인덱스 URL 상태
+  const [useCustomIndex, setUseCustomIndex] = useState(false);
+  const [customIndexUrl, setCustomIndexUrl] = useState('');
+  const [showSaveIndexUrlModal, setShowSaveIndexUrlModal] = useState(false);
+  const [indexUrlLabel, setIndexUrlLabel] = useState('');
+
+  // pip extras 상태 (예: jax[cuda] → ['cuda'])
+  const [extras, setExtras] = useState<string[]>([]);
 
   // 라이브러리 패키지 타입 (설정 기본값 적용 대상)
   const libraryPackageTypes: PackageType[] = ['pip', 'conda', 'maven', 'npm'];
@@ -239,6 +254,16 @@ const WizardPage: React.FC = () => {
     setSuggestions([]);
     setShowSuggestions(false);
     // 언어 버전은 초기화하지 않음 (설정에서 가져온 기본값 유지)
+  };
+
+  // URL 유효성 검사
+  const isValidUrl = (urlString: string): boolean => {
+    try {
+      const url = new URL(urlString);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch {
+      return false;
+    }
   };
 
   // 패키지 타입 변경 시 기본 언어 버전 설정
@@ -584,6 +609,21 @@ const WizardPage: React.FC = () => {
       return;
     }
 
+    // pip 패키지명에서 extras 파싱 (예: jax[cuda] → name: jax, extras: [cuda])
+    let searchQuery = query;
+    let parsedExtras: string[] = [];
+
+    if (packageType === 'pip') {
+      const extrasMatch = query.match(/^([a-zA-Z0-9_-]+)\[([a-zA-Z0-9_,\s]+)\]$/);
+      if (extrasMatch) {
+        searchQuery = extrasMatch[1]; // 패키지명만 추출
+        parsedExtras = extrasMatch[2].split(',').map(e => e.trim()); // extras 배열
+        setExtras(parsedExtras);
+      } else {
+        setExtras([]); // extras 없는 경우 초기화
+      }
+    }
+
     setSearching(true);
     setSearchResults([]);
 
@@ -614,7 +654,7 @@ const WizardPage: React.FC = () => {
         }
 
         const response = await window.electronAPI.os.search({
-          query,
+          query: searchQuery,
           distribution: {
             id: distInfo.id,
             name: distInfo.id,
@@ -645,9 +685,14 @@ const WizardPage: React.FC = () => {
         }));
       } else if (window.electronAPI?.search?.packages) {
         // 일반 패키지: electronAPI.search.packages 사용
-        let searchOptions: { channel?: string; registry?: string } | undefined;
+        let searchOptions: { channel?: string; registry?: string; indexUrl?: string } | undefined;
 
-        if (packageType === 'conda') {
+        if (packageType === 'pip') {
+          // pip 커스텀 인덱스 URL 전달
+          if (useCustomIndex && customIndexUrl) {
+            searchOptions = { indexUrl: customIndexUrl };
+          }
+        } else if (packageType === 'conda') {
           searchOptions = { channel: condaChannel };
         } else if (packageType === 'docker') {
           const registryValue = dockerRegistry === 'custom' && customRegistryUrl
@@ -656,11 +701,11 @@ const WizardPage: React.FC = () => {
           searchOptions = { registry: registryValue };
         }
 
-        const response = await window.electronAPI.search.packages(packageType, query, searchOptions);
+        const response = await window.electronAPI.search.packages(packageType, searchQuery, searchOptions);
         results = response.results;
       } else {
         // 브라우저 환경: 패키지 타입별 API 직접 호출
-        results = await searchPackageByType(packageType, query);
+        results = await searchPackageByType(packageType, searchQuery);
       }
 
       setSearchResults(results);
@@ -710,9 +755,14 @@ const WizardPage: React.FC = () => {
     try {
       if (window.electronAPI?.search?.versions) {
         // 패키지 타입별 옵션 전달
-        let searchOptions: { channel?: string; registry?: string } | undefined;
+        let searchOptions: { channel?: string; registry?: string; indexUrl?: string } | undefined;
 
-        if (packageType === 'conda') {
+        if (packageType === 'pip') {
+          // pip 커스텀 인덱스 URL 전달
+          if (useCustomIndex && customIndexUrl) {
+            searchOptions = { indexUrl: customIndexUrl };
+          }
+        } else if (packageType === 'conda') {
           searchOptions = { channel: condaChannel };
         } else if (packageType === 'docker') {
           const registryValue = dockerRegistry === 'custom' && customRegistryUrl
@@ -838,6 +888,10 @@ const WizardPage: React.FC = () => {
       downloadUrl: selectedPackage.downloadUrl,
       repository: selectedPackage.repository,
       location: selectedPackage.location,
+      // pip 커스텀 인덱스 URL 포함
+      ...(packageType === 'pip' && useCustomIndex && customIndexUrl && { indexUrl: customIndexUrl }),
+      // pip extras 포함
+      ...(packageType === 'pip' && extras.length > 0 && { extras }),
     });
 
     message.success(`${selectedPackage.name}@${selectedVersion}이(가) 장바구니에 추가되었습니다`);
@@ -1162,6 +1216,73 @@ const WizardPage: React.FC = () => {
               </div>
             )}
 
+            {/* pip 타입일 때 커스텀 인덱스 URL 입력 UI */}
+            {packageType === 'pip' && (
+              <div style={{ marginBottom: 16 }}>
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Checkbox
+                    checked={useCustomIndex}
+                    onChange={(e) => {
+                      setUseCustomIndex(e.target.checked);
+                      if (!e.target.checked) {
+                        setCustomIndexUrl('');
+                      }
+                      resetSearch();
+                    }}
+                  >
+                    커스텀 인덱스 URL 사용 (PyTorch CUDA 빌드 등)
+                  </Checkbox>
+
+                  {useCustomIndex && (
+                    <>
+                      <AutoComplete
+                        style={{ width: '100%' }}
+                        value={customIndexUrl}
+                        onChange={(value) => {
+                          setCustomIndexUrl(value);
+                        }}
+                        onBlur={resetSearch}
+                        options={customPipIndexUrls.map((item) => ({
+                          label: `${item.label} - ${item.url}`,
+                          value: item.url,
+                        }))}
+                        placeholder="인덱스 URL 입력 (예: https://download.pytorch.org/whl/cu121)"
+                        filterOption={(inputValue, option) =>
+                          option?.value.toLowerCase().includes(inputValue.toLowerCase()) ||
+                          option?.label.toLowerCase().includes(inputValue.toLowerCase())
+                        }
+                      >
+                        <Input.Search
+                          enterButton={
+                            <Tooltip title="설정에 저장">
+                              <Button icon={<PlusOutlined />} />
+                            </Tooltip>
+                          }
+                          onSearch={() => {
+                            if (customIndexUrl && isValidUrl(customIndexUrl)) {
+                              setShowSaveIndexUrlModal(true);
+                            } else if (customIndexUrl) {
+                              message.warning('유효한 URL을 입력하세요');
+                            }
+                          }}
+                        />
+                      </AutoComplete>
+
+                      {customIndexUrl && isValidUrl(customIndexUrl) && (
+                        <Alert
+                          message="커스텀 인덱스 사용"
+                          description={`PEP 503 Simple API를 지원하는 인덱스에서 패키지를 검색합니다: ${new URL(customIndexUrl).hostname}`}
+                          type="info"
+                          showIcon
+                          closable
+                        />
+                      )}
+                    </>
+                  )}
+                </Space>
+              </div>
+            )}
+
             <Dropdown
               menu={{ items: dropdownItems, style: { maxHeight: 300, overflowY: 'auto' } }}
               open={showSuggestions && suggestions.length > 0}
@@ -1336,6 +1457,45 @@ const WizardPage: React.FC = () => {
       />
 
       {renderCurrentStep()}
+
+      {/* pip 인덱스 URL 저장 모달 */}
+      <Modal
+        title="인덱스 URL 저장"
+        open={showSaveIndexUrlModal}
+        onOk={() => {
+          if (indexUrlLabel.trim() && customIndexUrl) {
+            addCustomPipIndexUrl(indexUrlLabel.trim(), customIndexUrl);
+            message.success('인덱스 URL이 저장되었습니다');
+            setIndexUrlLabel('');
+            setShowSaveIndexUrlModal(false);
+          } else {
+            message.warning('라벨을 입력하세요');
+          }
+        }}
+        onCancel={() => {
+          setIndexUrlLabel('');
+          setShowSaveIndexUrlModal(false);
+        }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <div>
+            저장할 URL: <Text code>{customIndexUrl}</Text>
+          </div>
+          <Input
+            placeholder="라벨 입력 (예: PyTorch CUDA 12.4)"
+            value={indexUrlLabel}
+            onChange={(e) => setIndexUrlLabel(e.target.value)}
+            onPressEnter={() => {
+              if (indexUrlLabel.trim() && customIndexUrl) {
+                addCustomPipIndexUrl(indexUrlLabel.trim(), customIndexUrl);
+                message.success('인덱스 URL이 저장되었습니다');
+                setIndexUrlLabel('');
+                setShowSaveIndexUrlModal(false);
+              }
+            }}
+          />
+        </Space>
+      </Modal>
     </div>
   );
 };

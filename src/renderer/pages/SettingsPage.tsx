@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useBlocker } from 'react-router-dom';
 import {
   Card,
   Form,
@@ -19,6 +20,9 @@ import {
   Divider,
   Tooltip,
   Alert,
+  Modal,
+  AutoComplete,
+  List,
 } from 'antd';
 import {
   SaveOutlined,
@@ -31,10 +35,20 @@ import {
   CloudOutlined,
   InfoCircleOutlined,
   SyncOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 
 import { useSettingsStore } from '../stores/settings-store';
 import type { OSDistribution } from '../global';
+import {
+  LINUX_DISTRO_GLIBC_MAP,
+  getDistrosByFamily,
+  isDistroEOL,
+  isDistroEOLSoon,
+  getMacOSVersionsSorted,
+  isMacOSVersionCompatibleWithArch,
+  type MacOSVersionInfo,
+} from '../../core/shared/platform-mappings';
 
 // 컴팩트 레이아웃 상수
 const CARD_MARGIN = 12;
@@ -61,7 +75,11 @@ const SettingsPage: React.FC = () => {
     languageVersions,
     defaultTargetOS,
     defaultArchitecture,
+    pipTargetPlatform,
     condaChannel,
+    customCondaChannels,
+    customPipIndexUrls,
+    cudaVersion,
     yumDistribution,
     aptDistribution,
     apkDistribution,
@@ -73,9 +91,18 @@ const SettingsPage: React.FC = () => {
     downloadRenderInterval,
     updateSettings,
     resetSettings,
+    addCustomCondaChannel,
+    removeCustomCondaChannel,
+    addCustomPipIndexUrl,
+    removeCustomPipIndexUrl,
   } = useSettingsStore();
 
   const [form] = Form.useForm();
+
+  // 변경사항 감지 상태
+  const [isDirty, setIsDirty] = useState(false);
+  const [initialValues, setInitialValues] = useState<Record<string, unknown>>({});
+  const [showNavigationModal, setShowNavigationModal] = useState(false);
 
   // 캐시 상태
   const [cacheSize, setCacheSize] = useState<number>(0);
@@ -86,6 +113,34 @@ const SettingsPage: React.FC = () => {
   // SMTP 테스트 상태
   const [testingSmtp, setTestingSmtp] = useState(false);
   const [smtpTestResult, setSmtpTestResult] = useState<'success' | 'failed' | null>(null);
+
+  // Python 버전 목록 상태
+  const [pythonVersions, setPythonVersions] = useState<string[]>([
+    '3.13',
+    '3.12',
+    '3.11',
+    '3.10',
+    '3.9',
+  ]); // 폴백 목록
+  const [loadingPythonVersions, setLoadingPythonVersions] = useState(false);
+
+  // CUDA 버전 목록 상태
+  const [cudaVersions, setCudaVersions] = useState<string[]>([
+    '12.6',
+    '12.5',
+    '12.4',
+    '12.1',
+    '12.0',
+    '11.8',
+  ]); // 폴백 목록
+  const [loadingCudaVersions, setLoadingCudaVersions] = useState(false);
+
+  // pip 커스텀 인덱스 URL 관리 상태
+  const [newIndexLabel, setNewIndexLabel] = useState('');
+  const [newIndexUrl, setNewIndexUrl] = useState('');
+
+  // Conda 채널 검증 상태
+  const [validatingChannel, setValidatingChannel] = useState(false);
 
   // OS 배포판 목록 상태
   const [distributions, setDistributions] = useState<OSDistribution[]>([]);
@@ -184,6 +239,42 @@ const SettingsPage: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  // Python 버전 목록 로드
+  const loadPythonVersions = async () => {
+    setLoadingPythonVersions(true);
+    try {
+      if (window.electronAPI?.versions?.python) {
+        const versions = await window.electronAPI.versions.python();
+        if (versions && versions.length > 0) {
+          setPythonVersions(versions);
+        }
+      }
+    } catch (error) {
+      console.error('Python 버전 로드 실패:', error);
+      // 폴백 목록 유지
+    } finally {
+      setLoadingPythonVersions(false);
+    }
+  };
+
+  // CUDA 버전 목록 로드
+  const loadCudaVersions = async () => {
+    setLoadingCudaVersions(true);
+    try {
+      if (window.electronAPI?.versions?.cuda) {
+        const versions = await window.electronAPI.versions.cuda();
+        if (versions && versions.length > 0) {
+          setCudaVersions(versions);
+        }
+      }
+    } catch (error) {
+      console.error('CUDA 버전 로드 실패:', error);
+      // 폴백 목록 유지
+    } finally {
+      setLoadingCudaVersions(false);
+    }
+  };
+
   // OS 배포판 목록 로드
   const loadDistributions = async () => {
     setLoadingDistributions(true);
@@ -206,11 +297,43 @@ const SettingsPage: React.FC = () => {
   useEffect(() => {
     loadCacheInfo();
     loadDistributions();
+    loadPythonVersions();
+    loadCudaVersions();
   }, []);
+
+  // useBlocker로 페이지 이동 차단
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      isDirty && currentLocation.pathname !== nextLocation.pathname
+  );
+
+  // blocker 상태 변경 시 모달 표시
+  useEffect(() => {
+    if (blocker.state === 'blocked') {
+      setShowNavigationModal(true);
+    }
+  }, [blocker.state]);
+
+  // beforeunload 이벤트 (브라우저 새로고침/닫기)
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isDirty]);
 
   // 초기값 설정
   React.useEffect(() => {
-    form.setFieldsValue({
+    const values = {
       concurrentDownloads,
       enableCache,
       cachePath,
@@ -228,7 +351,10 @@ const SettingsPage: React.FC = () => {
       languageVersions,
       defaultTargetOS,
       defaultArchitecture,
+      // pip 타겟 플랫폼
+      pipTargetPlatform,
       condaChannel,
+      cudaVersion,
       // OS 배포판 (2단계 캐스케이드: 배포판 ID와 아키텍처 분리)
       yumDistributionId: yumDistribution?.id || 'rocky-9',
       yumArchitecture: yumDistribution?.architecture || 'x86_64',
@@ -245,7 +371,13 @@ const SettingsPage: React.FC = () => {
       autoDownloadUpdate,
       // UI 렌더링
       downloadRenderInterval,
-    });
+    };
+
+    form.setFieldsValue(values);
+    // 초기값 저장 (변경사항 감지용)
+    setInitialValues(values);
+    setIsDirty(false);
+
     // 로컬 상태도 업데이트
     setSelectedYumDistroId(yumDistribution?.id || 'rocky-9');
     setSelectedAptDistroId(aptDistribution?.id || 'ubuntu-22.04');
@@ -269,7 +401,9 @@ const SettingsPage: React.FC = () => {
     languageVersions,
     defaultTargetOS,
     defaultArchitecture,
+    pipTargetPlatform,
     condaChannel,
+    cudaVersion,
     yumDistribution,
     aptDistribution,
     apkDistribution,
@@ -318,6 +452,11 @@ const SettingsPage: React.FC = () => {
 
     updateSettings(convertedValues);
     message.success('설정이 저장되었습니다');
+
+    // 저장 후 isDirty 초기화
+    const newValues = form.getFieldsValue();
+    setInitialValues(newValues);
+    setIsDirty(false);
   };
 
   // 초기화
@@ -325,6 +464,42 @@ const SettingsPage: React.FC = () => {
     resetSettings();
     form.resetFields();
     message.info('설정이 초기화되었습니다');
+
+    // 초기화 후 isDirty 초기화
+    const newValues = form.getFieldsValue();
+    setInitialValues(newValues);
+    setIsDirty(false);
+  };
+
+  // 폼 값 변경 감지
+  const handleFormChange = () => {
+    const currentValues = form.getFieldsValue();
+    const hasChanges = JSON.stringify(currentValues) !== JSON.stringify(initialValues);
+    setIsDirty(hasChanges);
+  };
+
+  // 모달 핸들러
+  const handleNavigationConfirm = async (shouldSave: boolean) => {
+    if (shouldSave) {
+      // 저장 후 이동
+      try {
+        await form.validateFields();
+        handleSave(form.getFieldsValue());
+        blocker.proceed?.();
+      } catch (error) {
+        // 유효성 검증 실패 시 이동 취소
+        message.error('설정 저장에 실패했습니다');
+      }
+    } else {
+      // 저장 안 함, 그냥 이동
+      blocker.proceed?.();
+    }
+    setShowNavigationModal(false);
+  };
+
+  const handleNavigationCancel = () => {
+    blocker.reset?.();
+    setShowNavigationModal(false);
   };
 
   // 폴더 선택
@@ -338,6 +513,56 @@ const SettingsPage: React.FC = () => {
     } else {
       message.info('폴더 선택 기능은 Electron 환경에서 사용 가능합니다');
     }
+  };
+
+  // 커스텀 Conda 채널 추가
+  const handleAddCustomChannel = async (channel: string) => {
+    // 빈 값 체크
+    if (!channel || !channel.trim()) {
+      return;
+    }
+
+    const trimmedChannel = channel.trim();
+
+    // 이미 기본 채널인지 확인
+    const defaultChannels = ['conda-forge', 'anaconda', 'bioconda', 'pytorch'];
+    if (defaultChannels.includes(trimmedChannel)) {
+      message.info('기본 채널입니다');
+      return;
+    }
+
+    // 이미 추가된 채널인지 확인
+    if (customCondaChannels.includes(trimmedChannel)) {
+      message.info('이미 추가된 채널입니다');
+      return;
+    }
+
+    // 채널 유효성 검증
+    setValidatingChannel(true);
+    try {
+      const { validateCondaChannel } = await import('../../core/shared/conda-validator');
+      const isValid = await validateCondaChannel(trimmedChannel);
+
+      if (isValid) {
+        addCustomCondaChannel(trimmedChannel);
+        message.success(`채널 '${trimmedChannel}'이(가) 추가되었습니다`);
+        checkDirty();
+      } else {
+        message.error(`채널 '${trimmedChannel}'을(를) 찾을 수 없습니다`);
+      }
+    } catch (error) {
+      message.error('채널 검증 중 오류가 발생했습니다');
+      console.error('Conda 채널 검증 오류:', error);
+    } finally {
+      setValidatingChannel(false);
+    }
+  };
+
+  // 커스텀 Conda 채널 삭제
+  const handleRemoveCustomChannel = (channel: string) => {
+    removeCustomCondaChannel(channel);
+    message.success(`채널 '${channel}'이(가) 삭제되었습니다`);
+    checkDirty();
   };
 
   // 배포판 필터링 헬퍼
@@ -503,6 +728,7 @@ const SettingsPage: React.FC = () => {
           form={form}
           layout="vertical"
           onFinish={handleSave}
+          onValuesChange={handleFormChange}
           style={{ maxWidth: 600 }}
           className="compact-settings-form"
         >
@@ -560,12 +786,12 @@ const SettingsPage: React.FC = () => {
           </Form.Item>
         </Card>
 
-        {/* 기본 언어 버전 설정 */}
+        {/* Python 버전 설정 */}
         <Card
           title={
             <Space>
-              <span>기본 언어 버전</span>
-              <Tooltip title="패키지 검색 시 기본으로 선택될 언어/런타임 버전입니다">
+              <span>Python 버전 설정</span>
+              <Tooltip title="pip/conda 패키지 다운로드 시 사용할 Python 버전. 휠 파일(.whl)은 Python 버전별로 다른 바이너리를 제공합니다. Maven JAR와 npm tarball은 런타임 버전과 무관하게 동일 파일을 다운로드하므로 별도 설정이 필요 없습니다.">
                 <InfoCircleOutlined style={{ color: '#999' }} />
               </Tooltip>
             </Space>
@@ -574,64 +800,102 @@ const SettingsPage: React.FC = () => {
           style={{ marginBottom: CARD_MARGIN }}
           styles={{ body: { padding: CARD_BODY_PADDING } }}
         >
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item
-                name={['languageVersions', 'python']}
-                label="Python"
-                tooltip="pip/conda"
-                style={{ marginBottom: 8 }}
-              >
-                <Select size="small">
-                  <Select.Option value="3.13">3.13</Select.Option>
-                  <Select.Option value="3.12">3.12</Select.Option>
-                  <Select.Option value="3.11">3.11</Select.Option>
-                  <Select.Option value="3.10">3.10</Select.Option>
-                  <Select.Option value="3.9">3.9</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item
-                name={['languageVersions', 'java']}
-                label="Java"
-                tooltip="Maven"
-                style={{ marginBottom: 8 }}
-              >
-                <Select size="small">
-                  <Select.Option value="21">21 LTS</Select.Option>
-                  <Select.Option value="17">17 LTS</Select.Option>
-                  <Select.Option value="11">11 LTS</Select.Option>
-                  <Select.Option value="8">8 LTS</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item
-                name={['languageVersions', 'node']}
-                label="Node.js"
-                tooltip="npm"
-                style={{ marginBottom: 8 }}
-              >
-                <Select size="small">
-                  <Select.Option value="22">22</Select.Option>
-                  <Select.Option value="20">20 LTS</Select.Option>
-                  <Select.Option value="18">18 LTS</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
+          <Form.Item
+            name={['languageVersions', 'python']}
+            label="Python 버전"
+            tooltip="pip/conda 패키지의 휠 파일 호환성에 영향"
+            style={{ marginBottom: 8 }}
+          >
+            <Select size="small" loading={loadingPythonVersions}>
+              {pythonVersions.map((version) => (
+                <Select.Option key={version} value={version}>
+                  {version}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
           <Form.Item
             name="condaChannel"
             label="Conda 채널"
-            style={{ marginBottom: 0 }}
+            tooltip="기본 채널 선택 또는 커스텀 채널 입력 가능"
+            style={{ marginBottom: 8 }}
           >
-            <Select size="small">
+            <Select
+              size="small"
+              showSearch
+              placeholder="채널 선택 또는 입력"
+              onSearch={(value) => {
+                // Enter 키 입력 시 검증 및 추가
+                if (value && !['conda-forge', 'anaconda', 'bioconda', 'pytorch'].includes(value)) {
+                  // 커스텀 채널로 간주
+                }
+              }}
+              onSelect={(value) => {
+                form.setFieldsValue({ condaChannel: value });
+                checkDirty();
+              }}
+              loading={validatingChannel}
+              dropdownRender={(menu) => (
+                <>
+                  {menu}
+                  <Divider style={{ margin: '8px 0' }} />
+                  <div style={{ padding: '0 8px 4px' }}>
+                    <Input.Search
+                      size="small"
+                      placeholder="커스텀 채널 입력 후 Enter"
+                      onSearch={handleAddCustomChannel}
+                      loading={validatingChannel}
+                      disabled={validatingChannel}
+                    />
+                  </div>
+                </>
+              )}
+            >
               <Select.Option value="conda-forge">conda-forge (커뮤니티)</Select.Option>
               <Select.Option value="anaconda">anaconda (공식)</Select.Option>
               <Select.Option value="bioconda">bioconda (생명과학)</Select.Option>
               <Select.Option value="pytorch">pytorch</Select.Option>
+              {customCondaChannels.map((channel) => (
+                <Select.Option key={channel} value={channel}>
+                  {channel} (커스텀)
+                </Select.Option>
+              ))}
             </Select>
+          </Form.Item>
+          {customCondaChannels.length > 0 && (
+            <Form.Item label="커스텀 채널" style={{ marginBottom: 8 }}>
+              <Space wrap>
+                {customCondaChannels.map((channel) => (
+                  <Tag
+                    key={channel}
+                    closable
+                    onClose={() => handleRemoveCustomChannel(channel)}
+                  >
+                    {channel}
+                  </Tag>
+                ))}
+              </Space>
+            </Form.Item>
+          )}
+          <Form.Item
+            name="cudaVersion"
+            label="CUDA 버전"
+            tooltip="폐쇄망 GPU 서버의 CUDA 버전. conda 패키지의 __cuda 의존성 필터링에 사용. 목록에 없는 버전은 직접 입력 가능"
+            style={{ marginBottom: 0 }}
+          >
+            <AutoComplete
+              size="small"
+              placeholder="없음 (CPU only) 또는 직접 입력"
+              allowClear
+              options={cudaVersions.map((version) => ({
+                value: version,
+                label: `CUDA ${version}`,
+              }))}
+              filterOption={(inputValue, option) =>
+                option!.value.toLowerCase().includes(inputValue.toLowerCase())
+              }
+              notFoundContent={loadingCudaVersions ? <Spin size="small" /> : null}
+            />
           </Form.Item>
         </Card>
 
@@ -681,6 +945,289 @@ const SettingsPage: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
+        </Card>
+
+        {/* pip 타겟 플랫폼 설정 */}
+        <Card
+          title={
+            <Space>
+              <span>pip Wheel 호환성 설정</span>
+              <Tag color="purple">pip</Tag>
+              <Tooltip title="폐쇄망 환경의 Linux 배포판 및 glibc 버전, macOS 버전에 맞는 wheel 파일을 다운로드합니다">
+                <InfoCircleOutlined style={{ color: '#999' }} />
+              </Tooltip>
+            </Space>
+          }
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
+        >
+          {/* OS 선택 */}
+          <Form.Item
+            name={['pipTargetPlatform', 'os']}
+            label="타겟 OS"
+            style={{ marginBottom: 8 }}
+          >
+            <Select size="small">
+              <Select.Option value="linux">Linux</Select.Option>
+              <Select.Option value="macos">macOS</Select.Option>
+              <Select.Option value="windows">Windows</Select.Option>
+            </Select>
+          </Form.Item>
+
+          {/* Linux 전용 설정 */}
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.pipTargetPlatform?.os !== curr.pipTargetPlatform?.os}>
+            {({ getFieldValue }) => {
+              const pipOs = getFieldValue(['pipTargetPlatform', 'os']);
+
+              if (pipOs === 'linux') {
+                return (
+                  <>
+                    <Form.Item
+                      name={['pipTargetPlatform', 'linuxDistro']}
+                      label="Linux 배포판"
+                      tooltip="배포판에 따라 glibc 버전이 자동으로 설정됩니다"
+                      style={{ marginBottom: 8 }}
+                    >
+                      <Select
+                        size="small"
+                        onChange={(value) => {
+                          // 중앙 매핑에서 glibc 버전 가져오기
+                          const distro = LINUX_DISTRO_GLIBC_MAP[value];
+                          const glibc = distro?.glibcVersion || '2.34';
+                          form.setFieldValue(['pipTargetPlatform', 'glibcVersion'], glibc);
+                        }}
+                      >
+                        {Object.entries(getDistrosByFamily()).map(([family, distros]) => {
+                          // family 한글 라벨
+                          const familyLabels: Record<string, string> = {
+                            rhel: 'RHEL 계열',
+                            ubuntu: 'Ubuntu',
+                            debian: 'Debian',
+                            other: '기타'
+                          };
+
+                          return (
+                            <Select.OptGroup key={family} label={familyLabels[family]}>
+                              {distros.map(distro => {
+                                const isEOL = isDistroEOL(distro.id);
+                                const isEOLSoon = isDistroEOLSoon(distro.id, 6);
+
+                                return (
+                                  <Select.Option
+                                    key={distro.id}
+                                    value={distro.id}
+                                    disabled={isEOL}
+                                  >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      {distro.name} (glibc {distro.glibcVersion})
+                                      {isEOL && (
+                                        <Tooltip title={`지원 종료: ${distro.eolDate}`}>
+                                          <WarningOutlined style={{ color: '#ff4d4f' }} />
+                                        </Tooltip>
+                                      )}
+                                      {isEOLSoon && !isEOL && (
+                                        <Tooltip title={`곧 지원 종료 예정: ${distro.eolDate}`}>
+                                          <InfoCircleOutlined style={{ color: '#faad14' }} />
+                                        </Tooltip>
+                                      )}
+                                    </span>
+                                  </Select.Option>
+                                );
+                              })}
+                            </Select.OptGroup>
+                          );
+                        })}
+                      </Select>
+                    </Form.Item>
+                    <Form.Item
+                      name={['pipTargetPlatform', 'glibcVersion']}
+                      label="glibc 버전"
+                      tooltip="수동으로 변경 가능합니다. wheel 파일의 manylinux 태그와 매칭됩니다."
+                      style={{ marginBottom: 8 }}
+                    >
+                      <Select size="small">
+                        <Select.Option value="2.17">2.17 (manylinux2014, CentOS 7)</Select.Option>
+                        <Select.Option value="2.28">2.28 (manylinux_2_28, RHEL 8)</Select.Option>
+                        <Select.Option value="2.31">2.31 (manylinux_2_31, Ubuntu 20.04)</Select.Option>
+                        <Select.Option value="2.34">2.34 (manylinux_2_34, RHEL 9)</Select.Option>
+                        <Select.Option value="2.35">2.35 (manylinux_2_35, Ubuntu 22.04)</Select.Option>
+                        <Select.Option value="2.36">2.36 (manylinux_2_36, Debian 12)</Select.Option>
+                        <Select.Option value="2.39">2.39 (manylinux_2_39, Ubuntu 24.04)</Select.Option>
+                      </Select>
+                    </Form.Item>
+                  </>
+                );
+              }
+
+              if (pipOs === 'macos') {
+                const macosVersions = getMacOSVersionsSorted();
+
+                return (
+                  <Form.Item
+                    name={['pipTargetPlatform', 'macosVersion']}
+                    label="macOS 버전"
+                    tooltip="macOS 최소 버전. wheel 파일의 macosx 태그와 매칭됩니다."
+                    style={{ marginBottom: 8 }}
+                  >
+                    <Select size="small">
+                      {macosVersions.map((info: MacOSVersionInfo) => {
+                        // 아키텍처 표시 문자열 생성
+                        let archLabel = '';
+                        if (info.minArch === 'intel') {
+                          archLabel = ' (Intel only)';
+                        } else if (info.minArch === 'apple_silicon') {
+                          archLabel = ' (Apple Silicon only)';
+                        } else {
+                          archLabel = ' (Both)';
+                        }
+
+                        // 선택지 텍스트: "macOS 11.0 Big Sur (Both)"
+                        const label = `macOS ${info.version} ${info.name}${archLabel}`;
+
+                        return (
+                          <Select.Option key={info.version} value={info.version}>
+                            {label}
+                          </Select.Option>
+                        );
+                      })}
+                    </Select>
+                  </Form.Item>
+                );
+              }
+
+              // Windows는 추가 설정 불필요 (아키텍처만 사용)
+              return null;
+            }}
+          </Form.Item>
+
+          {/* macOS 아키텍처 호환성 경고 */}
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, curr) =>
+              prev.pipTargetPlatform?.macosVersion !== curr.pipTargetPlatform?.macosVersion ||
+              prev.pipTargetPlatform?.arch !== curr.pipTargetPlatform?.arch ||
+              prev.pipTargetPlatform?.os !== curr.pipTargetPlatform?.os
+            }
+          >
+            {({ getFieldValue }) => {
+              const macosVer = getFieldValue(['pipTargetPlatform', 'macosVersion']);
+              const arch = getFieldValue(['pipTargetPlatform', 'arch']);
+              const pipOs = getFieldValue(['pipTargetPlatform', 'os']);
+
+              if (pipOs === 'macos' && macosVer && arch) {
+                // x86_64 또는 arm64만 체크
+                const normalizedArch =
+                  arch === 'x86_64' ? 'x86_64' : arch === 'arm64' ? 'arm64' : null;
+
+                if (normalizedArch && !isMacOSVersionCompatibleWithArch(macosVer, normalizedArch)) {
+                  return (
+                    <Alert
+                      message="아키텍처 호환성 경고"
+                      description={`macOS ${macosVer}는 ${arch} 아키텍처를 지원하지 않을 수 있습니다.`}
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 8 }}
+                    />
+                  );
+                }
+              }
+
+              return null;
+            }}
+          </Form.Item>
+
+          {/* 아키텍처 */}
+          <Form.Item
+            name={['pipTargetPlatform', 'arch']}
+            label="CPU 아키텍처"
+            style={{ marginBottom: 0 }}
+          >
+            <Select size="small">
+              <Select.Option value="x86_64">x86_64 (Intel/AMD 64-bit)</Select.Option>
+              <Select.Option value="aarch64">aarch64 (ARM 64-bit)</Select.Option>
+              <Select.Option value="arm64">arm64 (macOS Apple Silicon)</Select.Option>
+              <Select.Option value="i386">i386 (32-bit)</Select.Option>
+              <Select.Option value="amd64">amd64 (Windows 64-bit)</Select.Option>
+            </Select>
+          </Form.Item>
+        </Card>
+
+        {/* pip 커스텀 인덱스 URL 관리 */}
+        <Card
+          title={
+            <Space>
+              <span>pip 커스텀 인덱스 URL</span>
+              <Tag color="purple">pip</Tag>
+              <Tooltip title="자주 사용하는 pip 인덱스 URL을 저장하여 WizardPage에서 빠르게 선택할 수 있습니다">
+                <InfoCircleOutlined style={{ color: '#999' }} />
+              </Tooltip>
+            </Space>
+          }
+          size="small"
+          style={{ marginBottom: CARD_MARGIN }}
+          styles={{ body: { padding: CARD_BODY_PADDING } }}
+        >
+          <List
+            dataSource={customPipIndexUrls}
+            renderItem={(item) => (
+              <List.Item
+                actions={[
+                  <Button
+                    type="link"
+                    danger
+                    size="small"
+                    onClick={() => {
+                      removeCustomPipIndexUrl(item.url);
+                      message.success('인덱스 URL이 삭제되었습니다');
+                    }}
+                  >
+                    삭제
+                  </Button>
+                ]}
+              >
+                <List.Item.Meta
+                  title={item.label}
+                  description={<Text copyable>{item.url}</Text>}
+                />
+              </List.Item>
+            )}
+            locale={{ emptyText: '저장된 인덱스 URL이 없습니다' }}
+            style={{ marginBottom: 16 }}
+          />
+
+          <Divider style={{ margin: '12px 0' }} />
+
+          <Space direction="vertical" style={{ width: '100%' }} size="small">
+            <Input
+              size="small"
+              placeholder="라벨 (예: PyTorch CUDA 12.4)"
+              value={newIndexLabel}
+              onChange={(e) => setNewIndexLabel(e.target.value)}
+            />
+            <Input
+              size="small"
+              placeholder="URL (예: https://download.pytorch.org/whl/cu124)"
+              value={newIndexUrl}
+              onChange={(e) => setNewIndexUrl(e.target.value)}
+            />
+            <Button
+              type="primary"
+              size="small"
+              onClick={() => {
+                if (newIndexLabel.trim() && newIndexUrl.trim()) {
+                  addCustomPipIndexUrl(newIndexLabel.trim(), newIndexUrl.trim());
+                  setNewIndexLabel('');
+                  setNewIndexUrl('');
+                  message.success('인덱스 URL이 추가되었습니다');
+                } else {
+                  message.warning('라벨과 URL을 모두 입력하세요');
+                }
+              }}
+            >
+              추가
+            </Button>
+          </Space>
         </Card>
 
         {/* OS 패키지 배포판 설정 */}
@@ -1127,6 +1674,27 @@ const SettingsPage: React.FC = () => {
         </Card>
         </Form>
       </div>
+
+      {/* 저장 확인 모달 */}
+      <Modal
+        title="저장하지 않은 변경사항"
+        open={showNavigationModal}
+        onCancel={handleNavigationCancel}
+        footer={[
+          <Button key="cancel" onClick={handleNavigationCancel}>
+            취소
+          </Button>,
+          <Button key="no-save" onClick={() => handleNavigationConfirm(false)}>
+            저장 안 함
+          </Button>,
+          <Button key="save" type="primary" onClick={() => handleNavigationConfirm(true)}>
+            저장 후 이동
+          </Button>,
+        ]}
+      >
+        <p>저장하지 않은 변경사항이 있습니다.</p>
+        <p>변경사항을 저장하시겠습니까?</p>
+      </Modal>
     </div>
   );
 };

@@ -104,7 +104,7 @@ const DownloadPage: React.FC = () => {
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
-  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, concurrentDownloads, defaultDownloadPath, downloadRenderInterval } = useSettingsStore();
+  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, cudaVersion, concurrentDownloads, defaultDownloadPath, downloadRenderInterval } = useSettingsStore();
   const {
     items: downloadItems,
     isDownloading,
@@ -313,8 +313,8 @@ const DownloadPage: React.FC = () => {
         root: DependencyNodeData;
       }
 
-      const originalPackages = data.originalPackages as Array<{ id: string; name: string; version: string; type: string }>;
-      const allPackages = data.allPackages as Array<{ id: string; name: string; version: string; type: string }>;
+      const originalPackages = data.originalPackages as Array<{ id: string; name: string; version: string; type: string; filename?: string }>;
+      const allPackages = data.allPackages as Array<{ id: string; name: string; version: string; type: string; filename?: string }>;
       const dependencyTrees = data.dependencyTrees as DependencyTreeData[] | undefined;
       const failedPackages = data.failedPackages as Array<{ name: string; version: string; error: string }> | undefined;
 
@@ -375,6 +375,7 @@ const DownloadPage: React.FC = () => {
           isDependency: !isOriginal,
           parentId: depInfo?.parentId,
           dependencyOf: depInfo?.parentName,
+          filename: pkg.filename,
         };
       });
       setItems(newItems);
@@ -701,12 +702,15 @@ const DownloadPage: React.FC = () => {
         architecture: defaultArchitecture,
         includeDependencies,
         pythonVersion: languageVersions.python,
+        cudaVersion,
+        // yum 패키지의 repository.baseUrl 추출하여 전달
+        yumRepoUrl: cartItems.find(item => item.type === 'yum')?.repository?.baseUrl,
       };
 
       // 응답 데이터 타입 정의
       type DependencyResolveResponse = {
-        originalPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; metadata?: Record<string, unknown> }>;
-        allPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; metadata?: Record<string, unknown> }>;
+        originalPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; filename?: string; metadata?: Record<string, unknown> }>;
+        allPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; filename?: string; metadata?: Record<string, unknown> }>;
         dependencyTrees: Array<{
           root: {
             package: { name: string; version: string; type?: string };
@@ -792,6 +796,7 @@ const DownloadPage: React.FC = () => {
           dependencyOf: depInfo?.parentName,
           // 패키지 다운로드 정보 전달 (conda, yum, apt, apk 등에서 사용)
           downloadUrl: pkg.downloadUrl,
+          filename: pkg.filename,
           metadata: pkg.metadata,
         };
       });
@@ -1055,6 +1060,11 @@ const DownloadPage: React.FC = () => {
               <Tag style={{ marginLeft: 8 }}>{record.type}</Tag>
             )}
           </div>
+          {record.filename && (
+            <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+              {record.filename}
+            </Text>
+          )}
           {record.status === 'failed' && record.error && (
             <Text type="danger" style={{ fontSize: 12 }}>
               {record.error}

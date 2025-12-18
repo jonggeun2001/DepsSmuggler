@@ -21,6 +21,10 @@ export interface CartItem {
   downloadUrl?: string;
   repository?: { baseUrl: string; name?: string };
   location?: string;
+  // pip 커스텀 인덱스 URL
+  indexUrl?: string;
+  // pip extras 의존성 (예: ['cuda'], ['security', 'socks'])
+  extras?: string[];
 }
 
 // 장바구니 상태

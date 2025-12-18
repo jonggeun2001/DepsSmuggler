@@ -35,6 +35,8 @@ export interface DownloadItem {
   dependencyOf?: string; // 어떤 패키지의 의존성인지 (패키지명)
   // 패키지 다운로드 정보 (conda: subdir/filename, yum/apt/apk: 필수)
   downloadUrl?: string;
+  /** 실제 다운로드될 파일명 (예: numpy-1.24.0-py311h64a7726_0.conda) */
+  filename?: string;
   metadata?: Record<string, unknown>;
 }
 
