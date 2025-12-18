@@ -197,10 +197,30 @@ interface DownloadOptions {
 
 - `pip`: PyPI 검색 (Simple API + JSON API)
 - `conda`: Anaconda 채널 검색 (conda-forge, anaconda, bioconda, pytorch)
-- `maven`: Maven Central 검색
+- `maven`: Maven Central 검색 (groupId, artifactId, popularityCount 포함)
 - `npm`: npm Registry 검색
 - `docker`: Docker Hub 검색 (레지스트리 지정 가능)
 - `yum`: YUM 저장소 검색
+
+### Maven 네이티브 라이브러리 관련 IPC
+
+| 채널 | 파라미터 | 반환값 | 설명 |
+|------|----------|--------|------|
+| `maven:isNativeArtifact` | `groupId, artifactId, version?` | `boolean` | 네이티브 아티팩트 여부 확인 (Maven Central API) |
+| `maven:getAvailableClassifiers` | `groupId, artifactId, version?` | `string[]` | 사용 가능한 classifier 목록 조회 |
+
+### Maven 검색 결과 필드
+
+```typescript
+interface MavenSearchResult {
+  name: string;              // "groupId:artifactId" 형식
+  version: string;
+  description: string;
+  popularityCount?: number;  // 인기도 (다운로드 수)
+  groupId: string;           // Maven groupId
+  artifactId: string;        // Maven artifactId
+}
+```
 
 ### 검색 결과 정렬
 검색 결과는 관련성 점수로 정렬됨 (search-utils.ts의 `sortByRelevance` 사용)

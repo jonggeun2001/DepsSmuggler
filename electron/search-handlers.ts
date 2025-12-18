@@ -40,6 +40,10 @@ import {
   getSimplifiedDistributions,
   invalidateDistributionCache,
 } from '../src/core/downloaders/os-shared/distribution-fetcher';
+import {
+  isNativeArtifactFromApi,
+  getAvailableClassifiersAsync,
+} from '../src/core/shared/maven-utils';
 import type {
   OSPackageManager,
   OSDistribution,
@@ -209,12 +213,21 @@ async function searchMaven(query: string) {
     const mavenDownloader = getMavenDownloader();
     const results = await mavenDownloader.searchPackages(query);
 
-    return results.map((pkg) => ({
-      name: pkg.name,
-      version: pkg.version,
-      description: `Maven artifact: ${pkg.name}`,
-      popularityCount: pkg.metadata?.popularityCount,
-    }));
+    return results.map((pkg) => {
+      // pkg.name은 "groupId:artifactId" 형식
+      const parts = pkg.name.split(':');
+      const groupId = parts[0] || '';
+      const artifactId = parts[1] || pkg.name;
+
+      return {
+        name: pkg.name,
+        version: pkg.version,
+        description: `Maven artifact: ${pkg.name}`,
+        popularityCount: pkg.metadata?.popularityCount,
+        groupId,
+        artifactId,
+      };
+    });
   } catch (error) {
     log.error('Maven search failed:', error);
 
@@ -493,6 +506,16 @@ export function registerSearchHandlers(): void {
     const { packages, options } = data;
     log.info(`Resolving dependencies for ${packages.length} packages (targetOS: ${options?.targetOS || 'any'}, python: ${options?.pythonVersion || 'any'}, cuda: ${options?.cudaVersion || 'none'})`);
 
+    // 디버그: Maven 패키지의 classifier 확인
+    const mavenPackages = packages.filter(p => p.type === 'maven');
+    if (mavenPackages.length > 0) {
+      log.info('[DEBUG] Maven packages with classifiers:', mavenPackages.map(p => ({
+        name: p.name,
+        version: p.version,
+        classifier: p.classifier,
+      })));
+    }
+
     try {
       const resolved = await resolveAllDependencies(packages, {
         targetOS: options?.targetOS as 'any' | 'windows' | 'macos' | 'linux' | undefined,
@@ -646,6 +669,24 @@ export function registerSearchHandlers(): void {
       }
 
       return searchResults;
+    }
+  );
+
+  // Maven: 네이티브 아티팩트 여부 확인 (Maven Central API 사용)
+  ipcMain.handle(
+    'maven:isNativeArtifact',
+    async (_event, groupId: string, artifactId: string, version?: string): Promise<boolean> => {
+      log.info(`Checking if ${groupId}:${artifactId}${version ? '@' + version : ''} is a native artifact via API`);
+      return isNativeArtifactFromApi(groupId, artifactId, version);
+    }
+  );
+
+  // Maven: 사용 가능한 classifier 목록 조회 (Maven Central API 사용)
+  ipcMain.handle(
+    'maven:getAvailableClassifiers',
+    async (_event, groupId: string, artifactId: string, version?: string): Promise<string[]> => {
+      log.info(`Getting available classifiers for ${groupId}:${artifactId}${version ? '@' + version : ''} via API`);
+      return getAvailableClassifiersAsync(groupId, artifactId, version);
     }
   );
 

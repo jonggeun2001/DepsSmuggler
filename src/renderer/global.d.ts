@@ -4,7 +4,7 @@ import type {
   OSPackageInfo,
   MatchType,
   OSArchitecture,
-} from '../core/downloaders/os/types';
+} from '../core/downloaders/os-shared/types';
 
 export interface OSPackageOutputOptions {
   type: 'archive' | 'repository' | 'both';

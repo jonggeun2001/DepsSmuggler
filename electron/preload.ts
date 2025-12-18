@@ -235,6 +235,14 @@ const electronAPI = {
     },
   },
 
+  // Maven 관련
+  maven: {
+    isNativeArtifact: (groupId: string, artifactId: string, version?: string): Promise<boolean> =>
+      ipcRenderer.invoke('maven:isNativeArtifact', groupId, artifactId, version),
+    getAvailableClassifiers: (groupId: string, artifactId: string, version?: string): Promise<string[]> =>
+      ipcRenderer.invoke('maven:getAvailableClassifiers', groupId, artifactId, version),
+  },
+
   // OS 패키지 관련
   os: {
     // 배포판 목록 조회

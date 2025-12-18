@@ -20,6 +20,8 @@ export interface DownloadPackage {
   indexUrl?: string;
   /** pip extras 의존성 (예: ['cuda'], ['security', 'socks']) */
   extras?: string[];
+  /** Maven classifier (예: natives-linux, linux-x86_64) */
+  classifier?: string;
   /** 추가 메타데이터 (Docker registry 등) */
   metadata?: Record<string, unknown>;
 }

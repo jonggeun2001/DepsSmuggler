@@ -164,6 +164,26 @@ export interface HistoryAPI {
   clear: () => Promise<{ success: boolean }>;
 }
 
+export interface MavenAPI {
+  isNativeArtifact: (groupId: string, artifactId: string, version?: string) => Promise<boolean>;
+  getAvailableClassifiers: (groupId: string, artifactId: string, version?: string) => Promise<string[]>;
+}
+
+export interface VersionsAPI {
+  python: () => Promise<string[]>;
+  java: () => Promise<Array<{ version: string; lts: boolean }>>;
+  node: () => Promise<Array<{ version: string; lts: string | false }>>;
+  cuda: () => Promise<string[]>;
+  preload: () => Promise<{
+    success: boolean;
+    status: { python: string; cuda: string };
+    errors: Array<{ source: string; error: string; timestamp: number }>;
+    duration: number;
+  }>;
+  refreshExpired: () => Promise<void>;
+  cacheStatus: () => Promise<Record<string, { valid: boolean; age?: number }>>;
+}
+
 export interface OSPackageAPI {
   getDistributions: (osType?: string) => Promise<unknown[]>;
   getAllDistributions: () => Promise<unknown[]>;
@@ -221,6 +241,8 @@ export interface ElectronAPI {
   docker?: DockerAPI;
   updater?: UpdaterAPI;
   history?: HistoryAPI;
+  maven?: MavenAPI;
+  versions?: VersionsAPI;
   os?: OSPackageAPI;
 }
 
