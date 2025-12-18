@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import type { OSArchitecture, OSDistribution } from '../../../core/downloaders/os/types';
+import type { OSArchitecture, OSDistribution } from '../../../core/downloaders/os-shared/types';
 
 interface ArchitectureOption {
   id: OSArchitecture;

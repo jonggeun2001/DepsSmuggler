@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import type { OSPackageManager } from '../../../core/downloaders/os/types';
+import type { OSPackageManager } from '../../../core/downloaders/os-shared/types';
 
 interface OSTypeOption {
   id: OSPackageManager;

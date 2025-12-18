@@ -4,13 +4,13 @@
  */
 
 import React, { useMemo } from 'react';
-import type { OSDistribution, OSPackageManager, OSArchitecture } from '../../../core/downloaders/os/types';
+import type { OSDistribution, OSPackageManager, OSArchitecture } from '../../../core/downloaders/os-shared/types';
 import {
   OS_DISTRIBUTIONS,
   USE_CASE_RECOMMENDATIONS,
   getDistributionsByPackageManager,
   getRecommendedDistributions,
-} from '../../../core/downloaders/os/repositories';
+} from '../../../core/downloaders/os-shared/repositories';
 
 interface OSVersionSelectorProps {
   packageManager: OSPackageManager;

@@ -8,7 +8,7 @@ import type {
   OSPackageInfo,
   OSPackageOutputOptions,
   OSPackageManager,
-} from '../../../core/downloaders/os/types';
+} from '../../../core/downloaders/os-shared/types';
 
 interface OSDownloadResultProps {
   success: OSPackageInfo[];

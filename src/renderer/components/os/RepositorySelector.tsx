@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import type { Repository, OSDistribution } from '../../../core/downloaders/os/types';
+import type { Repository, OSDistribution } from '../../../core/downloaders/os-shared/types';
 
 interface RepositorySelectorProps {
   distribution: OSDistribution | null;

@@ -10,7 +10,7 @@ import type {
   OSArchitecture,
   Repository,
   MatchType,
-} from '../../../core/downloaders/os/types';
+} from '../../../core/downloaders/os-shared/types';
 
 interface OSPackageSearchProps {
   distribution: OSDistribution | null;

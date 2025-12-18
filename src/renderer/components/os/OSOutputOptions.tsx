@@ -10,7 +10,7 @@ import type {
   ArchiveFormat,
   ScriptType,
   OSPackageManager,
-} from '../../../core/downloaders/os/types';
+} from '../../../core/downloaders/os-shared/types';
 
 interface OSOutputOptionsProps {
   value: OSPackageOutputOptions;
