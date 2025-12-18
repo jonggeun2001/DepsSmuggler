@@ -330,30 +330,40 @@ const DownloadPage: React.FC = () => {
       const dependencyMap = new Map<string, { parentId: string; parentName: string }>();
       const originalIds = new Set(originalPackages.map(p => p.id));
 
-      // 의존성 트리에서 관계 추출
+      // 의존성 트리에서 관계 추출 (반복문 기반 - call stack 문제 방지)
       if (dependencyTrees) {
         dependencyTrees.forEach((tree) => {
           const rootPkg = tree.root.package;
           const rootId = `${rootPkg.type || 'pip'}-${rootPkg.name}-${rootPkg.version}`;
           const rootName = rootPkg.name;
 
-          // 재귀적으로 의존성 노드 탐색
-          const extractDeps = (node: DependencyNodeData, parentId: string, parentName: string) => {
+          const stack: DependencyNodeData[] = [tree.root];
+          const visited = new Set<string>();
+
+          while (stack.length > 0) {
+            const node = stack.pop()!;
+            const nodeId = `${node.package.type || 'pip'}-${node.package.name}-${node.package.version}`;
+
+            if (visited.has(nodeId)) {
+              continue;
+            }
+            visited.add(nodeId);
+
             node.dependencies.forEach((dep) => {
               const depPkg = dep.package;
               const depId = `${depPkg.type || 'pip'}-${depPkg.name}-${depPkg.version}`;
 
               // 원본 패키지가 아닌 경우에만 의존성으로 표시
               if (!originalIds.has(depId)) {
-                dependencyMap.set(depId, { parentId, parentName });
+                dependencyMap.set(depId, { parentId: rootId, parentName: rootName });
               }
 
-              // 재귀 호출 (이 의존성의 하위 의존성들)
-              extractDeps(dep, rootId, rootName);
+              // 스택에 추가 (재귀 호출 대신)
+              if (!visited.has(depId)) {
+                stack.push(dep);
+              }
             });
-          };
-
-          extractDeps(tree.root, rootId, rootName);
+          }
         });
       }
 
@@ -695,6 +705,10 @@ const DownloadPage: React.FC = () => {
         repository: item.repository,
         location: item.location,
         metadata: item.metadata,
+        // pip 커스텀 인덱스 URL 전달
+        indexUrl: item.indexUrl,
+        // pip extras 전달
+        extras: item.extras,
       }));
 
       const options = {
@@ -756,22 +770,35 @@ const DownloadPage: React.FC = () => {
           const rootId = originalIdByName.get(rootPkg.name) || `${rootPkg.type || 'pip'}-${rootPkg.name}-${rootPkg.version}`;
           const rootName = rootPkg.name;
 
-          const extractDeps = (node: DependencyNodeData, parentId: string, parentName: string) => {
+          // 반복문 기반으로 의존성 추출 (call stack 문제 방지)
+          const stack: DependencyNodeData[] = [tree.root as DependencyNodeData];
+          const visited = new Set<string>();
+
+          while (stack.length > 0) {
+            const node = stack.pop()!;
+            const nodeKey = `${node.package.name}-${node.package.version}`;
+
+            // 이미 방문한 노드는 스킵 (순환 참조 방지)
+            if (visited.has(nodeKey)) {
+              continue;
+            }
+            visited.add(nodeKey);
+
             node.dependencies.forEach((dep) => {
               const depPkg = dep.package;
               const depKey = `${depPkg.name}-${depPkg.version}`;
 
               // 원본 패키지가 아닌 경우에만 의존성으로 표시
               if (!originalNames.has(depKey)) {
-                dependencyMap.set(depKey, { parentId, parentName });
+                dependencyMap.set(depKey, { parentId: rootId, parentName: rootName });
               }
 
-              // 재귀 호출 - 항상 루트 패키지를 부모로 유지
-              extractDeps(dep, rootId, rootName);
+              // 스택에 추가 (재귀 호출 대신)
+              if (!visited.has(depKey)) {
+                stack.push(dep);
+              }
             });
-          };
-
-          extractDeps(tree.root as DependencyNodeData, rootId, rootName);
+          }
         });
       }
 
@@ -896,6 +923,10 @@ const DownloadPage: React.FC = () => {
         // OS 패키지용 필드 (레거시 호환)
         repository: (item as unknown as { repository?: string }).repository,
         location: (item as unknown as { location?: string }).location,
+        // pip 커스텀 인덱스 URL 전달
+        indexUrl: (item as unknown as { indexUrl?: string }).indexUrl,
+        // pip extras 전달
+        extras: (item as unknown as { extras?: string[] }).extras,
       }));
 
       const options = {

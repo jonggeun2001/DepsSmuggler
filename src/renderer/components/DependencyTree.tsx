@@ -59,22 +59,77 @@ const DependencyTree: React.FC<DependencyTreeProps> = ({ data, onNodeClick, styl
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }, []);
 
-  // DependencyNode를 react-d3-tree 형식으로 변환
-  const convertToTreeData = useCallback((node: DependencyNode): TreeNodeDatum => {
-    return {
-      name: node.package.name,
-      attributes: {
-        version: node.package.version,
-        type: node.package.type,
-        optional: node.optional,
-        scope: node.scope,
-        size: node.package.metadata?.size
-          ? formatBytes(node.package.metadata.size)
-          : undefined,
-      },
-      children: node.dependencies.map(convertToTreeData),
-      originalNode: node,
-    };
+  // DependencyNode를 react-d3-tree 형식으로 변환 (반복문 기반 - call stack 문제 방지)
+  const convertToTreeData = useCallback((rootNode: DependencyNode): TreeNodeDatum => {
+    // 노드 키 생성 함수
+    const getNodeKey = (node: DependencyNode) =>
+      `${node.package.name}@${node.package.version}`;
+
+    // 모든 노드를 TreeNodeDatum으로 변환하여 Map에 저장
+    const nodeMap = new Map<string, TreeNodeDatum>();
+    const parentChildMap = new Map<string, string[]>();
+    const stack: Array<{ node: DependencyNode; parentKey?: string }> = [{ node: rootNode }];
+    const visited = new Set<string>();
+
+    // 1단계: 모든 노드 방문하여 TreeNodeDatum 생성
+    while (stack.length > 0) {
+      const { node, parentKey } = stack.pop()!;
+      const nodeKey = getNodeKey(node);
+
+      if (visited.has(nodeKey)) {
+        // 이미 방문했지만 부모-자식 관계는 추가
+        if (parentKey) {
+          const children = parentChildMap.get(parentKey) || [];
+          if (!children.includes(nodeKey)) {
+            children.push(nodeKey);
+            parentChildMap.set(parentKey, children);
+          }
+        }
+        continue;
+      }
+      visited.add(nodeKey);
+
+      // TreeNodeDatum 생성 (children은 나중에 채움)
+      const treeNode: TreeNodeDatum = {
+        name: node.package.name,
+        attributes: {
+          version: node.package.version,
+          type: node.package.type,
+          optional: node.optional,
+          scope: node.scope,
+          size: node.package.metadata?.size
+            ? formatBytes(node.package.metadata.size)
+            : undefined,
+        },
+        children: [],
+        originalNode: node,
+      };
+      nodeMap.set(nodeKey, treeNode);
+
+      // 부모-자식 관계 저장
+      if (parentKey) {
+        const children = parentChildMap.get(parentKey) || [];
+        children.push(nodeKey);
+        parentChildMap.set(parentKey, children);
+      }
+
+      // 자식 노드들을 스택에 추가
+      for (const child of node.dependencies) {
+        stack.push({ node: child, parentKey: nodeKey });
+      }
+    }
+
+    // 2단계: 부모-자식 관계 연결
+    for (const [parentKey, childKeys] of parentChildMap) {
+      const parentNode = nodeMap.get(parentKey);
+      if (parentNode) {
+        parentNode.children = childKeys
+          .map(key => nodeMap.get(key))
+          .filter((n): n is TreeNodeDatum => n !== undefined);
+      }
+    }
+
+    return nodeMap.get(getNodeKey(rootNode))!;
   }, [formatBytes]);
 
   const treeData = useMemo(() => {

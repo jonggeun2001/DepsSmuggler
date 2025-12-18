@@ -39,6 +39,22 @@ interface TargetPlatform {
   machine?: 'x86_64' | 'aarch64' | 'arm64';
 }
 
+// BFS 큐 아이템
+interface QueueItem {
+  name: string;
+  version: string;
+  indexUrl?: string;
+  extras?: string[];
+  parentCacheKey?: string; // 부모 패키지 캐시키 (트리 구축용)
+}
+
+// 패키지 정보 조회 결과
+interface FetchedPackageInfo {
+  packageInfo: PackageInfo;
+  requiresDist: string[];
+  actualVersion: string;
+}
+
 export class PipResolver implements IResolver {
   readonly type = 'pip' as const;
   private readonly baseUrl = 'https://pypi.org/pypi';
@@ -71,7 +87,7 @@ export class PipResolver implements IResolver {
   }
 
   /**
-   * 의존성 해결
+   * 의존성 해결 (BFS 큐 기반 - call stack 문제 해결)
    */
   async resolveDependencies(
     packageName: string,
@@ -89,8 +105,160 @@ export class PipResolver implements IResolver {
     const extras = options?.extras;
 
     try {
-      const root = await this.resolvePackage(packageName, version, 0, maxDepth, indexUrl, extras);
+      // BFS 큐 초기화
+      const queue: Array<QueueItem & { depth: number }> = [{
+        name: packageName,
+        version,
+        indexUrl,
+        extras,
+        parentCacheKey: undefined,
+        depth: 0,
+      }];
+
+      // 해결된 패키지 저장 (캐시키 → 노드)
+      const resolvedNodes: Map<string, DependencyNode> = new Map();
+      // 부모-자식 관계 저장 (부모캐시키 → 자식캐시키[])
+      const parentChildMap: Map<string, string[]> = new Map();
+      // 루트 캐시키
+      let rootCacheKey: string | undefined;
+
+      // BFS 반복
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        const { name, version: ver, indexUrl: idx, extras: ext, parentCacheKey, depth } = current;
+
+        // 최대 깊이 체크
+        if (depth > maxDepth) {
+          continue;
+        }
+
+        // 패키지 정보 조회
+        let fetchResult: FetchedPackageInfo | null = null;
+        try {
+          fetchResult = await this.fetchPackageInfo(name, ver, idx);
+        } catch (error) {
+          logger.warn('패키지 정보 조회 실패', { name, version: ver, error });
+          continue;
+        }
+
+        if (!fetchResult) continue;
+
+        const { packageInfo, requiresDist, actualVersion } = fetchResult;
+        const cacheKey = `${name.toLowerCase()}@${actualVersion}`;
+
+        // 이미 해결된 패키지면 스킵 (부모-자식 관계만 추가)
+        if (resolvedNodes.has(cacheKey)) {
+          if (parentCacheKey) {
+            const children = parentChildMap.get(parentCacheKey) || [];
+            if (!children.includes(cacheKey)) {
+              children.push(cacheKey);
+              parentChildMap.set(parentCacheKey, children);
+            }
+          }
+          continue;
+        }
+
+        // 루트 캐시키 저장
+        if (!rootCacheKey) {
+          rootCacheKey = cacheKey;
+        }
+
+        // 노드 생성 및 저장
+        const node: DependencyNode = {
+          package: packageInfo,
+          dependencies: [], // 나중에 트리 빌드 시 채움
+        };
+        resolvedNodes.set(cacheKey, node);
+        this.visited.set(cacheKey, node);
+
+        // 부모-자식 관계 저장
+        if (parentCacheKey) {
+          const children = parentChildMap.get(parentCacheKey) || [];
+          children.push(cacheKey);
+          parentChildMap.set(parentCacheKey, children);
+        }
+
+        // 의존성 파싱 및 큐에 추가
+        if (requiresDist.length > 0) {
+          const parsedDeps = requiresDist
+            .map((dep) => this.parseDependencyString(dep))
+            .filter((dep) => dep !== null && this.evaluateMarker(dep.markers, ext));
+
+          for (const dep of parsedDeps) {
+            if (!dep) continue;
+
+            try {
+              // 의존성 버전 조회
+              let depVersion: string | null = null;
+              let usedIndexUrl: string | undefined = idx;
+
+              if (idx) {
+                // 커스텀 인덱스에서 시도
+                depVersion = await this.getLatestVersion(dep.name, dep.versionSpec, idx);
+                if (!depVersion) {
+                  // PyPI fallback
+                  depVersion = await this.getLatestVersion(dep.name, dep.versionSpec, undefined);
+                  usedIndexUrl = undefined;
+                }
+              } else {
+                // PyPI 사용
+                depVersion = await this.getLatestVersion(dep.name, dep.versionSpec, undefined);
+              }
+
+              if (depVersion) {
+                const depCacheKey = `${dep.name.toLowerCase()}@${depVersion}`;
+                // 아직 해결되지 않은 패키지만 큐에 추가
+                if (!resolvedNodes.has(depCacheKey)) {
+                  queue.push({
+                    name: dep.name,
+                    version: depVersion,
+                    indexUrl: usedIndexUrl,
+                    extras: dep.extras,
+                    parentCacheKey: cacheKey,
+                    depth: depth + 1,
+                  });
+                } else {
+                  // 이미 해결된 경우 부모-자식 관계만 추가
+                  const children = parentChildMap.get(cacheKey) || [];
+                  if (!children.includes(depCacheKey)) {
+                    children.push(depCacheKey);
+                    parentChildMap.set(cacheKey, children);
+                  }
+                }
+              }
+            } catch (error) {
+              logger.warn('의존성 버전 조회 실패', { parent: name, dependency: dep.name, error });
+            }
+          }
+        }
+      }
+
+      // 의존성 트리 빌드
+      if (!rootCacheKey || !resolvedNodes.has(rootCacheKey)) {
+        throw new Error(`패키지를 찾을 수 없음: ${packageName}@${version}`);
+      }
+
+      // 부모-자식 관계를 기반으로 트리 구축
+      for (const [parentKey, childKeys] of parentChildMap) {
+        const parentNode = resolvedNodes.get(parentKey);
+        if (parentNode) {
+          for (const childKey of childKeys) {
+            const childNode = resolvedNodes.get(childKey);
+            if (childNode) {
+              parentNode.dependencies.push(childNode);
+            }
+          }
+        }
+      }
+
+      const root = resolvedNodes.get(rootCacheKey)!;
       const flatList = flattenDependencyTree(root);
+
+      logger.info('✅ BFS 의존성 해결 완료', {
+        rootPackage: packageName,
+        totalResolved: resolvedNodes.size,
+        flatListSize: flatList.length,
+      });
 
       return {
         root,
@@ -108,16 +276,19 @@ export class PipResolver implements IResolver {
   }
 
   /**
-   * 단일 패키지 의존성 해결 (재귀)
+   * 단일 패키지 정보 조회 (비재귀 - BFS에서 사용)
    */
-  private async resolvePackage(
+  private async fetchPackageInfo(
     name: string,
     version: string,
-    depth: number,
-    maxDepth: number,
-    indexUrl?: string,
-    extras?: string[]
-  ): Promise<DependencyNode> {
+    indexUrl?: string
+  ): Promise<FetchedPackageInfo | null> {
+    logger.debug('📦 패키지 정보 조회', {
+      name,
+      version,
+      indexUrl: indexUrl ? indexUrl.substring(0, 50) + '...' : 'PyPI',
+    });
+
     // "latest" 버전인 경우 실제 최신 버전 조회
     let actualVersion = version;
     if (version === 'latest' || !version) {
@@ -129,191 +300,96 @@ export class PipResolver implements IResolver {
       logger.debug('"latest" 버전을 실제 버전으로 변환', { name, version, actualVersion });
     }
 
-    const cacheKey = `${name.toLowerCase()}@${actualVersion}@${indexUrl || 'pypi'}`;
+    let packageInfo: PackageInfo;
+    let requiresDist: string[] = [];
 
-    // 이미 방문한 패키지인 경우 캐시된 결과 반환 (순환 의존성 방지)
-    if (this.visited.has(cacheKey)) {
-      return this.visited.get(cacheKey)!;
-    }
+    if (indexUrl) {
+      // Simple API 사용 (커스텀 인덱스)
+      const files = await fetchPackageFiles(indexUrl, name);
 
-    // 최대 깊이 도달
-    if (depth >= maxDepth) {
-      const node: DependencyNode = {
-        package: { type: 'pip', name, version: actualVersion },
-        dependencies: [],
-      };
-      return node;
-    }
+      const targetFiles = files.filter(
+        (f) => extractVersionFromFilename(f.filename) === actualVersion
+      );
 
-    try {
-      let packageInfo: PackageInfo;
-      let requiresDist: string[] = [];
-
-      if (indexUrl) {
-        // Simple API 사용 (커스텀 인덱스)
-        // 1) Simple API에서 파일 정보 조회 (다운로드 URL용)
-        const files = await fetchPackageFiles(indexUrl, name);
-        const targetFiles = files.filter(
-          (f) => extractVersionFromFilename(f.filename) === actualVersion
-        );
-
-        if (targetFiles.length === 0) {
-          throw new Error(`패키지를 찾을 수 없음: ${name}@${actualVersion} (인덱스: ${indexUrl})`);
-        }
-
-        // 최적의 wheel 선택
-        const selectedFile = this.selectBestWheelFromSimpleApi(targetFiles);
-        const packageSize = 0; // Simple API는 파일 크기 정보 미제공
-
-        // 2) PEP 658 메타데이터에서 의존성 정보 조회 (커스텀 인덱스 우선)
-        if (selectedFile?.metadataHash) {
-          logger.debug('PEP 658 메타데이터 조회 시도', {
-            name,
-            version: actualVersion,
-            filename: selectedFile.filename,
-          });
-          requiresDist = await fetchWheelMetadata(selectedFile);
-        }
-
-        // 3) PEP 658 실패 시 PyPI 폴백 (기본 버전으로 조회)
-        if (requiresDist.length === 0) {
-          try {
-            // 로컬 버전 지정자 제거 (예: 2.9.1+cu130 → 2.9.1)
-            const baseVersion = actualVersion.split('+')[0];
-            const pypiResult = await fetchPackageMetadata(name, baseVersion, this.cacheOptions);
-            if (pypiResult) {
-              requiresDist = pypiResult.data.info.requires_dist || [];
-              logger.debug('PyPI 폴백으로 의존성 정보 조회 성공', {
-                name,
-                originalVersion: actualVersion,
-                baseVersion,
-                dependenciesCount: requiresDist.length,
-              });
-            }
-          } catch (error) {
-            logger.warn('PyPI 폴백 조회 실패 (커스텀 전용 패키지일 수 있음)', {
-              name,
-              version: actualVersion,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-
-        packageInfo = {
-          type: 'pip',
+      if (targetFiles.length === 0) {
+        // 커스텀 인덱스에서 찾지 못하면 PyPI로 fallback
+        logger.debug('커스텀 인덱스에서 패키지를 찾지 못함 - PyPI로 fallback', {
           name,
           version: actualVersion,
-          metadata: {
-            description: '',
-            size: packageSize,
-            filename: selectedFile?.filename,
-            indexUrl, // 커스텀 인덱스 URL 저장 (다운로드 시 사용)
-          },
-        };
-
-        if (requiresDist.length === 0) {
-          logger.info('의존성 없음 (PEP 658 미지원 및 PyPI 미등록)', {
-            name,
-            version: actualVersion,
-          });
-        } else {
-          logger.info('의존성 정보 조회 성공', {
-            name,
-            version: actualVersion,
-            dependenciesCount: requiresDist.length,
-            source: selectedFile?.metadataHash ? 'PEP 658' : 'PyPI 폴백',
-          });
-        }
-      } else {
-        // PyPI JSON API 사용 (기존 로직)
-        const cacheResult = await fetchPackageMetadata(name, actualVersion, this.cacheOptions);
-        if (!cacheResult) {
-          throw new Error(`패키지를 찾을 수 없음: ${name}@${actualVersion}`);
-        }
-        const { info, urls } = cacheResult.data;
-
-        // 패키지 크기 및 파일명 결정 (wheel 또는 sdist 중 가장 적합한 것 선택)
-        let packageSize = 0;
-        let packageFilename: string | undefined;
-        if (urls && urls.length > 0) {
-          // 타겟 플랫폼에 맞는 최적의 wheel 선택
-          const selectedFile = this.selectBestWheel(urls);
-          if (selectedFile) {
-            packageSize = selectedFile.size || 0;
-            packageFilename = selectedFile.filename;
-          }
-        }
-
-        packageInfo = {
-          type: 'pip',
-          name: info.name,
-          version: info.version,
-          metadata: {
-            description: '',
-            size: packageSize,
-            filename: packageFilename,
-          },
-        };
-
-        requiresDist = info.requires_dist || [];
+        });
+        return await this.fetchPackageInfo(name, actualVersion, undefined);
       }
 
-      const node: DependencyNode = {
-        package: packageInfo,
-        dependencies: [],
+      // 최적의 wheel 선택
+      const selectedFile = this.selectBestWheelFromSimpleApi(targetFiles);
+
+      // PEP 658 메타데이터에서 의존성 정보 조회
+      if (selectedFile?.metadataHash) {
+        requiresDist = await fetchWheelMetadata(selectedFile);
+      }
+
+      // PEP 658 실패 시 PyPI 폴백
+      if (requiresDist.length === 0) {
+        try {
+          const baseVersion = actualVersion.split('+')[0];
+          const pypiResult = await fetchPackageMetadata(name, baseVersion, this.cacheOptions);
+          if (pypiResult) {
+            requiresDist = pypiResult.data.info.requires_dist || [];
+          }
+        } catch {
+          // 커스텀 전용 패키지일 수 있음
+        }
+      }
+
+      packageInfo = {
+        type: 'pip',
+        name,
+        version: actualVersion,
+        metadata: {
+          description: '',
+          size: 0,
+          filename: selectedFile?.filename,
+          indexUrl,
+        },
+      };
+    } else {
+      // PyPI JSON API 사용
+      const cacheResult = await fetchPackageMetadata(name, actualVersion, this.cacheOptions);
+      if (!cacheResult) {
+        throw new Error(`패키지를 찾을 수 없음: ${name}@${actualVersion}`);
+      }
+
+      const { info, urls } = cacheResult.data;
+
+      let packageSize = 0;
+      let packageFilename: string | undefined;
+      if (urls && urls.length > 0) {
+        const selectedFile = this.selectBestWheel(urls);
+        if (selectedFile) {
+          packageSize = selectedFile.size || 0;
+          packageFilename = selectedFile.filename;
+        }
+      }
+
+      packageInfo = {
+        type: 'pip',
+        name: info.name,
+        version: info.version,
+        metadata: {
+          description: '',
+          size: packageSize,
+          filename: packageFilename,
+        },
       };
 
-      // 캐시에 먼저 저장 (순환 참조 방지)
-      this.visited.set(cacheKey, node);
-
-      // requires_dist 파싱 및 의존성 해결
-      if (requiresDist.length > 0) {
-        const parsedDeps = requiresDist
-          .map((dep) => this.parseDependencyString(dep))
-          .filter((dep) => dep !== null && this.evaluateMarker(dep.markers, extras)); // 환경 마커 평가 (extras 전달)
-
-        for (const dep of parsedDeps) {
-          if (!dep) continue;
-
-          try {
-            // 최신 버전 조회
-            const depVersion = await this.getLatestVersion(
-              dep.name,
-              dep.versionSpec,
-              indexUrl // 부모와 동일한 인덱스 사용
-            );
-            if (depVersion) {
-              const childNode = await this.resolvePackage(
-                dep.name,
-                depVersion,
-                depth + 1,
-                maxDepth,
-                indexUrl, // 부모와 동일한 인덱스 전파
-                dep.extras // 파싱된 extras 전달
-              );
-              node.dependencies.push(childNode);
-            }
-          } catch (error) {
-            const errorInfo = error instanceof Error
-              ? { message: error.message, name: error.name }
-              : { message: String(error) };
-            logger.warn('의존성 패키지 조회 실패', {
-              parent: name,
-              dependency: dep.name,
-              error: errorInfo,
-            });
-          }
-        }
-      }
-
-      return node;
-    } catch (error) {
-      const errorInfo = error instanceof Error
-        ? { message: error.message, name: error.name }
-        : { message: String(error) };
-      logger.error('패키지 정보 조회 실패', { name, version: actualVersion, error: errorInfo });
-      throw error;
+      requiresDist = info.requires_dist || [];
     }
+
+    return {
+      packageInfo,
+      requiresDist,
+      actualVersion,
+    };
   }
 
   /**
