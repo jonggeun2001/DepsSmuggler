@@ -1,44 +1,66 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Row, Col, Card, Typography, Button, Space, Statistic } from 'antd';
+import { Row, Col, Card, Typography, Button, Space, Statistic, Divider } from 'antd';
 import {
   SearchOutlined,
   ShoppingCartOutlined,
-  DownloadOutlined,
   CodeOutlined,
   CloudServerOutlined,
   ContainerOutlined,
 } from '@ant-design/icons';
-import { useCartStore } from '../stores/cart-store';
+import { useCartStore, PackageType } from '../stores/cart-store';
 
 const { Title, Paragraph } = Typography;
+
+interface PackageManagerOption {
+  type: PackageType;
+  label: string;
+  description: string;
+  color: string;
+}
+
+interface PackageCategory {
+  title: string;
+  icon: React.ReactNode;
+  items: PackageManagerOption[];
+}
+
+const packageCategories: PackageCategory[] = [
+  {
+    title: '라이브러리',
+    icon: <CodeOutlined style={{ fontSize: 20 }} />,
+    items: [
+      { type: 'pip', label: 'pip', description: 'Python (PyPI)', color: '#3776ab' },
+      { type: 'conda', label: 'conda', description: 'Python/R (Anaconda)', color: '#44a833' },
+      { type: 'maven', label: 'Maven', description: 'Java 라이브러리', color: '#c71a36' },
+      { type: 'npm', label: 'npm', description: 'Node.js 패키지', color: '#cb3837' },
+    ],
+  },
+  {
+    title: 'OS 패키지',
+    icon: <CloudServerOutlined style={{ fontSize: 20 }} />,
+    items: [
+      { type: 'yum', label: 'YUM', description: 'RHEL/CentOS/Fedora', color: '#ee0000' },
+      { type: 'apt', label: 'APT', description: 'Ubuntu/Debian', color: '#e95420' },
+      { type: 'apk', label: 'APK', description: 'Alpine Linux', color: '#0d597f' },
+    ],
+  },
+  {
+    title: '컨테이너',
+    icon: <ContainerOutlined style={{ fontSize: 20 }} />,
+    items: [
+      { type: 'docker', label: 'Docker', description: 'Docker Hub 이미지', color: '#2496ed' },
+    ],
+  },
+];
 
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
 
-  const packageTypes = [
-    {
-      icon: <CodeOutlined style={{ fontSize: 32, color: '#1890ff' }} />,
-      title: 'Python',
-      description: 'pip, conda 패키지',
-    },
-    {
-      icon: <CodeOutlined style={{ fontSize: 32, color: '#fa8c16' }} />,
-      title: 'Java',
-      description: 'Maven 아티팩트',
-    },
-    {
-      icon: <CloudServerOutlined style={{ fontSize: 32, color: '#52c41a' }} />,
-      title: 'Linux',
-      description: 'YUM, APT, APK 패키지',
-    },
-    {
-      icon: <ContainerOutlined style={{ fontSize: 32, color: '#722ed1' }} />,
-      title: 'Container',
-      description: 'Docker 이미지',
-    },
-  ];
+  const handlePackageSelect = (type: PackageType) => {
+    navigate(`/wizard?type=${type}`);
+  };
 
   return (
     <div>
@@ -101,72 +123,37 @@ const HomePage: React.FC = () => {
         </Col>
       </Row>
 
-      {/* Package Types */}
-      <Title level={4} style={{ marginBottom: 16 }}>
-        지원하는 패키지 타입
+      {/* Package Types by Category */}
+      <Title level={4} style={{ marginBottom: 24 }}>
+        패키지 매니저 선택
       </Title>
-      <Row gutter={16}>
-        {packageTypes.map((type, index) => (
-          <Col span={6} key={index}>
-            <Card
-              hoverable
-              style={{ textAlign: 'center' }}
-              onClick={() => navigate('/wizard')}
-            >
-              {type.icon}
-              <Title level={5} style={{ marginTop: 16, marginBottom: 8 }}>
-                {type.title}
-              </Title>
-              <Paragraph style={{ color: '#666', marginBottom: 0 }}>
-                {type.description}
-              </Paragraph>
-            </Card>
-          </Col>
-        ))}
-      </Row>
-
-      {/* Quick Actions */}
-      <Title level={4} style={{ marginTop: 48, marginBottom: 16 }}>
-        빠른 시작
-      </Title>
-      <Row gutter={16}>
-        <Col span={8}>
-          <Card
-            hoverable
-            onClick={() => navigate('/wizard')}
-          >
-            <Card.Meta
-              avatar={<SearchOutlined style={{ fontSize: 24 }} />}
-              title="패키지 검색"
-              description="패키지를 검색하고 의존성과 함께 다운로드할 패키지를 선택하세요."
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card
-            hoverable
-            onClick={() => navigate('/cart')}
-          >
-            <Card.Meta
-              avatar={<ShoppingCartOutlined style={{ fontSize: 24 }} />}
-              title="장바구니 확인"
-              description="선택한 패키지를 확인하고 다운로드를 시작하세요."
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card
-            hoverable
-            onClick={() => navigate('/download')}
-          >
-            <Card.Meta
-              avatar={<DownloadOutlined style={{ fontSize: 24 }} />}
-              title="다운로드"
-              description="패키지를 다운로드하고 출력 형식을 선택하세요."
-            />
-          </Card>
-        </Col>
-      </Row>
+      {packageCategories.map((category, categoryIndex) => (
+        <div key={categoryIndex} style={{ marginBottom: 32 }}>
+          <Space style={{ marginBottom: 12 }}>
+            {category.icon}
+            <Title level={5} style={{ margin: 0 }}>{category.title}</Title>
+          </Space>
+          <Row gutter={[16, 16]}>
+            {category.items.map((item) => (
+              <Col xs={12} sm={8} md={6} key={item.type}>
+                <Card
+                  hoverable
+                  style={{ textAlign: 'center', borderTop: `3px solid ${item.color}` }}
+                  onClick={() => handlePackageSelect(item.type)}
+                >
+                  <Title level={5} style={{ marginBottom: 4, color: item.color }}>
+                    {item.label}
+                  </Title>
+                  <Paragraph style={{ color: '#666', marginBottom: 0, fontSize: 12 }}>
+                    {item.description}
+                  </Paragraph>
+                </Card>
+              </Col>
+            ))}
+          </Row>
+          {categoryIndex < packageCategories.length - 1 && <Divider />}
+        </div>
+      ))}
     </div>
   );
 };

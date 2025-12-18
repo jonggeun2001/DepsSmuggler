@@ -1,4 +1,5 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Steps,
   Card,
@@ -155,9 +156,12 @@ interface SearchResult {
   registry?: string;
   isOfficial?: boolean;
   pullCount?: number;
+  // Maven 아티팩트용 추가 필드
+  popularityCount?: number;
 }
 
 const WizardPage: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [currentStep, setCurrentStep] = useState(0);
 
   // Step 1: 카테고리
@@ -165,6 +169,22 @@ const WizardPage: React.FC = () => {
 
   // Step 2: 패키지 타입
   const [packageType, setPackageType] = useState<PackageType>('pip');
+
+  // URL 파라미터에서 패키지 타입 읽기
+  useEffect(() => {
+    const typeParam = searchParams.get('type') as PackageType | null;
+    if (typeParam) {
+      const foundOption = packageTypeOptions.find(opt => opt.value === typeParam);
+      if (foundOption) {
+        setCategory(foundOption.category);
+        setPackageType(foundOption.value);
+        // 바로 검색 단계로 이동
+        setCurrentStep(2);
+        // 파라미터 사용 후 URL에서 제거 (깔끔한 URL 유지)
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, []);
 
   // Step 3: 검색
   const [searchQuery, setSearchQuery] = useState('');
@@ -212,6 +232,7 @@ const WizardPage: React.FC = () => {
   // pip 커스텀 인덱스 URL 상태
   const [useCustomIndex, setUseCustomIndex] = useState(false);
   const [customIndexUrl, setCustomIndexUrl] = useState('');
+  const [usedIndexUrl, setUsedIndexUrl] = useState<string | undefined>(undefined); // 실제로 버전 조회 시 사용한 indexUrl
   const [showSaveIndexUrlModal, setShowSaveIndexUrlModal] = useState(false);
   const [indexUrlLabel, setIndexUrlLabel] = useState('');
 
@@ -253,6 +274,7 @@ const WizardPage: React.FC = () => {
     setAvailableVersions([]);
     setSuggestions([]);
     setShowSuggestions(false);
+    setUsedIndexUrl(undefined); // 사용한 indexUrl 초기화
     // 언어 버전은 초기화하지 않음 (설정에서 가져온 기본값 유지)
   };
 
@@ -756,11 +778,13 @@ const WizardPage: React.FC = () => {
       if (window.electronAPI?.search?.versions) {
         // 패키지 타입별 옵션 전달
         let searchOptions: { channel?: string; registry?: string; indexUrl?: string } | undefined;
+        let actualIndexUrl: string | undefined = undefined;
 
         if (packageType === 'pip') {
           // pip 커스텀 인덱스 URL 전달
           if (useCustomIndex && customIndexUrl) {
             searchOptions = { indexUrl: customIndexUrl };
+            actualIndexUrl = customIndexUrl; // 실제 사용한 indexUrl 기록
           }
         } else if (packageType === 'conda') {
           searchOptions = { channel: condaChannel };
@@ -775,6 +799,10 @@ const WizardPage: React.FC = () => {
         if (response.versions && response.versions.length > 0) {
           setAvailableVersions(response.versions);
           setSelectedVersion(response.versions[0]);
+          // pip의 경우 실제 사용한 indexUrl 저장
+          if (packageType === 'pip') {
+            setUsedIndexUrl(actualIndexUrl);
+          }
         } else {
           setAvailableVersions([record.version]);
         }
@@ -784,6 +812,8 @@ const WizardPage: React.FC = () => {
         if (versions.length > 0) {
           setAvailableVersions(versions);
           setSelectedVersion(versions[0]);
+          // 브라우저 환경에서는 항상 PyPI 사용 (커스텀 인덱스 미지원)
+          setUsedIndexUrl(undefined);
         } else {
           setAvailableVersions(record.versions || [record.version]);
         }
@@ -888,8 +918,8 @@ const WizardPage: React.FC = () => {
       downloadUrl: selectedPackage.downloadUrl,
       repository: selectedPackage.repository,
       location: selectedPackage.location,
-      // pip 커스텀 인덱스 URL 포함
-      ...(packageType === 'pip' && useCustomIndex && customIndexUrl && { indexUrl: customIndexUrl }),
+      // pip 커스텀 인덱스 URL 포함 (실제 버전 조회 시 사용한 indexUrl)
+      ...(packageType === 'pip' && usedIndexUrl && { indexUrl: usedIndexUrl }),
       // pip extras 포함
       ...(packageType === 'pip' && extras.length > 0 && { extras }),
     });
@@ -899,43 +929,20 @@ const WizardPage: React.FC = () => {
     setCurrentStep(2); // 검색 단계로 이동
   };
 
-  // 검색 결과 테이블 컬럼
-  const columns = [
-    {
-      title: '패키지명',
-      dataIndex: 'name',
-      key: 'name',
-      render: (name: string) => <Text strong>{name}</Text>,
-    },
-    {
-      title: '최신 버전',
-      dataIndex: 'version',
-      key: 'version',
-      width: 120,
-      render: (version: string) => <Tag color="blue">{version}</Tag>,
-    },
-    {
-      title: '설명',
-      dataIndex: 'description',
-      key: 'description',
-      ellipsis: true,
-    },
-    {
-      title: '액션',
-      key: 'action',
-      width: 100,
-      render: (_: unknown, record: SearchResult) => (
-        <Button
-          type="primary"
-          size="small"
-          icon={<PlusOutlined />}
-          onClick={() => handleSelectPackage(record)}
-        >
-          선택
-        </Button>
-      ),
-    },
-  ];
+  // 숫자를 K, M 단위로 포맷팅
+  const formatPopularity = (count: number | null | undefined): string => {
+    if (!count || count === 0) {
+      return '0';
+    }
+    if (count >= 1000000) {
+      return `${(count / 1000000).toFixed(1)}M`;
+    }
+    if (count >= 1000) {
+      return `${(count / 1000).toFixed(1)}K`;
+    }
+    return count.toString();
+  };
+
 
   // 단계 정보 (환경 확인 단계 제거 - 검색 화면에 인라인 표시)
   const getStepItems = () => {
@@ -1104,6 +1111,13 @@ const WizardPage: React.FC = () => {
                       <span style={{ marginLeft: 8 }}>📥 {item.pullCount.toLocaleString()}</span>
                     )}
                   </>
+                ) : packageType === 'maven' ? (
+                  <>
+                    {item.version} - {item.description || '설명 없음'}
+                    {item.popularityCount !== undefined && (
+                      <span style={{ marginLeft: 8 }}>🔥 {formatPopularity(item.popularityCount)} apps</span>
+                    )}
+                  </>
                 ) : (
                   <>{item.version} - {item.description || '설명 없음'}</>
                 )}
@@ -1111,49 +1125,6 @@ const WizardPage: React.FC = () => {
             </div>
           ),
         }));
-
-        // Docker 전용 검색 결과 컬럼
-        const dockerColumns = [
-          {
-            title: '이미지명',
-            dataIndex: 'name',
-            key: 'name',
-            render: (name: string, record: SearchResult) => (
-              <Space>
-                <Text strong>{name}</Text>
-                {record.isOfficial && <Tag color="gold">공식</Tag>}
-              </Space>
-            ),
-          },
-          {
-            title: '설명',
-            dataIndex: 'description',
-            key: 'description',
-            ellipsis: true,
-          },
-          {
-            title: 'Pull 수',
-            dataIndex: 'pullCount',
-            key: 'pullCount',
-            width: 120,
-            render: (count: number) => count ? count.toLocaleString() : '-',
-          },
-          {
-            title: '액션',
-            key: 'action',
-            width: 100,
-            render: (_: unknown, record: SearchResult) => (
-              <Button
-                type="primary"
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={() => handleSelectPackage(record)}
-              >
-                선택
-              </Button>
-            ),
-          },
-        ];
 
         return (
           <Card>
@@ -1303,9 +1274,19 @@ const WizardPage: React.FC = () => {
               )}
             >
               <Input
-                placeholder={packageType === 'docker'
-                  ? '이미지명을 입력하세요 (예: nginx, python, node)'
-                  : '패키지명을 입력하세요 (예: requests, lodash, nginx)'}
+                placeholder={(() => {
+                  switch (packageType) {
+                    case 'pip': return '패키지명을 입력하세요 (예: requests, numpy, pandas)';
+                    case 'conda': return '패키지명을 입력하세요 (예: numpy, scipy, pytorch)';
+                    case 'maven': return '아티팩트를 입력하세요 (예: org.springframework:spring-core)';
+                    case 'npm': return '패키지명을 입력하세요 (예: lodash, express, react)';
+                    case 'yum': return '패키지명을 입력하세요 (예: httpd, nginx, vim)';
+                    case 'apt': return '패키지명을 입력하세요 (예: nginx, curl, git)';
+                    case 'apk': return '패키지명을 입력하세요 (예: nginx, curl, git)';
+                    case 'docker': return '이미지명을 입력하세요 (예: nginx, python, node)';
+                    default: return '패키지명을 입력하세요';
+                  }
+                })()}
                 allowClear
                 size="large"
                 value={searchQuery}
@@ -1322,32 +1303,6 @@ const WizardPage: React.FC = () => {
               />
             </Dropdown>
 
-            {searchResults.length > 0 && (
-              <>
-                <Alert
-                  message={`${searchResults.length}개의 ${packageType === 'docker' ? '이미지' : '패키지'}를 찾았습니다`}
-                  type="success"
-                  showIcon
-                  style={{ marginBottom: 16 }}
-                />
-                <Table
-                  columns={packageType === 'docker' ? dockerColumns : columns}
-                  dataSource={searchResults}
-                  rowKey="name"
-                  pagination={false}
-                  size="middle"
-                />
-              </>
-            )}
-
-            {!searching && searchResults.length === 0 && (
-              <Empty
-                description={packageType === 'docker'
-                  ? '이미지명을 입력하여 컨테이너 이미지를 찾아보세요'
-                  : '검색어를 입력하여 패키지를 찾아보세요'}
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-              />
-            )}
 
             <div style={{ marginTop: 24 }}>
               <Button onClick={() => setCurrentStep(1)}>이전</Button>
