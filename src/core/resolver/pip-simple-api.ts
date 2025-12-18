@@ -8,7 +8,10 @@
  */
 
 import axios from 'axios';
+import * as path from 'path';
 import logger from '../../utils/logger';
+import { createDiskCache, CacheManager } from '../shared/cache-manager';
+import { getConfigManager } from '../config';
 
 /**
  * Simple API에서 반환되는 패키지 파일 정보
@@ -40,6 +43,35 @@ export interface WheelInfo {
   platformTag: string;
 }
 
+// ============================================================================
+// 캐시 관리자
+// ============================================================================
+
+let simpleApiCache: CacheManager<SimpleApiPackageFile[]> | null = null;
+
+/**
+ * Simple API 캐시 초기화
+ */
+function getSimpleApiCache(): CacheManager<SimpleApiPackageFile[]> {
+  if (!simpleApiCache) {
+    const configManager = getConfigManager();
+    const cachePath = path.join(configManager.getCacheDir(), 'pip-simple');
+
+    simpleApiCache = createDiskCache<SimpleApiPackageFile[]>(
+      'pip-simple-api',
+      5 * 60 * 1000, // 메모리 캐시 TTL: 5분
+      cachePath,
+      {
+        diskTtlMs: 60 * 60 * 1000, // 디스크 캐시 TTL: 1시간
+        maxSize: 100, // 최대 100개 패키지 캐시
+      }
+    );
+
+    logger.debug('Simple API 캐시 초기화', { cachePath });
+  }
+  return simpleApiCache;
+}
+
 /**
  * PEP 503 Simple API에서 패키지 파일 목록 조회
  *
@@ -51,27 +83,45 @@ export async function fetchPackageFiles(
   indexUrl: string,
   packageName: string
 ): Promise<SimpleApiPackageFile[]> {
-  try {
-    // Simple API 엔드포인트: {indexUrl}/{package}/
-    const normalizedPackageName = packageName.toLowerCase().replace(/_/g, '-');
-    const url = `${indexUrl.replace(/\/$/, '')}/${normalizedPackageName}/`;
+  const cache = getSimpleApiCache();
+  const normalizedPackageName = packageName.toLowerCase().replace(/_/g, '-');
 
-    logger.debug('Fetching Simple API', { url });
+  // 캐시 키: indexUrl + packageName 조합
+  const cacheKey = `${indexUrl}:${normalizedPackageName}`;
 
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'DepsSmuggler/1.0',
-        Accept: 'text/html,application/xhtml+xml',
-      },
-      timeout: 30000,
-    });
+  // 캐시에서 가져오거나 네트워크 요청
+  const result = await cache.getOrFetch(cacheKey, async () => {
+    try {
+      // Simple API 엔드포인트: {indexUrl}/{package}/
+      const url = `${indexUrl.replace(/\/$/, '')}/${normalizedPackageName}/`;
 
-    const html = response.data as string;
-    return parseSimpleApiHtml(html, indexUrl);
-  } catch (error) {
-    logger.error('Simple API 조회 실패', { indexUrl, packageName, error });
-    throw new Error(`패키지를 찾을 수 없습니다: ${packageName} (인덱스: ${indexUrl})`);
-  }
+      logger.debug('Fetching Simple API', { url });
+
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'DepsSmuggler/1.0',
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        timeout: 30000,
+      });
+
+      const html = response.data as string;
+      return parseSimpleApiHtml(html, indexUrl);
+    } catch (error) {
+      logger.error('Simple API 조회 실패', { indexUrl, packageName, error });
+      throw new Error(`패키지를 찾을 수 없습니다: ${packageName} (인덱스: ${indexUrl})`);
+    }
+  });
+
+  logger.debug('Simple API 조회 결과', {
+    packageName,
+    indexUrl,
+    fromCache: result.fromCache,
+    cacheType: result.cacheType,
+    fileCount: result.data.length,
+  });
+
+  return result.data;
 }
 
 /**
@@ -93,7 +143,19 @@ function parseSimpleApiHtml(html: string, baseUrl: string): SimpleApiPackageFile
 
   while ((match = linkRegex.exec(html)) !== null) {
     const attributes = match[1];
-    const filename = match[2].trim();
+    const rawFilename = match[2].trim();
+
+    // URL 디코딩 적용 (예: torch-2.9.1%2Bcu130 → torch-2.9.1+cu130)
+    let filename = rawFilename;
+    try {
+      filename = decodeURIComponent(rawFilename);
+      if (filename !== rawFilename) {
+        logger.debug('파일명 URL 디코딩 적용', { before: rawFilename, after: filename });
+      }
+    } catch (error) {
+      // 디코딩 실패 시 원본 사용
+      logger.debug('URL 디코딩 실패, 원본 파일명 사용', { rawFilename, error });
+    }
 
     // href 추출
     const hrefMatch = /href=["']([^"']+)["']/i.exec(attributes);
@@ -331,4 +393,24 @@ export function findLatestVersion(files: SimpleApiPackageFile[]): string | null 
   });
 
   return sortedVersions[0];
+}
+
+/**
+ * Simple API 캐시 전체 삭제
+ */
+export function clearSimpleApiCache(): void {
+  if (simpleApiCache) {
+    simpleApiCache.clear();
+    logger.info('Simple API 캐시 초기화 완료');
+  }
+}
+
+/**
+ * Simple API 캐시 통계 조회
+ */
+export function getSimpleApiCacheStats() {
+  if (simpleApiCache) {
+    return simpleApiCache.getStats();
+  }
+  return null;
 }
