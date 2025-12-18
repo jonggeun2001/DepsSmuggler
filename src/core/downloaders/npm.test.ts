@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { getNpmDownloader, NpmDownloader } from './npm';
 import * as crypto from 'crypto';
+import * as os from 'os';
+import * as path from 'path';
 
 describe('npm downloader', () => {
   let downloader: ReturnType<typeof getNpmDownloader>;
@@ -251,7 +253,7 @@ describe('NpmDownloader 클래스 메서드 테스트', () => {
       (downloader as any).versionResolver = mockVersionResolver;
 
       const info = { type: 'npm', name: 'test', version: '1.0.0' } as const;
-      await expect(downloader.downloadPackage(info, '/tmp/test')).rejects.toThrow(
+      await expect(downloader.downloadPackage(info, path.join(os.tmpdir(), 'npm-test'))).rejects.toThrow(
         '다운로드 URL을 찾을 수 없습니다'
       );
     });
@@ -696,14 +698,14 @@ describe('NpmDownloader 파일 검증 테스트', () => {
 
       const info = { type: 'npm' as const, name: 'test-pkg', version: '1.0.0' };
 
-      await expect(downloader.downloadPackage(info, '/tmp/test')).rejects.toThrow(
+      await expect(downloader.downloadPackage(info, path.join(os.tmpdir(), 'npm-test'))).rejects.toThrow(
         '다운로드 URL을 찾을 수 없습니다'
       );
     });
   });
 
   describe('verifyIntegrity (실제 파일 테스트)', () => {
-    const testFilePath = '/tmp/npm-test-integrity.txt';
+    const testFilePath = path.join(os.tmpdir(), 'npm-test-integrity.txt');
 
     it('유효한 무결성 검증 성공', async () => {
       const testContent = 'test content for integrity verification';
@@ -738,13 +740,13 @@ describe('NpmDownloader 파일 검증 테스트', () => {
     });
 
     it('파일이 존재하지 않으면 false 반환', async () => {
-      const result = await downloader.verifyIntegrity('/tmp/nonexistent-file-xyz.tgz', 'sha512-abc');
+      const result = await downloader.verifyIntegrity(path.join(os.tmpdir(), 'nonexistent-file-xyz.tgz'), 'sha512-abc');
       expect(result).toBe(false);
     });
   });
 
   describe('verifyShasum (실제 파일 테스트)', () => {
-    const testFilePath = '/tmp/npm-test-shasum.txt';
+    const testFilePath = path.join(os.tmpdir(), 'npm-test-shasum.txt');
 
     it('유효한 SHA1 검증 성공', async () => {
       const testContent = 'test content for sha1 verification';

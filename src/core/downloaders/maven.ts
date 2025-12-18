@@ -724,7 +724,8 @@ export class MavenDownloader implements IDownloader {
       .join('/');
     const safeArtifactId = sanitizePath(artifactId);
     const safeVersion = sanitizePath(version);
-    return path.join(groupPath, safeArtifactId, safeVersion);
+    // .m2 저장소 구조는 항상 forward slash 사용 (플랫폼 무관)
+    return [groupPath, safeArtifactId, safeVersion].join('/');
   }
 
   /**
