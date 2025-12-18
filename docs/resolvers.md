@@ -12,13 +12,13 @@
 - 목적: Python/PyPI 패키지 의존성 해결
 - 위치: `src/core/resolver/pip-resolver.ts`
 - 캐시: `src/core/shared/pip-cache.ts` 모듈 사용 (메모리 + 디스크 캐싱)
+- **알고리즘**: BFS 큐 기반 (v1.x 대비 call stack overflow 문제 해결)
 
 ### 클래스 구조
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `resolveDependencies` | name: string, version?: string, options?: ResolverOptions | Promise<DependencyResolutionResult> | 메인 진입점: 패키지 의존성 트리 해결 |
-| `resolvePackage` | name: string, version: string, depth: number, parentPath: string[] | Promise<DependencyNode \| null> | 단일 패키지의 의존성 재귀 해결 |
+| `resolveDependencies` | name: string, version?: string, options?: ResolverOptions | Promise<DependencyResolutionResult> | 메인 진입점: 패키지 의존성 트리 해결 (BFS 큐 기반) |
 | `parseFromText` | text: string | ParsedDependency[] | requirements.txt 파싱 |
 | `flattenDependencies` | node: DependencyNode | PackageInfo[] | 트리를 플랫 리스트로 변환 |
 
@@ -26,9 +26,34 @@
 
 | 메서드 | 설명 |
 |--------|------|
+| `fetchPackageInfo` | 패키지 정보 조회 (캐시 활용) |
 | `parseDependencyString` | 의존성 문자열 파싱 (예: "requests>=2.0,<3.0; python_version >= '3.8'") |
 | `getLatestVersion` | 버전 제약조건에 맞는 최신 버전 조회 |
 | `evaluateMarker` | 환경 마커 평가 (예: `python_version >= '3.8'`, `sys_platform == 'linux'`) |
+
+### BFS 큐 알고리즘
+
+기존 재귀 방식(`resolvePackage`)에서 BFS 큐 기반으로 변경되어 깊은 의존성 트리에서도 call stack overflow가 발생하지 않습니다.
+
+```typescript
+// 내부 타입
+interface QueueItem {
+  name: string;
+  version: string;
+  indexUrl?: string;
+  extras?: string[];
+  parentCacheKey?: string; // 부모 패키지 캐시키 (트리 구축용)
+}
+
+// 알고리즘 흐름
+1. 루트 패키지를 큐에 추가
+2. 큐에서 패키지를 꺼내어 정보 조회
+3. 이미 해결된 패키지면 부모-자식 관계만 추가하고 스킵
+4. 노드 생성 및 저장
+5. 하위 의존성을 큐에 추가
+6. 큐가 빌 때까지 반복
+7. 부모-자식 관계 맵을 이용해 트리 구축
+```
 
 ### 속성
 

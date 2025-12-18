@@ -298,12 +298,42 @@ destPath/
 
 이 구조는 Maven의 로컬 저장소 (`~/.m2/repository`)와 동일하여, 폐쇄망 환경에서 직접 로컬 저장소로 복사하여 사용할 수 있습니다.
 
+### 검색 결과 필드
+
+`searchPackages`는 `central.sonatype.com` API를 사용하며, 인기도 순으로 정렬됩니다:
+
+```typescript
+interface PackageInfo {
+  name: string;           // groupId:artifactId
+  version: string;        // 최신 버전
+  description?: string;
+  metadata: {
+    groupId: string;
+    artifactId: string;
+    popularityCount?: number;  // 사용하는 앱 수 (인기도)
+  };
+}
+```
+
+**참고**: API 결과는 최대 20개로 제한됩니다.
+
+### 에러 처리
+
+검색 실패 시 에러 유형별로 다른 메시지가 표시됩니다:
+
+| 에러 유형 | 원인 | 메시지 |
+|-----------|------|--------|
+| 타임아웃 | API 응답 지연 | "API 요청 시간이 초과되었습니다." |
+| 네트워크 오류 | 연결 불가 | "네트워크에 연결할 수 없습니다." |
+| 기타 | API 오류 등 | "central.sonatype.com API에 연결할 수 없습니다." |
+
 ### 사용 예시
 ```typescript
 import { getMavenDownloader } from './core/downloaders/maven';
 
 const downloader = getMavenDownloader();
 const results = await downloader.searchPackages('spring-core');
+// results[0].metadata.popularityCount로 인기도 확인 가능
 
 // 완전 다운로드 (jar, jar.sha1, pom, pom.sha1 모두 다운로드)
 const result = await downloader.downloadPackage(

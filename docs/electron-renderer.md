@@ -791,6 +791,41 @@ src/renderer/
 - 경로: `/`
 - 역할: 메인 대시보드, 패키지 타입 선택
 
+#### 패키지 타입 바로가기
+
+카테고리별로 그룹화된 패키지 타입 버튼을 제공합니다. 클릭 시 WizardPage로 바로 이동:
+
+```typescript
+const packageCategories = [
+  {
+    title: '라이브러리',
+    items: [
+      { type: 'pip', label: 'pip', description: 'Python (PyPI)' },
+      { type: 'conda', label: 'conda', description: 'Python/R (Anaconda)' },
+      { type: 'maven', label: 'Maven', description: 'Java 라이브러리' },
+      { type: 'npm', label: 'npm', description: 'Node.js 패키지' },
+    ],
+  },
+  {
+    title: 'OS 패키지',
+    items: [
+      { type: 'yum', label: 'YUM', description: 'RHEL/CentOS/Fedora' },
+      { type: 'apt', label: 'APT', description: 'Ubuntu/Debian' },
+      { type: 'apk', label: 'APK', description: 'Alpine Linux' },
+    ],
+  },
+  {
+    title: '컨테이너',
+    items: [{ type: 'docker', label: 'Docker', description: 'Docker Hub 이미지' }],
+  },
+];
+
+// 패키지 타입 클릭 시
+const handlePackageSelect = (type: PackageType) => {
+  navigate(`/wizard?type=${type}`);
+};
+```
+
 ### WizardPage
 - 경로: `/wizard`
 - 역할: 패키지 검색 및 선택 위자드
@@ -801,6 +836,39 @@ src/renderer/
   4. 패키지 검색 및 선택
   5. 버전 선택
   6. 타겟 OS/아키텍처 선택
+
+#### URL 파라미터 지원
+
+URL 파라미터로 패키지 타입을 전달하면 바로 검색 단계(3단계)로 이동합니다:
+
+```typescript
+// URL: /wizard?type=pip
+useEffect(() => {
+  const typeParam = searchParams.get('type') as PackageType | null;
+  if (typeParam) {
+    const foundOption = packageTypeOptions.find(opt => opt.value === typeParam);
+    if (foundOption) {
+      setCategory(foundOption.category);
+      setPackageType(foundOption.value);
+      setCurrentStep(2); // 바로 검색 단계로 이동
+      setSearchParams({}, { replace: true }); // URL에서 파라미터 제거
+    }
+  }
+}, []);
+```
+
+#### Maven 검색 결과 인기도 표시
+
+Maven 검색 결과에 `popularityCount` (사용 앱 수)가 표시됩니다:
+
+```typescript
+interface SearchResult {
+  name: string;
+  version: string;
+  description?: string;
+  popularityCount?: number; // Maven 아티팩트용
+}
+```
 
 #### 언어 버전 선택
 
@@ -912,6 +980,55 @@ const resolvedPackages = await Promise.all(
 - 에러 발생 시 재시도/건너뛰기/취소 선택
 - 완료 후 폴더 열기 (Finder/Explorer)
 - 다운로드 완료 시 히스토리 자동 저장
+
+#### pip 커스텀 옵션 지원
+
+장바구니에서 전달된 pip 커스텀 인덱스 URL 및 extras를 다운로드 시 전달합니다:
+
+```typescript
+// 패키지 정보에 pip 옵션 포함
+const packages = cartItems.map((item) => ({
+  id: item.id,
+  type: item.type,
+  name: item.name,
+  version: item.version,
+  // pip 커스텀 인덱스 URL 전달
+  indexUrl: item.indexUrl,
+  // pip extras 전달 (예: ['dev', 'test'])
+  extras: item.extras,
+}));
+```
+
+#### 의존성 트리 탐색 (반복문 기반)
+
+의존성 트리에서 관계를 추출할 때 스택 기반 반복문을 사용하여 call stack overflow를 방지합니다:
+
+```typescript
+// 의존성 트리에서 관계 추출 (반복문 기반)
+const stack: DependencyNodeData[] = [tree.root];
+const visited = new Set<string>();
+
+while (stack.length > 0) {
+  const node = stack.pop()!;
+  const nodeId = `${node.package.type || 'pip'}-${node.package.name}-${node.package.version}`;
+
+  if (visited.has(nodeId)) continue;
+  visited.add(nodeId);
+
+  node.dependencies.forEach((dep) => {
+    const depPkg = dep.package;
+    const depId = `${depPkg.type || 'pip'}-${depPkg.name}-${depPkg.version}`;
+
+    if (!originalIds.has(depId)) {
+      dependencyMap.set(depId, { parentId: rootId, parentName: rootName });
+    }
+
+    if (!visited.has(depId)) {
+      stack.push(dep);
+    }
+  });
+}
+```
 
 #### 의존성 확인 단계
 
@@ -1440,14 +1557,64 @@ CLI(`src/core/config.ts`)와 GUI가 동일한 설정 파일을 사용합니다:
 
 ### DependencyTree (`components/DependencyTree.tsx`)
 
-의존성 트리 시각화 컴포넌트
+의존성 트리 시각화 컴포넌트 (react-d3-tree 기반)
 
 ```typescript
 interface DependencyTreeProps {
-  tree: DependencyNode;
+  data: DependencyNode | DependencyNode[];
   onNodeClick?: (node: DependencyNode) => void;
-  expandLevel?: number;
+  style?: React.CSSProperties;
 }
+```
+
+#### 반복문 기반 트리 변환
+
+`convertToTreeData` 함수가 스택 기반 반복문으로 구현되어 깊은 트리에서도 call stack overflow가 발생하지 않습니다:
+
+```typescript
+const convertToTreeData = useCallback((rootNode: DependencyNode): TreeNodeDatum => {
+  const nodeMap = new Map<string, TreeNodeDatum>();
+  const parentChildMap = new Map<string, string[]>();
+  const stack: Array<{ node: DependencyNode; parentKey?: string }> = [{ node: rootNode }];
+  const visited = new Set<string>();
+
+  // 1단계: 모든 노드 방문하여 TreeNodeDatum 생성
+  while (stack.length > 0) {
+    const { node, parentKey } = stack.pop()!;
+    const nodeKey = getNodeKey(node);
+
+    if (visited.has(nodeKey)) {
+      // 이미 방문했지만 부모-자식 관계는 추가
+      if (parentKey) {
+        const children = parentChildMap.get(parentKey) || [];
+        if (!children.includes(nodeKey)) {
+          children.push(nodeKey);
+          parentChildMap.set(parentKey, children);
+        }
+      }
+      continue;
+    }
+    visited.add(nodeKey);
+
+    // TreeNodeDatum 생성 및 저장
+    nodeMap.set(nodeKey, { name, attributes, children: [], originalNode: node });
+
+    // 자식 노드들을 스택에 추가
+    for (const child of node.dependencies) {
+      stack.push({ node: child, parentKey: nodeKey });
+    }
+  }
+
+  // 2단계: 부모-자식 관계 연결
+  for (const [parentKey, childKeys] of parentChildMap) {
+    const parentNode = nodeMap.get(parentKey);
+    if (parentNode) {
+      parentNode.children = childKeys.map(key => nodeMap.get(key)).filter(Boolean);
+    }
+  }
+
+  return nodeMap.get(getNodeKey(rootNode))!;
+}, [formatBytes]);
 ```
 
 ### MainLayout (`layouts/MainLayout.tsx`)
