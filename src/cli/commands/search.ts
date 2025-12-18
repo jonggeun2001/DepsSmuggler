@@ -4,7 +4,6 @@ import { PackageType } from '../../types';
 import { getPipDownloader } from '../../core/downloaders/pip';
 import { getCondaDownloader } from '../../core/downloaders/conda';
 import { getMavenDownloader } from '../../core/downloaders/maven';
-import { getYumDownloader } from '../../core/downloaders/yum';
 import { getDockerDownloader } from '../../core/downloaders/docker';
 
 // 검색 옵션
@@ -55,14 +54,11 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
         break;
 
       case 'yum':
-        const yumDownloader = getYumDownloader();
-        const yumResults = await yumDownloader.searchPackages(query);
-        results = yumResults.map((pkg) => ({
-          name: pkg.name,
-          version: pkg.version,
-          description: pkg.metadata?.description as string,
-        }));
-        break;
+      case 'apt':
+      case 'apk':
+        console.error(`OS 패키지 검색은 'os search' 명령어를 사용하세요.`);
+        console.error(`예: depssmuggler os search ${query} --distro rocky-9`);
+        process.exit(1);
 
       case 'docker':
         const dockerDownloader = getDockerDownloader();

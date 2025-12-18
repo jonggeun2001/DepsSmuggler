@@ -5,35 +5,18 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import cliProgress from 'cli-progress';
-import * as path from 'path';
-import * as fs from 'fs-extra';
 import {
-  OSPackageDownloader,
   getDistributionById,
   getDistributionsByPackageManager,
   OS_DISTRIBUTIONS,
-} from '../../core/downloaders/os';
+} from '../../core/downloaders/os-shared/repositories';
 import type {
   OSDistribution,
-  OSPackageInfo,
-  OutputType,
-  ArchiveFormat,
   OSPackageManager,
-  OSArchitecture,
-  OSDownloadProgress,
-  CacheMode,
-} from '../../core/downloaders/os/types';
+} from '../../core/downloaders/os-shared/types';
 
-// 싱글톤 다운로더 인스턴스
-let downloaderInstance: OSPackageDownloader | null = null;
-
-function getDownloader(): OSPackageDownloader {
-  if (!downloaderInstance) {
-    downloaderInstance = new OSPackageDownloader();
-  }
-  return downloaderInstance;
-}
+// TODO: OS 패키지 CLI 명령어는 플랫 구조 전환 후 재구현 필요
+// 현재는 Electron GUI의 os:* IPC 핸들러를 통해 OS 패키지 기능 사용 가능
 
 /**
  * OS 명령어 등록
@@ -41,7 +24,7 @@ function getDownloader(): OSPackageDownloader {
 export function registerOSCommands(program: Command): void {
   const osCmd = program
     .command('os')
-    .description('OS 패키지 다운로드 (yum, apt, apk)');
+    .description('OS 패키지 다운로드 (yum, apt, apk) [재구현 중 - GUI 사용 권장]');
 
   // 배포판 목록 조회
   osCmd
@@ -151,55 +134,9 @@ async function searchCommand(
   query: string,
   options: { distro: string; arch: string; limit: string }
 ): Promise<void> {
-  console.log(chalk.cyan(`\n"${query}" 검색 중...\n`));
-
-  try {
-    const downloader = getDownloader();
-    const distribution = getDistributionById(options.distro);
-
-    if (!distribution) {
-      console.log(chalk.red(`배포판 "${options.distro}"을(를) 찾을 수 없습니다.`));
-      console.log(chalk.gray('사용 가능한 배포판 목록: depssmuggler os list-distros'));
-      process.exit(1);
-    }
-
-    const result = await downloader.search({
-      query,
-      distribution,
-      architecture: options.arch as OSArchitecture,
-      limit: parseInt(options.limit, 10),
-    });
-
-    if (result.packages.length === 0) {
-      console.log(chalk.yellow('검색 결과가 없습니다.'));
-      return;
-    }
-
-    // 테이블 헤더
-    const header = `${'패키지명'.padEnd(30)} ${'최신 버전'.padEnd(20)} ${'버전 수'.padEnd(10)} ${'아키텍처'.padEnd(12)} ${'크기'.padEnd(12)}`;
-    console.log(chalk.bold(header));
-    console.log(chalk.gray('─'.repeat(84)));
-
-    // 결과 출력 (그룹화된 결과에서 latest 사용)
-    for (const pkgResult of result.packages) {
-      const name = pkgResult.name.length > 28 ? pkgResult.name.substring(0, 25) + '...' : pkgResult.name;
-      const version = pkgResult.latest.version.length > 18
-        ? pkgResult.latest.version.substring(0, 15) + '...'
-        : pkgResult.latest.version;
-      const versionCount = pkgResult.versions.length.toString();
-
-      console.log(
-        `${chalk.green(name.padEnd(30))} ${version.padEnd(20)} ${versionCount.padEnd(10)} ${pkgResult.latest.architecture.padEnd(12)} ${formatBytes(pkgResult.latest.size).padEnd(12)}`
-      );
-    }
-
-    console.log(chalk.gray('─'.repeat(84)));
-    console.log(chalk.gray(`총 ${result.totalCount}개 패키지 (${result.packages.length}개 표시)`));
-    console.log('');
-  } catch (error) {
-    console.error(chalk.red(`오류: ${(error as Error).message}`));
-    process.exit(1);
-  }
+  console.log(chalk.yellow('\n⚠️  OS 패키지 CLI 명령어는 현재 재구현 중입니다.'));
+  console.log(chalk.cyan('Electron GUI를 사용하여 OS 패키지를 검색하세요.\n'));
+  process.exit(0);
 }
 
 /**
@@ -211,228 +148,34 @@ async function downloadCommand(
     distro: string;
     arch: string;
     output: string;
-    format: OutputType;
-    archiveFormat: ArchiveFormat;
+    format: string;
+    archiveFormat: string;
     deps: boolean;
     scripts?: boolean;
     concurrency: string;
   }
 ): Promise<void> {
-  console.log(chalk.cyan('\nOS 패키지 다운로드 준비 중...\n'));
-
-  try {
-    const downloader = getDownloader();
-    const distribution = getDistributionById(options.distro);
-
-    if (!distribution) {
-      console.log(chalk.red(`배포판 "${options.distro}"을(를) 찾을 수 없습니다.`));
-      console.log(chalk.gray('사용 가능한 배포판 목록: depssmuggler os list-distros'));
-      process.exit(1);
-    }
-
-    const pmIcon = getPMIcon(distribution.packageManager);
-    console.log(chalk.green(`${pmIcon} 배포판: ${distribution.name} ${distribution.version}`));
-    console.log(chalk.gray(`  아키텍처: ${options.arch}`));
-    console.log(chalk.gray(`  패키지 수: ${packageNames.length}개`));
-    console.log('');
-
-    // 패키지 정보 검색
-    console.log(chalk.cyan('패키지 정보 조회 중...'));
-    const packages: OSPackageInfo[] = [];
-    const notFound: string[] = [];
-
-    for (const pkgName of packageNames) {
-      const result = await downloader.search({
-        query: pkgName,
-        distribution,
-        architecture: options.arch as OSArchitecture,
-        matchType: 'exact',
-        limit: 1,
-      });
-
-      if (result.packages.length > 0) {
-        // 그룹화된 결과에서 latest 패키지 사용
-        packages.push(result.packages[0].latest);
-        console.log(chalk.green(`  ✓ ${pkgName} (${result.packages[0].latest.version})`));
-      } else {
-        notFound.push(pkgName);
-        console.log(chalk.yellow(`  ✗ ${pkgName} (찾을 수 없음)`));
-      }
-    }
-
-    if (packages.length === 0) {
-      console.log(chalk.red('\n다운로드할 패키지가 없습니다.'));
-      process.exit(1);
-    }
-
-    if (notFound.length > 0) {
-      console.log(chalk.yellow(`\n경고: ${notFound.length}개 패키지를 찾을 수 없습니다.`));
-    }
-
-    // 의존성 해결
-    let allPackages = packages;
-    if (options.deps !== false) {
-      console.log(chalk.cyan('\n의존성 해결 중...'));
-
-      const progressBar = new cliProgress.SingleBar(
-        {
-          format: '  진행률 |{bar}| {percentage}% | {message}',
-          hideCursor: true,
-        },
-        cliProgress.Presets.shades_classic
-      );
-
-      progressBar.start(100, 0, { message: '의존성 분석 중...' });
-
-      const depsResult = await downloader.resolveDependencies(
-        packages,
-        distribution,
-        options.arch as OSArchitecture,
-        {
-          onProgress: (message: string, current: number, total: number) => {
-            const percent = total > 0 ? Math.round((current / total) * 100) : 0;
-            progressBar.update(percent, { message });
-          },
-        }
-      );
-
-      progressBar.stop();
-
-      allPackages = depsResult.packages;
-      const depsCount = allPackages.length - packages.length;
-
-      console.log(chalk.green(`✓ 의존성 해결 완료`));
-      console.log(chalk.gray(`  총 패키지: ${allPackages.length}개 (원본 ${packages.length}개 + 의존성 ${depsCount}개)`));
-
-      if (depsResult.unresolved && depsResult.unresolved.length > 0) {
-        console.log(chalk.yellow(`  경고: ${depsResult.unresolved.length}개 의존성 해결 실패`));
-      }
-    }
-
-    // 출력 경로 생성
-    const outputPath = path.resolve(options.output);
-    await fs.ensureDir(outputPath);
-
-    console.log(chalk.cyan(`\n출력 경로: ${outputPath}`));
-    console.log(chalk.cyan(`출력 형식: ${options.format}`));
-    if (options.format !== 'repository') {
-      console.log(chalk.cyan(`압축 형식: ${options.archiveFormat}`));
-    }
-    console.log('');
-
-    // 다운로드 시작
-    console.log(chalk.cyan('다운로드 중...'));
-
-    const multibar = new cliProgress.MultiBar(
-      {
-        clearOnComplete: false,
-        hideCursor: true,
-        format: '  {bar} | {filename} | {percentage}% | {speed}',
-      },
-      cliProgress.Presets.shades_classic
-    );
-
-    const overallBar = multibar.create(100, 0, {
-      filename: '전체 진행률'.padEnd(30),
-      speed: 'N/A',
-    });
-
-    const downloadResult = await downloader.download({
-      packages: allPackages,
-      outputDir: outputPath,
-      resolveDependencies: false, // 이미 해결됨
-      includeOptionalDeps: false,
-      concurrency: parseInt(options.concurrency, 10),
-      verifyGPG: false,
-      cacheMode: 'session',
-      onProgress: (progress: OSDownloadProgress) => {
-        const percent = progress.totalBytes > 0
-          ? Math.round((progress.bytesDownloaded / progress.totalBytes) * 100)
-          : Math.round((progress.currentIndex / progress.totalPackages) * 100);
-        overallBar.update(percent, {
-          filename: progress.currentPackage.substring(0, 30).padEnd(30),
-          speed: formatSpeed(progress.speed),
-        });
-      },
-    });
-
-    multibar.stop();
-
-    // 결과 출력
-    console.log('\n');
-
-    if (downloadResult.failed.length === 0) {
-      console.log(chalk.green('✓ 다운로드 완료!'));
-    } else {
-      console.log(chalk.yellow('⚠ 다운로드 완료 (일부 실패)'));
-    }
-
-    console.log(chalk.gray(`  성공: ${downloadResult.success.length}개`));
-    if (downloadResult.failed.length > 0) {
-      console.log(chalk.red(`  실패: ${downloadResult.failed.length}개`));
-    }
-    if (downloadResult.skipped.length > 0) {
-      console.log(chalk.gray(`  건너뜀: ${downloadResult.skipped.length}개`));
-    }
-
-    const totalSize = downloadResult.success.reduce((sum: number, pkg: OSPackageInfo) => sum + (pkg.size || 0), 0);
-    console.log(chalk.gray(`  총 크기: ${formatBytes(totalSize)}`));
-    console.log(chalk.gray(`  출력 경로: ${downloadResult.outputDir}`));
-
-    if (downloadResult.failed.length > 0) {
-      console.log(chalk.red('\n실패한 패키지:'));
-      for (const item of downloadResult.failed) {
-        console.log(chalk.red(`  - ${item.package.name}: ${item.error}`));
-      }
-    }
-
-    console.log('');
-  } catch (error) {
-    console.error(chalk.red(`\n오류: ${(error as Error).message}`));
-    process.exit(1);
-  }
+  console.log(chalk.yellow('\n⚠️  OS 패키지 CLI 명령어는 현재 재구현 중입니다.'));
+  console.log(chalk.cyan('Electron GUI를 사용하여 OS 패키지를 다운로드하세요.\n'));
+  process.exit(0);
 }
 
 /**
  * 캐시 통계 명령어
  */
 async function cacheStatsCommand(): Promise<void> {
-  console.log(chalk.cyan('\nOS 패키지 캐시 통계\n'));
-
-  try {
-    const downloader = getDownloader();
-    const stats = await downloader.getCacheStats();
-
-    console.log(`  캐시 크기: ${formatBytes(stats.totalSize)}`);
-    console.log(`  엔트리 수: ${stats.entryCount}개`);
-    console.log(`  히트율: ${(stats.hitRate * 100).toFixed(1)}%`);
-    console.log('');
-  } catch (error) {
-    console.error(chalk.red(`오류: ${(error as Error).message}`));
-    process.exit(1);
-  }
+  console.log(chalk.yellow('\n⚠️  OS 패키지 CLI 명령어는 현재 재구현 중입니다.'));
+  console.log(chalk.cyan('Electron GUI를 사용하여 OS 패키지를 관리하세요.\n'));
+  process.exit(0);
 }
 
 /**
  * 캐시 삭제 명령어
  */
 async function cacheClearCommand(options: { force?: boolean }): Promise<void> {
-  try {
-    if (!options.force) {
-      console.log(chalk.yellow('\n캐시를 삭제하시겠습니까? (--force 옵션으로 확인 없이 삭제)\n'));
-      return;
-    }
-
-    console.log(chalk.cyan('\nOS 패키지 캐시 삭제 중...\n'));
-
-    const downloader = getDownloader();
-    await downloader.clearCache();
-
-    console.log(chalk.green('✓ 캐시 삭제 완료\n'));
-  } catch (error) {
-    console.error(chalk.red(`오류: ${(error as Error).message}`));
-    process.exit(1);
-  }
+  console.log(chalk.yellow('\n⚠️  OS 패키지 CLI 명령어는 현재 재구현 중입니다.'));
+  console.log(chalk.cyan('Electron GUI를 사용하여 OS 패키지를 관리하세요.\n'));
+  process.exit(0);
 }
 
 // 유틸리티 함수들
