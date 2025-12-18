@@ -709,6 +709,8 @@ const DownloadPage: React.FC = () => {
         indexUrl: item.indexUrl,
         // pip extras 전달
         extras: item.extras,
+        // Maven classifier 전달
+        classifier: item.classifier,
       }));
 
       const options = {
@@ -723,8 +725,8 @@ const DownloadPage: React.FC = () => {
 
       // 응답 데이터 타입 정의
       type DependencyResolveResponse = {
-        originalPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; filename?: string; metadata?: Record<string, unknown> }>;
-        allPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; filename?: string; metadata?: Record<string, unknown> }>;
+        originalPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; filename?: string; metadata?: Record<string, unknown>; classifier?: string }>;
+        allPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; filename?: string; metadata?: Record<string, unknown>; classifier?: string }>;
         dependencyTrees: Array<{
           root: {
             package: { name: string; version: string; type?: string };
@@ -825,6 +827,8 @@ const DownloadPage: React.FC = () => {
           downloadUrl: pkg.downloadUrl,
           filename: pkg.filename,
           metadata: pkg.metadata,
+          // Maven classifier 전달
+          classifier: (pkg as unknown as { classifier?: string }).classifier,
         };
       });
 
@@ -927,6 +931,8 @@ const DownloadPage: React.FC = () => {
         indexUrl: (item as unknown as { indexUrl?: string }).indexUrl,
         // pip extras 전달
         extras: (item as unknown as { extras?: string[] }).extras,
+        // Maven classifier 전달
+        classifier: (item as unknown as { classifier?: string }).classifier,
       }));
 
       const options = {

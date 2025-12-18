@@ -25,6 +25,8 @@ export interface CartItem {
   indexUrl?: string;
   // pip extras 의존성 (예: ['cuda'], ['security', 'socks'])
   extras?: string[];
+  // Maven classifier (예: natives-linux, natives-windows)
+  classifier?: string;
 }
 
 // 장바구니 상태

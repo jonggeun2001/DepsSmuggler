@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
+import type { PipTargetPlatform } from '../../types/pip-target-platform';
 
 // 언어 버전 타입 정의
 export interface LanguageVersions {

@@ -38,6 +38,8 @@ export interface DownloadItem {
   /** 실제 다운로드될 파일명 (예: numpy-1.24.0-py311h64a7726_0.conda) */
   filename?: string;
   metadata?: Record<string, unknown>;
+  /** Maven classifier (예: natives-linux, linux-x86_64) */
+  classifier?: string;
 }
 
 // 다운로드 상태

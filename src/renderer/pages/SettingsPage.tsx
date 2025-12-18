@@ -103,6 +103,7 @@ const SettingsPage: React.FC = () => {
   const [isDirty, setIsDirty] = useState(false);
   const [initialValues, setInitialValues] = useState<Record<string, unknown>>({});
   const [showNavigationModal, setShowNavigationModal] = useState(false);
+  const isInitializedRef = React.useRef(false);
 
   // 캐시 상태
   const [cacheSize, setCacheSize] = useState<number>(0);
@@ -331,8 +332,13 @@ const SettingsPage: React.FC = () => {
     };
   }, [isDirty]);
 
-  // 초기값 설정
+  // 초기값 설정 (최초 1회만 실행)
   React.useEffect(() => {
+    // 이미 초기화되었으면 스킵
+    if (isInitializedRef.current) {
+      return;
+    }
+
     const values = {
       concurrentDownloads,
       enableCache,
@@ -377,6 +383,7 @@ const SettingsPage: React.FC = () => {
     // 초기값 저장 (변경사항 감지용)
     setInitialValues(values);
     setIsDirty(false);
+    isInitializedRef.current = true;
 
     // 로컬 상태도 업데이트
     setSelectedYumDistroId(yumDistribution?.id || 'rocky-9');
@@ -472,11 +479,14 @@ const SettingsPage: React.FC = () => {
   };
 
   // 폼 값 변경 감지
-  const handleFormChange = () => {
-    const currentValues = form.getFieldsValue();
+  const handleFormChange = (_changedValues?: Record<string, unknown>, allValues?: Record<string, unknown>) => {
+    const currentValues = allValues || form.getFieldsValue();
     const hasChanges = JSON.stringify(currentValues) !== JSON.stringify(initialValues);
     setIsDirty(hasChanges);
   };
+
+  // checkDirty는 handleFormChange의 alias
+  const checkDirty = handleFormChange;
 
   // 모달 핸들러
   const handleNavigationConfirm = async (shouldSave: boolean) => {
@@ -508,6 +518,7 @@ const SettingsPage: React.FC = () => {
       const folder = await window.electronAPI.selectFolder();
       if (folder) {
         form.setFieldsValue({ defaultOutputPath: folder });
+        checkDirty(); // 폴더 선택 후 dirty 체크
         message.success('폴더가 선택되었습니다');
       }
     } else {
@@ -686,6 +697,7 @@ const SettingsPage: React.FC = () => {
     if (architectures.length > 0) {
       form.setFieldValue(fieldName, architectures[0]);
     }
+    checkDirty(); // 배포판 변경 후 dirty 체크
   };
 
   return (
@@ -776,6 +788,7 @@ const SettingsPage: React.FC = () => {
                   const selectedPath = await window.electronAPI.selectDirectory();
                   if (selectedPath) {
                     form.setFieldValue('defaultDownloadPath', selectedPath);
+                    checkDirty(); // 폴더 선택 후 dirty 체크
                   }
                 } else {
                   message.info('폴더 선택은 Electron 환경에서만 가능합니다');
@@ -996,6 +1009,7 @@ const SettingsPage: React.FC = () => {
                           const distro = LINUX_DISTRO_GLIBC_MAP[value];
                           const glibc = distro?.glibcVersion || '2.34';
                           form.setFieldValue(['pipTargetPlatform', 'glibcVersion'], glibc);
+                          checkDirty(); // glibc 버전 변경 후 dirty 체크
                         }}
                       >
                         {Object.entries(getDistrosByFamily()).map(([family, distros]) => {
