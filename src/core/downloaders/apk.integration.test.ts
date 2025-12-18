@@ -13,8 +13,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApkMetadataParser, ApkDependencyResolver, ApkDownloader } from './os/apk';
-import type { Repository, OSArchitecture } from './os/types';
+import { ApkMetadataParser, ApkDependencyResolver, ApkDownloader } from './apk';
+import type { Repository, OSArchitecture } from './os-shared/types';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

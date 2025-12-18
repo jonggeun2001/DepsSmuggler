@@ -1,16 +1,25 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { getYumDownloader } from './yum';
+import type { BaseDownloaderOptions } from './os-shared/base-downloader';
 
 describe('yum downloader', () => {
   let downloader: ReturnType<typeof getYumDownloader>;
+  let options: BaseDownloaderOptions;
 
   beforeEach(() => {
-    downloader = getYumDownloader();
+    options = {
+      outputDir: '/tmp/test',
+      distribution: { id: 'rocky', version: '9', codename: '' },
+      architecture: 'x86_64',
+      repositories: [],
+      concurrency: 1,
+    };
+    downloader = getYumDownloader(options);
   });
 
   describe('getYumDownloader', () => {
     it('싱글톤 인스턴스 반환', () => {
-      const instance1 = getYumDownloader();
+      const instance1 = getYumDownloader(options);
       const instance2 = getYumDownloader();
       expect(instance1).toBe(instance2);
     });

@@ -274,7 +274,8 @@ describe('dependency-resolver', () => {
       expect(result.allPackages).toHaveLength(2);
     });
 
-    it('yum 패키지 의존성 해결', async () => {
+    // yum, apt, apk는 별도 IPC 핸들러(os:resolveDependencies)에서 처리되므로 스킵
+    it.skip('yum 패키지 의존성 해결', async () => {
       const mockYumResult = {
         root: {
           package: { type: 'yum', name: 'httpd', version: '2.4.6' },

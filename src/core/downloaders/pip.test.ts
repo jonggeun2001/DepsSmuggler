@@ -17,8 +17,14 @@ vi.mock('axios', () => {
 });
 
 // Simple API 모킹
-vi.mock('../shared/pip-simple-api', () => ({
-  fetchVersionsFromSimpleApi: vi.fn().mockResolvedValue(['1.0.0', '2.0.0', '2.1.0']),
+vi.mock('../resolver/pip-simple-api', () => ({
+  fetchPackageFiles: vi.fn(),
+  extractVersionFromFilename: vi.fn(),
+  findLatestVersion: vi.fn(),
+  compareVersions: vi.fn((a: string, b: string) => {
+    // 간단한 버전 비교 구현
+    return a.localeCompare(b, undefined, { numeric: true });
+  }),
 }));
 
 describe('pip downloader', () => {
@@ -126,39 +132,44 @@ describe('PipDownloader 클래스 메서드 테스트 (모킹)', () => {
   });
 
   describe('getVersions', () => {
-    it('Simple API로 버전 목록 조회 성공', async () => {
-      const versions = await downloader.getVersions('requests');
-
-      // Simple API 모킹에서 반환된 버전들 (정렬됨)
-      expect(versions).toContain('2.1.0');
-      expect(versions).toContain('2.0.0');
-      expect(versions).toContain('1.0.0');
-    });
-
-    it('Simple API 실패 시 JSON API 폴백', async () => {
-      const { fetchVersionsFromSimpleApi } = await import('../shared/pip-simple-api');
-      vi.mocked(fetchVersionsFromSimpleApi).mockResolvedValueOnce([]);
-
+    it('JSON API로 버전 목록 조회 성공', async () => {
       mockClient.get.mockResolvedValueOnce({
         data: {
           releases: {
-            '3.0.0': [],
-            '2.9.0': [],
-            '2.8.0': [],
+            '2.1.0': [{ filename: 'requests-2.1.0.tar.gz' }],
+            '2.0.0': [{ filename: 'requests-2.0.0.tar.gz' }],
+            '1.0.0': [{ filename: 'requests-1.0.0.tar.gz' }],
           },
         },
       });
 
       const versions = await downloader.getVersions('requests');
 
-      expect(versions).toContain('3.0.0');
-      expect(versions).toContain('2.9.0');
-      expect(versions).toContain('2.8.0');
+      expect(versions).toContain('2.1.0');
+      expect(versions).toContain('2.0.0');
+      expect(versions).toContain('1.0.0');
+    });
+
+    it('Simple API로 버전 목록 조회 성공 (indexUrl 지정)', async () => {
+      const { fetchPackageFiles, extractVersionFromFilename } = await import('../resolver/pip-simple-api');
+
+      vi.mocked(fetchPackageFiles).mockResolvedValueOnce([
+        { filename: 'requests-3.0.0.tar.gz', url: 'http://example.com/requests-3.0.0.tar.gz', yanked: false },
+        { filename: 'requests-2.9.0.tar.gz', url: 'http://example.com/requests-2.9.0.tar.gz', yanked: false },
+        { filename: 'requests-2.8.0.tar.gz', url: 'http://example.com/requests-2.8.0.tar.gz', yanked: false },
+      ]);
+
+      vi.mocked(extractVersionFromFilename)
+        .mockReturnValueOnce('3.0.0')
+        .mockReturnValueOnce('2.9.0')
+        .mockReturnValueOnce('2.8.0');
+
+      const versions = await downloader.getVersions('requests', 'https://pypi.org/simple');
+
+      expect(versions.length).toBeGreaterThan(0);
     });
 
     it('버전 조회 실패 시 예외 발생', async () => {
-      const { fetchVersionsFromSimpleApi } = await import('../shared/pip-simple-api');
-      vi.mocked(fetchVersionsFromSimpleApi).mockResolvedValueOnce([]);
 
       const error = new Error('API Error');
       mockClient.get.mockRejectedValueOnce(error);

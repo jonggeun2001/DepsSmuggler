@@ -236,7 +236,7 @@ describe('initializeDownloaders & getDownloaderAsync', () => {
     expect(types).toContain('maven');
     expect(types).toContain('npm');
     expect(types).toContain('docker');
-    expect(types).toContain('yum');
+    // yum, apt, apk는 별도의 OS 패키지 다운로더로 처리되므로 factory에 등록되지 않음
   });
 
   it('getDownloaderAsync가 자동으로 초기화해야 함', async () => {
