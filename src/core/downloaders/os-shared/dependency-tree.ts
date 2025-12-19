@@ -199,35 +199,63 @@ export class OSDependencyTree {
    * 의존성이 없는 것부터 순서대로 반환
    */
   getInstallOrder(): OSPackageInfo[] {
+    // BFS 기반 토폴로지 정렬 (Kahn's algorithm)
     const result: OSPackageInfo[] = [];
-    const visited = new Set<string>();
-    const temp = new Set<string>(); // 순환 감지용
-
-    const visit = (key: string): void => {
-      if (visited.has(key)) return;
-      if (temp.has(key)) {
-        // 순환 의존성 발견 - 건너뛰기
-        console.warn(`Circular dependency detected involving: ${key}`);
-        return;
+    
+    // 각 노드의 처리되지 않은 의존성 개수 (in-degree)
+    const inDegree = new Map<string, number>();
+    
+    // 초기화
+    for (const [key, node] of this.nodes) {
+      inDegree.set(key, node.dependsOn.size);
+    }
+    
+    // BFS 큐: 의존성이 없는 노드(리프)부터 시작
+    const queue: string[] = [];
+    for (const [key, count] of inDegree) {
+      if (count === 0) {
+        queue.push(key);
       }
-
-      temp.add(key);
+    }
+    
+    // 처리된 노드 추적 (순환 의존성 감지용)
+    const processed = new Set<string>();
+    
+    // BFS 처리
+    while (queue.length > 0) {
+      const key = queue.shift()!;
+      
+      if (processed.has(key)) {
+        continue;
+      }
+      processed.add(key);
+      
       const node = this.nodes.get(key);
       if (node) {
-        // 먼저 의존하는 패키지들 방문
-        Array.from(node.dependsOn).forEach((depKey) => {
-          visit(depKey);
-        });
+        result.push(node.package);
+        
+        // 이 노드를 의존하는 부모 노드들의 in-degree 감소
+        for (const [parentKey, parentNode] of this.nodes) {
+          if (parentNode.dependsOn.has(key)) {
+            const newDegree = inDegree.get(parentKey)! - 1;
+            inDegree.set(parentKey, newDegree);
+            
+            // 모든 의존성이 처리되면 큐에 추가
+            if (newDegree === 0 && !processed.has(parentKey)) {
+              queue.push(parentKey);
+            }
+          }
+        }
+      }
+    }
+    
+    // 순환 의존성으로 처리되지 않은 노드들 처리 (경고 출력 후 추가)
+    for (const [key, node] of this.nodes) {
+      if (!processed.has(key)) {
+        console.warn(`Circular dependency detected involving: ${key}`);
         result.push(node.package);
       }
-      temp.delete(key);
-      visited.add(key);
-    };
-
-    // 모든 노드 방문
-    Array.from(this.nodes.keys()).forEach((key) => {
-      visit(key);
-    });
+    }
 
     return result;
   }
@@ -318,31 +346,72 @@ export class OSDependencyTree {
     conflictCount: number;
     maxDepth: number;
   } {
-    // 최대 깊이 계산
+    // BFS 기반 최대 깊이 계산 (Kahn's algorithm)
     const depths = new Map<string, number>();
-    const calculateDepth = (key: string): number => {
-      if (depths.has(key)) return depths.get(key)!;
-
-      const node = this.nodes.get(key);
-      if (!node || node.dependsOn.size === 0) {
-        depths.set(key, 0);
-        return 0;
+    
+    // 역방향 그래프 구축: childKey -> parentKeys (이 노드를 의존하는 노드들)
+    const dependedBy = new Map<string, Set<string>>();
+    // 각 노드의 처리되지 않은 의존성 개수
+    const pendingDeps = new Map<string, number>();
+    
+    // 초기화
+    for (const [key, node] of this.nodes) {
+      dependedBy.set(key, new Set());
+      pendingDeps.set(key, node.dependsOn.size);
+    }
+    
+    // 역방향 엣지 구축
+    for (const [key, node] of this.nodes) {
+      for (const depKey of node.dependsOn) {
+        if (dependedBy.has(depKey)) {
+          dependedBy.get(depKey)!.add(key);
+        }
       }
-
-      let maxChildDepth = 0;
-      Array.from(node.dependsOn).forEach((childKey) => {
-        maxChildDepth = Math.max(maxChildDepth, calculateDepth(childKey));
-      });
-
-      const depth = maxChildDepth + 1;
-      depths.set(key, depth);
-      return depth;
-    };
-
+    }
+    
+    // BFS 큐: 의존성이 없는 노드(리프)부터 시작
+    const queue: string[] = [];
+    for (const [key, count] of pendingDeps) {
+      if (count === 0) {
+        queue.push(key);
+        depths.set(key, 0);
+      }
+    }
+    
     let maxDepth = 0;
-    Array.from(this.nodes.keys()).forEach((key) => {
-      maxDepth = Math.max(maxDepth, calculateDepth(key));
-    });
+    
+    // BFS 처리
+    while (queue.length > 0) {
+      const key = queue.shift()!;
+      const currentDepth = depths.get(key) || 0;
+      maxDepth = Math.max(maxDepth, currentDepth);
+      
+      // 이 노드를 의존하는 부모 노드들 처리
+      const parents = dependedBy.get(key);
+      if (parents) {
+        for (const parentKey of parents) {
+          const remaining = pendingDeps.get(parentKey)! - 1;
+          pendingDeps.set(parentKey, remaining);
+          
+          // 부모의 깊이 업데이트: max(현재 깊이, 자식 깊이 + 1)
+          const parentDepth = depths.get(parentKey) || 0;
+          depths.set(parentKey, Math.max(parentDepth, currentDepth + 1));
+          
+          // 모든 의존성이 처리되면 큐에 추가
+          if (remaining === 0) {
+            queue.push(parentKey);
+          }
+        }
+      }
+    }
+    
+    // 순환 의존성으로 처리되지 않은 노드들 처리
+    for (const key of this.nodes.keys()) {
+      if (!depths.has(key)) {
+        depths.set(key, 0);
+      }
+      maxDepth = Math.max(maxDepth, depths.get(key)!);
+    }
 
     return {
       totalPackages: this.nodes.size,

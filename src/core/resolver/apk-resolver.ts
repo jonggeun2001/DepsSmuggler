@@ -5,9 +5,9 @@
 
 import type { OSPackageInfo, PackageDependency, Repository, OSPackageSearchResult } from '../downloaders/os-shared/types';
 import { BaseOSDependencyResolver, type DependencyResolverOptions } from '../downloaders/os-shared/base-resolver';
-import { compareVersions } from '../shared/version-utils';
 import { ApkMetadataParser } from '../downloaders/apk';
 import { isArchitectureCompatible } from '../downloaders/os-shared/repositories';
+import { searchPackagesCommon, createResolverFactory } from './os-resolver-utils';
 
 /**
  * APK 의존성 해결기
@@ -178,69 +178,15 @@ export class ApkDependencyResolver extends BaseOSDependencyResolver {
     matchType: 'exact' | 'partial' | 'wildcard' = 'partial'
   ): Promise<OSPackageSearchResult[]> {
     await this.loadMetadata();
-
-    // 쿼리와 일치하는 패키지 필터링
-    const matchingPackages = this.allPackages.filter((pkg) => {
-      switch (matchType) {
-        case 'exact':
-          return pkg.name === query;
-        case 'partial':
-          return pkg.name.includes(query);
-        case 'wildcard':
-          const regex = new RegExp(
-            '^' + query.replace(/\*/g, '.*').replace(/\?/g, '.') + '$'
-          );
-          return regex.test(pkg.name);
-        default:
-          return false;
-      }
-    });
-
-    // 패키지 이름별로 그룹화
-    const groupedByName = new Map<string, OSPackageInfo[]>();
-    for (const pkg of matchingPackages) {
-      const existing = groupedByName.get(pkg.name) || [];
-      existing.push(pkg);
-      groupedByName.set(pkg.name, existing);
-    }
-
-    // OSPackageSearchResult 형태로 변환
-    const results: OSPackageSearchResult[] = [];
-    for (const [name, versions] of groupedByName) {
-      // 버전 정렬 (최신순)
-      const sortedVersions = versions.sort((a, b) => {
-        try {
-          return compareVersions(b.version, a.version);
-        } catch {
-          return b.version.localeCompare(a.version);
-        }
-      });
-
-      results.push({
-        name,
-        versions: sortedVersions,
-        latest: sortedVersions[0],
-      });
-    }
-
-    // 패키지 이름순으로 정렬
-    return results.sort((a, b) => a.name.localeCompare(b.name));
+    return searchPackagesCommon(this.allPackages, query, matchType);
   }
 }
 
-// 싱글톤 인스턴스
-let apkResolverInstance: ApkDependencyResolver | null = null;
-
-export function getApkResolver(options?: DependencyResolverOptions): ApkDependencyResolver {
-  if (!apkResolverInstance && options) {
-    apkResolverInstance = new ApkDependencyResolver(options);
-  }
-  // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
-  if (!apkResolverInstance) {
-    throw new Error('ApkDependencyResolver requires DependencyResolverOptions');
-  }
-  return apkResolverInstance;
-}
+// 싱글톤 팩토리 (배포판 ID별로 캐싱)
+export const getApkResolver = createResolverFactory(
+  ApkDependencyResolver,
+  'ApkDependencyResolver'
+);
 
 // 기존 ApkResolver export (호환성 유지를 위해 ApkDependencyResolver를 ApkResolver로도 export)
 export { ApkDependencyResolver as ApkResolver };

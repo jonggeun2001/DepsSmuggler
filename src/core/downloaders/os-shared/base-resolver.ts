@@ -15,6 +15,7 @@ import type {
 } from './types';
 import { OSDependencyTree } from './dependency-tree';
 import { isArchitectureCompatible } from './repositories';
+import logger from '../../../utils/logger';
 
 /**
  * 의존성 해결기 옵션
@@ -112,74 +113,107 @@ export abstract class BaseOSDependencyResolver {
   }
 
   /**
-   * 단일 패키지의 의존성 해결 (재귀)
+   * 단일 패키지의 의존성 해결 (BFS - 순환 의존성 방지)
    */
   protected async resolvePackageDependencies(
     pkg: OSPackageInfo,
     tree: OSDependencyTree
   ): Promise<void> {
-    const pkgKey = this.getPackageKey(pkg);
+    logger.debug(`[BFS] resolvePackageDependencies 시작: ${pkg.name}@${pkg.version}`);
 
-    // 이미 해결된 패키지면 스킵
-    if (this.resolvedPackages.has(pkgKey)) {
-      return;
-    }
+    // BFS 큐: 처리할 패키지 목록
+    const queue: OSPackageInfo[] = [pkg];
+    // 처리 중인 패키지 추적 (순환 의존성 방지)
+    const processing = new Set<string>();
+    // 최대 반복 횟수 (무한 루프 방지)
+    const MAX_ITERATIONS = 10000;
+    let iterations = 0;
 
-    this.resolvedPackages.add(pkgKey);
-    tree.addNode(pkg);
+    while (queue.length > 0 && iterations < MAX_ITERATIONS) {
+      iterations++;
+      const currentPkg = queue.shift()!;
+      const pkgKey = this.getPackageKey(currentPkg);
 
-    // 의존성 가져오기
-    const dependencies = await this.fetchDependencies(pkg);
+      logger.debug(`[BFS] iteration=${iterations}, queue=${queue.length}, pkg=${currentPkg.name}, key=${pkgKey}`);
 
-    for (const dep of dependencies) {
-      // 선택적 의존성 필터링
-      if (dep.isOptional && !this.options.includeOptional) {
+      // 이미 해결된 패키지면 스킵
+      if (this.resolvedPackages.has(pkgKey)) {
+        logger.debug(`[BFS] 스킵 (이미 해결됨): ${pkgKey}`);
         continue;
       }
 
-      // 의존성을 만족하는 패키지 찾기
-      const candidates = await this.findPackagesForDependency(dep);
-
-      if (candidates.length === 0) {
-        // 누락된 의존성
-        tree.addMissingDependency(pkg, dep, 'not_found');
+      // 순환 의존성 체크: 이미 처리 중이면 스킵
+      if (processing.has(pkgKey)) {
+        logger.debug(`[BFS] 스킵 (처리 중): ${pkgKey}`);
         continue;
       }
 
-      // 버전 조건을 만족하는 패키지 필터링
-      const matchingPackages = this.filterByVersion(candidates, dep);
+      processing.add(pkgKey);
+      this.resolvedPackages.add(pkgKey);
+      tree.addNode(currentPkg);
 
-      if (matchingPackages.length === 0) {
-        tree.addMissingDependency(pkg, dep, 'version_mismatch');
-        continue;
-      }
+      // 의존성 가져오기
+      const dependencies = await this.fetchDependencies(currentPkg);
 
-      // 아키텍처 호환 패키지 필터링
-      const compatiblePackages = matchingPackages.filter((p) =>
-        isArchitectureCompatible(p.architecture, this.options.architecture)
-      );
+      for (const dep of dependencies) {
+        // 선택적 의존성 필터링
+        if (dep.isOptional && !this.options.includeOptional) {
+          continue;
+        }
 
-      if (compatiblePackages.length === 0) {
-        tree.addMissingDependency(pkg, dep, 'architecture_mismatch');
-        continue;
-      }
+        // 의존성을 만족하는 패키지 찾기
+        const candidates = await this.findPackagesForDependency(dep);
 
-      // 여러 버전이 있으면 충돌로 기록 (모든 버전 다운로드)
-      if (compatiblePackages.length > 1) {
-        const uniqueVersions = this.getUniqueVersions(compatiblePackages);
-        if (uniqueVersions.length > 1) {
-          tree.addConflict(dep.name, uniqueVersions, [
-            { package: pkg, requiredVersion: dep.version },
-          ]);
+        if (candidates.length === 0) {
+          // 누락된 의존성
+          tree.addMissingDependency(currentPkg, dep, 'not_found');
+          continue;
+        }
+
+        // 버전 조건을 만족하는 패키지 필터링
+        const matchingPackages = this.filterByVersion(candidates, dep);
+
+        if (matchingPackages.length === 0) {
+          tree.addMissingDependency(currentPkg, dep, 'version_mismatch');
+          continue;
+        }
+
+        // 아키텍처 호환 패키지 필터링
+        const compatiblePackages = matchingPackages.filter((p) =>
+          isArchitectureCompatible(p.architecture, this.options.architecture)
+        );
+
+        if (compatiblePackages.length === 0) {
+          tree.addMissingDependency(currentPkg, dep, 'architecture_mismatch');
+          continue;
+        }
+
+        // 여러 버전이 있으면 충돌로 기록 (모든 버전 다운로드)
+        if (compatiblePackages.length > 1) {
+          const uniqueVersions = this.getUniqueVersions(compatiblePackages);
+          if (uniqueVersions.length > 1) {
+            tree.addConflict(dep.name, uniqueVersions, [
+              { package: currentPkg, requiredVersion: dep.version },
+            ]);
+          }
+        }
+
+        // 최선의 패키지 선택 (최신 버전)
+        const bestMatch = this.selectBestMatch(compatiblePackages);
+        const bestMatchKey = this.getPackageKey(bestMatch);
+
+        // 엣지 추가
+        tree.addEdge(currentPkg, bestMatch, dep);
+
+        // 아직 처리되지 않은 패키지만 큐에 추가
+        if (!this.resolvedPackages.has(bestMatchKey) && !processing.has(bestMatchKey)) {
+          queue.push(bestMatch);
         }
       }
+    }
 
-      // 최선의 패키지 선택 (최신 버전)
-      const bestMatch = this.selectBestMatch(compatiblePackages);
-
-      // 엣지 추가 및 재귀 해결
-      tree.addEdge(pkg, bestMatch, dep);
-      await this.resolvePackageDependencies(bestMatch, tree);
+    if (iterations >= MAX_ITERATIONS) {
+      logger.warn(`의존성 해결 최대 반복 횟수 도달 (${MAX_ITERATIONS})`);
     }
   }
 
@@ -245,6 +279,10 @@ export abstract class BaseOSDependencyResolver {
    * 버전 문자열 비교
    */
   protected compareVersionStrings(a: string, b: string): number {
+    // 문자열이 아닌 경우 문자열로 변환
+    const strA = typeof a === 'string' ? a : String(a ?? '');
+    const strB = typeof b === 'string' ? b : String(b ?? '');
+
     // epoch 분리
     const parseEpoch = (ver: string) => {
       const match = ver.match(/^(\d+):/);
@@ -253,8 +291,8 @@ export abstract class BaseOSDependencyResolver {
         : { epoch: 0, rest: ver };
     };
 
-    const verA = parseEpoch(a);
-    const verB = parseEpoch(b);
+    const verA = parseEpoch(strA);
+    const verB = parseEpoch(strB);
 
     if (verA.epoch !== verB.epoch) {
       return verA.epoch - verB.epoch;
