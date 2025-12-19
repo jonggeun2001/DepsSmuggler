@@ -921,6 +921,59 @@ addItem({
 });
 ```
 
+#### OS 패키지 검색 통합
+
+OS 패키지(yum, apt, apk) 검색 시 `electronAPI.os.search` API를 직접 사용하여 검색합니다:
+
+```typescript
+// OS 패키지 타입인 경우 os.search 사용
+const isOSPackage = ['yum', 'apt', 'apk'].includes(packageType);
+
+if (isOSPackage && window.electronAPI?.os?.search) {
+  const distInfo = getDistributionInfo(); // 현재 설정된 배포판 정보
+  const response = await window.electronAPI.os.search({
+    query,
+    distribution: {
+      id: distInfo.id,
+      name: distInfo.id,
+      packageManager: distInfo.packageManager,
+    },
+    architecture: distInfo.architecture,
+    matchType: 'partial',
+    limit: 20,
+  });
+
+  // OSPackageInfo를 SearchResult로 변환
+  results = packages.map(pkg => ({
+    name: pkg.name,
+    version: pkg.version,
+    description: pkg.summary || pkg.description || '',
+    downloadUrl: `${pkg.repository.baseUrl}/${pkg.location}`,
+    repository: { baseUrl: pkg.repository.baseUrl, name: pkg.repository.name },
+    location: pkg.location,
+    architecture: pkg.architecture,
+    osPackageInfo: pkg,  // 전체 OSPackageInfo 저장 (의존성 해결에 사용)
+  }));
+}
+```
+
+- **osPackageInfo 필드**: 검색 결과에 전체 `OSPackageInfo` 객체가 포함되어 의존성 해결 시 사용됩니다.
+- **배포판 설정 연동**: 설정 페이지의 `yumDistribution`, `aptDistribution`, `apkDistribution` 값이 자동으로 적용됩니다.
+- **설정 미리보기**: 배포판 미설정 시 설정 페이지로 이동하는 버튼이 표시됩니다.
+
+#### 설정 페이지 하이라이트 네비게이션
+
+패키지 타입별 관련 설정으로 바로 이동하고 하이라이트하는 기능:
+
+```typescript
+// WizardPage에서 설정 페이지로 이동 시
+navigate('/settings?highlight=pip');  // pip 관련 설정 하이라이트
+navigate('/settings?highlight=yum');  // YUM 배포판 설정 하이라이트
+```
+
+- **하이라이트 효과**: 관련 설정 카드에 파란색 테두리와 그림자 효과 적용
+- **자동 스크롤**: 첫 번째 하이라이트된 섹션으로 자동 스크롤
+
 #### Docker 레지스트리 선택 (신규)
 
 Docker 타입 선택 시 레지스트리 선택 UI 표시:
@@ -1274,6 +1327,40 @@ const outputFormat = defaultOutputFormat;  // 설정 페이지 값 직접 사용
 ### SettingsPage
 - 경로: `/settings`
 - 역할: 앱 설정 관리
+
+#### URL 파라미터 - 하이라이트
+
+URL 파라미터 `?highlight=<type>`을 사용하여 특정 설정 섹션을 하이라이트할 수 있습니다:
+
+```typescript
+// URL: /settings?highlight=pip
+// pip 관련 설정 카드(python-settings, library-env, pip-platform, pip-custom-index)가 하이라이트됨
+
+const highlightSections: Record<string, string[]> = {
+  pip: ['python-settings', 'library-env', 'pip-platform', 'pip-custom-index'],
+  conda: ['python-settings', 'library-env'],
+  maven: [],
+  npm: [],
+  yum: ['os-distribution'],
+  apt: ['os-distribution'],
+  apk: ['os-distribution'],
+  docker: ['docker-settings'],
+};
+
+// 하이라이트된 카드 스타일
+const getCardStyle = (cardId: string) => {
+  if (highlightType && highlightSections[highlightType]?.includes(cardId)) {
+    return {
+      boxShadow: '0 0 0 2px #1890ff',
+      borderColor: '#1890ff',
+    };
+  }
+  return {};
+};
+```
+
+- **하이라이트 효과**: 파란색 테두리와 그림자
+- **자동 스크롤**: 첫 번째 하이라이트된 섹션으로 자동 스크롤
 
 #### 설정 항목
 - **다운로드 설정**: 동시 다운로드 수, 기본 다운로드 경로

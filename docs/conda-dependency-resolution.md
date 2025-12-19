@@ -220,9 +220,11 @@ Step 8: 트랜잭션 생성
 
 ## 5. 구현 전략 (DepsSmuggler)
 
-### 5.1 간소화된 의존성 해결
+### 5.1 BFS 큐 기반 의존성 해결
 
-완전한 SAT solver 대신 **재귀적 DFS + 버전 선택 휴리스틱** 사용:
+완전한 SAT solver 대신 **BFS 큐 + 버전 선택 휴리스틱** 사용:
+
+> 기존 재귀적 DFS에서 BFS 큐 기반으로 변경하여 깊은 의존성 트리에서도 call stack overflow가 발생하지 않습니다.
 
 ```typescript
 interface RepoData {
@@ -244,46 +246,76 @@ interface PackageRecord {
   timestamp?: number;
 }
 
+interface QueueItem {
+  name: string;
+  version: string;
+  depth: number;
+  parentCacheKey?: string;  // 부모 패키지 캐시키 (트리 구축용)
+}
+
 class CondaDependencyResolver {
   private repoData: RepoData;
-  private resolved: Map<string, PackageRecord> = new Map();
-  private resolving: Set<string> = new Set(); // 순환 의존성 감지
+  private resolvedNodes: Map<string, DependencyNode> = new Map();
+  private parentChildMap: Map<string, string[]> = new Map();
 
-  async resolve(specs: string[]): Promise<PackageRecord[]> {
+  async resolve(specs: string[]): Promise<DependencyNode> {
+    const queue: QueueItem[] = [];
+    let rootCacheKey: string | undefined;
+
+    // 루트 패키지를 큐에 추가
     for (const spec of specs) {
-      await this.resolveSpec(spec);
-    }
-    return Array.from(this.resolved.values());
-  }
-
-  private async resolveSpec(spec: string): Promise<void> {
-    const matchSpec = parseMatchSpec(spec);
-
-    // 이미 해결됨
-    if (this.resolved.has(matchSpec.name)) {
-      return;
+      const matchSpec = parseMatchSpec(spec);
+      queue.push({ name: matchSpec.name, version: matchSpec.version, depth: 0 });
     }
 
-    // 순환 의존성 감지
-    if (this.resolving.has(matchSpec.name)) {
-      return; // 또는 에러
+    // BFS 처리
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const { name, version, depth, parentCacheKey } = current;
+
+      // 최대 깊이 체크
+      if (depth > this.maxDepth) continue;
+
+      const cacheKey = `${channel}/${name.toLowerCase()}@${version}`;
+
+      // 이미 해결된 패키지면 부모-자식 관계만 추가
+      if (this.resolvedNodes.has(cacheKey)) {
+        if (parentCacheKey) {
+          this.addChildToParent(parentCacheKey, cacheKey);
+        }
+        continue;
+      }
+
+      // 루트 캐시키 저장
+      if (!rootCacheKey) rootCacheKey = cacheKey;
+
+      // 패키지 정보 조회
+      const pkgInfo = await this.fetchPackageInfo(name, version);
+
+      // 노드 생성 및 저장
+      const node = { package: pkgInfo, dependencies: [] };
+      this.resolvedNodes.set(cacheKey, node);
+
+      // 부모-자식 관계 저장
+      if (parentCacheKey) {
+        this.addChildToParent(parentCacheKey, cacheKey);
+      }
+
+      // 의존성 큐에 추가
+      for (const dep of pkgInfo.depends) {
+        const depSpec = parseMatchSpec(dep);
+        const depVersion = await this.resolveVersion(depSpec);
+        queue.push({
+          name: depSpec.name,
+          version: depVersion,
+          depth: depth + 1,
+          parentCacheKey: cacheKey,
+        });
+      }
     }
 
-    this.resolving.add(matchSpec.name);
-
-    // 가장 적합한 패키지 선택
-    const pkg = this.selectBestPackage(matchSpec);
-    if (!pkg) {
-      throw new Error(`Package not found: ${spec}`);
-    }
-
-    // 의존성 재귀 해결
-    for (const dep of pkg.depends) {
-      await this.resolveSpec(dep);
-    }
-
-    this.resolved.set(matchSpec.name, pkg);
-    this.resolving.delete(matchSpec.name);
+    // 트리 구축
+    return this.buildTree(rootCacheKey);
   }
 
   private selectBestPackage(spec: MatchSpec): PackageRecord | null {

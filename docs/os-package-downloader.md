@@ -375,14 +375,19 @@ D:pcre2 zlib
 
 - **위치**: `src/core/downloaders/os-shared/base-resolver.ts`
 - **방식**: 하이브리드 (API 우선 → 메타데이터 파싱 폴백)
+- **알고리즘**: BFS 큐 기반
 
 #### 알고리즘
 
-1. **너비 우선 탐색 (BFS)**으로 의존성 그래프 구성
-2. **provides/virtual 패키지** 해결
-3. **버전 제약 조건** 확인
-4. **위상 정렬 (Topological Sort)**로 설치 순서 결정
-5. **충돌 감지** 및 모든 후보 버전 포함
+> 기존 재귀적 의존성 해결에서 BFS 큐 기반으로 변경하여 순환 의존성을 안전하게 처리하고 깊은 의존성 트리에서도 call stack overflow가 발생하지 않습니다.
+
+1. **BFS 큐**로 의존성 그래프 구성 (순환 의존성 방지)
+2. **processing Set**으로 현재 처리 중인 패키지 추적
+3. **provides/virtual 패키지** 해결
+4. **버전 제약 조건** 확인
+5. **위상 정렬 (Topological Sort)**로 설치 순서 결정
+6. **충돌 감지** 및 모든 후보 버전 포함
+7. **MAX_ITERATIONS (10000)** 제한으로 무한 루프 방지
 
 #### DependencyResolutionResult
 

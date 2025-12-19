@@ -234,14 +234,15 @@ torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl
 - 위치: `src/core/resolver/conda-resolver.ts`
 - RepoData 처리: `src/core/resolver/conda-repodata-processor.ts` (분리된 모듈)
 - 캐시: `src/core/shared/conda-cache.ts` 모듈 사용 (디스크 캐싱 전용 - 350MB+ repodata)
+- **알고리즘**: BFS 큐 기반 (call stack overflow 방지)
 
 ### 모듈 구조
 
 ```
-conda-resolver.ts (501줄)
+conda-resolver.ts (600줄+)
 ├── CondaResolver 클래스
-│   ├── resolveDependencies() - 메인 진입점
-│   ├── resolvePackage() - 단일 패키지 해결
+│   ├── resolveDependencies() - 메인 진입점 (BFS 큐 기반)
+│   ├── fetchPackageInfoBFS() - 단일 패키지 정보 조회
 │   ├── resolvePackageFallback() - Anaconda API 폴백
 │   ├── parseDependencyString() - 의존성 문자열 파싱
 │   ├── isSystemPackage() - 시스템 패키지 확인
@@ -268,11 +269,33 @@ conda-repodata-processor.ts (301줄)
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `resolveDependencies` | name: string, version?: string, options?: ResolverOptions | Promise<DependencyResolutionResult> | Conda 패키지 의존성 해결 |
-| `resolvePackage` | name: string, version: string, depth: number, parentPath: string[] | Promise<DependencyNode \| null> | 단일 패키지 해결 |
+| `resolveDependencies` | name: string, version?: string, options?: ResolverOptions | Promise<DependencyResolutionResult> | Conda 패키지 의존성 해결 (BFS) |
+| `fetchPackageInfoBFS` | name: string, version: string, channel: string | Promise<PackageInfoResult> | BFS용 패키지 정보 조회 |
 | `parseFromText` | text: string | ParsedDependency[] | environment.yml 파싱 |
 | `flattenDependencies` | node: DependencyNode | PackageInfo[] | 플랫 리스트 변환 |
 | `clearCache` | - | void | repodata 캐시 초기화 |
+
+### BFS 큐 알고리즘
+
+기존 재귀 방식에서 BFS 큐 기반으로 변경되어 깊은 의존성 트리에서도 call stack overflow가 발생하지 않습니다.
+
+```typescript
+interface QueueItem {
+  name: string;
+  version: string;
+  depth: number;
+  parentCacheKey?: string;  // 부모 패키지 캐시키 (트리 구축용)
+}
+
+// 알고리즘 흐름
+1. 루트 패키지를 큐에 추가
+2. 큐에서 패키지를 꺼내어 정보 조회
+3. 이미 해결된 패키지면 부모-자식 관계만 추가하고 스킵
+4. 노드 생성 및 resolvedNodes에 저장
+5. 하위 의존성을 큐에 추가
+6. 큐가 빌 때까지 반복
+7. parentChildMap을 이용해 트리 구축
+```
 
 ### 내부 메서드
 
@@ -882,12 +905,18 @@ interface DependencyConflict {
 
 ## 의존성 해결 알고리즘
 
-1. **DFS 탐색**: 깊이 우선 탐색으로 의존성 트리 구축
-2. **방문 캐싱**: 동일 패키지 중복 처리 방지
-3. **충돌 감지**: 동일 패키지의 다른 버전 요청 시 기록
-4. **버전 해결**: 제약조건에 맞는 최적 버전 선택
-5. **환경 마커 평가**: 플랫폼별 조건부 의존성 필터링 (pip)
-6. **시스템 패키지 제외**: libc 등 시스템 패키지 자동 제외 (conda)
+### BFS 기반
+
+모든 리졸버가 BFS(너비 우선 탐색) 큐 기반으로 변경되어 깊은 의존성 트리에서도 call stack overflow가 발생하지 않습니다.
+
+1. **BFS 탐색**: 큐 기반 너비 우선 탐색으로 의존성 트리 구축
+2. **방문 캐싱**: 동일 패키지 중복 처리 방지 (resolvedNodes Map)
+3. **순환 의존성 방지**: processing Set으로 현재 처리 중인 패키지 추적
+4. **부모-자식 관계 추적**: parentChildMap으로 트리 구조 구축
+5. **충돌 감지**: 동일 패키지의 다른 버전 요청 시 기록
+6. **버전 해결**: 제약조건에 맞는 최적 버전 선택
+7. **환경 마커 평가**: 플랫폼별 조건부 의존성 필터링 (pip)
+8. **시스템 패키지 제외**: libc 등 시스템 패키지 자동 제외 (conda, OS 패키지)
 
 ```
 패키지 A

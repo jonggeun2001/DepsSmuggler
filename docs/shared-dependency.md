@@ -73,9 +73,12 @@ findLatestCompatibleVersion(versions, '>=2.0,<3.0'); // '2.5.0'
 | `conda` | CondaResolver | Conda 의존성 |
 | `maven` | MavenResolver | Maven 의존성 |
 | `npm` | NpmResolver | npm 의존성 |
-| `yum` | YumResolver | RPM 의존성 |
+| `yum` | YumResolver | RPM 의존성 (통합 처리) |
+| `apt` | AptResolver | DEB 의존성 (통합 처리) |
+| `apk` | ApkResolver | APK 의존성 (통합 처리) |
+| `docker` | - | 원본만 포함 (의존성 없음) |
 
-> **참고**: apt, apk 리졸버는 인터페이스가 달라 별도 어댑터 필요
+> **참고**: OS 패키지(yum, apt, apk)는 `osPackageInfo` 메타데이터가 있으면 의존성 해결이 수행됩니다.
 
 ### ResolvedPackageList
 
@@ -100,6 +103,17 @@ interface DependencyResolverOptions {
   pythonVersion?: string;   // Python 버전 (예: '3.12')
   targetOS?: string;        // 타겟 OS (예: 'linux')
   onProgress?: DependencyProgressCallback;  // 진행 상황 콜백
+
+  // OS 패키지 배포판 설정
+  yumDistribution?: OSDistributionSetting;  // YUM 배포판 (RHEL/CentOS/Rocky/AlmaLinux)
+  aptDistribution?: OSDistributionSetting;  // APT 배포판 (Debian/Ubuntu)
+  apkDistribution?: OSDistributionSetting;  // APK 배포판 (Alpine)
+  includeRecommends?: boolean;              // 권장 의존성 포함 (APT용)
+}
+
+interface OSDistributionSetting {
+  id: string;           // 배포판 ID (예: 'rocky-9', 'ubuntu-22.04')
+  architecture: string; // 아키텍처 (예: 'x86_64', 'amd64')
 }
 ```
 
@@ -156,6 +170,93 @@ const result = await resolveAllDependencies(packages, {
 });
 
 console.log(`총 ${result.allPackages.length}개 패키지 (의존성 포함)`);
+```
+
+---
+
+## OS 패키지 의존성 해결
+
+`resolveAllDependencies`에서 OS 패키지(yum, apt, apk) 의존성을 직접 해결합니다.
+
+### 처리 흐름
+
+```
+resolveAllDependencies()
+    │
+    ├── 일반 패키지 (pip, conda, maven, npm)
+    │   └── 타입별 리졸버 호출
+    │
+    └── OS 패키지 (yum, apt, apk)
+        │
+        ├── osPackageInfo 메타데이터 확인
+        │   └── 없으면: 원본만 포함하고 스킵
+        │
+        ├── 배포판 설정 조회 (yumDistribution, aptDistribution, apkDistribution)
+        │
+        ├── OS 리졸버 생성 (YumResolver, AptResolver, ApkResolver)
+        │
+        ├── 의존성 해결 수행
+        │   └── BFS 기반 의존성 트리 구축
+        │
+        ├── 결과를 DownloadPackage로 변환
+        │   └── downloadUrl, filename, location 설정
+        │
+        └── dependencyTrees에 추가 (UI 표시용)
+```
+
+### 사용 예시
+
+```typescript
+import { resolveAllDependencies, DownloadPackage } from '../shared';
+
+const packages: DownloadPackage[] = [
+  {
+    id: '1',
+    type: 'yum',
+    name: 'httpd',
+    version: '2.4.6',
+    metadata: {
+      osPackageInfo: {
+        name: 'httpd',
+        version: '2.4.6-97.el7',
+        architecture: 'x86_64',
+        repository: { baseUrl: 'http://...', name: 'base' },
+        location: 'Packages/httpd-2.4.6-97.el7.x86_64.rpm',
+        // ... 기타 OSPackageInfo 필드
+      }
+    }
+  },
+];
+
+const result = await resolveAllDependencies(packages, {
+  maxDepth: 5,
+  includeOptional: false,
+  yumDistribution: { id: 'rocky-9', architecture: 'x86_64' },
+});
+
+// 결과: httpd + 모든 의존성 패키지
+console.log(`총 ${result.allPackages.length}개 패키지`);
+```
+
+### 결과 구조
+
+OS 패키지 의존성 해결 결과는 다음과 같이 반환됩니다:
+
+```typescript
+// allPackages 내 OS 패키지
+{
+  id: 'generated-id',
+  type: 'yum',
+  name: 'apr',
+  version: '1.4.8-7.el7',
+  architecture: 'x86_64',
+  size: 103456,
+  downloadUrl: 'http://mirror.../Packages/apr-1.4.8-7.el7.x86_64.rpm',
+  repository: { baseUrl: 'http://mirror...', name: 'base' },
+  location: 'Packages/apr-1.4.8-7.el7.x86_64.rpm',
+  filename: 'apr-1.4.8-7.el7.x86_64.rpm',
+  metadata: { osPackageInfo: { ... } }
+}
 ```
 
 ---
