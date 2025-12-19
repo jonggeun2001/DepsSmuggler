@@ -100,6 +100,27 @@ export class PipResolver implements IResolver {
     this.targetPlatform = options?.targetPlatform ?? null;
     this.pythonVersion = options?.pythonVersion ?? null;
 
+    // pipTargetPlatform 설정 (wheel 호환성 체크용)
+    if (this.targetPlatform || this.pythonVersion) {
+      const osMap: Record<string, 'linux' | 'macos' | 'windows'> = {
+        'Linux': 'linux',
+        'Darwin': 'macos',
+        'Windows': 'windows',
+      };
+      const archMap: Record<string, 'x86_64' | 'aarch64' | 'arm64'> = {
+        'x86_64': 'x86_64',
+        'amd64': 'x86_64',
+        'aarch64': 'aarch64',
+        'arm64': 'arm64',
+      };
+
+      this.pipTargetPlatform = {
+        os: osMap[this.targetPlatform?.system || ''] || 'linux',
+        arch: archMap[this.targetPlatform?.machine || ''] || 'x86_64',
+        pythonVersion: this.pythonVersion ?? undefined,
+      };
+    }
+
     const maxDepth = options?.maxDepth ?? 10;
     const indexUrl = options?.indexUrl;
     const extras = options?.extras;
@@ -731,6 +752,30 @@ export class PipResolver implements IResolver {
     if (release.packagetype !== 'bdist_wheel') {
       // wheel이 아니면 호환성 체크 불필요 (sdist는 항상 호환)
       return true;
+    }
+
+    // Python 버전 호환성 체크
+    if (this.pipTargetPlatform.pythonVersion || this.pythonVersion) {
+      const wheelMatch = /^[^-]+-[^-]+-([^-]+)-([^-]+)-(.+)\.whl$/.exec(release.filename);
+      if (wheelMatch) {
+        const pythonTag = wheelMatch[1];
+        const abiTag = wheelMatch[2];
+        const targetPyVersion = (this.pipTargetPlatform.pythonVersion || this.pythonVersion || '').replace('.', '');
+
+        if (targetPyVersion) {
+          // 정확한 버전(cp312), abi3, py3, py2.py3 호환
+          const isCompatiblePython =
+            pythonTag.includes(`cp${targetPyVersion}`) ||
+            pythonTag.includes(`py${targetPyVersion}`) ||
+            pythonTag.includes('py3') ||
+            pythonTag.includes('py2.py3') ||
+            abiTag === 'abi3';
+
+          if (!isCompatiblePython) {
+            return false;
+          }
+        }
+      }
     }
 
     const platformTags = this.extractPlatformTags(release.filename);

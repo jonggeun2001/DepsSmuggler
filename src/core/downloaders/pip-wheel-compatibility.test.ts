@@ -243,4 +243,97 @@ describe('PipDownloader wheel 호환성', () => {
       expect(result?.filename).toContain('py3-none-any');
     });
   });
+
+  describe('Python 버전 호환성', () => {
+    it('Python 3.12 설정 시 cp312 wheel을 선택해야 함', () => {
+      const releases: PyPIRelease[] = [
+        createWheelRelease('torch-2.0.0-cp311-cp311-manylinux_2_17_x86_64.whl'),
+        createWheelRelease('torch-2.0.0-cp312-cp312-manylinux_2_17_x86_64.whl'),
+        createWheelRelease('torch-2.0.0-cp39-cp39-manylinux_2_17_x86_64.whl'),
+        createSdistRelease('torch-2.0.0.tar.gz'),
+      ];
+
+      const platform: PipTargetPlatform = {
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.12',
+        glibcVersion: '2.28',
+      };
+
+      const result = testSelectBestRelease(releases, platform);
+      expect(result?.filename).toContain('cp312');
+    });
+
+    it('Python 3.11 설정 시 cp311 wheel을 선택해야 함', () => {
+      const releases: PyPIRelease[] = [
+        createWheelRelease('torch-2.0.0-cp311-cp311-manylinux_2_17_x86_64.whl'),
+        createWheelRelease('torch-2.0.0-cp312-cp312-manylinux_2_17_x86_64.whl'),
+        createWheelRelease('torch-2.0.0-cp39-cp39-manylinux_2_17_x86_64.whl'),
+        createSdistRelease('torch-2.0.0.tar.gz'),
+      ];
+
+      const platform: PipTargetPlatform = {
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.11',
+        glibcVersion: '2.28',
+      };
+
+      const result = testSelectBestRelease(releases, platform);
+      expect(result?.filename).toContain('cp311');
+    });
+
+    it('Python 3.12 설정 시 cp311은 선택하지 않고 sdist 선택', () => {
+      const releases: PyPIRelease[] = [
+        createWheelRelease('torch-2.0.0-cp311-cp311-manylinux_2_17_x86_64.whl'),
+        createWheelRelease('torch-2.0.0-cp39-cp39-manylinux_2_17_x86_64.whl'),
+        createSdistRelease('torch-2.0.0.tar.gz'),
+      ];
+
+      const platform: PipTargetPlatform = {
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.12',
+        glibcVersion: '2.28',
+      };
+
+      const result = testSelectBestRelease(releases, platform);
+      // 호환되는 wheel이 없으므로 sdist 선택
+      expect(result?.filename).toContain('.tar.gz');
+    });
+
+    it('py3-none-any wheel은 모든 Python 버전과 호환', () => {
+      const releases: PyPIRelease[] = [
+        createWheelRelease('requests-2.28.0-py3-none-any.whl'),
+        createSdistRelease('requests-2.28.0.tar.gz'),
+      ];
+
+      const platform: PipTargetPlatform = {
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.12',
+        glibcVersion: '2.28',
+      };
+
+      const result = testSelectBestRelease(releases, platform);
+      expect(result?.filename).toContain('py3-none-any');
+    });
+
+    it('abi3 wheel은 여러 Python 버전과 호환', () => {
+      const releases: PyPIRelease[] = [
+        createWheelRelease('cryptography-40.0.0-cp37-abi3-manylinux_2_28_x86_64.whl'),
+        createSdistRelease('cryptography-40.0.0.tar.gz'),
+      ];
+
+      const platform: PipTargetPlatform = {
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.12',
+        glibcVersion: '2.28',
+      };
+
+      const result = testSelectBestRelease(releases, platform);
+      expect(result?.filename).toContain('abi3');
+    });
+  });
 });

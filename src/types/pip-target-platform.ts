@@ -2,6 +2,8 @@
 export interface PipTargetPlatform {
   os: 'linux' | 'macos' | 'windows';
   arch: 'x86_64' | 'aarch64' | 'arm64' | 'i386' | 'amd64' | 'arm/v7' | '386';
+  // Python 버전 (예: '3.11', '3.12')
+  pythonVersion?: string;
   // Linux 전용
   linuxDistro?: string;  // 'centos7', 'rhel8', 'rocky9', 'ubuntu20', 'ubuntu22', 'debian11'
   glibcVersion?: string; // '2.17', '2.28', '2.31', '2.34'

@@ -506,9 +506,16 @@ export class PipDownloader implements IDownloader {
       const platformTag = wheelMatch[3].toLowerCase();
 
       // Python 버전 체크
-      if (this.pipTargetPlatform.linuxDistro) {
-        const pyVersion = '311'; // 기본값 (설정에서 가져와야 함)
-        if (!pythonTag.includes(pyVersion) && !pythonTag.includes('py3') && !pythonTag.includes('py2.py3')) {
+      if (this.pipTargetPlatform.pythonVersion) {
+        const pyVersion = this.pipTargetPlatform.pythonVersion.replace('.', '');
+        // 정확한 버전(cp312), abi3, py3, py2.py3 호환
+        const isCompatiblePython =
+          pythonTag.includes(`cp${pyVersion}`) ||
+          pythonTag.includes(`py${pyVersion}`) ||
+          pythonTag.includes('py3') ||
+          pythonTag.includes('py2.py3') ||
+          abiTag === 'abi3';
+        if (!isCompatiblePython) {
           continue;
         }
       }
@@ -619,6 +626,28 @@ export class PipDownloader implements IDownloader {
 
     if (release.packagetype !== 'bdist_wheel') {
       return true;
+    }
+
+    // Python 버전 호환성 체크
+    if (this.pipTargetPlatform.pythonVersion) {
+      const wheelMatch = /^[^-]+-[^-]+-([^-]+)-([^-]+)-(.+)\.whl$/.exec(release.filename);
+      if (wheelMatch) {
+        const pythonTag = wheelMatch[1];
+        const abiTag = wheelMatch[2];
+        const pyVersion = this.pipTargetPlatform.pythonVersion.replace('.', '');
+
+        // 정확한 버전(cp312), abi3, py3, py2.py3 호환
+        const isCompatiblePython =
+          pythonTag.includes(`cp${pyVersion}`) ||
+          pythonTag.includes(`py${pyVersion}`) ||
+          pythonTag.includes('py3') ||
+          pythonTag.includes('py2.py3') ||
+          abiTag === 'abi3';
+
+        if (!isCompatiblePython) {
+          return false;
+        }
+      }
     }
 
     const platformTags = this.extractPlatformTags(release.filename);
