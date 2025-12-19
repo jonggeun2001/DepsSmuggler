@@ -99,7 +99,20 @@ export class AptMetadataParser {
    * Release 파일 파싱
    */
   async parseRelease(): Promise<ReleaseInfo> {
-    const releaseUrl = `${this.baseUrl}/Release`;
+    // Release 파일은 배포판 레벨에 있음 (component 레벨이 아님)
+    // baseUrl에서 component를 제거하고 Release URL 구성
+    const normalizedBaseUrl = this.baseUrl.replace(/\/$/, '');
+    const componentPattern = new RegExp(`/${this.component}$`);
+    
+    let releaseUrl: string;
+    if (componentPattern.test(normalizedBaseUrl)) {
+      // baseUrl에 component가 포함됨 - 제거 후 Release 경로 구성
+      const distUrl = normalizedBaseUrl.replace(componentPattern, '');
+      releaseUrl = `${distUrl}/Release`;
+    } else {
+      // component가 포함되지 않음
+      releaseUrl = `${normalizedBaseUrl}/Release`;
+    }
 
     try {
       const { data } = await this.fetchWithRetry(releaseUrl);
@@ -140,7 +153,18 @@ export class AptMetadataParser {
    */
   async parsePackages(): Promise<OSPackageInfo[]> {
     // Packages.gz URL 구성
-    const packagesUrl = `${this.baseUrl}/${this.component}/binary-${this.architecture}/Packages.gz`;
+    // baseUrl에 이미 component가 포함되어 있는지 확인
+    const normalizedBaseUrl = this.baseUrl.replace(/\/$/, '');
+    const componentPattern = new RegExp(`/${this.component}$`);
+    
+    let packagesUrl: string;
+    if (componentPattern.test(normalizedBaseUrl)) {
+      // baseUrl에 이미 component가 포함됨 (예: .../dists/jammy/main)
+      packagesUrl = `${normalizedBaseUrl}/binary-${this.architecture}/Packages.gz`;
+    } else {
+      // component가 포함되지 않음 (예: .../dists/jammy)
+      packagesUrl = `${normalizedBaseUrl}/${this.component}/binary-${this.architecture}/Packages.gz`;
+    }
 
     try {
       const { data } = await this.fetchWithRetry(packagesUrl, { responseType: 'arraybuffer' });
@@ -433,8 +457,12 @@ export class AptMetadataParser {
    * 버전 문자열 비교
    */
   private compareVersionStrings(a: string, b: string): number {
-    const partsA = a.split(/[.-~+]/);
-    const partsB = b.split(/[.-~+]/);
+    // 문자열이 아닌 경우 문자열로 변환
+    const strA = typeof a === 'string' ? a : String(a ?? '');
+    const strB = typeof b === 'string' ? b : String(b ?? '');
+
+    const partsA = strA.split(/[.-~+]/);
+    const partsB = strB.split(/[.-~+]/);
 
     const maxLen = Math.max(partsA.length, partsB.length);
 
@@ -472,9 +500,16 @@ export class AptDownloader extends BaseOSDownloader {
   protected getDownloadUrl(pkg: OSPackageInfo): string {
     // APT의 경우 baseUrl은 dists/codename/component/ 형태
     // location은 pool/... 형태의 전체 경로
-    const baseUrl = pkg.repository.baseUrl;
+    const baseUrl = pkg.repository.baseUrl.replace(/\/$/, '');
 
-    // dists/codename/component 부분을 제거하고 pool 경로 추가
+    // dists/ 이전까지의 경로를 추출 (예: http://archive.ubuntu.com/ubuntu)
+    const distsIndex = baseUrl.indexOf('/dists/');
+    if (distsIndex !== -1) {
+      const repoRoot = baseUrl.substring(0, distsIndex);
+      return `${repoRoot}/${pkg.location}`;
+    }
+
+    // dists가 없으면 도메인 + 경로 기반으로 추출
     const match = baseUrl.match(/^(https?:\/\/[^/]+)/);
     const domain = match ? match[1] : baseUrl;
 

@@ -387,8 +387,12 @@ export class ApkMetadataParser {
    * 버전 문자열 비교
    */
   private compareVersionStrings(a: string, b: string): number {
-    const partsA = a.split(/[._-]/);
-    const partsB = b.split(/[._-]/);
+    // 문자열이 아닌 경우 문자열로 변환
+    const strA = typeof a === 'string' ? a : String(a ?? '');
+    const strB = typeof b === 'string' ? b : String(b ?? '');
+
+    const partsA = strA.split(/[._-]/);
+    const partsB = strB.split(/[._-]/);
 
     const maxLen = Math.max(partsA.length, partsB.length);
 

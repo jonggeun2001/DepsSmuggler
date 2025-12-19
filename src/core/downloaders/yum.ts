@@ -465,8 +465,12 @@ export class YumMetadataParser {
    * 버전 문자열 비교 (RPM 버전 비교 규칙)
    */
   private compareVersionStrings(a: string, b: string): number {
-    const partsA = a.split(/[.-]/);
-    const partsB = b.split(/[.-]/);
+    // 문자열이 아닌 경우 문자열로 변환
+    const strA = typeof a === 'string' ? a : String(a ?? '');
+    const strB = typeof b === 'string' ? b : String(b ?? '');
+
+    const partsA = strA.split(/[.-]/);
+    const partsB = strB.split(/[.-]/);
 
     const maxLen = Math.max(partsA.length, partsB.length);
 

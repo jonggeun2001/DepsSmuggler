@@ -501,10 +501,25 @@ export function registerSearchHandlers(): void {
       architecture?: string;
       pythonVersion?: string;
       cudaVersion?: string | null;
+      // OS 패키지 배포판 설정
+      yumDistribution?: { id: string; architecture: string };
+      aptDistribution?: { id: string; architecture: string };
+      apkDistribution?: { id: string; architecture: string };
+      includeRecommends?: boolean;
     };
   }) => {
     const { packages, options } = data;
     log.info(`Resolving dependencies for ${packages.length} packages (targetOS: ${options?.targetOS || 'any'}, python: ${options?.pythonVersion || 'any'}, cuda: ${options?.cudaVersion || 'none'})`);
+
+    // 디버그: OS 패키지 배포판 설정 로그
+    const osPackages = packages.filter(p => ['yum', 'apt', 'apk'].includes(p.type));
+    if (osPackages.length > 0) {
+      log.info('[DEBUG] OS packages distribution settings:', {
+        yum: options?.yumDistribution,
+        apt: options?.aptDistribution,
+        apk: options?.apkDistribution,
+      });
+    }
 
     // 디버그: Maven 패키지의 classifier 확인
     const mavenPackages = packages.filter(p => p.type === 'maven');
@@ -522,6 +537,11 @@ export function registerSearchHandlers(): void {
         architecture: options?.architecture,
         pythonVersion: options?.pythonVersion,
         cudaVersion: options?.cudaVersion,
+        // OS 패키지 배포판 설정
+        yumDistribution: options?.yumDistribution,
+        aptDistribution: options?.aptDistribution,
+        apkDistribution: options?.apkDistribution,
+        includeRecommends: options?.includeRecommends,
         // 진행 상황을 렌더러로 전송
         onProgress: (progress) => {
           event.sender.send('dependency:progress', progress);
@@ -613,24 +633,30 @@ export function registerSearchHandlers(): void {
       _event,
       options: {
         query: string;
-        distribution: OSDistribution;
+        distribution: OSDistribution | { id: string; packageManager: string };
         architecture: OSArchitecture;
         matchType?: MatchType;
         limit?: number;
       }
     ) => {
-      const { query, distribution, architecture, matchType, limit } = options;
+      const { query, architecture, matchType, limit } = options;
 
-      log.info(`OS package search: ${query} on ${distribution.id} (${architecture})`);
+      // distribution.id로 완전한 distribution 정보 가져오기
+      const fullDistribution = getDistributionById(options.distribution.id);
+      if (!fullDistribution) {
+        throw new Error(`Unknown distribution: ${options.distribution.id}`);
+      }
+
+      log.info(`OS package search: ${query} on ${fullDistribution.id} (${architecture})`);
 
       // packageManager에 따라 적절한 resolver 선택
       let searchResults;
-      switch (distribution.packageManager) {
+      switch (fullDistribution.packageManager) {
         case 'yum':
           const yumResolver = getYumResolver({
-            repositories: distribution.defaultRepos,
+            repositories: fullDistribution.defaultRepos,
             architecture,
-            distribution,
+            distribution: fullDistribution,
             includeOptional: false,
             includeRecommends: false,
           });
@@ -639,9 +665,9 @@ export function registerSearchHandlers(): void {
 
         case 'apt':
           const aptResolver = getAptResolver({
-            repositories: distribution.defaultRepos,
+            repositories: fullDistribution.defaultRepos,
             architecture,
-            distribution,
+            distribution: fullDistribution,
             includeOptional: false,
             includeRecommends: false,
           });
@@ -650,9 +676,9 @@ export function registerSearchHandlers(): void {
 
         case 'apk':
           const apkResolver = getApkResolver({
-            repositories: distribution.defaultRepos,
+            repositories: fullDistribution.defaultRepos,
             architecture,
-            distribution,
+            distribution: fullDistribution,
             includeOptional: false,
             includeRecommends: false,
           });
@@ -660,15 +686,19 @@ export function registerSearchHandlers(): void {
           break;
 
         default:
-          throw new Error(`Unsupported package manager: ${distribution.packageManager}`);
+          throw new Error(`Unsupported package manager: ${fullDistribution.packageManager}`);
       }
+
+      // OSPackageSearchResult[]를 OSPackageInfo[]로 변환 (latest 버전만 사용)
+      const packages = searchResults.map(result => result.latest);
 
       // limit 적용
-      if (limit && searchResults.length > limit) {
-        searchResults = searchResults.slice(0, limit);
-      }
+      const limitedPackages = limit ? packages.slice(0, limit) : packages;
 
-      return searchResults;
+      return {
+        packages: limitedPackages,
+        totalCount: packages.length,
+      };
     }
   );
 
