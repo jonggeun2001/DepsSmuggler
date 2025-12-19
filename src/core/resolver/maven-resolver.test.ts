@@ -246,6 +246,7 @@ describe('MavenResolver 단위 테스트', () => {
             artifactId: 'test',
             classifier: undefined,
             type: undefined,
+            filename: 'test-1.0.0.jar',
           },
         },
         dependencies: [],

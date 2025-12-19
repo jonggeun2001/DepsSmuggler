@@ -245,14 +245,19 @@ export class NpmTreeManager {
     for (const [path, node] of this.tree.entries()) {
       if (path === '') continue; // 루트 제외
 
+      // tarball URL에서 파일명 추출 (예: https://registry.npmjs.org/express/-/express-4.18.2.tgz -> express-4.18.2.tgz)
+      const tarballUrl = node.dist.tarball;
+      const filename = tarballUrl ? tarballUrl.split('/').pop() : undefined;
+
       result.push({
         name: node.name,
         version: node.version,
-        tarball: node.dist.tarball,
+        tarball: tarballUrl,
         integrity: node.dist.integrity,
         shasum: node.dist.shasum,
         size: node.dist.unpackedSize,
         hoistedPath: path,
+        filename,
       });
     }
 

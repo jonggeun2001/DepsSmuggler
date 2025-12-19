@@ -320,6 +320,12 @@ export class MavenResolver implements IResolver {
     coordinate: MavenCoordinate,
     scope: DependencyScope
   ): DependencyNode {
+    // Maven 파일명 생성: {artifactId}-{version}[-{classifier}].{type}
+    const extension = coordinate.type || 'jar';
+    const filename = coordinate.classifier
+      ? `${coordinate.artifactId}-${coordinate.version}-${coordinate.classifier}.${extension}`
+      : `${coordinate.artifactId}-${coordinate.version}.${extension}`;
+
     return {
       package: {
         type: 'maven',
@@ -330,6 +336,7 @@ export class MavenResolver implements IResolver {
           artifactId: coordinate.artifactId,
           classifier: coordinate.classifier,
           type: coordinate.type,
+          filename,
         },
       },
       dependencies: [],

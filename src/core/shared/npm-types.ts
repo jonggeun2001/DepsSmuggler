@@ -200,6 +200,8 @@ export interface NpmFlatPackage {
   size?: number;
   hoistedPath: string;
   dependencies?: Record<string, string>;
+  /** 다운로드될 파일명 (예: express-4.18.2.tgz) */
+  filename?: string;
 }
 
 /**
