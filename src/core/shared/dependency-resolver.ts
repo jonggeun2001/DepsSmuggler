@@ -3,9 +3,14 @@ import { getPipResolver } from '../resolver/pip-resolver';
 import { getMavenResolver } from '../resolver/maven-resolver';
 import { getCondaResolver } from '../resolver/conda-resolver';
 import { getNpmResolver } from '../resolver/npm-resolver';
+import { getYumResolver } from '../resolver/yum-resolver';
+import { getAptResolver } from '../resolver/apt-resolver';
+import { getApkResolver } from '../resolver/apk-resolver';
+import { getDistributionById } from '../downloaders/os-shared/repos/repository-utils';
 import { DownloadPackage } from './types';
-import { DependencyResolutionResult } from '../../types';
+import { DependencyResolutionResult, PackageType } from '../../types';
 import { NpmResolutionResult } from './npm-types';
+import type { OSPackageInfo, OSArchitecture } from '../downloaders/os-shared/types';
 import logger from '../../utils/logger';
 
 /**
@@ -45,6 +50,14 @@ export interface ResolvedPackageList {
 }
 
 /**
+ * OS 배포판 설정 (settings에서 전달)
+ */
+export interface OSDistributionSetting {
+  id: string;
+  architecture: string;
+}
+
+/**
  * 의존성 해결 옵션
  */
 export interface DependencyResolverOptions {
@@ -66,6 +79,14 @@ export interface DependencyResolverOptions {
   cudaVersion?: string | null;
   /** 진행 상황 콜백 */
   onProgress?: DependencyProgressCallback;
+  /** YUM 배포판 설정 (RHEL/CentOS/Rocky/AlmaLinux) */
+  yumDistribution?: OSDistributionSetting;
+  /** APT 배포판 설정 (Debian/Ubuntu) */
+  aptDistribution?: OSDistributionSetting;
+  /** APK 배포판 설정 (Alpine) */
+  apkDistribution?: OSDistributionSetting;
+  /** 권장 의존성 포함 여부 (APT용) */
+  includeRecommends?: boolean;
 }
 
 /**
@@ -81,8 +102,9 @@ function getResolverByType(type: string) {
       return getMavenResolver();
     case 'npm':
       return getNpmResolver();
-    // yum, apt, apk: OS 패키지 관리자는 저장소 메타데이터 기반 의존성 해결 방식이 달라
+    // OS 패키지 (yum, apt, apk)는 distribution 정보가 필요하므로
     // 별도 IPC 핸들러(os:resolveDependencies)에서 처리됨
+    // 여기서는 null을 반환하여 패키지만 결과에 포함되고 의존성은 건너뜀
     case 'yum':
     case 'apt':
     case 'apk':
@@ -128,7 +150,6 @@ export async function resolveAllDependencies(
 
   for (const pkg of packages) {
     currentIndex++;
-    console.log('[DEBUG-CONSOLE] Processing package:', { type: pkg.type, name: pkg.name, classifier: pkg.classifier });
 
     // 원본 패키지 추가
     const key = `${pkg.type}:${pkg.name}@${pkg.version}`;
@@ -137,8 +158,223 @@ export async function resolveAllDependencies(
     // 타입별 리졸버 선택
     const resolver = getResolverByType(pkg.type);
     if (!resolver) {
-      logger.warn(`지원하지 않는 패키지 타입: ${pkg.type}`, { package: pkg.name });
-      continue;
+      // OS 패키지(yum, apt, apk) 처리 - osPackageInfo가 있으면 의존성 해결
+      const osTypes = ['yum', 'apt', 'apk'];
+      const osPackageInfo = pkg.metadata?.osPackageInfo as OSPackageInfo | undefined;
+
+      if (osTypes.includes(pkg.type) && osPackageInfo) {
+        // osPackageInfo가 있는 OS 패키지 - 의존성 해결 수행
+        logger.info(`[${currentIndex}/${totalPackages}] OS 패키지 의존성 해결 시작: ${pkg.type}/${pkg.name}@${pkg.version}`);
+        options?.onProgress?.({
+          current: currentIndex,
+          total: totalPackages,
+          packageName: pkg.name,
+          packageType: pkg.type,
+          status: 'start',
+        });
+
+        try {
+          // 배포판 설정 가져오기
+          const distSettingMap: Record<string, OSDistributionSetting | undefined> = {
+            yum: options?.yumDistribution,
+            apt: options?.aptDistribution,
+            apk: options?.apkDistribution,
+          };
+          const distSetting = distSettingMap[pkg.type];
+
+          if (!distSetting) {
+            throw new Error(`${pkg.type} 배포판 설정이 없습니다`);
+          }
+
+          // 전체 배포판 정보 가져오기
+          const fullDistribution = getDistributionById(distSetting.id);
+          if (!fullDistribution) {
+            throw new Error(`배포판을 찾을 수 없습니다: ${distSetting.id}`);
+          }
+
+          // OS 리졸버 생성
+          const osResolverOptions = {
+            distribution: fullDistribution,
+            repositories: fullDistribution.defaultRepos,
+            architecture: distSetting.architecture as OSArchitecture,
+            includeOptional: includeOptional,
+            includeRecommends: options?.includeRecommends ?? false,
+          };
+
+          let osResolver;
+          switch (pkg.type) {
+            case 'yum':
+              osResolver = getYumResolver(osResolverOptions);
+              break;
+            case 'apt':
+              osResolver = getAptResolver(osResolverOptions);
+              break;
+            case 'apk':
+              osResolver = getApkResolver(osResolverOptions);
+              break;
+          }
+
+          if (osResolver) {
+            // 의존성 해결
+            const result = await osResolver.resolveDependencies([osPackageInfo]);
+
+            // 결과를 DownloadPackage로 변환하여 추가
+            for (const resolvedPkg of result.packages) {
+              const depKey = `${pkg.type}:${resolvedPkg.name}@${resolvedPkg.version}`;
+              if (!resolvedSet.has(depKey)) {
+                // location에서 파일명 추출
+                let filename = '';
+                if (resolvedPkg.location) {
+                  const parts = resolvedPkg.location.split('/');
+                  filename = parts[parts.length - 1];
+                }
+                if (!filename) {
+                  // fallback: 패키지명-버전.아키텍처.확장자
+                  const ext = pkg.type === 'apt' ? 'deb' : pkg.type === 'apk' ? 'apk' : 'rpm';
+                  filename = `${resolvedPkg.name}-${resolvedPkg.version}.${resolvedPkg.architecture}.${ext}`;
+                }
+
+                resolvedSet.set(depKey, {
+                  id: generateId(),
+                  type: pkg.type,
+                  name: resolvedPkg.name,
+                  version: resolvedPkg.version,
+                  architecture: resolvedPkg.architecture,
+                  size: resolvedPkg.size,
+                  downloadUrl: `${resolvedPkg.repository.baseUrl}/${resolvedPkg.location}`,
+                  repository: { baseUrl: resolvedPkg.repository.baseUrl, name: resolvedPkg.repository.name },
+                  location: resolvedPkg.location,
+                  filename, // 파일명 추가
+                  metadata: { osPackageInfo: resolvedPkg },
+                });
+              }
+            }
+
+            // OS 패키지 의존성 트리를 dependencyTrees에 추가 (UI 표시용)
+            // 원본 패키지를 root로, 나머지를 dependencies로 변환
+            const rootPkg = result.packages.find(p => p.name === pkg.name) || result.packages[0];
+            const depPackages = result.packages.filter(p => p !== rootPkg);
+            const pkgTypeAsPackageType = pkg.type as PackageType;
+
+            // OS 패키지에서 파일명 추출 헬퍼
+            const getOsPackageFilename = (osPkg: typeof rootPkg): string => {
+              // location에서 파일명 추출 (마지막 경로 부분)
+              if (osPkg.location) {
+                const parts = osPkg.location.split('/');
+                return parts[parts.length - 1];
+              }
+              // fallback: 패키지명-버전.아키텍처.확장자
+              const ext = pkg.type === 'apt' ? 'deb' : pkg.type === 'apk' ? 'apk' : 'rpm';
+              return `${osPkg.name}-${osPkg.version}.${osPkg.architecture}.${ext}`;
+            };
+
+            // OS 패키지에서 다운로드 URL 생성 헬퍼
+            const getOsPackageDownloadUrl = (osPkg: typeof rootPkg): string => {
+              if (osPkg.repository?.baseUrl && osPkg.location) {
+                return `${osPkg.repository.baseUrl}/${osPkg.location}`;
+              }
+              return '';
+            };
+
+            const osConvertedResult: DependencyResolutionResult = {
+              root: {
+                package: {
+                  type: pkgTypeAsPackageType,
+                  name: rootPkg.name,
+                  version: rootPkg.version,
+                  metadata: {
+                    size: rootPkg.size,
+                    filename: getOsPackageFilename(rootPkg),
+                    downloadUrl: getOsPackageDownloadUrl(rootPkg),
+                  },
+                },
+                dependencies: depPackages.map(depPkg => ({
+                  package: {
+                    type: pkgTypeAsPackageType,
+                    name: depPkg.name,
+                    version: depPkg.version,
+                    metadata: {
+                      size: depPkg.size,
+                      filename: getOsPackageFilename(depPkg),
+                      downloadUrl: getOsPackageDownloadUrl(depPkg),
+                    },
+                  },
+                  dependencies: [],
+                })),
+              },
+              flatList: result.packages.map(p => ({
+                type: pkgTypeAsPackageType,
+                name: p.name,
+                version: p.version,
+                metadata: {
+                  size: p.size,
+                  filename: getOsPackageFilename(p),
+                  downloadUrl: getOsPackageDownloadUrl(p),
+                },
+              })),
+              conflicts: (result.conflicts || []).map(c => ({
+                type: 'version' as const,
+                packageName: c.package,
+                versions: c.versions.map(v => typeof v === 'string' ? v : v.version),
+              })),
+              totalSize: result.packages.reduce((sum, p) => sum + (p.size || 0), 0),
+            };
+            dependencyTrees.push(osConvertedResult);
+
+            // 해결 실패한 의존성 기록
+            if (result.unresolved && result.unresolved.length > 0) {
+              logger.warn(`미해결 의존성: ${result.unresolved.join(', ')}`);
+            }
+
+            logger.info(`[${currentIndex}/${totalPackages}] ${pkg.type}/${pkg.name}: ${result.packages.length}개 패키지 해결됨`);
+            options?.onProgress?.({
+              current: currentIndex,
+              total: totalPackages,
+              packageName: pkg.name,
+              packageType: pkg.type,
+              status: 'success',
+              dependencyCount: result.packages.length - 1, // 원본 제외
+            });
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorStack = error instanceof Error ? error.stack : '';
+          logger.error(`OS 패키지 의존성 해결 실패: ${pkg.name}`, { error: errorMessage, stack: errorStack });
+          failedPackages.push({ name: pkg.name, version: pkg.version, error: errorMessage });
+          options?.onProgress?.({
+            current: currentIndex,
+            total: totalPackages,
+            packageName: pkg.name,
+            packageType: pkg.type,
+            status: 'error',
+            error: errorMessage,
+          });
+        }
+        continue;
+      } else if (osTypes.includes(pkg.type) || pkg.type === 'docker') {
+        // osPackageInfo가 없는 OS 패키지 또는 Docker - 원본만 포함
+        logger.info(`[${currentIndex}/${totalPackages}] ${pkg.type}/${pkg.name}@${pkg.version}: 패키지 정보 없음, 원본만 포함`);
+        options?.onProgress?.({
+          current: currentIndex,
+          total: totalPackages,
+          packageName: pkg.name,
+          packageType: pkg.type,
+          status: 'success',
+          dependencyCount: 0,
+        });
+        continue;
+      } else {
+        logger.warn(`지원하지 않는 패키지 타입: ${pkg.type}`, { package: pkg.name });
+        options?.onProgress?.({
+          current: currentIndex,
+          total: totalPackages,
+          packageName: pkg.name,
+          packageType: pkg.type,
+          status: 'error',
+          error: `지원하지 않는 패키지 타입: ${pkg.type}`,
+        });
+        continue;
+      }
     }
 
     // 시작 로그 및 콜백
@@ -162,7 +398,10 @@ export async function resolveAllDependencies(
         // pip: 환경 마커 평가를 위한 타겟 플랫폼 및 Python 버전 전달
         resolverOptions = {
           ...resolverOptions,
-          targetPlatform,
+          targetPlatform: {
+            ...targetPlatform,
+            machine: architecture,
+          },
           pythonVersion: options?.pythonVersion,
           indexUrl: pkg.indexUrl, // 커스텀 인덱스 URL 전파
           extras: pkg.extras, // extras 전달
@@ -187,10 +426,6 @@ export async function resolveAllDependencies(
         };
       } else if (pkg.type === 'maven') {
         // maven: 사용자 선택 classifier 또는 targetOS/targetArchitecture 전달
-        console.log('[DEBUG-CONSOLE] Maven package classifier in dependency-resolver:', {
-          name: pkg.name,
-          classifier: pkg.classifier,
-        });
         resolverOptions = {
           ...resolverOptions,
           targetOS: options?.targetOS !== 'any' ? options?.targetOS : undefined,
@@ -263,6 +498,7 @@ export async function resolveAllDependencies(
               version: depPkg.version,
               architecture: pkg.architecture,
               size: depPkg.size,
+              filename: depPkg.filename,
             });
           }
         }

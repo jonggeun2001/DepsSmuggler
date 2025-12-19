@@ -194,7 +194,7 @@ describe('dependency-resolver', () => {
         '1.24.0',
         expect.objectContaining({
           maxDepth: 3,
-          targetPlatform: { system: 'Linux' },
+          targetPlatform: expect.objectContaining({ system: 'Linux' }),
           pythonVersion: '3.11',
         })
       );
@@ -559,7 +559,7 @@ describe('dependency-resolver', () => {
         'test',
         '1.0.0',
         expect.objectContaining({
-          targetPlatform: { system: 'Windows' },
+          targetPlatform: expect.objectContaining({ system: 'Windows' }),
         })
       );
     });
