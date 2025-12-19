@@ -104,7 +104,7 @@ const DownloadPage: React.FC = () => {
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
-  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, cudaVersion, concurrentDownloads, defaultDownloadPath, downloadRenderInterval } = useSettingsStore();
+  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, cudaVersion, concurrentDownloads, defaultDownloadPath, downloadRenderInterval, yumDistribution, aptDistribution, apkDistribution } = useSettingsStore();
   const {
     items: downloadItems,
     isDownloading,
@@ -114,6 +114,7 @@ const DownloadPage: React.FC = () => {
     packagingProgress,
     logs,
     startTime,
+    depsResolved,
     setItems,
     updateItem,
     updateItemsBatch,
@@ -128,6 +129,7 @@ const DownloadPage: React.FC = () => {
     setStartTime,
     skipItem,
     retryItem,
+    setDepsResolved,
     reset,
   } = useDownloadStore();
   const { defaultOutputFormat, includeInstallScripts } = useSettingsStore();
@@ -138,7 +140,6 @@ const DownloadPage: React.FC = () => {
   const [outputDir, setOutputDir] = useState(outputPath || defaultDownloadPath || '');
   // 의존성 확인 관련 상태
   const [isResolvingDeps, setIsResolvingDeps] = useState(false);
-  const [depsResolved, setDepsResolved] = useState(false);
   const downloadCancelledRef = useRef(false);
   const downloadPausedRef = useRef(false);
   // 다운로드 아이템 목록을 ref로 유지 (SSE 이벤트 핸들러에서 최신 상태 참조용)
@@ -721,6 +722,10 @@ const DownloadPage: React.FC = () => {
         cudaVersion,
         // yum 패키지의 repository.baseUrl 추출하여 전달
         yumRepoUrl: cartItems.find(item => item.type === 'yum')?.repository?.baseUrl,
+        // OS 패키지 배포판 설정
+        yumDistribution,
+        aptDistribution,
+        apkDistribution,
       };
 
       // 응답 데이터 타입 정의
@@ -1484,17 +1489,24 @@ const DownloadPage: React.FC = () => {
                   key={pkg.id}
                   header={
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                      <Space>
-                        {statusIcons[pkg.status]}
-                        <Text strong>{pkg.name}</Text>
-                        <Text type="secondary">{pkg.version}</Text>
-                        {pkg.type && <Tag>{pkg.type}</Tag>}
-                        {deps.length > 0 && (
-                          <Tag icon={<BranchesOutlined />} color="blue">
-                            +{deps.length} 의존성
-                          </Tag>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <Space>
+                          {statusIcons[pkg.status]}
+                          <Text strong>{pkg.name}</Text>
+                          <Text type="secondary">{pkg.version}</Text>
+                          {pkg.type && <Tag>{pkg.type}</Tag>}
+                          {deps.length > 0 && (
+                            <Tag icon={<BranchesOutlined />} color="blue">
+                              +{deps.length} 의존성
+                            </Tag>
+                          )}
+                        </Space>
+                        {pkg.filename && (
+                          <Text type="secondary" style={{ fontSize: 11, marginLeft: 24 }}>
+                            {pkg.filename}
+                          </Text>
                         )}
-                      </Space>
+                      </div>
                       <Space style={{ marginRight: 24 }}>
                         {groupStatus.hasFailures && (
                           <Tag color="error">{groupStatus.failed} 실패</Tag>
@@ -1568,6 +1580,13 @@ const DownloadPage: React.FC = () => {
                                 {statusLabels[dep.status]}
                               </Tag>
                             </Space>
+                            {dep.filename && (
+                              <div style={{ marginLeft: 24, marginTop: 2 }}>
+                                <Text type="secondary" style={{ fontSize: 11 }}>
+                                  {dep.filename}
+                                </Text>
+                              </div>
+                            )}
                             {dep.status === 'failed' && dep.error && (
                               <div style={{ marginLeft: 24, marginTop: 4 }}>
                                 <Text type="danger" style={{ fontSize: 12 }}>

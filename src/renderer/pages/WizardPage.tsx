@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Steps,
   Card,
@@ -34,6 +34,7 @@ import {
 } from '@ant-design/icons';
 import { useCartStore, PackageType, Architecture } from '../stores/cart-store';
 import { useSettingsStore, DockerRegistry } from '../stores/settings-store';
+import type { OSPackageInfo } from '../../core/downloaders/os-shared/types';
 
 const { Title, Text } = Typography;
 
@@ -152,6 +153,8 @@ interface SearchResult {
   repository?: { baseUrl: string; name?: string };
   location?: string;
   architecture?: string;
+  // OS 패키지 전체 정보 (의존성 해결에 사용)
+  osPackageInfo?: OSPackageInfo;
   // Docker 이미지용 추가 필드
   registry?: string;
   isOfficial?: boolean;
@@ -164,6 +167,7 @@ interface SearchResult {
 
 const WizardPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
 
   // Step 1: 카테고리
@@ -217,12 +221,18 @@ const WizardPage: React.FC = () => {
     defaultArchitecture,
     defaultTargetOS,
     condaChannel,
+    customCondaChannels,
+    pipTargetPlatform,
+    cudaVersion,
     yumDistribution,
     aptDistribution,
     apkDistribution,
     dockerRegistry: defaultDockerRegistry,
     dockerCustomRegistry,
     dockerArchitecture,
+    dockerLayerCompression,
+    dockerRetryStrategy,
+    dockerIncludeLoadScript,
     customPipIndexUrls,
     addCustomPipIndexUrl,
   } = useSettingsStore();
@@ -342,8 +352,55 @@ const WizardPage: React.FC = () => {
     setSearching(true);
     try {
       let results: SearchResult[];
-      if (window.electronAPI?.search?.packages) {
-        // 패키지 타입별 검색 옵션 설정
+
+      // OS 패키지 타입인 경우 os.search 사용
+      const isOSPackage = ['yum', 'apt', 'apk'].includes(packageType);
+
+      if (isOSPackage && window.electronAPI?.os?.search) {
+        // OS 패키지: electronAPI.os.search 사용
+        const getDistributionInfo = () => {
+          switch (packageType) {
+            case 'yum':
+              return { id: yumDistribution.id, architecture: yumDistribution.architecture, packageManager: 'yum' };
+            case 'apt':
+              return { id: aptDistribution.id, architecture: aptDistribution.architecture, packageManager: 'apt' };
+            case 'apk':
+              return { id: apkDistribution.id, architecture: apkDistribution.architecture, packageManager: 'apk' };
+            default:
+              return null;
+          }
+        };
+
+        const distInfo = getDistributionInfo();
+        if (distInfo) {
+          const response = await window.electronAPI.os.search({
+            query,
+            distribution: {
+              id: distInfo.id,
+              name: distInfo.id,
+              packageManager: distInfo.packageManager,
+            },
+            architecture: distInfo.architecture as import('../../core/downloaders/os-shared/types').OSArchitecture,
+            matchType: 'partial',
+            limit: 20,
+          });
+
+          const packages = (response.packages || []) as OSPackageInfo[];
+          results = packages.map(pkg => ({
+            name: pkg.name,
+            version: pkg.version,
+            description: pkg.summary || pkg.description || '',
+            downloadUrl: `${pkg.repository.baseUrl}/${pkg.location}`,
+            repository: { baseUrl: pkg.repository.baseUrl, name: pkg.repository.name },
+            location: pkg.location,
+            architecture: pkg.architecture,
+            osPackageInfo: pkg,
+          }));
+        } else {
+          results = [];
+        }
+      } else if (window.electronAPI?.search?.packages) {
+        // 일반 패키지: search.packages 사용
         let searchOptions: { channel?: string; registry?: string } | undefined;
         if (packageType === 'conda') {
           searchOptions = { channel: condaChannel };
@@ -364,7 +421,7 @@ const WizardPage: React.FC = () => {
     } finally {
       setSearching(false);
     }
-  }, [packageType, condaChannel, dockerRegistry]);
+  }, [packageType, condaChannel, dockerRegistry, yumDistribution, aptDistribution, apkDistribution]);
 
   // 입력 변경 핸들러 (디바운스 적용)
   const handleInputChange = useCallback((value: string) => {
@@ -557,38 +614,19 @@ const WizardPage: React.FC = () => {
       }
 
       // OS 패키지 결과를 SearchResult 형식으로 변환하는 헬퍼 함수
-      const mapOSPackageResult = (data: { packages?: Array<{
-        name: string;
-        versions: Array<{
-          name: string;
-          version: string;
-          description?: string;
-          summary?: string;
-          downloadUrl?: string;
-          repository?: { baseUrl: string; name?: string };
-          location?: string;
-          architecture?: string;
-        }>;
-        latest: {
-          name: string;
-          version: string;
-          description?: string;
-          summary?: string;
-          downloadUrl?: string;
-          repository?: { baseUrl: string; name?: string };
-          location?: string;
-          architecture?: string;
-        };
-      }> }): SearchResult[] => {
+      // API는 OSPackageInfo[] 형식으로 반환함
+      const mapOSPackageResult = (data: { packages?: OSPackageInfo[]; totalCount?: number }): SearchResult[] => {
         return (data.packages || []).map((pkg) => ({
           name: pkg.name,
-          version: pkg.latest.version,
-          description: pkg.latest.summary || pkg.latest.description || '',
-          versions: pkg.versions.map(v => v.version), // 버전 목록 포함
-          downloadUrl: pkg.latest.downloadUrl,
-          repository: pkg.latest.repository,
-          location: pkg.latest.location,
-          architecture: pkg.latest.architecture,
+          version: pkg.version,
+          description: pkg.summary || pkg.description || '',
+          versions: [pkg.version], // 단일 버전 (검색 결과는 각 패키지 1개씩)
+          downloadUrl: `${pkg.repository.baseUrl}/${pkg.location}`,
+          repository: { baseUrl: pkg.repository.baseUrl, name: pkg.repository.name },
+          location: pkg.location,
+          architecture: pkg.architecture,
+          // 전체 OSPackageInfo 저장 (의존성 해결에 사용)
+          osPackageInfo: pkg,
         }));
       };
 
@@ -608,7 +646,7 @@ const WizardPage: React.FC = () => {
         architecture: distributionInfo.architecture,
         matchType: 'contains',
         limit: 50,
-      }) as Parameters<typeof mapOSPackageResult>[0];
+      }) as { packages: OSPackageInfo[]; totalCount: number };
       return mapOSPackageResult(result);
     } catch (error) {
       console.error(`${type} search error:`, error);
@@ -702,21 +740,16 @@ const WizardPage: React.FC = () => {
         });
 
         // OS 패키지 결과를 SearchResult 형식으로 변환 (메타데이터 포함)
-        results = ((response.packages || []) as Array<{
-          name: string;
-          version: string;
-          description?: string;
-          summary?: string;
-          repository?: { baseUrl: string; name?: string; id?: string };
-          location?: string;
-          architecture?: string;
-        }>).map(pkg => ({
+        const packages = (response.packages || []) as OSPackageInfo[];
+        results = packages.map(pkg => ({
           name: pkg.name,
           version: pkg.version,
           description: pkg.summary || pkg.description || '',
-          repository: pkg.repository,
+          downloadUrl: `${pkg.repository.baseUrl}/${pkg.location}`,
+          repository: { baseUrl: pkg.repository.baseUrl, name: pkg.repository.name },
           location: pkg.location,
           architecture: pkg.architecture,
+          osPackageInfo: pkg,
         }));
       } else if (window.electronAPI?.search?.packages) {
         // 일반 패키지: electronAPI.search.packages 사용
@@ -990,6 +1023,10 @@ const WizardPage: React.FC = () => {
         ...(libraryPackageTypes.includes(packageType) && { targetOS: defaultTargetOS }),
         // Docker 이미지 메타데이터
         ...dockerMetadata,
+        // OS 패키지 전체 정보 (의존성 해결에 사용)
+        ...(osPackageTypes.includes(packageType) && selectedPackage.osPackageInfo && {
+          osPackageInfo: selectedPackage.osPackageInfo,
+        }),
       },
       // OS 패키지 메타데이터 포함
       downloadUrl: selectedPackage.downloadUrl,
@@ -1122,16 +1159,8 @@ const WizardPage: React.FC = () => {
         );
 
       case 2: {
-        // 환경 정보 바 (라이브러리 패키지용)
+        // 패키지 타입별 환경 정보 바
         const renderEnvironmentInfoBar = () => {
-          if (!libraryPackageTypes.includes(packageType)) return null;
-
-          const langKey = getLanguageKey(packageType);
-          const langVersion = (langKey && langKey in languageVersions) ? languageVersions[langKey as keyof typeof languageVersions] : '';
-          const versionLabel = languageVersionOptions[packageType]?.find(
-            v => v.value === langVersion
-          )?.label || langVersion;
-
           // OS 레이블 매핑
           const osLabels: Record<string, string> = {
             any: '모든 OS',
@@ -1139,6 +1168,95 @@ const WizardPage: React.FC = () => {
             macos: 'macOS',
             linux: 'Linux',
           };
+
+          // 패키지 타입별 설정 태그 렌더링
+          const renderSettingTags = () => {
+            switch (packageType) {
+              case 'pip': {
+                const pythonVersion = languageVersions.python;
+                const os = pipTargetPlatform?.os || 'linux';
+                const arch = pipTargetPlatform?.arch || 'x86_64';
+                const distro = pipTargetPlatform?.linuxDistro;
+                const glibc = pipTargetPlatform?.glibcVersion;
+                const macosVer = pipTargetPlatform?.macosVersion;
+
+                return (
+                  <>
+                    <Tag color="blue">Python {pythonVersion}</Tag>
+                    <Tag color="green">{osLabels[os] || os}</Tag>
+                    <Tag color="purple">{arch}</Tag>
+                    {os === 'linux' && glibc && <Tag color="orange">glibc {glibc}</Tag>}
+                    {os === 'linux' && distro && <Tag color="cyan">{distro}</Tag>}
+                    {os === 'macos' && macosVer && <Tag color="orange">macOS {macosVer}+</Tag>}
+                    {cudaVersion && <Tag color="volcano">CUDA {cudaVersion}</Tag>}
+                  </>
+                );
+              }
+
+              case 'conda': {
+                const pythonVersion = languageVersions.python;
+                return (
+                  <>
+                    <Tag color="blue">Python {pythonVersion}</Tag>
+                    <Tag color="green">{osLabels[defaultTargetOS] || defaultTargetOS}</Tag>
+                    <Tag color="purple">{defaultArchitecture}</Tag>
+                    <Tag color="geekblue">{condaChannel}</Tag>
+                    {customCondaChannels.length > 0 && (
+                      <Tag color="cyan">+{customCondaChannels.length} 채널</Tag>
+                    )}
+                    {cudaVersion && <Tag color="volcano">CUDA {cudaVersion}</Tag>}
+                  </>
+                );
+              }
+
+              case 'maven':
+              case 'npm':
+                // maven, npm은 플랫폼 설정 없음
+                return (
+                  <Tag color="default">플랫폼 독립적</Tag>
+                );
+
+              case 'yum':
+                return (
+                  <>
+                    <Tag color="red">{yumDistribution?.id || 'rocky-9'}</Tag>
+                    <Tag color="purple">{yumDistribution?.architecture || 'x86_64'}</Tag>
+                  </>
+                );
+
+              case 'apt':
+                return (
+                  <>
+                    <Tag color="orange">{aptDistribution?.id || 'ubuntu-22.04'}</Tag>
+                    <Tag color="purple">{aptDistribution?.architecture || 'amd64'}</Tag>
+                  </>
+                );
+
+              case 'apk':
+                return (
+                  <>
+                    <Tag color="blue">{apkDistribution?.id || 'alpine-3.18'}</Tag>
+                    <Tag color="purple">{apkDistribution?.architecture || 'x86_64'}</Tag>
+                  </>
+                );
+
+              case 'docker':
+                return (
+                  <>
+                    <Tag color="blue">{dockerRegistry}</Tag>
+                    <Tag color="purple">{dockerArchitecture}</Tag>
+                    <Tag color="cyan">{dockerLayerCompression}</Tag>
+                    {dockerIncludeLoadScript && <Tag color="green">스크립트 포함</Tag>}
+                  </>
+                );
+
+              default:
+                return null;
+            }
+          };
+
+          const tags = renderSettingTags();
+          if (!tags) return null;
 
           return (
             <div style={{
@@ -1154,13 +1272,11 @@ const WizardPage: React.FC = () => {
             }}>
               <Space size={4} wrap>
                 <SettingOutlined style={{ color: '#999', marginRight: 4 }} />
-                {versionLabel && <Tag color="blue">{versionLabel}</Tag>}
-                <Tag color="green">{osLabels[defaultTargetOS] || defaultTargetOS}</Tag>
-                <Tag color="purple">{defaultArchitecture}</Tag>
+                {tags}
               </Space>
               <a
-                href="/settings"
-                onClick={(e) => { e.preventDefault(); window.location.href = '/settings'; }}
+                href={`/settings?highlight=${packageType}`}
+                onClick={(e) => { e.preventDefault(); navigate(`/settings?highlight=${packageType}`); }}
                 style={{ fontSize: 12, color: '#1890ff' }}
               >
                 설정 변경
@@ -1216,7 +1332,7 @@ const WizardPage: React.FC = () => {
             </Text>
             <Divider />
 
-            {/* 라이브러리 패키지: 환경 정보 바 */}
+            {/* 패키지 타입별 환경 설정 정보 바 */}
             {renderEnvironmentInfoBar()}
 
             {/* Docker 타입일 때 레지스트리 선택 UI */}

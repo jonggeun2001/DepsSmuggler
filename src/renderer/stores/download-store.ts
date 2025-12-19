@@ -54,6 +54,7 @@ interface DownloadState {
   logs: LogEntry[];
   startTime: number | null;
   currentItemIndex: number;
+  depsResolved: boolean;
 
   // Actions
   setItems: (items: DownloadItem[]) => void;
@@ -72,6 +73,7 @@ interface DownloadState {
   setCurrentItemIndex: (index: number) => void;
   skipItem: (id: string) => void;
   retryItem: (id: string) => void;
+  setDepsResolved: (resolved: boolean) => void;
   reset: () => void;
 }
 
@@ -91,6 +93,7 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
   logs: [],
   startTime: null,
   currentItemIndex: 0,
+  depsResolved: false,
 
   setItems: (items) => set({ items }),
 
@@ -173,6 +176,8 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
       ),
     })),
 
+  setDepsResolved: (resolved) => set({ depsResolved: resolved }),
+
   reset: () =>
     set({
       items: [],
@@ -183,5 +188,6 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
       logs: [],
       startTime: null,
       currentItemIndex: 0,
+      depsResolved: false,
     }),
 }));

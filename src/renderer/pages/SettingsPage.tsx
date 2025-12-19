@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useBlocker } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useBlocker, useSearchParams } from 'react-router-dom';
 import {
   Card,
   Form,
@@ -98,6 +98,43 @@ const SettingsPage: React.FC = () => {
   } = useSettingsStore();
 
   const [form] = Form.useForm();
+  const [searchParams] = useSearchParams();
+  const highlightType = searchParams.get('highlight');
+  const highlightedRef = useRef<HTMLDivElement>(null);
+
+  // 패키지 타입별 하이라이트할 설정 카드 ID 매핑
+  const highlightSections: Record<string, string[]> = {
+    pip: ['python-settings', 'library-env', 'pip-platform', 'pip-custom-index'],
+    conda: ['python-settings', 'library-env'],
+    maven: [],
+    npm: [],
+    yum: ['os-distribution'],
+    apt: ['os-distribution'],
+    apk: ['os-distribution'],
+    docker: ['docker-settings'],
+  };
+
+  // 하이라이트된 카드 스타일
+  const getCardStyle = (cardId: string) => {
+    const baseStyle = { marginBottom: CARD_MARGIN };
+    if (highlightType && highlightSections[highlightType]?.includes(cardId)) {
+      return {
+        ...baseStyle,
+        boxShadow: '0 0 0 2px #1890ff',
+        borderColor: '#1890ff',
+      };
+    }
+    return baseStyle;
+  };
+
+  // 하이라이트된 첫 번째 섹션으로 스크롤
+  useEffect(() => {
+    if (highlightType && highlightedRef.current) {
+      setTimeout(() => {
+        highlightedRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    }
+  }, [highlightType]);
 
   // 변경사항 감지 상태
   const [isDirty, setIsDirty] = useState(false);
@@ -800,17 +837,22 @@ const SettingsPage: React.FC = () => {
         </Card>
 
         {/* Python 버전 설정 */}
+        <div
+          id="python-settings"
+          ref={highlightType && highlightSections[highlightType]?.includes('python-settings') ? highlightedRef : undefined}
+        >
         <Card
           title={
             <Space>
               <span>Python 버전 설정</span>
+              <Tag color="purple">pip/conda</Tag>
               <Tooltip title="pip/conda 패키지 다운로드 시 사용할 Python 버전. 휠 파일(.whl)은 Python 버전별로 다른 바이너리를 제공합니다. Maven JAR와 npm tarball은 런타임 버전과 무관하게 동일 파일을 다운로드하므로 별도 설정이 필요 없습니다.">
                 <InfoCircleOutlined style={{ color: '#999' }} />
               </Tooltip>
             </Space>
           }
           size="small"
-          style={{ marginBottom: CARD_MARGIN }}
+          style={getCardStyle('python-settings')}
           styles={{ body: { padding: CARD_BODY_PADDING } }}
         >
           <Form.Item
@@ -911,20 +953,25 @@ const SettingsPage: React.FC = () => {
             />
           </Form.Item>
         </Card>
+        </div>
 
         {/* 라이브러리 대상 환경 설정 */}
+        <div
+          id="library-env"
+          ref={highlightType && highlightSections[highlightType]?.includes('library-env') && !highlightSections[highlightType]?.includes('python-settings') ? highlightedRef : undefined}
+        >
         <Card
           title={
             <Space>
               <span>라이브러리 대상 환경</span>
-              <Tag color="blue">pip/conda/Maven/npm</Tag>
+              <Tag color="blue">pip/conda</Tag>
               <Tooltip title="폐쇄망에 설치된 OS와 CPU 아키텍처에 맞는 바이너리를 다운로드합니다">
                 <InfoCircleOutlined style={{ color: '#999' }} />
               </Tooltip>
             </Space>
           }
           size="small"
-          style={{ marginBottom: CARD_MARGIN }}
+          style={getCardStyle('library-env')}
           styles={{ body: { padding: CARD_BODY_PADDING } }}
         >
           <Row gutter={16}>
@@ -959,8 +1006,13 @@ const SettingsPage: React.FC = () => {
             </Col>
           </Row>
         </Card>
+        </div>
 
         {/* pip 타겟 플랫폼 설정 */}
+        <div
+          id="pip-platform"
+          ref={highlightType === 'pip' && !highlightSections.pip.slice(0, 2).some(id => highlightSections.pip.includes(id)) ? highlightedRef : undefined}
+        >
         <Card
           title={
             <Space>
@@ -972,7 +1024,7 @@ const SettingsPage: React.FC = () => {
             </Space>
           }
           size="small"
-          style={{ marginBottom: CARD_MARGIN }}
+          style={getCardStyle('pip-platform')}
           styles={{ body: { padding: CARD_BODY_PADDING } }}
         >
           {/* OS 선택 */}
@@ -1166,8 +1218,10 @@ const SettingsPage: React.FC = () => {
             </Select>
           </Form.Item>
         </Card>
+        </div>
 
         {/* pip 커스텀 인덱스 URL 관리 */}
+        <div id="pip-custom-index">
         <Card
           title={
             <Space>
@@ -1179,7 +1233,7 @@ const SettingsPage: React.FC = () => {
             </Space>
           }
           size="small"
-          style={{ marginBottom: CARD_MARGIN }}
+          style={getCardStyle('pip-custom-index')}
           styles={{ body: { padding: CARD_BODY_PADDING } }}
         >
           <List
@@ -1243,20 +1297,25 @@ const SettingsPage: React.FC = () => {
             </Button>
           </Space>
         </Card>
+        </div>
 
         {/* OS 패키지 배포판 설정 */}
+        <div
+          id="os-distribution"
+          ref={highlightType && highlightSections[highlightType]?.includes('os-distribution') ? highlightedRef : undefined}
+        >
         <Card
           title={
             <Space>
               <span>OS 패키지 배포판</span>
-              <Tag color="orange">YUM/APT/APK</Tag>
+              <Tag color="orange">yum/apt/apk</Tag>
               <Tooltip title="각 패키지 관리자별로 검색할 배포판과 아키텍처를 설정합니다">
                 <InfoCircleOutlined style={{ color: '#999' }} />
               </Tooltip>
             </Space>
           }
           size="small"
-          style={{ marginBottom: CARD_MARGIN }}
+          style={getCardStyle('os-distribution')}
           styles={{ body: { padding: CARD_BODY_PADDING } }}
         >
           {/* YUM */}
@@ -1328,21 +1387,26 @@ const SettingsPage: React.FC = () => {
             </Col>
           </Row>
         </Card>
+        </div>
 
         {/* Docker 설정 */}
+        <div
+          id="docker-settings"
+          ref={highlightType === 'docker' ? highlightedRef : undefined}
+        >
         <Card
           title={
             <Space>
               <CloudOutlined />
               <span>Docker 설정</span>
-              <Tag color="geekblue">Docker</Tag>
+              <Tag color="geekblue">docker</Tag>
               <Tooltip title="컨테이너 이미지를 다운로드할 때 사용할 레지스트리, 아키텍처 및 옵션">
                 <InfoCircleOutlined style={{ color: '#999' }} />
               </Tooltip>
             </Space>
           }
           size="small"
-          style={{ marginBottom: CARD_MARGIN }}
+          style={getCardStyle('docker-settings')}
           styles={{ body: { padding: CARD_BODY_PADDING } }}
         >
           <Alert
@@ -1391,6 +1455,7 @@ const SettingsPage: React.FC = () => {
             </Col>
           </Row>
         </Card>
+        </div>
 
         {/* 캐시 설정 */}
         <Card

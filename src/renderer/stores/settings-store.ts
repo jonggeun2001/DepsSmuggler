@@ -306,6 +306,9 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'depssmuggler-settings',
       storage: createJSONStorage(() => electronStorage),
+      // Electron IPC가 준비되기 전에 자동 hydration을 방지
+      // initializeFromFile에서 수동으로 설정을 로드함
+      skipHydration: true,
       // 저장할 때 액션 함수 제외
       partialize: (state) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -318,8 +321,26 @@ export const useSettingsStore = create<SettingsState>()(
 
 // 앱 시작 시 자동으로 파일에서 설정 로드
 if (typeof window !== 'undefined') {
-  // Electron 환경인지 확인 후 초기화
-  setTimeout(() => {
-    useSettingsStore.getState().initializeFromFile();
-  }, 100);
+  // Electron API가 준비될 때까지 대기 후 초기화
+  const initSettings = async () => {
+    // Electron API가 준비될 때까지 최대 2초 대기
+    let retries = 0;
+    const maxRetries = 20;
+
+    while (typeof window.electronAPI?.config?.get !== 'function' && retries < maxRetries) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      retries++;
+    }
+
+    if (typeof window.electronAPI?.config?.get === 'function') {
+      await useSettingsStore.getState().initializeFromFile();
+      console.debug('[settings-store] Electron 환경에서 설정 초기화 완료');
+    } else {
+      // Electron API가 없으면 기본값 사용 (브라우저 환경)
+      useSettingsStore.setState({ _initialized: true });
+      console.debug('[settings-store] 브라우저 환경에서 기본값 사용');
+    }
+  };
+
+  initSettings();
 }
