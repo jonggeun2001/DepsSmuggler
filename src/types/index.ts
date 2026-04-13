@@ -314,6 +314,8 @@ export interface HistorySettings {
   includeDependencies: boolean;
   /** 전달 방식 */
   deliveryMethod: DeliveryMethod;
+  /** 이메일 전달 재실행용 수신자 */
+  smtpTo?: string;
   /** 파일 분할 활성화 여부 */
   fileSplitEnabled?: boolean;
   /** 파일 분할 기준 크기 (MB) */

@@ -50,6 +50,7 @@ interface HistorySettings {
   includeScripts: boolean;
   includeDependencies: boolean;
   deliveryMethod: 'local' | 'email';
+  smtpTo?: string;
   fileSplitEnabled?: boolean;
   maxFileSizeMB?: number;
 }
@@ -195,6 +196,7 @@ history: {
 2. 확인 모달 표시
 3. 패키지들을 장바구니에 추가 (`cartStore.addItem`)
 4. 설정 복원 (`settingsStore.updateSettings`)
+   이메일 전달 히스토리면 저장된 `smtpTo`도 함께 복원
 5. 다운로드 페이지로 이동
 
 ---
@@ -203,7 +205,7 @@ history: {
 
 ### DownloadPage에서 자동 저장
 
-다운로드 완료 시 (`download:all-complete` 이벤트) 자동으로 히스토리 저장합니다. 아카이브 출력(`zip`, `tar.gz`)에서는 이벤트의 `outputPath`가 대표 산출물 경로를 담고, `artifactPaths`는 실제 산출물 전체 목록을 담습니다. 이메일 전달에서는 `deliveryMethod=email`과 `deliveryResult`가 함께 저장됩니다.
+다운로드 완료 시 (`download:all-complete` 이벤트) 자동으로 히스토리 저장합니다. 아카이브 출력(`zip`, `tar.gz`)에서는 이벤트의 `outputPath`가 대표 산출물 경로를 담고, `artifactPaths`는 실제 산출물 전체 목록을 담습니다. 이메일 전달에서는 `deliveryMethod=email`, `deliveryResult`, 그리고 재다운로드 복원용 `settings.smtpTo`가 함께 저장됩니다.
 
 ```typescript
 // DownloadPage.tsx 내 download:all-complete 핸들러

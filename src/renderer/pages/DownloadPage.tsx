@@ -69,6 +69,10 @@ import type {
   OSDownloadProgress as OSDownloadProgressData,
   PackageDependency,
 } from '../../core/downloaders/os-shared/types';
+import {
+  buildHistorySettings,
+  getEmailDeliveryValidationError,
+} from './download-delivery-utils';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -769,14 +773,15 @@ const DownloadPage: React.FC = () => {
         metadata: item.metadata,
       }));
 
-      const historySettings = historySettingsSnapshotRef.current ?? {
+      const historySettings = historySettingsSnapshotRef.current ?? buildHistorySettings({
         outputFormat,
         includeScripts: includeInstallScripts,
         includeDependencies,
         deliveryMethod,
+        smtpTo,
         fileSplitEnabled: enableFileSplit,
         maxFileSizeMB: maxFileSize,
-      };
+      });
 
       const resultMap = new Map((data.results || []).map((result) => [result.id, result.success]));
       let completedCount = 0;
@@ -1341,13 +1346,13 @@ const DownloadPage: React.FC = () => {
         : item.metadata,
     }));
 
-    const historySettings: HistorySettings = {
+    const historySettings = buildHistorySettings({
       outputFormat: result.outputOptions.archiveFormat || 'zip',
       includeScripts: result.outputOptions.generateScripts,
       includeDependencies,
       deliveryMethod: 'local',
       osOutputOptions: result.outputOptions,
-    };
+    });
 
     const failedCount = result.failed.length + result.unresolved.length;
     const downloadedCount = result.success.length;
@@ -1510,11 +1515,18 @@ const DownloadPage: React.FC = () => {
       return;
     }
 
-    if (deliveryMethod === 'email') {
-      if (!smtpHost || !smtpPort || !smtpTo || !(smtpFrom || smtpUser)) {
-        message.warning('이메일 전달을 사용하려면 설정에서 SMTP 서버, 수신자, 발신자 또는 로그인 사용자를 입력하세요');
-        return;
-      }
+    const emailDeliveryValidationError = getEmailDeliveryValidationError({
+      deliveryMethod,
+      smtpHost,
+      smtpPort,
+      smtpTo,
+      smtpFrom,
+      smtpUser,
+    });
+
+    if (emailDeliveryValidationError) {
+      message.warning(emailDeliveryValidationError);
+      return;
     }
 
     if (includeDependencies && !depsResolved) {
@@ -1545,14 +1557,15 @@ const DownloadPage: React.FC = () => {
     window.electronAPI?.log?.('info', `[TIMING] Proceeding with download at ${Date.now() - handleStartTime}ms`);
     // 히스토리 저장용 장바구니 스냅샷 저장
     cartSnapshotRef.current = [...cartItems];
-    historySettingsSnapshotRef.current = {
+    historySettingsSnapshotRef.current = buildHistorySettings({
       outputFormat,
       includeScripts: includeInstallScripts,
       includeDependencies,
       deliveryMethod,
+      smtpTo,
       fileSplitEnabled: enableFileSplit,
       maxFileSizeMB: maxFileSize,
-    };
+    });
     setCompletedOutputPath('');
     setCompletedArtifactPaths([]);
     setCompletedDeliveryResult(undefined);
@@ -1686,6 +1699,20 @@ const DownloadPage: React.FC = () => {
   const executeRetryDownload = async (item: DownloadItem) => {
     if (!window.electronAPI?.download?.start) {
       addLog('error', '다운로드 API를 사용할 수 없습니다');
+      return;
+    }
+
+    const emailDeliveryValidationError = getEmailDeliveryValidationError({
+      deliveryMethod,
+      smtpHost,
+      smtpPort,
+      smtpTo,
+      smtpFrom,
+      smtpUser,
+    });
+
+    if (emailDeliveryValidationError) {
+      message.warning(emailDeliveryValidationError);
       return;
     }
 

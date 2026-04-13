@@ -32,6 +32,7 @@ import {
 import { useHistoryStore, DownloadHistory, HistoryStatus } from '../stores/history-store';
 import { useCartStore, PackageType } from '../stores/cart-store';
 import { useSettingsStore } from '../stores/settings-store';
+import { buildHistoryRestoreSettings } from './download-delivery-utils';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -89,6 +90,8 @@ const getDeliveryMethod = (history: DownloadHistory): 'local' | 'email' =>
 const getDeliveryLabel = (history: DownloadHistory): string =>
   getDeliveryMethod(history) === 'email' ? '이메일' : '로컬';
 
+const getHistoryRecipient = (history: DownloadHistory): string | undefined => history.settings.smtpTo;
+
 const HistoryPage: React.FC = () => {
   const navigate = useNavigate();
   const { histories, deleteHistory, clearAll } = useHistoryStore();
@@ -130,7 +133,11 @@ const HistoryPage: React.FC = () => {
   const handleRedownload = useCallback((history: DownloadHistory) => {
     Modal.confirm({
       title: '재다운로드',
-      content: `${history.packages.length}개 패키지를 장바구니에 추가하고 다운로드 페이지로 이동합니다. 전달 방식은 ${getDeliveryLabel(history)}로 복원됩니다.`,
+      content: `${history.packages.length}개 패키지를 장바구니에 추가하고 다운로드 페이지로 이동합니다. 전달 방식은 ${
+        getDeliveryMethod(history) === 'email' && getHistoryRecipient(history)
+          ? `이메일(${getHistoryRecipient(history)})`
+          : getDeliveryLabel(history)
+      }로 복원됩니다.`,
       okText: '확인',
       cancelText: '취소',
       onOk: () => {
@@ -147,17 +154,7 @@ const HistoryPage: React.FC = () => {
         });
 
         // 설정 복원
-        updateSettings({
-          defaultOutputFormat: history.settings.outputFormat,
-          includeInstallScripts: history.settings.includeScripts,
-          includeDependencies: history.settings.includeDependencies,
-          ...(typeof history.settings.fileSplitEnabled === 'boolean'
-            ? { enableFileSplit: history.settings.fileSplitEnabled }
-            : {}),
-          ...(typeof history.settings.maxFileSizeMB === 'number'
-            ? { maxFileSize: history.settings.maxFileSizeMB }
-            : {}),
-        });
+        updateSettings(buildHistoryRestoreSettings(history.settings));
 
         message.success(`${history.packages.length}개 패키지가 장바구니에 추가되었습니다.`);
         navigate('/download', {
@@ -516,6 +513,11 @@ const HistoryPage: React.FC = () => {
                 {getDeliveryLabel(selectedHistory)}
               </Tag>
             </Descriptions.Item>
+            {getDeliveryMethod(selectedHistory) === 'email' && selectedHistory.settings.smtpTo && (
+              <Descriptions.Item label="수신자">
+                <Text copyable>{selectedHistory.settings.smtpTo}</Text>
+              </Descriptions.Item>
+            )}
             <Descriptions.Item label="설치 스크립트">
               {selectedHistory.settings.includeScripts ? '포함' : '미포함'}
             </Descriptions.Item>
