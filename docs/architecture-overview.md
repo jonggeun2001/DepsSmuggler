@@ -125,9 +125,10 @@ depssmuggler/
 
 ## 상태 저장
 
-- 설정: `~/.depssmuggler/settings.json`
-- 히스토리: `~/.depssmuggler/history.json`
-- 캐시/로그: `~/.depssmuggler/cache`, `~/.depssmuggler/logs`
+- 파일 기반 설정: `~/.depssmuggler/settings.json`
+- 파일 기반 히스토리: `~/.depssmuggler/history.json`
+- 파일 기반 패키지 메타데이터 캐시/로그: `~/.depssmuggler/cache`, `~/.depssmuggler/logs`
+- Python 버전 캐시와 settings store 백업은 renderer `localStorage`를 함께 사용합니다.
 - Renderer 상태: Zustand + persist 기반입니다.
 - 설정 상태는 Electron 환경에서 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화됩니다.
 - 장바구니/히스토리 상태는 현재 persist 저장소가 source of truth이며, `history.json` 기반 IPC는 부분 연결 상태입니다.

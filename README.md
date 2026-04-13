@@ -7,7 +7,7 @@
 - GUI: `pip`, `conda`, `maven`, `npm`, `yum`, `apt`, `apk`, `docker` 흐름을 제공합니다.
 - CLI: 일반 패키지용 `download`, `search`, `config`, `cache`와 OS 패키지용 `os` 네임스페이스를 제공합니다.
 - 자동 업데이트, 다운로드 히스토리, 설정 저장, SMTP 설정 UI가 포함되어 있습니다. 파일 분할은 설정 UI와 기반 코드는 있으나 현재 다운로드 경로에는 연결되어 있지 않습니다.
-- 설정/로그/캐시는 모두 사용자 홈 디렉터리의 `~/.depssmuggler/` 아래에 저장됩니다.
+- 파일 기반 설정/로그/히스토리와 패키지 메타데이터 캐시는 `~/.depssmuggler/` 아래에 저장됩니다. Python 버전 캐시와 일부 설정 백업은 renderer `localStorage`를 함께 사용합니다.
 
 ## 지원 범위
 
