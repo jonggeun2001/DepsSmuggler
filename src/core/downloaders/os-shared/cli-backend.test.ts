@@ -206,6 +206,44 @@ describe('OS CLI backend', () => {
     ]);
   });
 
+  it('YUM exact lookup은 같은 version이면 release가 더 높은 패키지를 선택한다', async () => {
+    const olderRelease = createPackage('httpd', '2.4.57', { release: '2.el9' });
+    const newerRelease = createPackage('httpd', '2.4.57', { release: '3.el9' });
+
+    searchPackages.mockResolvedValue([
+      {
+        name: 'httpd',
+        latest: olderRelease,
+        versions: [olderRelease, newerRelease],
+      },
+    ]);
+    downloadPackages.mockResolvedValue({
+      success: [newerRelease],
+      failed: [],
+      downloadedFiles: new Map([
+        [getDownloadedFileKey(newerRelease), path.join(tempDir, 'httpd-newer.rpm')],
+      ]),
+    });
+    createArchive.mockResolvedValue(path.join(tempDir, 'bundle.zip'));
+
+    const result = await downloadOSPackages({
+      distribution: distro,
+      architecture: 'x86_64',
+      packageNames: ['httpd'],
+      outputPath: path.join(tempDir, 'bundle'),
+      outputType: 'archive',
+      archiveFormat: 'zip',
+      resolveDependencies: false,
+      includeScripts: false,
+      concurrency: 1,
+      cacheDirectory: path.join(tempDir, 'cache'),
+      cacheEnabled: true,
+    });
+
+    expect(downloadPackages).toHaveBeenCalledWith([newerRelease]);
+    expect(result.requestedPackages).toEqual([newerRelease]);
+  });
+
   it('OS 메타데이터 캐시 통계와 삭제를 실제 디렉토리에 반영한다', async () => {
     const cacheDir = path.join(tempDir, 'cache');
     fs.mkdirSync(cacheDir, { recursive: true });

@@ -81,6 +81,63 @@ type ResolverSearchable = BaseOSDependencyResolver & {
   searchPackages(query: string, matchType?: MatchType): Promise<OSPackageSearchResult[]>;
 };
 
+function compareVersionStrings(a: string, b: string): number {
+  const partsA = a.split(/[.-]/);
+  const partsB = b.split(/[.-]/);
+  const maxLen = Math.max(partsA.length, partsB.length);
+
+  for (let index = 0; index < maxLen; index += 1) {
+    const partA = partsA[index] || '0';
+    const partB = partsB[index] || '0';
+    const numA = parseInt(partA, 10);
+    const numB = parseInt(partB, 10);
+
+    if (!Number.isNaN(numA) && !Number.isNaN(numB)) {
+      if (numA !== numB) {
+        return numA - numB;
+      }
+      continue;
+    }
+
+    if (partA !== partB) {
+      return partA.localeCompare(partB);
+    }
+  }
+
+  return 0;
+}
+
+function comparePackages(
+  left: OSPackageInfo,
+  right: OSPackageInfo,
+  packageManager: OSDistribution['packageManager']
+): number {
+  if (packageManager === 'yum') {
+    const epochDiff = (left.epoch || 0) - (right.epoch || 0);
+    if (epochDiff !== 0) {
+      return epochDiff;
+    }
+
+    const versionDiff = compareVersionStrings(left.version, right.version);
+    if (versionDiff !== 0) {
+      return versionDiff;
+    }
+
+    return compareVersionStrings(left.release || '', right.release || '');
+  }
+
+  return compareVersionStrings(left.version, right.version);
+}
+
+function selectRequestedPackage(
+  packages: OSPackageInfo[],
+  distribution: OSDistribution
+): OSPackageInfo {
+  return [...packages].sort((left, right) =>
+    comparePackages(right, left, distribution.packageManager)
+  )[0];
+}
+
 function getActiveRepositories(distribution: OSDistribution): Repository[] {
   return [...distribution.defaultRepos, ...distribution.extendedRepos].filter((repo) => repo.enabled);
 }
@@ -236,7 +293,8 @@ export async function searchOSPackages(
 
 async function resolveRequestedPackages(
   packageNames: string[],
-  resolver: ResolverSearchable
+  resolver: ResolverSearchable,
+  distribution: OSDistribution
 ): Promise<OSPackageInfo[]> {
   const requestedPackages: OSPackageInfo[] = [];
 
@@ -248,7 +306,7 @@ async function resolveRequestedPackages(
       throw new Error(`패키지를 찾을 수 없습니다: ${packageName}`);
     }
 
-    requestedPackages.push(exactMatch.latest);
+    requestedPackages.push(selectRequestedPackage(exactMatch.versions, distribution));
   }
 
   return requestedPackages;
@@ -259,7 +317,11 @@ export async function downloadOSPackages(
 ): Promise<DownloadOSPackagesResult> {
   const cacheManager = createCacheManager(options.cacheDirectory, options.cacheEnabled);
   const resolver = createResolver(options.distribution, options.architecture, cacheManager);
-  const requestedPackages = await resolveRequestedPackages(options.packageNames, resolver);
+  const requestedPackages = await resolveRequestedPackages(
+    options.packageNames,
+    resolver,
+    options.distribution
+  );
 
   const resolution = options.resolveDependencies
     ? await resolver.resolveDependencies(requestedPackages)
