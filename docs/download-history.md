@@ -46,7 +46,7 @@ interface HistoryPackageItem {
 
 ```typescript
 interface HistorySettings {
-  outputFormat: 'zip' | 'tar.gz' | 'mirror';
+  outputFormat: 'zip' | 'tar.gz';
   includeScripts: boolean;
   includeDependencies: boolean;
 }
@@ -62,7 +62,7 @@ interface DownloadHistory {
   timestamp: string;           // ISO 8601 형식
   packages: HistoryPackageItem[];
   settings: HistorySettings;
-  outputPath: string;          // 출력 파일/폴더 경로
+  outputPath: string;          // 실제 산출물 경로 (예: /path/to/output.zip)
   totalSize: number;           // 바이트 단위
   status: 'success' | 'partial' | 'failed';
   downloadedCount?: number;    // 성공한 파일 수
@@ -191,7 +191,7 @@ history: {
 
 ### DownloadPage에서 자동 저장
 
-다운로드 완료 시 (`download:all-complete` 이벤트) 자동으로 히스토리 저장:
+다운로드 완료 시 (`download:all-complete` 이벤트) 자동으로 히스토리 저장합니다. 아카이브 출력(`zip`, `tar.gz`)에서는 이벤트의 `outputPath`가 실제 생성된 압축 파일 경로를 담고, 그 값이 그대로 히스토리에 저장됩니다.
 
 ```typescript
 // DownloadPage.tsx 내 download:all-complete 핸들러

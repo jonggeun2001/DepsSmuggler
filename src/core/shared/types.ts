@@ -31,7 +31,7 @@ export type Architecture = 'x86_64' | 'amd64' | 'arm64' | 'aarch64' | 'noarch';
 
 export interface DownloadOptions {
   outputDir: string;
-  outputFormat: 'zip' | 'tar.gz' | 'mirror';
+  outputFormat: 'zip' | 'tar.gz';
   includeScripts: boolean;
   targetOS?: TargetOS;
   architecture?: Architecture;

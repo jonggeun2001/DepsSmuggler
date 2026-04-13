@@ -2,7 +2,6 @@ import archiver from 'archiver';
 import * as tar from 'tar';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import * as zlib from 'zlib';
 import { PackageInfo } from '../../types';
 import logger from '../../utils/logger';
 import { resolvePath, toUnixPath } from '../shared/path-utils';
@@ -47,6 +46,38 @@ export class ArchivePackager {
     packages: PackageInfo[],
     options: ArchiveOptions
   ): Promise<string> {
+    const filesWithRelativePaths = files.map((file) => ({
+      sourcePath: file,
+      archivePath: path.posix.join('packages', path.basename(file)),
+    }));
+
+    return this.createArchiveFromEntries(filesWithRelativePaths, outputPath, packages, options);
+  }
+
+  /**
+   * 준비된 디렉터리를 그대로 보존하면서 압축 파일 생성
+   */
+  async createArchiveFromDirectory(
+    sourceDir: string,
+    outputPath: string,
+    packages: PackageInfo[],
+    options: ArchiveOptions
+  ): Promise<string> {
+    const sourceFiles = await this.collectFiles(sourceDir);
+    const filesWithRelativePaths = sourceFiles.map((file) => ({
+      sourcePath: file,
+      archivePath: toUnixPath(path.relative(sourceDir, file)),
+    }));
+
+    return this.createArchiveFromEntries(filesWithRelativePaths, outputPath, packages, options);
+  }
+
+  private async createArchiveFromEntries(
+    files: Array<{ sourcePath: string; archivePath: string }>,
+    outputPath: string,
+    packages: PackageInfo[],
+    options: ArchiveOptions
+  ): Promise<string> {
     const {
       format,
       compressionLevel = 6,
@@ -61,15 +92,13 @@ export class ArchivePackager {
     // 총 파일 크기 계산
     let totalBytes = 0;
     for (const file of files) {
-      const stat = await fs.stat(file);
+      const stat = await fs.stat(file.sourcePath);
       totalBytes += stat.size;
     }
 
     // 임시 디렉토리 생성
     const tempDir = path.join(path.dirname(outputPath), `.temp-${Date.now()}`);
-    await fs.ensureDir(tempDir);
-    const packagesDir = path.join(tempDir, 'packages');
-    await fs.ensureDir(packagesDir);
+    await fs.emptyDir(tempDir);
 
     try {
       // 파일 복사
@@ -77,10 +106,11 @@ export class ArchivePackager {
       let processedFiles = 0;
 
       for (const file of files) {
-        const destPath = path.join(packagesDir, path.basename(file));
-        await fs.copy(file, destPath);
+        const destPath = path.join(tempDir, file.archivePath);
+        await fs.ensureDir(path.dirname(destPath));
+        await fs.copy(file.sourcePath, destPath);
 
-        const stat = await fs.stat(file);
+        const stat = await fs.stat(file.sourcePath);
         processedBytes += stat.size;
         processedFiles++;
 
@@ -179,6 +209,22 @@ export class ArchivePackager {
       },
       files
     );
+  }
+
+  private async collectFiles(sourceDir: string): Promise<string[]> {
+    const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+    const files: string[] = [];
+
+    for (const entry of entries) {
+      const fullPath = path.join(sourceDir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...await this.collectFiles(fullPath));
+      } else {
+        files.push(fullPath);
+      }
+    }
+
+    return files;
   }
 
   /**
