@@ -17,6 +17,11 @@ const {
   createArchive,
   createLocalRepo,
   generateDependencyOrderScript,
+  YumDependencyResolver,
+  YumDownloader,
+  OSArchivePackager,
+  OSRepoPackager,
+  OSScriptGenerator,
 } = vi.hoisted(() => ({
   searchPackages: vi.fn(),
   resolveDependencies: vi.fn(),
@@ -24,37 +29,52 @@ const {
   createArchive: vi.fn(),
   createLocalRepo: vi.fn(),
   generateDependencyOrderScript: vi.fn(),
+  YumDependencyResolver: vi.fn(function MockYumDependencyResolver() {
+    return {
+      searchPackages,
+      resolveDependencies,
+    };
+  }),
+  YumDownloader: vi.fn(function MockYumDownloader() {
+    return {
+      downloadPackages,
+    };
+  }),
+  OSArchivePackager: vi.fn(function MockOSArchivePackager() {
+    return {
+      createArchive,
+    };
+  }),
+  OSRepoPackager: vi.fn(function MockOSRepoPackager() {
+    return {
+      createLocalRepo,
+    };
+  }),
+  OSScriptGenerator: vi.fn(function MockOSScriptGenerator() {
+    return {
+      generateDependencyOrderScript,
+    };
+  }),
 }));
 
 vi.mock('../../resolver/yum-resolver', () => ({
-  YumDependencyResolver: vi.fn().mockImplementation(() => ({
-    searchPackages,
-    resolveDependencies,
-  })),
+  YumDependencyResolver,
 }));
 
 vi.mock('../../downloaders/yum', () => ({
-  YumDownloader: vi.fn().mockImplementation(() => ({
-    downloadPackages,
-  })),
+  YumDownloader,
 }));
 
 vi.mock('./archive-packager', () => ({
-  OSArchivePackager: vi.fn().mockImplementation(() => ({
-    createArchive,
-  })),
+  OSArchivePackager,
 }));
 
 vi.mock('./repo-packager', () => ({
-  OSRepoPackager: vi.fn().mockImplementation(() => ({
-    createLocalRepo,
-  })),
+  OSRepoPackager,
 }));
 
 vi.mock('./script-generator', () => ({
-  OSScriptGenerator: vi.fn().mockImplementation(() => ({
-    generateDependencyOrderScript,
-  })),
+  OSScriptGenerator,
 }));
 
 function createPackage(

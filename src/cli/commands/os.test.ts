@@ -10,11 +10,13 @@ const {
   getOSPackageCacheStats,
   clearOSPackageCache,
   getConfig,
+  createInterface,
 } = vi.hoisted(() => ({
   downloadOSPackages: vi.fn(),
   getOSPackageCacheStats: vi.fn(),
   clearOSPackageCache: vi.fn(),
   getConfig: vi.fn(),
+  createInterface: vi.fn(),
 }));
 
 vi.mock('../../core/downloaders/os-shared/cli-backend', () => ({
@@ -28,8 +30,6 @@ vi.mock('../../core/config', () => ({
     getConfig,
   })),
 }));
-
-const createInterface = vi.fn();
 
 vi.mock('readline', () => ({
   createInterface,
