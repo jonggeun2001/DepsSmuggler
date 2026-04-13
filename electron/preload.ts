@@ -102,10 +102,12 @@ const electronAPI = {
       ipcRenderer.invoke('fs:read-file', filePath),
   },
 
-  // 캐시 관련
+  // 패키지 메타데이터 캐시 관련
   cache: {
     getSize: (): Promise<number> => ipcRenderer.invoke('cache:get-size'),
     getStats: (): Promise<{
+      scope: string;
+      excludes: string[];
       totalSize: number;
       entryCount: number;
       details: {

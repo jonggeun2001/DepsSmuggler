@@ -189,19 +189,19 @@ const SettingsPage: React.FC = () => {
   const [selectedAptDistroId, setSelectedAptDistroId] = useState<string>(aptDistribution?.id || 'ubuntu-22.04');
   const [selectedApkDistroId, setSelectedApkDistroId] = useState<string>(apkDistribution?.id || 'alpine-3.18');
 
-  // 캐시 정보 로드
+  // 패키지 캐시 정보 로드
   const loadCacheInfo = async () => {
     setLoadingCache(true);
     try {
       // Electron IPC 사용 (개발/프로덕션 모두)
       if (!window.electronAPI?.cache?.getStats) {
-        throw new Error('캐시 정보 API를 사용할 수 없습니다');
+        throw new Error('패키지 캐시 정보 API를 사용할 수 없습니다');
       }
       const stats = await window.electronAPI.cache.getStats();
       setCacheSize(stats.totalSize);
       setCacheCount(stats.entryCount);
     } catch (error) {
-      console.error('캐시 정보 로드 실패:', error);
+      console.error('패키지 캐시 정보 로드 실패:', error);
       // 에러 시 0으로 설정
       setCacheSize(0);
       setCacheCount(0);
@@ -210,21 +210,21 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  // 캐시 삭제
+  // 패키지 캐시 삭제
   const handleClearCache = async () => {
     setClearingCache(true);
     try {
       // Electron IPC 사용 (개발/프로덕션 모두)
       if (!window.electronAPI?.cache?.clear) {
-        throw new Error('캐시 삭제 API를 사용할 수 없습니다');
+        throw new Error('패키지 캐시 삭제 API를 사용할 수 없습니다');
       }
       await window.electronAPI.cache.clear();
       setCacheSize(0);
       setCacheCount(0);
-      message.success('캐시가 삭제되었습니다');
+      message.success('패키지 캐시가 삭제되었습니다');
     } catch (error) {
-      console.error('캐시 삭제 실패:', error);
-      message.error('캐시 삭제에 실패했습니다');
+      console.error('패키지 캐시 삭제 실패:', error);
+      message.error('패키지 캐시 삭제에 실패했습니다');
     } finally {
       setClearingCache(false);
     }
@@ -1457,9 +1457,9 @@ const SettingsPage: React.FC = () => {
         </Card>
         </div>
 
-        {/* 캐시 설정 */}
+        {/* 패키지 캐시 설정 */}
         <Card
-          title="캐시 설정"
+          title="패키지 캐시 설정"
           size="small"
           style={{ marginBottom: CARD_MARGIN }}
           styles={{ body: { padding: CARD_BODY_PADDING } }}
@@ -1468,7 +1468,7 @@ const SettingsPage: React.FC = () => {
             <Col span={8}>
               <Form.Item
                 name="enableCache"
-                label="캐시 사용"
+                label="패키지 캐시 사용"
                 valuePropName="checked"
                 style={{ marginBottom: 8 }}
               >
@@ -1478,7 +1478,7 @@ const SettingsPage: React.FC = () => {
             <Col span={16}>
               <Form.Item
                 name="cachePath"
-                label="캐시 경로"
+                label="패키지 캐시 경로"
                 style={{ marginBottom: 8 }}
               >
                 <Space.Compact style={{ width: '100%' }}>
@@ -1489,7 +1489,7 @@ const SettingsPage: React.FC = () => {
             </Col>
           </Row>
 
-          {/* 캐시 통계 (컴팩트) */}
+          {/* 패키지 캐시 통계 (컴팩트) */}
           <div style={{ padding: '8px 12px', background: '#f5f5f5', borderRadius: 4 }}>
             <Spin spinning={loadingCache}>
               <Row gutter={16} align="middle">
@@ -1505,8 +1505,8 @@ const SettingsPage: React.FC = () => {
                   <Space size={4}>
                     <Button size="small" onClick={loadCacheInfo} loading={loadingCache}>새로고침</Button>
                     <Popconfirm
-                      title="캐시 삭제"
-                      description="모든 캐시가 삭제됩니다"
+                      title="패키지 캐시 삭제"
+                      description="패키지 메타데이터 캐시만 삭제됩니다. 버전 목록 캐시는 유지됩니다"
                       onConfirm={handleClearCache}
                       okText="삭제"
                       cancelText="취소"
@@ -1518,6 +1518,9 @@ const SettingsPage: React.FC = () => {
                 </Col>
               </Row>
             </Spin>
+            <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+              이 영역은 패키지 메타데이터 캐시만 집계합니다. Python/CUDA 버전 목록 캐시는 별도 경로로 관리됩니다.
+            </Text>
           </div>
         </Card>
 

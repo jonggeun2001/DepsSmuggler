@@ -20,7 +20,7 @@
 | `/cart` | `CartPage` | 장바구니와 텍스트 입력 |
 | `/download` | `DownloadPage` | 의존성 해결, 다운로드, 결과 표시 |
 | `/history` | `HistoryPage` | 다운로드 이력 |
-| `/settings` | `SettingsPage` | 설정, SMTP, 캐시, 업데이트 |
+| `/settings` | `SettingsPage` | 설정, SMTP, 패키지 캐시, 업데이트 |
 
 공통 레이아웃은 `src/renderer/layouts/MainLayout.tsx`가 담당하고, 자동 업데이트 UI는 `src/renderer/components/UpdateNotification.tsx`가 전역으로 렌더링됩니다.
 
@@ -111,6 +111,7 @@
 
 - Electron 환경에서는 settings store가 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화됩니다.
 - settings UI는 `zip`/`tar.gz`를 노출하지만, 현재 main process에서 실제 아카이브 생성이 연결된 형식은 `zip`뿐입니다.
+- 설정 화면의 캐시 위젯은 현재 `cache:*` IPC 기준 패키지 메타데이터 캐시만 집계/삭제합니다.
 - 현재 UI 히스토리의 source of truth는 Zustand persist 키 `depssmuggler-history`입니다.
 - `window.electronAPI.history.*`와 `~/.depssmuggler/history.json` 기반 파일 히스토리도 존재하지만, 현재 렌더러에서는 부분적으로만 연결되어 있습니다.
 

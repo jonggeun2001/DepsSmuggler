@@ -50,12 +50,14 @@ electron/
 
 | 채널 | 설명 |
 |------|------|
-| `cache:get-size` | 전체 캐시 크기만 조회 |
-| `cache:stats` | 전체 캐시 통계 |
-| `cache:clear` | 전체 캐시 삭제 |
+| `cache:get-size` | 패키지 메타데이터 캐시 크기만 조회 |
+| `cache:stats` | 패키지 메타데이터 캐시 통계 (`pip`/`npm`/`maven`/`conda`) |
+| `cache:clear` | 패키지 메타데이터 캐시 삭제 |
 | `docker:cache:refresh` | Docker 카탈로그 캐시 갱신 |
 | `docker:cache:status` | Docker 카탈로그 캐시 상태 |
 | `docker:cache:clear` | Docker 카탈로그 캐시 삭제 |
+
+참고: `cache:*`는 현재 버전 목록 캐시(`versions:*`, 예: CUDA 버전 파일/메모리 캐시)나 renderer localStorage 캐시를 포함하지 않습니다.
 
 ### `history-handlers.ts`
 

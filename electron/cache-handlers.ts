@@ -14,7 +14,7 @@ import { getDockerDownloader } from '../src/core';
 
 const log = createScopedLogger('Cache');
 
-async function collectCacheStats() {
+async function collectPackageCacheStats() {
   const [pipStats, npmStats, mavenStats, condaStats] = await Promise.all([
     Promise.resolve(pipCache.getCacheStats()),
     Promise.resolve(npmCache.getNpmCacheStats()),
@@ -30,6 +30,8 @@ async function collectCacheStats() {
     (condaStats.entries?.length || 0);
 
   return {
+    scope: 'package-metadata',
+    excludes: ['version caches', 'renderer localStorage'],
     totalSize,
     entryCount,
     details: {
@@ -47,16 +49,16 @@ async function collectCacheStats() {
 export function registerCacheHandlers(): void {
   // 캐시 전체 크기 조회
   ipcMain.handle('cache:get-size', async () => {
-    log.debug('Getting cache size...');
-    const stats = await collectCacheStats();
+    log.debug('Getting package cache size...');
+    const stats = await collectPackageCacheStats();
     return stats.totalSize;
   });
 
   // 캐시 통계 조회
   ipcMain.handle('cache:stats', async () => {
-    log.debug('Getting cache stats...');
+    log.debug('Getting package cache stats...');
     try {
-      return await collectCacheStats();
+      return await collectPackageCacheStats();
     } catch (error) {
       log.error('Failed to get cache stats:', error);
       throw error;
@@ -65,7 +67,7 @@ export function registerCacheHandlers(): void {
 
   // 캐시 전체 삭제
   ipcMain.handle('cache:clear', async () => {
-    log.info('Clearing all caches...');
+    log.info('Clearing package metadata caches...');
     try {
       await Promise.all([
         Promise.resolve(pipCache.clearAllCache()),
@@ -73,7 +75,7 @@ export function registerCacheHandlers(): void {
         Promise.all([mavenCache.clearMemoryCache(), mavenCache.clearDiskCache()]),
         condaCache.clearCache(),
       ]);
-      log.info('All caches cleared');
+      log.info('Package metadata caches cleared');
       return { success: true };
     } catch (error) {
       log.error('Failed to clear caches:', error);

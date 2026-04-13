@@ -56,6 +56,8 @@ export interface FileSystemAPI {
 export interface CacheAPI {
   getSize: () => Promise<number>;
   getStats: () => Promise<{
+    scope: string;
+    excludes: string[];
     totalSize: number;
     entryCount: number;
     details: {
