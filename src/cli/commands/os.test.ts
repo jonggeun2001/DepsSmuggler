@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cacheClearCommand,
@@ -36,6 +37,8 @@ vi.mock('readline', () => ({
 }));
 
 describe('os CLI commands', () => {
+  const expectedCacheDirectory = join('/tmp/depssmuggler-cache', 'os-packages');
+
   beforeEach(() => {
     vi.clearAllMocks();
     getConfig.mockReturnValue({
@@ -54,12 +57,12 @@ describe('os CLI commands', () => {
       conflicts: [],
     });
     getOSPackageCacheStats.mockResolvedValue({
-      directory: '/tmp/depssmuggler-cache/os-packages',
+      directory: expectedCacheDirectory,
       entryCount: 3,
       totalSize: 1024,
     });
     clearOSPackageCache.mockResolvedValue({
-      directory: '/tmp/depssmuggler-cache/os-packages',
+      directory: expectedCacheDirectory,
       clearedEntries: 3,
       clearedSize: 1024,
     });
@@ -84,7 +87,7 @@ describe('os CLI commands', () => {
         archiveFormat: 'zip',
         concurrency: 7,
         cacheEnabled: true,
-        cacheDirectory: '/tmp/depssmuggler-cache/os-packages',
+        cacheDirectory: expectedCacheDirectory,
       })
     );
   });
@@ -92,9 +95,7 @@ describe('os CLI commands', () => {
   it('cacheStatsCommand는 OS 캐시 통계를 backend에서 조회한다', async () => {
     await cacheStatsCommand();
 
-    expect(getOSPackageCacheStats).toHaveBeenCalledWith(
-      '/tmp/depssmuggler-cache/os-packages'
-    );
+    expect(getOSPackageCacheStats).toHaveBeenCalledWith(expectedCacheDirectory);
   });
 
   it('cacheClearCommand는 확인이 거부되면 삭제를 호출하지 않는다', async () => {
