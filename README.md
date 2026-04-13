@@ -17,9 +17,9 @@
 | Python `conda` | 지원 | 지원 | 채널 선택 지원 |
 | Java `maven` | 지원 | 지원 | 네이티브 classifier 확인 지원 |
 | Node.js `npm` | 지원 | 지원 | npm Registry 검색/버전 조회/다운로드 |
-| OS `yum` | 지원 | 부분 지원 | CLI는 `os` 네임스페이스 중심이며 `download/cache`는 재구현 중 |
-| OS `apt` | 지원 | 부분 지원 | CLI `os download`는 재구현 중 안내만 출력 |
-| OS `apk` | 지원 | 부분 지원 | GUI 기준 기능이 더 완전함 |
+| OS `yum` | 지원 | 지원 | `os list-distros/search/download/cache` 제공 |
+| OS `apt` | 지원 | 지원 | `os download`로 의존성 포함 다운로드 가능 |
+| OS `apk` | 지원 | 지원 | CLI에서 아카이브/로컬 저장소 출력 지원 |
 | Container `docker` | 지원 | 지원 | GUI는 Docker Hub 외 레지스트리 선택 UI 포함 |
 
 ## 주요 기능
@@ -106,9 +106,12 @@ depssmuggler download -t pip --file requirements.txt
 # OS 패키지 지원 배포판/검색
 depssmuggler os list-distros
 depssmuggler os search nginx --distro rocky-9
+depssmuggler os download httpd --distro rocky-9 --format both --scripts
+depssmuggler os cache stats
+depssmuggler os cache clear
 ```
 
-현재 CLI의 `download`는 `pip`, `conda`, `maven`, `npm`, `docker` 중심이며, OS 패키지는 `os` 네임스페이스에서 다룹니다. 다만 `os download`, `os cache stats`, `os cache clear`는 재구현 중이며 Electron GUI 사용을 안내합니다.
+OS 패키지는 `os` 네임스페이스에서 다루며, `download`는 실제 패키지 다운로드와 의존성 해결, `cache`는 OS 메타데이터 캐시 통계/삭제를 수행합니다.
 
 ## 저장 위치
 

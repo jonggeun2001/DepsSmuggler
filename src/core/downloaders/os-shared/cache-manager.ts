@@ -276,8 +276,20 @@ export class OSCacheManager {
    * 캐시 키를 파일명으로 변환
    */
   private keyToFilename(key: string): string {
-    // 안전한 파일명으로 변환
-    return key.replace(/[^a-zA-Z0-9_-]/g, '_') + '.json';
+    return Buffer.from(key, 'utf8').toString('base64url') + '.json';
+  }
+
+  /**
+   * 파일명에서 캐시 키 복원
+   */
+  private filenameToKey(filename: string): string | null {
+    const encoded = filename.replace(/\.json$/, '');
+
+    try {
+      return Buffer.from(encoded, 'base64url').toString('utf8');
+    } catch {
+      return encoded.replace(/_/g, ':');
+    }
   }
 
   /**
@@ -376,9 +388,10 @@ export class OSCacheManager {
             continue;
           }
 
-          // 키 복원
-          const key = file.replace('.json', '').replace(/_/g, ':');
-          this.memoryCache.set(key, entry);
+          const key = this.filenameToKey(file);
+          if (key) {
+            this.memoryCache.set(key, entry);
+          }
         } catch {
           // 파싱 실패한 파일 삭제
           fs.unlinkSync(filePath);

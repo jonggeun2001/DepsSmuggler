@@ -30,6 +30,12 @@ export interface DownloadResult {
   verification?: VerificationResult;
 }
 
+export interface DownloadPackagesResult {
+  success: OSPackageInfo[];
+  failed: Array<{ package: OSPackageInfo; error: Error }>;
+  downloadedFiles: Map<string, string>;
+}
+
 /**
  * 다운로더 옵션
  */
@@ -221,12 +227,10 @@ export abstract class BaseOSDownloader {
    */
   async downloadPackages(
     packages: OSPackageInfo[]
-  ): Promise<{
-    success: OSPackageInfo[];
-    failed: Array<{ package: OSPackageInfo; error: Error }>;
-  }> {
+  ): Promise<DownloadPackagesResult> {
     const success: OSPackageInfo[] = [];
     const failed: Array<{ package: OSPackageInfo; error: Error }> = [];
+    const downloadedFiles = new Map<string, string>();
 
     // 간단한 병렬 처리 (concurrency 제한)
     const queue = [...packages];
@@ -240,6 +244,9 @@ export abstract class BaseOSDownloader {
 
       if (result.success) {
         success.push(pkg);
+        if (result.filePath) {
+          downloadedFiles.set(`${pkg.name}-${pkg.version}`, result.filePath);
+        }
       } else {
         failed.push({ package: pkg, error: result.error! });
       }
@@ -275,6 +282,6 @@ export abstract class BaseOSDownloader {
       }
     }
 
-    return { success, failed };
+    return { success, failed, downloadedFiles };
   }
 }

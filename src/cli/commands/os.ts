@@ -5,6 +5,8 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import * as path from 'path';
+import * as readline from 'readline';
 import {
   getDistributionById,
   getDistributionsByPackageManager,
@@ -13,16 +15,17 @@ import {
 import type {
   OSDistribution,
   OSPackageManager,
-  OSPackageInfo,
   OSArchitecture,
-  OSPackageSearchResult,
+  OutputType,
+  ArchiveFormat,
 } from '../../core/downloaders/os-shared/types';
-import { YumMetadataParser } from '../../core/downloaders/yum';
-import { AptMetadataParser } from '../../core/downloaders/apt';
-import { ApkMetadataParser } from '../../core/downloaders/apk';
-
-// 검색 기능은 CLI에서 직접 지원
-// 다운로드 기능은 Electron GUI의 os:* IPC 핸들러를 통해 사용
+import {
+  clearOSPackageCache,
+  downloadOSPackages,
+  getOSPackageCacheStats,
+  searchOSPackages,
+} from '../../core/downloaders/os-shared/cli-backend';
+import { getConfigManager } from '../../core/config';
 
 /**
  * OS 명령어 등록
@@ -136,7 +139,7 @@ async function listDistrosCommand(options: { type?: string }): Promise<void> {
 /**
  * 패키지 검색 명령어
  */
-async function searchCommand(
+export async function searchCommand(
   query: string,
   options: { distro: string; arch: string; limit: string }
 ): Promise<void> {
@@ -157,68 +160,17 @@ async function searchCommand(
   console.log(chalk.cyan(`\n'${query}' 검색 중... (${distro.name}, ${arch})\n`));
 
   try {
-    // 검색 결과를 통일된 형식으로 저장 (패키지명, 버전, 저장소명, 설명)
-    const searchResults: Array<{ name: string; version: string; repoName: string; summary?: string }> = [];
-    const repos = [...distro.defaultRepos, ...distro.extendedRepos].filter(r => r.enabled);
-
-    for (const repo of repos) {
-      try {
-        switch (distro.packageManager) {
-          case 'yum': {
-            const parser = new YumMetadataParser(repo, arch);
-            const packages = await parser.searchPackages(query, 'partial');
-            for (const pkg of packages) {
-              searchResults.push({
-                name: pkg.name,
-                version: pkg.version,
-                repoName: repo.name,
-                summary: pkg.summary,
-              });
-            }
-            break;
-          }
-          case 'apt': {
-            // apt는 component가 필요 (기본 'main' 사용)
-            const parser = new AptMetadataParser(repo, 'main', arch);
-            const results = await parser.searchPackages(query, 'partial');
-            for (const result of results) {
-              searchResults.push({
-                name: result.name,
-                version: result.latest.version,
-                repoName: repo.name,
-                summary: result.latest.summary,
-              });
-            }
-            break;
-          }
-          case 'apk': {
-            const parser = new ApkMetadataParser(repo, arch);
-            const results = await parser.searchPackages(query, 'partial');
-            for (const result of results) {
-              searchResults.push({
-                name: result.name,
-                version: result.latest.version,
-                repoName: repo.name,
-                summary: result.latest.summary,
-              });
-            }
-            break;
-          }
-        }
-      } catch (repoError) {
-        // 개별 저장소 오류는 경고만 출력
-        console.log(chalk.gray(`  저장소 '${repo.name}' 검색 건너뜀: ${(repoError as Error).message}`));
-      }
-    }
-
-    // 중복 제거 (이름 + 버전 기준)
-    const uniqueResults = Array.from(
-      new Map(searchResults.map(p => [`${p.name}-${p.version}`, p])).values()
-    );
-
-    // 결과 제한
+    const config = getConfigManager().getConfig();
+    const cacheDirectory = path.join(config.cachePath, 'os-packages');
     const limit = parseInt(options.limit, 10);
-    const finalResults = uniqueResults.slice(0, limit);
+    const finalResults = await searchOSPackages({
+      distribution: distro,
+      architecture: arch,
+      query,
+      limit,
+      cacheDirectory,
+      cacheEnabled: config.cacheEnabled,
+    });
 
     if (finalResults.length === 0) {
       console.log(chalk.yellow('검색 결과가 없습니다.'));
@@ -228,13 +180,18 @@ async function searchCommand(
     console.log(chalk.green(`${finalResults.length}개의 패키지를 찾았습니다:\n`));
     console.log(chalk.gray('─'.repeat(80)));
 
-    for (const pkg of finalResults) {
-      const versionStr = String(pkg.version || 'unknown');
+    for (const result of finalResults) {
+      const versionStr = String(result.latest.version || 'unknown');
+      const repoName = result.latest.repository.name;
       console.log(
-        `${chalk.bold(pkg.name.padEnd(30))} ${chalk.blue(versionStr.padEnd(20))} ${chalk.gray(pkg.repoName)}`
+        `${chalk.bold(result.name.padEnd(30))} ${chalk.blue(versionStr.padEnd(20))} ${chalk.gray(repoName)}`
       );
-      if (pkg.summary) {
-        console.log(chalk.gray(`  ${pkg.summary.slice(0, 70)}${pkg.summary.length > 70 ? '...' : ''}`));
+      if (result.latest.summary) {
+        console.log(
+          chalk.gray(
+            `  ${result.latest.summary.slice(0, 70)}${result.latest.summary.length > 70 ? '...' : ''}`
+          )
+        );
       }
     }
 
@@ -249,7 +206,7 @@ async function searchCommand(
 /**
  * 패키지 다운로드 명령어
  */
-async function downloadCommand(
+export async function downloadCommand(
   packageNames: string[],
   options: {
     distro: string;
@@ -262,27 +219,129 @@ async function downloadCommand(
     concurrency: string;
   }
 ): Promise<void> {
-  console.log(chalk.yellow('\n⚠️  OS 패키지 CLI 명령어는 현재 재구현 중입니다.'));
-  console.log(chalk.cyan('Electron GUI를 사용하여 OS 패키지를 다운로드하세요.\n'));
-  process.exit(0);
+  const distro = getDistributionById(options.distro);
+  if (!distro) {
+    console.error(chalk.red(`\n오류: 알 수 없는 배포판 '${options.distro}'`));
+    process.exit(1);
+  }
+
+  const arch = options.arch as OSArchitecture;
+  if (!distro.architectures.includes(arch)) {
+    console.error(chalk.red(`\n오류: 배포판 '${distro.name}'은 아키텍처 '${arch}'를 지원하지 않습니다.`));
+    console.log(chalk.cyan(`지원되는 아키텍처: ${distro.architectures.join(', ')}`));
+    process.exit(1);
+  }
+
+  const outputType = options.format as OutputType;
+  if (!['archive', 'repository', 'both'].includes(outputType)) {
+    console.error(chalk.red(`\n오류: 지원하지 않는 출력 형식 '${options.format}'`));
+    process.exit(1);
+  }
+
+  const archiveFormat = options.archiveFormat as ArchiveFormat;
+  if (!['zip', 'tar.gz'].includes(archiveFormat)) {
+    console.error(chalk.red(`\n오류: 지원하지 않는 압축 형식 '${options.archiveFormat}'`));
+    process.exit(1);
+  }
+
+  const config = getConfigManager().getConfig();
+  const cacheDirectory = path.join(config.cachePath, 'os-packages');
+  const concurrency = parseInt(options.concurrency, 10);
+
+  console.log(chalk.cyan(`\nOS 패키지 다운로드를 시작합니다... (${distro.name}, ${arch})\n`));
+
+  try {
+    const result = await downloadOSPackages({
+      distribution: distro,
+      architecture: arch,
+      packageNames,
+      outputPath: options.output,
+      outputType,
+      archiveFormat,
+      resolveDependencies: options.deps,
+      includeScripts: Boolean(options.scripts),
+      concurrency: Number.isFinite(concurrency) && concurrency > 0
+        ? concurrency
+        : config.concurrentDownloads,
+      cacheDirectory,
+      cacheEnabled: config.cacheEnabled,
+    });
+
+    console.log(chalk.green('다운로드가 완료되었습니다.\n'));
+    console.log(`요청 패키지: ${result.requestedPackages.length}개`);
+    console.log(`실제 다운로드: ${result.packages.length}개`);
+
+    for (const artifact of result.artifacts) {
+      console.log(`${artifact.type === 'archive' ? '아카이브' : '로컬 저장소'}: ${artifact.path}`);
+    }
+
+    if (result.unresolved.length > 0) {
+      console.log(chalk.yellow(`\n미해결 의존성: ${result.unresolved.length}개`));
+    }
+
+    if (result.warnings.length > 0) {
+      console.log(chalk.yellow('\n경고:'));
+      for (const warning of result.warnings) {
+        console.log(`- ${warning}`);
+      }
+    }
+    console.log('');
+  } catch (error) {
+    console.error(chalk.red(`\n다운로드 오류: ${(error as Error).message}`));
+    process.exit(1);
+  }
 }
 
 /**
  * 캐시 통계 명령어
  */
-async function cacheStatsCommand(): Promise<void> {
-  console.log(chalk.yellow('\n⚠️  OS 패키지 CLI 명령어는 현재 재구현 중입니다.'));
-  console.log(chalk.cyan('Electron GUI를 사용하여 OS 패키지를 관리하세요.\n'));
-  process.exit(0);
+export async function cacheStatsCommand(): Promise<void> {
+  const config = getConfigManager().getConfig();
+  const cacheDirectory = path.join(config.cachePath, 'os-packages');
+
+  try {
+    const stats = await getOSPackageCacheStats(cacheDirectory);
+    console.log(chalk.cyan('\nOS 패키지 메타데이터 캐시 통계\n'));
+    console.log(`경로: ${stats.directory}`);
+    console.log(`항목 수: ${stats.entryCount}`);
+    console.log(`크기: ${formatBytes(stats.totalSize)}\n`);
+  } catch (error) {
+    console.error(chalk.red(`캐시 통계 조회 실패: ${(error as Error).message}`));
+    process.exit(1);
+  }
 }
 
 /**
  * 캐시 삭제 명령어
  */
-async function cacheClearCommand(options: { force?: boolean }): Promise<void> {
-  console.log(chalk.yellow('\n⚠️  OS 패키지 CLI 명령어는 현재 재구현 중입니다.'));
-  console.log(chalk.cyan('Electron GUI를 사용하여 OS 패키지를 관리하세요.\n'));
-  process.exit(0);
+export async function cacheClearCommand(options: { force?: boolean }): Promise<void> {
+  const config = getConfigManager().getConfig();
+  const cacheDirectory = path.join(config.cachePath, 'os-packages');
+
+  if (!options.force) {
+    const confirmed = await askConfirmation('정말로 OS 메타데이터 캐시를 삭제하시겠습니까?');
+    if (!confirmed) {
+      console.log(chalk.yellow('캐시 삭제가 취소되었습니다.\n'));
+      return;
+    }
+  }
+
+  try {
+    const result = await clearOSPackageCache(cacheDirectory);
+    if (result.clearedEntries === 0) {
+      console.log(chalk.yellow('삭제할 OS 메타데이터 캐시가 없습니다.\n'));
+      return;
+    }
+
+    console.log(
+      chalk.green(
+        `OS 메타데이터 캐시를 삭제했습니다 (${result.clearedEntries}개, ${formatBytes(result.clearedSize)}).\n`
+      )
+    );
+  } catch (error) {
+    console.error(chalk.red(`캐시 삭제 실패: ${(error as Error).message}`));
+    process.exit(1);
+  }
 }
 
 // 유틸리티 함수들
@@ -322,8 +381,19 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-function formatSpeed(bytesPerSecond: number): string {
-  return formatBytes(bytesPerSecond) + '/s';
+async function askConfirmation(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(`${question} (y/N) `, (answer) => {
+      rl.close();
+      const normalized = answer.trim().toLowerCase();
+      resolve(normalized === 'y' || normalized === 'yes');
+    });
+  });
 }
 
 export default registerOSCommands;

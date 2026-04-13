@@ -164,7 +164,7 @@ initializeLogger().then(() => {
     console.log(chalk.gray('    depssmuggler search requests -t pip'));
     console.log(chalk.gray('    depssmuggler os list-distros'));
     console.log(chalk.gray('    depssmuggler os search nginx --distro rocky-9'));
-    console.log(chalk.gray('    depssmuggler os download httpd --distro rocky-9  # 현재 GUI 사용 안내'));
+    console.log(chalk.gray('    depssmuggler os download httpd --distro rocky-9'));
     console.log('\n  자세한 내용: depssmuggler --help\n');
   }
 
