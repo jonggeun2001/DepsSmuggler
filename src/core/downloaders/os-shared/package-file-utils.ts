@@ -1,7 +1,12 @@
 import type { OSPackageInfo, OSPackageManager } from './types';
 
 export function getDownloadedFileKey(pkg: OSPackageInfo): string {
-  return `${pkg.name}-${pkg.version}-${pkg.release ?? ''}-${pkg.architecture}`;
+  return JSON.stringify([
+    pkg.name,
+    pkg.version,
+    pkg.release ?? '',
+    pkg.architecture,
+  ]);
 }
 
 export function getPackageFilename(

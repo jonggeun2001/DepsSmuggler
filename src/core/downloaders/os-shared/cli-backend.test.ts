@@ -244,6 +244,44 @@ describe('OS CLI backend', () => {
     expect(result.requestedPackages).toEqual([newerRelease]);
   });
 
+  it('YUM exact lookup은 prerelease보다 정식 릴리스를 우선 선택한다', async () => {
+    const prerelease = createPackage('httpd', '2.4.57~rc1', { release: '1.el9' });
+    const stable = createPackage('httpd', '2.4.57', { release: '1.el9' });
+
+    searchPackages.mockResolvedValue([
+      {
+        name: 'httpd',
+        latest: prerelease,
+        versions: [prerelease, stable],
+      },
+    ]);
+    downloadPackages.mockResolvedValue({
+      success: [stable],
+      failed: [],
+      downloadedFiles: new Map([
+        [getDownloadedFileKey(stable), path.join(tempDir, 'httpd-stable.rpm')],
+      ]),
+    });
+    createArchive.mockResolvedValue(path.join(tempDir, 'bundle.zip'));
+
+    const result = await downloadOSPackages({
+      distribution: distro,
+      architecture: 'x86_64',
+      packageNames: ['httpd'],
+      outputPath: path.join(tempDir, 'bundle-stable'),
+      outputType: 'archive',
+      archiveFormat: 'zip',
+      resolveDependencies: false,
+      includeScripts: false,
+      concurrency: 1,
+      cacheDirectory: path.join(tempDir, 'cache'),
+      cacheEnabled: true,
+    });
+
+    expect(downloadPackages).toHaveBeenCalledWith([stable]);
+    expect(result.requestedPackages).toEqual([stable]);
+  });
+
   it('OS 메타데이터 캐시 통계와 삭제를 실제 디렉토리에 반영한다', async () => {
     const cacheDir = path.join(tempDir, 'cache');
     fs.mkdirSync(cacheDir, { recursive: true });

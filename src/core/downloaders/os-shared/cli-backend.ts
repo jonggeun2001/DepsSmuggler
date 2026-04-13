@@ -81,26 +81,95 @@ type ResolverSearchable = BaseOSDependencyResolver & {
   searchPackages(query: string, matchType?: MatchType): Promise<OSPackageSearchResult[]>;
 };
 
-function compareVersionStrings(a: string, b: string): number {
-  const partsA = a.split(/[.-]/);
-  const partsB = b.split(/[.-]/);
-  const maxLen = Math.max(partsA.length, partsB.length);
+function tokenizeRpmVersion(value: string): string[] {
+  const tokens: string[] = [];
+  let index = 0;
 
-  for (let index = 0; index < maxLen; index += 1) {
-    const partA = partsA[index] || '0';
-    const partB = partsB[index] || '0';
-    const numA = parseInt(partA, 10);
-    const numB = parseInt(partB, 10);
+  while (index < value.length) {
+    const char = value[index];
 
-    if (!Number.isNaN(numA) && !Number.isNaN(numB)) {
-      if (numA !== numB) {
-        return numA - numB;
-      }
+    if (char === '~') {
+      tokens.push('~');
+      index += 1;
       continue;
     }
 
-    if (partA !== partB) {
-      return partA.localeCompare(partB);
+    if (!/[A-Za-z0-9]/.test(char)) {
+      index += 1;
+      continue;
+    }
+
+    const isDigit = /\d/.test(char);
+    let end = index + 1;
+    while (end < value.length) {
+      const nextChar = value[end];
+      if (!/[A-Za-z0-9]/.test(nextChar)) {
+        break;
+      }
+      if (/\d/.test(nextChar) !== isDigit) {
+        break;
+      }
+      end += 1;
+    }
+
+    tokens.push(value.slice(index, end));
+    index = end;
+  }
+
+  return tokens;
+}
+
+function compareRpmToken(left: string | undefined, right: string | undefined): number {
+  if (left === right) {
+    return 0;
+  }
+
+  if (left === undefined) {
+    if (right === '~') {
+      return 1;
+    }
+    return /^\d+$/.test(right ?? '') ? -1 : 1;
+  }
+
+  if (right === undefined) {
+    if (left === '~') {
+      return -1;
+    }
+    return /^\d+$/.test(left) ? 1 : -1;
+  }
+
+  if (left === '~' || right === '~') {
+    return left === '~' ? -1 : 1;
+  }
+
+  const leftIsNumber = /^\d+$/.test(left);
+  const rightIsNumber = /^\d+$/.test(right);
+
+  if (leftIsNumber && rightIsNumber) {
+    const normalizedLeft = left.replace(/^0+/, '') || '0';
+    const normalizedRight = right.replace(/^0+/, '') || '0';
+    if (normalizedLeft.length !== normalizedRight.length) {
+      return normalizedLeft.length - normalizedRight.length;
+    }
+    return normalizedLeft.localeCompare(normalizedRight);
+  }
+
+  if (leftIsNumber !== rightIsNumber) {
+    return leftIsNumber ? 1 : -1;
+  }
+
+  return left.localeCompare(right);
+}
+
+function compareVersionStrings(a: string, b: string): number {
+  const tokensA = tokenizeRpmVersion(a);
+  const tokensB = tokenizeRpmVersion(b);
+  const maxLength = Math.max(tokensA.length, tokensB.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const tokenDiff = compareRpmToken(tokensA[index], tokensB[index]);
+    if (tokenDiff !== 0) {
+      return tokenDiff;
     }
   }
 
