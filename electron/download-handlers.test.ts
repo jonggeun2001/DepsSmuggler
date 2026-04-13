@@ -213,6 +213,102 @@ describe('registerDownloadHandlers', () => {
             path: '/downloads/repository',
           }),
         ]),
+        warnings: [],
+        unresolved: [],
+        conflicts: [],
+        cancelled: false,
+      })
+    );
+  });
+
+  it('os:download:start에서 해결되지 않은 의존성이 있으면 다운로드를 시작하지 않고 결과에 포함한다', async () => {
+    const mockWindow = {
+      webContents: {
+        send: windowSend,
+      },
+    };
+
+    yumResolveDependencies.mockResolvedValueOnce({
+      packages: [rootPackage],
+      unresolved: [{ name: 'openssl-libs', operator: '>=', version: '1.1.1' }],
+      conflicts: [{ package: 'glibc', versions: [dependencyPackage] }],
+      warnings: ['1 dependencies could not be resolved'],
+    });
+
+    registerDownloadHandlers(() => mockWindow as never);
+
+    const osDownloadHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'os:download:start'
+    )?.[1];
+
+    const result = await osDownloadHandler(
+      {},
+      {
+        packages: [rootPackage],
+        outputDir: '/downloads',
+        distribution,
+        architecture: 'x86_64',
+        resolveDependencies: true,
+      }
+    );
+
+    expect(yumDownloadPackage).not.toHaveBeenCalled();
+    expect(archiveCreateArchive).not.toHaveBeenCalled();
+    expect(repoCreateLocalRepo).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: [],
+        failed: [],
+        skipped: [],
+        warnings: ['1 dependencies could not be resolved'],
+        unresolved: [{ name: 'openssl-libs', operator: '>=', version: '1.1.1' }],
+        conflicts: [{ package: 'glibc', versions: [dependencyPackage] }],
+        cancelled: false,
+        generatedOutputs: [],
+      })
+    );
+  });
+
+  it('os:download:start에서 건너뛴 패키지를 failed 대신 skipped로 집계한다', async () => {
+    const mockWindow = {
+      webContents: {
+        send: windowSend,
+      },
+    };
+
+    yumDownloadPackage.mockReset();
+    yumDownloadPackage.mockResolvedValueOnce({
+      success: false,
+      error: new Error('사용자 건너뜀'),
+      skipped: true,
+    });
+
+    registerDownloadHandlers(() => mockWindow as never);
+
+    const osDownloadHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'os:download:start'
+    )?.[1];
+
+    const result = await osDownloadHandler(
+      {},
+      {
+        packages: [rootPackage],
+        outputDir: '/downloads',
+        distribution,
+        architecture: 'x86_64',
+        resolveDependencies: false,
+      }
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: [],
+        failed: [],
+        skipped: [rootPackage],
+        warnings: [],
+        unresolved: [],
+        conflicts: [],
+        cancelled: false,
       })
     );
   });

@@ -18,6 +18,9 @@ interface OSDownloadResultProps {
   outputOptions: OSPackageOutputOptions;
   packageManager: OSPackageManager;
   generatedOutputs?: Array<{ type: 'archive' | 'repository'; path: string; label: string }>;
+  warnings?: string[];
+  conflicts?: Array<{ package: string; versions: OSPackageInfo[] }>;
+  cancelled?: boolean;
   onOpenFolder: () => void;
   onClose: () => void;
 }
@@ -30,6 +33,9 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
   outputOptions,
   packageManager,
   generatedOutputs = [],
+  warnings = [],
+  conflicts = [],
+  cancelled = false,
   onOpenFolder,
   onClose,
 }) => {
@@ -74,20 +80,24 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
     }
   };
 
-  const isSuccess = failed.length === 0;
+  const isSuccess = !cancelled && failed.length === 0;
+  const title = cancelled
+    ? '다운로드 취소됨'
+    : isSuccess
+    ? '다운로드 완료!'
+    : '다운로드 완료 (일부 실패)';
+  const summary = cancelled
+    ? `${success.length}개 패키지 다운로드 성공 후 작업이 중단되었습니다`
+    : `${success.length}개 패키지 다운로드 성공${failed.length > 0 ? `, ${failed.length}개 실패` : ''}${skipped.length > 0 ? `, ${skipped.length}개 건너뜀` : ''}`;
 
   return (
     <div className="os-download-result">
       {/* 헤더 */}
       <div className={`result-header ${isSuccess ? 'success' : 'warning'}`}>
-        <span className="result-icon">{isSuccess ? '✅' : '⚠️'}</span>
+        <span className="result-icon">{isSuccess ? '✅' : cancelled ? '🛑' : '⚠️'}</span>
         <div className="result-title">
-          <h2>{isSuccess ? '다운로드 완료!' : '다운로드 완료 (일부 실패)'}</h2>
-          <p>
-            {success.length}개 패키지 다운로드 성공
-            {failed.length > 0 && `, ${failed.length}개 실패`}
-            {skipped.length > 0 && `, ${skipped.length}개 건너뜀`}
-          </p>
+          <h2>{title}</h2>
+          <p>{summary}</p>
         </div>
       </div>
 
@@ -106,6 +116,33 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
           <span className="summary-value">{formatSize(totalSize)}</span>
         </div>
       </div>
+
+      {(warnings.length > 0 || conflicts.length > 0) && (
+        <div className="result-section warnings">
+          <h3 className="section-title">확인할 사항</h3>
+          {warnings.length > 0 && (
+            <ul className="failed-list">
+              {warnings.map((warning, index) => (
+                <li key={`warning-${index}`}>
+                  <span className="error-msg">{warning}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {conflicts.length > 0 && (
+            <ul className="failed-list">
+              {conflicts.map((conflict) => (
+                <li key={conflict.package}>
+                  <span className="pkg-name">{conflict.package}</span>
+                  <span className="error-msg">
+                    {conflict.versions.map((pkg) => pkg.version).join(', ')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {generatedOutputs.length > 0 && (
         <div className="result-section">

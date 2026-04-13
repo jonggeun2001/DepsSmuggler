@@ -121,8 +121,9 @@ depssmuggler/
 1. `WizardPage.tsx`가 `os:search`로 `yum/apt/apk` 패키지를 찾고, 전체 `OSPackageInfo`를 장바구니 메타데이터로 유지합니다.
 2. OS 패키지 전용 장바구니만 담긴 상태에서 `WizardPage.tsx`와 `DownloadPage.tsx`가 동일 라우트(`/download`) 안에서 OS 전용 다운로드 화면으로 전환됩니다.
 3. `DownloadPage.tsx`가 `os:getDistribution`으로 선택된 배포판 전체 설정을 읽고 `archive | repository | both` 출력 옵션을 노출합니다.
-4. 실제 다운로드 시작은 `os:download:start` 하나로 통합되어, 메인 프로세스가 필요 시 의존성 해결과 패키징까지 수행합니다.
-5. 진행률은 `os:download:progress`로, 결과 출력물 경로는 `os:download:start` 반환값으로 렌더러에 전달됩니다.
+4. 실제 다운로드 시작은 `os:download:start` 하나로 통합되어, 메인 프로세스가 필요 시 의존성 해결과 패키징까지 수행합니다. 미해결 의존성은 이 단계에서 즉시 중단되고, 충돌/경고는 결과 계약에 유지됩니다.
+5. 진행률은 `os:download:progress`로, 취소는 `os:download:cancel`로 처리됩니다.
+6. 결과 출력물 경로와 `generatedOutputs`, `warnings`, `conflicts`, `cancelled` 상태는 `os:download:start` 반환값으로 렌더러에 전달되고, 성공 시 routed OS 결과 화면을 유지한 채 히스토리 저장과 장바구니 정리가 함께 일어납니다.
 
 ## 상태 저장
 
@@ -151,7 +152,7 @@ npm run lint
 npx tsc --noEmit
 ```
 
-참고: `playwright.config.ts`는 존재하지만 현재 저장소에는 `tests/e2e` 시나리오가 커밋되어 있지 않아 E2E는 스캐폴딩 단계로 봅니다.
+참고: `tests/e2e/os-package-download.spec.ts`가 routed OS 다운로드 흐름의 최소 E2E 스모크를 담당합니다. 다만 로컬 실행에는 Playwright 의존성 설치가 필요합니다.
 
 ## 관련 문서
 

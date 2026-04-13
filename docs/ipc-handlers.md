@@ -129,7 +129,8 @@ electron/
 | 채널 | 설명 |
 |------|------|
 | `os:resolveDependencies` | OS 패키지 의존성 해결 |
-| `os:download:start` | OS 패키지 전용 end-to-end 다운로드 시작. 필요 시 의존성 해결, 원본 패키지 다운로드, `archive/repository/both` 패키징까지 수행 |
+| `os:download:start` | OS 패키지 전용 end-to-end 다운로드 시작. 필요 시 의존성 해결, 원본 패키지 다운로드, `archive/repository/both` 패키징까지 수행하고 `warnings`, `unresolved`, `conflicts`, `generatedOutputs`, `cancelled`를 함께 반환 |
+| `os:download:cancel` | OS 패키지 전용 다운로드 취소 요청 |
 | `os:cache:stats` | OS 캐시 통계 조회 placeholder (`{ size: 0, count: 0, path: '' }`) |
 | `os:cache:clear` | OS 캐시 초기화 placeholder (`{ success: true }`만 반환) |
 
@@ -138,7 +139,7 @@ OS 이벤트:
 | 이벤트 | 설명 |
 |--------|------|
 | `os:resolveDependencies:progress` | OS 의존성 해결 진행률 |
-| `os:download:progress` | OS 다운로드/패키징 진행률 (`resolving`, `downloading`, `packaging` 단계 포함) |
+| `os:download:progress` | OS 다운로드/패키징 진행률 (`resolving`, `downloading`, `packaging` 단계 포함). 충돌/미해결 의존성도 resolving 단계 메시지로 먼저 표면화 |
 
 참고: `os:cache:*` 채널은 현재 실제 캐시 백엔드에 연결되지 않은 no-op 성격의 placeholder 구현입니다.
 

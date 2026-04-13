@@ -26,6 +26,8 @@ export interface DownloadResult {
   filePath?: string;
   /** 에러 */
   error?: Error;
+  /** 사용자가 건너뛰기를 선택했는지 여부 */
+  skipped?: boolean;
   /** 검증 결과 */
   verification?: VerificationResult;
 }
@@ -138,6 +140,7 @@ export abstract class BaseOSDownloader {
               return {
                 success: false,
                 error: lastError,
+                skipped: true,
               };
             } else {
               throw lastError;

@@ -38,6 +38,7 @@ import type {
   OSDownloadProgress,
   OSErrorAction,
   OSPackageOutputOptions,
+  PackageDependency,
 } from '../src/core/downloaders/os-shared/types';
 import { dialog } from 'electron';
 
@@ -86,6 +87,7 @@ function sendProgressThrottled(
 let downloadCancelled = false;
 let downloadPaused = false;
 let downloadAbortController: AbortController | null = null;
+let osDownloadCancelled = false;
 
 // mainWindow 참조를 저장할 변수
 let getMainWindow: () => BrowserWindow | null = () => null;
@@ -121,6 +123,13 @@ interface OSDownloadStartResult {
   packageManager: OSDistribution['packageManager'];
   outputOptions: OSPackageOutputOptions;
   generatedOutputs: OSGeneratedOutput[];
+  warnings: string[];
+  unresolved: PackageDependency[];
+  conflicts: Array<{
+    package: string;
+    versions: OSPackageInfo[];
+  }>;
+  cancelled: boolean;
 }
 
 const DEFAULT_OS_OUTPUT_OPTIONS: OSPackageOutputOptions = {
@@ -157,7 +166,8 @@ function createOSDownloadErrorHandler(
       case 1:
         return 'skip';
       default:
-        return 'cancel';
+        osDownloadCancelled = true;
+        return 'skip';
     }
   };
 }
@@ -250,6 +260,39 @@ function getOSDownloaderForDistribution(
     default:
       throw new Error(`Unsupported package manager: ${distribution.packageManager}`);
   }
+}
+
+function buildOSDownloadStartResult(
+  params: {
+    success?: OSPackageInfo[];
+    failed?: OSDownloadFailure[];
+    skipped?: OSPackageInfo[];
+    outputDir: string;
+    distribution: OSDistribution;
+    outputOptions: OSPackageOutputOptions;
+    generatedOutputs?: OSGeneratedOutput[];
+    warnings?: string[];
+    unresolved?: PackageDependency[];
+    conflicts?: Array<{
+      package: string;
+      versions: OSPackageInfo[];
+    }>;
+    cancelled?: boolean;
+  }
+): OSDownloadStartResult {
+  return {
+    success: params.success ?? [],
+    failed: params.failed ?? [],
+    skipped: params.skipped ?? [],
+    outputPath: params.outputDir,
+    packageManager: params.distribution.packageManager,
+    outputOptions: params.outputOptions,
+    generatedOutputs: params.generatedOutputs ?? [],
+    warnings: params.warnings ?? [],
+    unresolved: params.unresolved ?? [],
+    conflicts: params.conflicts ?? [],
+    cancelled: params.cancelled ?? false,
+  };
 }
 
 async function writeRepositoryScripts(
@@ -876,8 +919,15 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
         ...DEFAULT_OS_OUTPUT_OPTIONS,
         ...rawOutputOptions,
       };
+      const warnings: string[] = [];
+      let unresolved: PackageDependency[] = [];
+      let conflicts: Array<{
+        package: string;
+        versions: OSPackageInfo[];
+      }> = [];
 
       log.info(`Starting OS package download: ${packages.length} packages to ${outputDir}`);
+      osDownloadCancelled = false;
 
       await fse.ensureDir(outputDir);
 
@@ -891,6 +941,41 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
         );
         const resolved = await resolver.resolveDependencies(packages);
         packagesToDownload = resolved.packages;
+        warnings.push(...resolved.warnings);
+        unresolved = resolved.unresolved;
+        conflicts = resolved.conflicts;
+
+        if (conflicts.length > 0) {
+          emitOSProgress(mainWindow, {
+            currentPackage: `버전 충돌 ${conflicts.length}건 감지`,
+            currentIndex: 0,
+            totalPackages: packagesToDownload.length,
+            bytesDownloaded: 0,
+            totalBytes: 0,
+            speed: 0,
+            phase: 'resolving',
+          });
+        }
+      }
+
+      if (unresolved.length > 0) {
+        emitOSProgress(mainWindow, {
+          currentPackage: `해결되지 않은 의존성 ${unresolved.length}건`,
+          currentIndex: 0,
+          totalPackages: packagesToDownload.length,
+          bytesDownloaded: 0,
+          totalBytes: 0,
+          speed: 0,
+          phase: 'resolving',
+        });
+        return buildOSDownloadStartResult({
+          outputDir,
+          distribution,
+          outputOptions,
+          warnings,
+          unresolved,
+          conflicts,
+        });
       }
 
       const stagingDir = await fse.mkdtemp(path.join(outputDir, '.depssmuggler-os-'));
@@ -909,6 +994,11 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
 
       try {
         for (const [index, pkg] of packagesToDownload.entries()) {
+          if (osDownloadCancelled) {
+            skippedPackages.push(...packagesToDownload.slice(index));
+            break;
+          }
+
           emitOSProgress(mainWindow, {
             currentPackage: pkg.name,
             currentIndex: index + 1,
@@ -920,9 +1010,30 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           });
 
           const result = await downloader.downloadPackage(pkg);
+          if (osDownloadCancelled) {
+            if (result.success && result.filePath) {
+              successfulPackages.push(pkg);
+              downloadedFiles.set(`${pkg.name}-${pkg.version}`, result.filePath);
+            } else if (result.skipped) {
+              skippedPackages.push(pkg);
+            } else {
+              failedPackages.push({
+                package: pkg,
+                error: result.error?.message || '다운로드 실패',
+              });
+            }
+            skippedPackages.push(...packagesToDownload.slice(index + 1));
+            break;
+          }
+
           if (result.success && result.filePath) {
             successfulPackages.push(pkg);
             downloadedFiles.set(`${pkg.name}-${pkg.version}`, result.filePath);
+            continue;
+          }
+
+          if (result.skipped) {
+            skippedPackages.push(pkg);
             continue;
           }
 
@@ -932,7 +1043,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           });
         }
 
-        if (successfulPackages.length > 0) {
+        if (!osDownloadCancelled && successfulPackages.length > 0) {
           emitOSProgress(mainWindow, {
             currentPackage: '결과 패키징',
             currentIndex: successfulPackages.length,
@@ -993,22 +1104,30 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           }
         }
 
-        const result: OSDownloadStartResult = {
+        return buildOSDownloadStartResult({
           success: successfulPackages,
           failed: failedPackages,
           skipped: skippedPackages,
-          outputPath: outputDir,
-          packageManager: distribution.packageManager,
+          outputDir,
+          distribution,
           outputOptions,
           generatedOutputs,
-        };
-
-        return result;
+          warnings,
+          unresolved,
+          conflicts,
+          cancelled: osDownloadCancelled,
+        });
       } finally {
+        osDownloadCancelled = false;
         await fse.remove(stagingDir);
       }
     }
   );
+
+  ipcMain.handle('os:download:cancel', async () => {
+    osDownloadCancelled = true;
+    return { success: true };
+  });
 
   // OS 패키지 캐시 통계
   ipcMain.handle('os:cache:stats', async () => {

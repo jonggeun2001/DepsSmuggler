@@ -62,6 +62,7 @@ import type {
   OSDistribution,
   OSPackageManager,
   OSDownloadProgress as OSDownloadProgressData,
+  PackageDependency,
 } from '../../core/downloaders/os-shared/types';
 
 const { Title, Text, Paragraph } = Typography;
@@ -136,6 +137,10 @@ interface OSDownloadResultData {
   packageManager: OSPackageManager;
   outputOptions: OSPackageOutputOptions;
   generatedOutputs?: Array<{ type: 'archive' | 'repository'; path: string; label: string }>;
+  warnings: string[];
+  unresolved: PackageDependency[];
+  conflicts: Array<{ package: string; versions: OSPackageInfo[] }>;
+  cancelled: boolean;
 }
 
 function isOSCartItem(item: CartItem): item is CartItem & { type: SupportedOSPackageManager } {
@@ -164,6 +169,40 @@ function toOSPackageInfo(item: CartItem): OSPackageInfo | null {
     description: typeof item.metadata?.description === 'string' ? item.metadata.description : undefined,
     summary: typeof item.metadata?.description === 'string' ? item.metadata.description : undefined,
   };
+}
+
+function formatDependencyRequirement(requirement: PackageDependency): string {
+  if (!requirement.version) {
+    return requirement.name;
+  }
+
+  return `${requirement.name} ${requirement.operator || '='} ${requirement.version}`;
+}
+
+function buildOSDependencyIssueMessage(result: Pick<OSDownloadResultData, 'warnings' | 'unresolved' | 'conflicts'>): string {
+  const sections: string[] = [];
+
+  if (result.unresolved.length > 0) {
+    sections.push(
+      `해결되지 않은 의존성:\n${result.unresolved
+        .map((dependency) => `- ${formatDependencyRequirement(dependency)}`)
+        .join('\n')}`
+    );
+  }
+
+  if (result.conflicts.length > 0) {
+    sections.push(
+      `버전 충돌:\n${result.conflicts
+        .map((conflict) => `- ${conflict.package}: ${conflict.versions.map((pkg) => pkg.version).join(', ')}`)
+        .join('\n')}`
+    );
+  }
+
+  if (result.warnings.length > 0) {
+    sections.push(`경고:\n${result.warnings.map((warning) => `- ${warning}`).join('\n')}`);
+  }
+
+  return sections.join('\n\n');
 }
 
 function createPendingDownloadItems(items: PendingDownloadSource[]): DownloadItem[] {
@@ -234,8 +273,7 @@ const DownloadPage: React.FC = () => {
     () => Array.from(new Set(osCartItems.map((item) => item.type))),
     [osCartItems]
   );
-  const isDedicatedOSFlow =
-    hasOnlyOSPackages && osPackageManagers.length === 1;
+  const isDedicatedOSFlow = hasOnlyOSPackages && osPackageManagers.length === 1;
   const activeOSPackageManager = (isDedicatedOSFlow
     ? osPackageManagers[0]
     : null) as SupportedOSPackageManager | null;
@@ -248,6 +286,9 @@ const DownloadPage: React.FC = () => {
   const [osDownloading, setOSDownloading] = useState(false);
   const [osResult, setOSResult] = useState<OSDownloadResultData | null>(null);
   const [osDownloadError, setOSDownloadError] = useState<string | null>(null);
+  const resolvedOSPackageManager = (activeOSPackageManager ?? osResult?.packageManager ?? null) as SupportedOSPackageManager | null;
+  const shouldRenderDedicatedOSFlow =
+    isDedicatedOSFlow || osDownloading || osResult !== null;
   // 의존성 확인 관련 상태
   const [isResolvingDeps, setIsResolvingDeps] = useState(false);
   const downloadCancelledRef = useRef(false);
@@ -279,14 +320,14 @@ const DownloadPage: React.FC = () => {
   }, [cartItems, downloadItems.length, setItems, clearLogs]);
 
   useEffect(() => {
-    if (!isDedicatedOSFlow || !activeOSPackageManager || !window.electronAPI?.os?.getDistribution) {
+    if (!shouldRenderDedicatedOSFlow || !resolvedOSPackageManager || !window.electronAPI?.os?.getDistribution) {
       setOSDistribution(null);
       return;
     }
 
-    const distributionId = activeOSPackageManager === 'yum'
+    const distributionId = resolvedOSPackageManager === 'yum'
       ? yumDistribution.id
-      : activeOSPackageManager === 'apt'
+      : resolvedOSPackageManager === 'apt'
       ? aptDistribution.id
       : apkDistribution.id;
 
@@ -309,8 +350,8 @@ const DownloadPage: React.FC = () => {
       active = false;
     };
   }, [
-    activeOSPackageManager,
-    isDedicatedOSFlow,
+    resolvedOSPackageManager,
+    shouldRenderDedicatedOSFlow,
     yumDistribution.id,
     aptDistribution.id,
     apkDistribution.id,
@@ -1066,6 +1107,47 @@ const DownloadPage: React.FC = () => {
     return defaultArchitecture;
   };
 
+  const addOSDownloadHistory = (result: OSDownloadResultData) => {
+    if (cartSnapshotRef.current.length === 0) {
+      return;
+    }
+
+    const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
+      type: item.type,
+      name: item.name,
+      version: item.version,
+      arch: item.arch,
+      languageVersion: item.languageVersion,
+      metadata: item.metadata,
+    }));
+
+    const historySettings: HistorySettings = {
+      outputFormat: result.outputOptions.archiveFormat || 'zip',
+      includeScripts: result.outputOptions.generateScripts,
+      includeDependencies,
+    };
+
+    const failedCount = result.failed.length + result.unresolved.length;
+    const downloadedCount = result.success.length;
+    let historyStatus: HistoryStatus = 'success';
+
+    if (result.cancelled || failedCount > 0 || result.skipped.length > 0) {
+      historyStatus = downloadedCount > 0 ? 'partial' : 'failed';
+    }
+
+    const totalSize = result.success.reduce((sum, item) => sum + (item.size || 0), 0);
+
+    addHistory(
+      historyPackages,
+      historySettings,
+      result.outputPath,
+      totalSize,
+      historyStatus,
+      downloadedCount,
+      failedCount
+    );
+  };
+
   const handleStartOSDownload = async (outputOptions: OSPackageOutputOptions) => {
     if (!outputDir) {
       message.warning('출력 폴더를 선택하세요');
@@ -1087,17 +1169,14 @@ const DownloadPage: React.FC = () => {
       return;
     }
 
-    const osDownloadAPI = window.electronAPI?.os?.download as
-      | {
-          start: (options: unknown) => Promise<unknown>;
-        }
-      | undefined;
+    const osDownloadAPI = window.electronAPI?.os?.download;
 
     if (!osDownloadAPI?.start) {
       message.error('OS 패키지 다운로드 API를 사용할 수 없습니다');
       return;
     }
 
+    cartSnapshotRef.current = [...osCartItems];
     setOSDownloadError(null);
     setOSResult(null);
     setOSDownloading(true);
@@ -1123,16 +1202,38 @@ const DownloadPage: React.FC = () => {
         outputOptions,
       }) as OSDownloadResultData;
 
+      if (result.unresolved.length > 0) {
+        setOSDownloadError(buildOSDependencyIssueMessage(result));
+        message.error('해결되지 않은 OS 의존성이 있어 다운로드를 시작하지 않았습니다');
+        return;
+      }
+
+      addOSDownloadHistory(result);
       setOSResult(result);
-      setOSProgress({
-        phase: 'packaging',
-        currentPackage: '완료',
-        currentIndex: result.success.length,
-        totalPackages: result.success.length || osPackages.length,
-        bytesDownloaded: result.success.length,
-        totalBytes: result.success.length || osPackages.length,
-        speed: 0,
-      });
+
+      if (!result.cancelled) {
+        setOSProgress({
+          phase: 'packaging',
+          currentPackage: '완료',
+          currentIndex: result.success.length,
+          totalPackages: result.success.length || osPackages.length,
+          bytesDownloaded: result.success.length,
+          totalBytes: result.success.length || osPackages.length,
+          speed: 0,
+        });
+      }
+
+      if (!result.cancelled && result.failed.length === 0) {
+        clearCart();
+      }
+
+      if (result.cancelled) {
+        message.warning('OS 패키지 다운로드가 취소되었습니다');
+      } else if (result.failed.length > 0 || result.skipped.length > 0) {
+        message.warning('OS 패키지 다운로드가 부분 완료되었습니다');
+      } else {
+        message.success('OS 패키지 다운로드가 완료되었습니다');
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       setOSDownloadError(errorMessage);
@@ -1140,6 +1241,33 @@ const DownloadPage: React.FC = () => {
     } finally {
       setOSDownloading(false);
     }
+  };
+
+  const handleCancelOSDownload = () => {
+    Modal.confirm({
+      title: 'OS 패키지 다운로드 취소',
+      content: '진행 중인 OS 패키지 다운로드를 취소하시겠습니까?',
+      okText: '취소',
+      okType: 'danger',
+      cancelText: '계속',
+      onOk: async () => {
+        if (!window.electronAPI?.os?.download?.cancel) {
+          message.error('OS 패키지 취소 API를 사용할 수 없습니다');
+          return;
+        }
+
+        await window.electronAPI.os.download.cancel();
+        setOSProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                currentPackage: '취소 요청 중',
+              }
+            : prev
+        );
+        message.warning('OS 패키지 다운로드 취소를 요청했습니다');
+      },
+    });
   };
 
   // 다운로드 시작
@@ -1507,7 +1635,7 @@ const DownloadPage: React.FC = () => {
     };
   };
 
-  if (isDedicatedOSFlow) {
+  if (shouldRenderDedicatedOSFlow) {
     return (
       <div>
         <Title level={3}>OS 패키지 다운로드</Title>
@@ -1542,7 +1670,7 @@ const DownloadPage: React.FC = () => {
             showIcon
             style={{ marginBottom: 24 }}
             message="OS 패키지 다운로드 실패"
-            description={osDownloadError}
+            description={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{osDownloadError}</pre>}
           />
         )}
 
@@ -1555,15 +1683,25 @@ const DownloadPage: React.FC = () => {
             outputOptions={osResult.outputOptions}
             packageManager={osResult.packageManager}
             generatedOutputs={osResult.generatedOutputs}
+            warnings={osResult.warnings}
+            conflicts={osResult.conflicts}
+            cancelled={osResult.cancelled}
             onOpenFolder={handleOpenFolder}
             onClose={handleComplete}
           />
         ) : osDownloading ? (
-          <OSDownloadProgress
-            progress={osProgress}
-            packageCount={osPackages.length}
-            outputDir={outputDir}
-          />
+          <div>
+            <OSDownloadProgress
+              progress={osProgress}
+              packageCount={osPackages.length}
+              outputDir={outputDir}
+            />
+            <div style={{ marginTop: 16, textAlign: 'right' }}>
+              <Button danger icon={<StopOutlined />} onClick={handleCancelOSDownload}>
+                다운로드 취소
+              </Button>
+            </div>
+          </div>
         ) : (
           <OSPackageCart
             packages={osPackages}
