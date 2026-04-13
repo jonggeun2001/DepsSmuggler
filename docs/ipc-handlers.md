@@ -50,6 +50,7 @@ electron/
 
 | 채널 | 설명 |
 |------|------|
+| `cache:get-size` | 전체 캐시 크기만 조회 |
 | `cache:stats` | 전체 캐시 통계 |
 | `cache:clear` | 전체 캐시 삭제 |
 | `docker:cache:refresh` | Docker 카탈로그 캐시 갱신 |
