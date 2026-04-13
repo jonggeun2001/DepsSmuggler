@@ -187,7 +187,7 @@ depssmuggler cache list
 
 - `size`: 캐시 디렉터리 용량 출력
 - `clear`: 캐시 삭제, `--force` 없으면 확인 프롬프트 표시
-- `list`: 캐시 디렉터리별 manifest와 용량을 표로 출력
+- `list`: 캐시 하위 디렉터리를 표로 출력하고, 엔트리별 `manifest.json`이 있으면 메타데이터를 채우고 없으면 디렉터리명과 `-`를 표시
 
 ## 현재 한계
 

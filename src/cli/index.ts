@@ -30,7 +30,7 @@ program
 program
   .command('download')
   .description('패키지 다운로드')
-  .option('-t, --type <type>', '패키지 타입 (pip, conda, maven, yum, docker)', 'pip')
+  .option('-t, --type <type>', '패키지 타입 (pip, conda, maven, npm, docker)', 'pip')
   .option('-p, --package <name>', '패키지명')
   .option('-V, --pkg-version <version>', '패키지 버전', 'latest')
   .option('-a, --arch <arch>', '아키텍처 (x86_64, arm64 등)', 'x86_64')
@@ -159,11 +159,12 @@ initializeLogger().then(() => {
     console.log('\n  예시:');
     console.log(chalk.gray('    depssmuggler download -t pip -p requests -V 2.28.0'));
     console.log(chalk.gray('    depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0'));
+    console.log(chalk.gray('    depssmuggler download -t npm -p react -V 19.2.0'));
     console.log(chalk.gray('    depssmuggler download -t docker -p nginx -V latest'));
     console.log(chalk.gray('    depssmuggler search requests -t pip'));
     console.log(chalk.gray('    depssmuggler os list-distros'));
     console.log(chalk.gray('    depssmuggler os search nginx --distro rocky-9'));
-    console.log(chalk.gray('    depssmuggler os download httpd --distro rocky-9 --output ./packages'));
+    console.log(chalk.gray('    depssmuggler os download httpd --distro rocky-9  # 현재 GUI 사용 안내'));
     console.log('\n  자세한 내용: depssmuggler --help\n');
   }
 
