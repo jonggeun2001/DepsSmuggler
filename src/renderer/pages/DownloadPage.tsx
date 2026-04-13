@@ -1246,6 +1246,11 @@ const DownloadPage: React.FC = () => {
   };
 
   const handleCancelOSDownload = () => {
+    if (osProgress?.phase === 'packaging') {
+      message.info('패키징 단계에서는 취소할 수 없습니다');
+      return;
+    }
+
     Modal.confirm({
       title: 'OS 패키지 다운로드 취소',
       content: '진행 중인 OS 패키지 다운로드를 취소하시겠습니까?',
@@ -1600,6 +1605,7 @@ const DownloadPage: React.FC = () => {
 
   // 전체 다운로드 속도 (이동 평균 기반)
   const totalSpeed = calculateOverallSpeed();
+  const isOSPackaging = osProgress?.phase === 'packaging';
 
   // 크기 포맷팅 함수
   const formatBytes = (bytes: number) => {
@@ -1699,7 +1705,12 @@ const DownloadPage: React.FC = () => {
               outputDir={outputDir}
             />
             <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <Button danger icon={<StopOutlined />} onClick={handleCancelOSDownload}>
+              <Button
+                danger
+                icon={<StopOutlined />}
+                onClick={handleCancelOSDownload}
+                disabled={isOSPackaging}
+              >
                 다운로드 취소
               </Button>
             </div>

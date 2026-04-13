@@ -62,17 +62,20 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
   };
 
   const getInstallCommand = (): string => {
+    const useRepositoryInstall =
+      outputOptions.type === 'repository' || outputOptions.type === 'both';
+
     switch (packageManager) {
       case 'yum':
-        return outputOptions.type === 'repository'
+        return useRepositoryInstall
           ? 'yum install <패키지명>'
           : 'rpm -ivh <패키지.rpm>';
       case 'apt':
-        return outputOptions.type === 'repository'
+        return useRepositoryInstall
           ? 'apt install <패키지명>'
           : 'dpkg -i <패키지.deb>';
       case 'apk':
-        return outputOptions.type === 'repository'
+        return useRepositoryInstall
           ? 'apk add <패키지명>'
           : 'apk add --allow-untrusted <패키지.apk>';
       default:

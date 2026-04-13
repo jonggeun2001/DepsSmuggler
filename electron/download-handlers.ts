@@ -317,6 +317,10 @@ async function writeRepositoryScripts(
   }
 }
 
+async function cleanupGeneratedOutputs(outputs: OSGeneratedOutput[]): Promise<void> {
+  await Promise.all(outputs.map((output) => fse.remove(output.path)));
+}
+
 /**
  * 다운로드 관련 IPC 핸들러 등록
  * @param windowGetter mainWindow를 반환하는 함수
@@ -1085,9 +1089,16 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
               path: archivePath,
               label: `압축 파일 (${outputOptions.archiveFormat || 'zip'})`,
             });
+
+            if (osDownloadCancelled) {
+              await cleanupGeneratedOutputs(generatedOutputs);
+              generatedOutputs.length = 0;
+              successfulPackages.length = 0;
+              warnings.push('패키징 단계에서 취소되어 생성 중이던 출력물을 정리했습니다.');
+            }
           }
 
-          if (outputOptions.type === 'repository' || outputOptions.type === 'both') {
+          if (!osDownloadCancelled && (outputOptions.type === 'repository' || outputOptions.type === 'both')) {
             const repoPath = path.join(outputDir, 'repository');
             const repoPackager = new OSRepoPackager();
             await repoPackager.createLocalRepo(successfulPackages, downloadedFiles, {
@@ -1113,7 +1124,21 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
               path: repoPath,
               label: '로컬 저장소',
             });
+
+            if (osDownloadCancelled) {
+              await cleanupGeneratedOutputs(generatedOutputs);
+              generatedOutputs.length = 0;
+              successfulPackages.length = 0;
+              warnings.push('패키징 단계에서 취소되어 생성 중이던 출력물을 정리했습니다.');
+            }
           }
+        }
+
+        if (osDownloadCancelled && generatedOutputs.length > 0) {
+          await cleanupGeneratedOutputs(generatedOutputs);
+          generatedOutputs.length = 0;
+          successfulPackages.length = 0;
+          warnings.push('패키징 단계에서 취소되어 생성된 출력물을 정리했습니다.');
         }
 
         return buildOSDownloadStartResult({
