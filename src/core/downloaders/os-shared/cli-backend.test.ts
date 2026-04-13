@@ -181,18 +181,29 @@ describe('OS CLI backend', () => {
       aprUtilOld,
       aprUtilNew,
     ]);
-    expect(createArchive).toHaveBeenCalled();
-    expect(createLocalRepo).toHaveBeenCalled();
-    expect(generateDependencyOrderScript).toHaveBeenCalledWith(
+    expect(createArchive).toHaveBeenCalledWith(
       [httpd, apr, aprUtilOld, aprUtilNew],
-      'yum',
-      expect.any(Object)
+      expect.any(Map),
+      expect.objectContaining({
+        includeScripts: false,
+      })
     );
+    expect(createLocalRepo).toHaveBeenCalledWith(
+      [httpd, apr, aprUtilOld, aprUtilNew],
+      expect.any(Map),
+      expect.objectContaining({
+        includeSetupScript: false,
+      })
+    );
+    expect(generateDependencyOrderScript).not.toHaveBeenCalled();
     expect(result.artifacts).toEqual([
       { type: 'archive', path: path.join(tempDir, 'bundle.zip') },
       { type: 'repository', path: path.join(tempDir, 'repo') },
     ]);
-    expect(result.warnings).toEqual(['version conflict']);
+    expect(result.warnings).toEqual([
+      'version conflict',
+      '버전 충돌이 감지되어 자동 설치 스크립트 생성을 생략했습니다. 필요한 버전을 수동으로 선택해 설치하세요.',
+    ]);
   });
 
   it('OS 메타데이터 캐시 통계와 삭제를 실제 디렉토리에 반영한다', async () => {

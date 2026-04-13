@@ -271,6 +271,16 @@ export async function downloadOSPackages(
       };
 
   const packagesToDownload = normalizePackagesToDownload(resolution);
+  const warnings = [...resolution.warnings];
+  const shouldGenerateScripts =
+    options.includeScripts && resolution.conflicts.length === 0;
+
+  if (options.includeScripts && resolution.conflicts.length > 0) {
+    warnings.push(
+      '버전 충돌이 감지되어 자동 설치 스크립트 생성을 생략했습니다. 필요한 버전을 수동으로 선택해 설치하세요.'
+    );
+  }
+
   const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'depssmuggler-os-download-'));
   const downloader = createDownloader(
     options.distribution,
@@ -303,8 +313,8 @@ export async function downloadOSPackages(
         {
           format: options.archiveFormat,
           outputPath: outputPaths.archivePath,
-          includeScripts: options.includeScripts,
-          scriptTypes: options.includeScripts
+          includeScripts: shouldGenerateScripts,
+          scriptTypes: shouldGenerateScripts
             ? ['dependency-order', 'local-repo']
             : [],
           packageManager: options.distribution.packageManager,
@@ -325,11 +335,11 @@ export async function downloadOSPackages(
           packageManager: options.distribution.packageManager,
           outputPath: outputPaths.repositoryPath,
           repoName: `depssmuggler-${options.distribution.id}`,
-          includeSetupScript: options.includeScripts,
+          includeSetupScript: shouldGenerateScripts,
         }
       );
 
-      if (options.includeScripts) {
+      if (shouldGenerateScripts) {
         ensureDirectory(repoResult.repoPath);
         writeRepositoryInstallScripts(
           repoResult.repoPath,
@@ -345,7 +355,7 @@ export async function downloadOSPackages(
       requestedPackages,
       packages: packagesToDownload,
       artifacts,
-      warnings: resolution.warnings,
+      warnings,
       unresolved: resolution.unresolved,
       conflicts: resolution.conflicts,
     };

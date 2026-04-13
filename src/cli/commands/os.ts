@@ -179,6 +179,21 @@ export async function searchCommand(
           summary: pkg.summary,
         }))
       )
+      .reduce<Array<{ name: string; version: string; repoName: string; summary?: string }>>(
+        (uniqueResults, result) => {
+          if (
+            uniqueResults.some(
+              (existing) =>
+                existing.name === result.name && existing.version === result.version
+            )
+          ) {
+            return uniqueResults;
+          }
+          uniqueResults.push(result);
+          return uniqueResults;
+        },
+        []
+      )
       .slice(0, Number.isFinite(limit) && limit > 0 ? limit : groupedResults.length);
 
     if (finalResults.length === 0) {
