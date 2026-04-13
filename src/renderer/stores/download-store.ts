@@ -21,6 +21,7 @@ export interface DownloadItem {
   name: string;
   version: string;
   type?: string;
+  arch?: string;
   status: DownloadStatus;
   progress: number;
   downloadedBytes: number;
@@ -40,6 +41,10 @@ export interface DownloadItem {
   metadata?: Record<string, unknown>;
   /** Maven classifier (예: natives-linux, linux-x86_64) */
   classifier?: string;
+  repository?: unknown;
+  location?: string;
+  indexUrl?: string;
+  extras?: string[];
 }
 
 // 다운로드 상태

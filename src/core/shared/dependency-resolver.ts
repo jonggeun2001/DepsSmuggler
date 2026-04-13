@@ -61,6 +61,8 @@ export interface OSDistributionSetting {
  * 의존성 해결 옵션
  */
 export interface DependencyResolverOptions {
+  /** 의존성 포함 여부 (기본값: true) */
+  includeDependencies?: boolean;
   /** 최대 의존성 탐색 깊이 (기본값: 5) */
   maxDepth?: number;
   /** 선택적 의존성 포함 여부 (기본값: false) */
@@ -130,11 +132,21 @@ export async function resolveAllDependencies(
   const dependencyTrees: DependencyResolutionResult[] = [];
   const failedPackages: { name: string; version: string; error: string }[] = [];
 
+  const includeDependencies = options?.includeDependencies ?? true;
   const maxDepth = options?.maxDepth ?? 5;
   const includeOptional = options?.includeOptional ?? false;
   const condaChannel = options?.condaChannel ?? 'conda-forge';
   const architecture = options?.architecture ?? 'x86_64';
   const targetOS = options?.targetOS ?? 'any';
+
+  if (!includeDependencies) {
+    return {
+      originalPackages: packages,
+      allPackages: [...packages],
+      dependencyTrees,
+      failedPackages,
+    };
+  }
 
   // targetOS를 targetPlatform으로 변환 (pip/conda 환경 마커 평가용)
   const targetPlatformMap: Record<string, { system?: 'Linux' | 'Windows' | 'Darwin' }> = {

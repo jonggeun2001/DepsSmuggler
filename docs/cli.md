@@ -61,8 +61,10 @@ depssmuggler download [옵션]
 | `--output` | `-o` | 출력 경로 | `./output` |
 | `--format` | `-f` | 출력 형식 (zip, tar.gz, mirror) | `zip` |
 | `--file` | - | 패키지 목록 파일 | - |
-| `--no-deps` | - | 의존성 포함하지 않음 | `false` |
+| `--no-deps` | - | 의존성 해결을 건너뛰고 요청한 패키지만 다운로드 | `의존성 포함` |
 | `--concurrency` | - | 동시 다운로드 수 | `3` |
+
+기본 동작은 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 의존성을 함께 해결해 다운로드하는 것입니다. `--no-deps`를 지정하면 원본 패키지 목록만 다운로드합니다. 라이브러리 패키지의 의존성 해결이 실패하면 명령은 오류로 종료됩니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
 
 ### 예시
 
@@ -106,6 +108,8 @@ interface DownloadOptions {
 
 async function downloadCommand(options: DownloadOptions): Promise<void>;
 ```
+
+기본적으로 `downloadCommand`는 라이브러리 패키지에 한해 공통 의존성 리졸버로 전이 의존성을 확장한 뒤 다운로드 큐를 구성합니다. `deps === false`일 때만 원본 패키지만 큐에 추가합니다. OS 패키지는 `download` 명령에서 의존성 자동 해결을 수행하지 않고 `os download` 명령으로 분리합니다.
 
 #### 헬퍼 함수
 

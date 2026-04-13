@@ -47,7 +47,7 @@ interface DownloadOptions {
   includeScripts: boolean;                 // 설치 스크립트 포함 여부
   targetOS?: TargetOS;                     // 타겟 OS
   architecture?: Architecture;             // 아키텍처
-  includeDependencies?: boolean;           // 의존성 포함 여부
+  includeDependencies?: boolean;           // false면 의존성 해결 단계를 생략하고 원본만 사용
   pythonVersion?: string;                  // Python 버전 (pip/conda용)
   concurrency?: number;                    // 동시 다운로드 수 (기본: 3)
 }
