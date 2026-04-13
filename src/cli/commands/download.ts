@@ -102,6 +102,13 @@ async function preparePackagesForDownload(
     includeDependencies: true,
   });
 
+  if (resolved.failedPackages.length > 0) {
+    const failedList = resolved.failedPackages
+      .map((pkg) => `${pkg.name}@${pkg.version}: ${pkg.error}`)
+      .join(', ');
+    throw new Error(`의존성 해결 실패: ${failedList}`);
+  }
+
   return {
     packages: resolved.allPackages.map(toPackageInfo),
     dependencyResolutionApplied: true,
