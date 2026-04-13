@@ -196,4 +196,55 @@ describe('registerDownloadHandlers', () => {
       ],
     });
   });
+
+  it('아카이브 생성이 실패하면 성공 완료 이벤트 대신 실패 이벤트를 보내야 함', async () => {
+    createArchiveFromDirectoryMock.mockRejectedValueOnce(new Error('archive failed'));
+
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = '/tmp/depssmuggler-gui-output-failure';
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'tar.gz',
+          includeScripts: false,
+          concurrency: 1,
+        },
+      }
+    );
+
+    await flushDownloadWork();
+
+    expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
+      success: false,
+      outputPath: outputDir,
+      error: 'archive failed',
+    });
+    expect(webContentsSend).not.toHaveBeenCalledWith('download:all-complete', {
+      success: true,
+      outputPath: `${outputDir}.tar.gz`,
+      results: expect.any(Array),
+    });
+  });
 });

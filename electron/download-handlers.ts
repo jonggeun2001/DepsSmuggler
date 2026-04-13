@@ -467,7 +467,14 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
 
               log.info(`Created ${outputFormat} archive: ${finalOutputPath}`);
             } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
               log.error(`Failed to create ${outputFormat} archive:`, error);
+              mainWindow?.webContents.send('download:all-complete', {
+                success: false,
+                outputPath: outputDir,
+                error: errorMessage,
+              });
+              return;
             }
           }
 

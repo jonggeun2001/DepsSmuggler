@@ -462,6 +462,20 @@ const DownloadPage: React.FC = () => {
 
     // 전체 다운로드 완료 리스너
     const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
+      if (!data.success) {
+        setIsDownloading(false);
+        setPackagingStatus('failed');
+        setPackagingProgress(0);
+
+        if (!data.cancelled) {
+          const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
+          scheduleLogBatch('error', '다운로드/패키징 실패', errorMessage);
+          message.error(errorMessage);
+        }
+
+        return;
+      }
+
       // 전체 완료 시 pending/downloading 상태인 아이템만 completed로 변경
       // (failed, skipped 등 다른 상태는 보존)
       // Zustand 스토어에서 직접 최신 상태를 가져옴 (이벤트 처리 타이밍 문제 해결)
