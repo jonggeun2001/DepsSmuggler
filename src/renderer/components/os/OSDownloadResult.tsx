@@ -83,16 +83,51 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
     }
   };
 
-  const getManualRepositorySetupGuide = (): string => {
+  const repositoryPath =
+    generatedOutputs.find((output) => output.type === 'repository')?.path || `${outputPath}/repository`;
+
+  const getManualRepositorySetupSteps = (): Array<{ title: string; command: string }> => {
     switch (packageManager) {
       case 'yum':
-        return '저장소 경로를 가리키는 .repo 파일을 만들고 baseurl=file:///경로/repository 로 등록하세요.';
+        return [
+          {
+            title: '로컬 저장소를 등록합니다:',
+            command: `sudo sh -c 'printf "[depssmuggler-local]\\nname=depssmuggler-local\\nbaseurl=file://${repositoryPath}\\nenabled=1\\ngpgcheck=0\\n" > /etc/yum.repos.d/depssmuggler-local.repo'`,
+          },
+          {
+            title: '메타데이터를 갱신합니다:',
+            command: 'sudo yum makecache',
+          },
+        ];
       case 'apt':
-        return "sources.list.d에 'deb [trusted=yes] file:/경로/repository ./' 항목을 추가하세요.";
+        return [
+          {
+            title: 'sources.list.d에 로컬 저장소를 추가합니다:',
+            command: `echo "deb [trusted=yes] file://${repositoryPath} ./" | sudo tee /etc/apt/sources.list.d/depssmuggler-local.list`,
+          },
+          {
+            title: '패키지 목록을 갱신합니다:',
+            command: 'sudo apt-get update',
+          },
+        ];
       case 'apk':
-        return 'apk add --repository /경로/repository --allow-untrusted <패키지명>';
+        return [
+          {
+            title: '/etc/apk/repositories 에 로컬 저장소를 추가합니다:',
+            command: `echo "${repositoryPath}" | sudo tee -a /etc/apk/repositories`,
+          },
+          {
+            title: '패키지 목록을 갱신합니다:',
+            command: 'sudo apk update --allow-untrusted',
+          },
+        ];
       default:
-        return '패키지 관리자에 맞는 로컬 저장소 등록 절차를 수동으로 진행하세요.';
+        return [
+          {
+            title: '패키지 관리자에 맞는 로컬 저장소 등록 절차를 수동으로 진행하세요:',
+            command: repositoryPath,
+          },
+        ];
     }
   };
 
@@ -244,7 +279,14 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
                   <p className="guide-step">
                     <strong>2.</strong> `setup-repo.sh`는 생성되지 않았습니다. 로컬 저장소를 수동으로 등록하세요:
                   </p>
-                  <code className="guide-code">{getManualRepositorySetupGuide()}</code>
+                  {getManualRepositorySetupSteps().map((step, index) => (
+                    <div key={step.command}>
+                      <p className="guide-step">
+                        {index === 0 ? <strong>2.</strong> : <strong>추가.</strong>} {step.title}
+                      </p>
+                      <code className="guide-code">{step.command}</code>
+                    </div>
+                  ))}
                   <p className="guide-step">
                     <strong>3.</strong> 패키지를 설치합니다:
                   </p>

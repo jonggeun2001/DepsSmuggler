@@ -952,6 +952,17 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
         unresolved = resolved.unresolved;
         conflicts = resolved.conflicts;
 
+        if (osDownloadCancelled) {
+          warnings.push('의존성 해결 단계에서 취소되어 다운로드를 시작하지 않았습니다.');
+          return buildOSDownloadStartResult({
+            outputDir,
+            distribution,
+            outputOptions,
+            warnings,
+            cancelled: true,
+          });
+        }
+
         if (conflicts.length > 0) {
           emitOSProgress(mainWindow, {
             currentPackage: `버전 충돌 ${conflicts.length}건 감지`,
