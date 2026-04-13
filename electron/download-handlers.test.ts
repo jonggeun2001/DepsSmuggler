@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, waitFor } from 'vitest';
 import { registerDownloadHandlers } from './download-handlers';
 
 const {
@@ -63,11 +63,6 @@ vi.mock('../src/core/packager/archive-packager', () => ({
   })),
 }));
 
-const flushDownloadWork = async (): Promise<void> => {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-};
-
 describe('registerDownloadHandlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -118,32 +113,34 @@ describe('registerDownloadHandlers', () => {
       }
     );
 
-    await flushDownloadWork();
-
-    expect(createArchiveFromDirectoryMock).toHaveBeenCalledWith(
-      outputDir,
-      expectedArchivePath,
-      [
+    await waitFor(() => {
+      expect(createArchiveFromDirectoryMock).toHaveBeenCalledWith(
+        outputDir,
+        expectedArchivePath,
+        [
+          expect.objectContaining({
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          }),
+        ],
         expect.objectContaining({
-          type: 'pip',
-          name: 'requests',
-          version: '2.28.0',
-        }),
-      ],
-      expect.objectContaining({
-        format: 'tar.gz',
-      })
-    );
+          format: 'tar.gz',
+        })
+      );
+    });
 
-    expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
-      success: true,
-      outputPath: expectedArchivePath,
-      results: [
-        {
-          id: 'pip-requests-2.28.0',
-          success: true,
-        },
-      ],
+    await waitFor(() => {
+      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
+        success: true,
+        outputPath: expectedArchivePath,
+        results: [
+          {
+            id: 'pip-requests-2.28.0',
+            success: true,
+          },
+        ],
+      });
     });
   });
 
@@ -183,17 +180,17 @@ describe('registerDownloadHandlers', () => {
       }
     );
 
-    await flushDownloadWork();
-
-    expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
-      success: true,
-      outputPath: expectedArchivePath,
-      results: [
-        {
-          id: 'pip-requests-2.28.0',
-          success: true,
-        },
-      ],
+    await waitFor(() => {
+      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
+        success: true,
+        outputPath: expectedArchivePath,
+        results: [
+          {
+            id: 'pip-requests-2.28.0',
+            success: true,
+          },
+        ],
+      });
     });
   });
 
@@ -234,12 +231,12 @@ describe('registerDownloadHandlers', () => {
       }
     );
 
-    await flushDownloadWork();
-
-    expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
-      success: false,
-      outputPath: outputDir,
-      error: 'archive failed',
+    await waitFor(() => {
+      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
+        success: false,
+        outputPath: outputDir,
+        error: 'archive failed',
+      });
     });
     expect(webContentsSend).not.toHaveBeenCalledWith('download:all-complete', {
       success: true,
@@ -283,12 +280,12 @@ describe('registerDownloadHandlers', () => {
       }
     );
 
-    await flushDownloadWork();
-
-    expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
-      success: false,
-      outputPath: outputDir,
-      error: '지원하지 않는 출력 형식입니다: archive',
+    await waitFor(() => {
+      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
+        success: false,
+        outputPath: outputDir,
+        error: '지원하지 않는 출력 형식입니다: archive',
+      });
     });
     expect(createArchiveFromDirectoryMock).not.toHaveBeenCalled();
   });
