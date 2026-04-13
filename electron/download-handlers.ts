@@ -28,6 +28,8 @@ import {
   getApkResolver,
 } from '../src/core';
 import { getArchivePackager } from '../src/core/packager/archive-packager';
+import { getFileSplitter } from '../src/core/packager/file-splitter';
+import { initializeEmailSender } from '../src/core/mailer/email-sender';
 import type { PackageInfo } from '../src/types';
 import type {
   OSPackageInfo,
@@ -77,6 +79,22 @@ function sendProgressThrottled(
       ...data,
     });
   }
+}
+
+function collectSplitArtifacts(splitResult: {
+  parts: string[];
+  metadataPath?: string;
+  mergeScripts?: {
+    bash?: string;
+    powershell?: string;
+  };
+}): string[] {
+  return [
+    ...splitResult.parts,
+    splitResult.metadataPath,
+    splitResult.mergeScripts?.bash,
+    splitResult.mergeScripts?.powershell,
+  ].filter((value): value is string => Boolean(value));
 }
 
 // 다운로드 상태
@@ -431,6 +449,24 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
 
         if (!downloadCancelled) {
           let finalOutputPath = outputDir;
+          let artifactPaths: string[] = [];
+          const deliveryMethod = options.deliveryMethod || 'local';
+          const packageInfos: PackageInfo[] = allPackages.map((pkg) => ({
+            type: pkg.type as PackageInfo['type'],
+            name: pkg.name,
+            version: pkg.version,
+            arch: pkg.architecture as PackageInfo['arch'],
+            metadata: pkg.metadata,
+          }));
+          let deliveryResult:
+            | {
+                emailSent: boolean;
+                emailsSent?: number;
+                attachmentsSent?: number;
+                splitApplied?: boolean;
+                error?: string;
+              }
+            | undefined;
           const isSupportedOutputFormat = outputFormat === 'zip' || outputFormat === 'tar.gz';
 
           // 설치 스크립트 생성 (의존성 포함)
@@ -451,13 +487,6 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
             try {
               const archivePath = `${outputDir}.${outputFormat === 'zip' ? 'zip' : 'tar.gz'}`;
               const archivePackager = getArchivePackager();
-              const packageInfos: PackageInfo[] = allPackages.map((pkg) => ({
-                type: pkg.type as PackageInfo['type'],
-                name: pkg.name,
-                version: pkg.version,
-                arch: pkg.architecture as PackageInfo['arch'],
-                metadata: pkg.metadata,
-              }));
 
               mainWindow?.webContents.send('download:status', {
                 phase: 'packaging',
@@ -474,6 +503,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                   includeReadme: true,
                 }
               );
+              artifactPaths = [finalOutputPath];
 
               log.info(`Created ${outputFormat} archive: ${finalOutputPath}`);
             } catch (error) {
@@ -488,10 +518,145 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
             }
           }
 
+          if (deliveryMethod === 'email') {
+            const smtpOptions = options.smtp;
+            const emailOptions = options.email;
+
+            if (!smtpOptions?.host || !smtpOptions.port || !emailOptions?.to) {
+              const errorMessage = '이메일 전달에 필요한 SMTP 또는 수신자 설정이 없습니다';
+              mainWindow?.webContents.send('download:all-complete', {
+                success: false,
+                outputPath: finalOutputPath,
+                artifactPaths: artifactPaths.length > 0 ? artifactPaths : [finalOutputPath],
+                deliveryMethod,
+                deliveryResult: {
+                  emailSent: false,
+                  splitApplied: false,
+                  error: errorMessage,
+                },
+                error: errorMessage,
+              });
+              return;
+            }
+
+            const maxAttachmentSizeBytes = (options.fileSplit?.maxSizeMB ?? 25) * 1024 * 1024;
+            let attachments = artifactPaths.length > 0 ? [...artifactPaths] : [finalOutputPath];
+            let splitApplied = false;
+
+            mainWindow?.webContents.send('download:status', {
+              phase: 'packaging',
+              message: '이메일 전달 준비 중...',
+            });
+
+            try {
+              const archiveStat = await fse.stat(finalOutputPath);
+
+              if (archiveStat.size > maxAttachmentSizeBytes) {
+                if (!options.fileSplit?.enabled) {
+                  const errorMessage = '첨부 파일 크기가 제한을 초과했습니다. 파일 분할을 활성화하세요.';
+                  mainWindow?.webContents.send('download:all-complete', {
+                    success: false,
+                    outputPath: finalOutputPath,
+                    artifactPaths: [finalOutputPath],
+                    deliveryMethod,
+                    deliveryResult: {
+                      emailSent: false,
+                      splitApplied: false,
+                      error: errorMessage,
+                    },
+                    error: errorMessage,
+                  });
+                  return;
+                }
+
+                const splitter = getFileSplitter();
+                const splitResult = await splitter.splitFile(finalOutputPath, {
+                  maxSizeMB: options.fileSplit.maxSizeMB,
+                  generateMergeScripts: true,
+                });
+                attachments = collectSplitArtifacts(splitResult);
+                artifactPaths = attachments;
+                finalOutputPath = attachments[0] || finalOutputPath;
+                splitApplied = true;
+              }
+
+              const emailSender = initializeEmailSender(
+                {
+                  host: smtpOptions.host,
+                  port: smtpOptions.port,
+                  secure: smtpOptions.secure ?? smtpOptions.port === 465,
+                  auth: smtpOptions.user
+                    ? {
+                        user: smtpOptions.user,
+                        pass: smtpOptions.password || '',
+                      }
+                    : undefined,
+                  from: emailOptions.from || smtpOptions.from,
+                },
+                maxAttachmentSizeBytes
+              );
+
+              const emailSendResult = await emailSender.sendEmail({
+                to: emailOptions.to,
+                subject: emailOptions.subject || `DepsSmuggler 패키지 전달 (${packageInfos.length}개 패키지)`,
+                body: splitApplied
+                  ? '첨부 용량 제한에 맞춰 파일을 분할해 전달했습니다.'
+                  : '다운로드된 패키지 아카이브를 전달합니다.',
+                attachments,
+                packages: packageInfos,
+              });
+
+              if (!emailSendResult.success) {
+                const errorMessage = emailSendResult.error || '이메일 전달에 실패했습니다';
+                mainWindow?.webContents.send('download:all-complete', {
+                  success: false,
+                  outputPath: finalOutputPath,
+                  artifactPaths: attachments,
+                  deliveryMethod,
+                  deliveryResult: {
+                    emailSent: false,
+                    emailsSent: emailSendResult.emailsSent,
+                    attachmentsSent: emailSendResult.attachmentsSent,
+                    splitApplied,
+                    error: errorMessage,
+                  },
+                  error: errorMessage,
+                });
+                return;
+              }
+
+              deliveryResult = {
+                emailSent: true,
+                emailsSent: emailSendResult.emailsSent,
+                attachmentsSent: emailSendResult.attachmentsSent,
+                splitApplied,
+              };
+              artifactPaths = attachments;
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              mainWindow?.webContents.send('download:all-complete', {
+                success: false,
+                outputPath: finalOutputPath,
+                artifactPaths: artifactPaths.length > 0 ? artifactPaths : [finalOutputPath],
+                deliveryMethod,
+                deliveryResult: {
+                  emailSent: false,
+                  splitApplied,
+                  error: errorMessage,
+                },
+                error: errorMessage,
+              });
+              return;
+            }
+          }
+
           // 전체 완료 이벤트 전송
           mainWindow?.webContents.send('download:all-complete', {
             success: true,
             outputPath: finalOutputPath,
+            artifactPaths: artifactPaths.length > 0 ? artifactPaths : [finalOutputPath],
+            deliveryMethod,
+            deliveryResult,
             results,
           });
         } else {

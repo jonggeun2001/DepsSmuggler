@@ -66,6 +66,7 @@ interface SettingsState {
   smtpUser: string;
   smtpPassword: string;
   smtpFrom: string;
+  smtpTo: string;
 
   // 언어 버전 설정
   languageVersions: LanguageVersions;
@@ -138,6 +139,7 @@ const defaultSettings = {
   smtpUser: '',
   smtpPassword: '',
   smtpFrom: '',
+  smtpTo: '',
 
   languageVersions: {
     python: '3.11',

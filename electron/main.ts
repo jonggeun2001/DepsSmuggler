@@ -16,6 +16,7 @@ if (process.env.DEPSSMUGGLER_STRICT_SSL !== 'true') {
 }
 import { createScopedLogger } from './utils/logger';
 import { logger as coreLogger } from '../src/utils/logger';
+import { EmailSender } from '../src/core/mailer/email-sender';
 
 // 스코프별 로거 생성
 const log = createScopedLogger('Main');
@@ -247,6 +248,43 @@ ipcMain.handle('open-folder', async (_, targetPath: string) => {
   }
 
   await shell.openPath(targetPath);
+});
+
+ipcMain.handle('test-smtp-connection', async (_, config: {
+  host: string;
+  port: number;
+  user?: string;
+  password?: string;
+  from?: string;
+}) => {
+  try {
+    const emailSender = new EmailSender({
+      host: config.host,
+      port: config.port,
+      secure: config.port === 465,
+      auth: config.user
+        ? {
+            user: config.user,
+            pass: config.password || '',
+          }
+        : undefined,
+      from: config.from,
+    });
+
+    const success = await emailSender.testConnection();
+    emailSender.close();
+
+    if (!success) {
+      return { success: false, error: 'SMTP 연결 테스트 실패' };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 });
 
 // 파일 저장 다이얼로그

@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs-extra';
+import * as os from 'os';
+import * as path from 'path';
 import { registerDownloadHandlers } from './download-handlers';
 
 const {
@@ -9,6 +12,10 @@ const {
   generateInstallScriptsMock,
   createZipArchiveMock,
   createArchiveFromDirectoryMock,
+  initializeEmailSenderMock,
+  sendEmailMock,
+  getFileSplitterMock,
+  splitFileMock,
 } = vi.hoisted(() => ({
   ipcHandle: vi.fn(),
   webContentsSend: vi.fn(),
@@ -17,6 +24,10 @@ const {
   generateInstallScriptsMock: vi.fn(),
   createZipArchiveMock: vi.fn(),
   createArchiveFromDirectoryMock: vi.fn(),
+  initializeEmailSenderMock: vi.fn(),
+  sendEmailMock: vi.fn(),
+  getFileSplitterMock: vi.fn(),
+  splitFileMock: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -63,6 +74,14 @@ vi.mock('../src/core/packager/archive-packager', () => ({
   })),
 }));
 
+vi.mock('../src/core/mailer/email-sender', () => ({
+  initializeEmailSender: initializeEmailSenderMock,
+}));
+
+vi.mock('../src/core/packager/file-splitter', () => ({
+  getFileSplitter: getFileSplitterMock,
+}));
+
 const waitForExpectation = async (assertion: () => void, timeoutMs = 2000): Promise<void> => {
   const startTime = Date.now();
   let lastError: unknown;
@@ -81,8 +100,11 @@ const waitForExpectation = async (assertion: () => void, timeoutMs = 2000): Prom
 };
 
 describe('registerDownloadHandlers', () => {
+  let tempDir: string;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    tempDir = path.join(os.tmpdir(), `download-handler-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
     getPyPIDownloadUrlMock.mockResolvedValue({
       url: 'https://example.com/requests-2.28.0.whl',
@@ -91,7 +113,44 @@ describe('registerDownloadHandlers', () => {
     downloadFileMock.mockResolvedValue(undefined);
     generateInstallScriptsMock.mockResolvedValue(undefined);
     createZipArchiveMock.mockResolvedValue(undefined);
-    createArchiveFromDirectoryMock.mockImplementation(async (_sourceDir: string, outputPath: string) => outputPath);
+    createArchiveFromDirectoryMock.mockImplementation(async (_sourceDir: string, outputPath: string) => {
+      await fs.ensureDir(path.dirname(outputPath));
+      await fs.writeFile(outputPath, Buffer.alloc(1024));
+      return outputPath;
+    });
+    sendEmailMock.mockResolvedValue({
+      success: true,
+      messageId: 'mail-1',
+      emailsSent: 1,
+      attachmentsSent: 1,
+      splitApplied: false,
+    });
+    initializeEmailSenderMock.mockReturnValue({
+      sendEmail: sendEmailMock,
+      testConnection: vi.fn(),
+    });
+    splitFileMock.mockResolvedValue({
+      parts: [
+        path.join(tempDir, 'bundle.tar.gz.part001'),
+        path.join(tempDir, 'bundle.tar.gz.part002'),
+      ],
+      metadataPath: path.join(tempDir, 'bundle.tar.gz.meta.json'),
+      metadata: {
+        originalFileName: 'bundle.tar.gz',
+        originalSize: 2048,
+        partCount: 2,
+        partSize: 1024,
+        checksum: 'abc',
+        createdAt: new Date().toISOString(),
+      },
+      mergeScripts: {
+        bash: path.join(tempDir, 'merge.sh'),
+        powershell: path.join(tempDir, 'merge.ps1'),
+      },
+    });
+    getFileSplitterMock.mockReturnValue({
+      splitFile: splitFileMock,
+    });
   });
 
   it('tar.gz 선택 시 공통 아카이브 패키저를 사용하고 실제 산출물 경로를 완료 이벤트에 담아야 함', async () => {
@@ -148,17 +207,23 @@ describe('registerDownloadHandlers', () => {
     });
 
     await waitForExpectation(() => {
-      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
-        success: true,
-        outputPath: expectedArchivePath,
-        results: [
-          {
-            id: 'pip-requests-2.28.0',
-            success: true,
-          },
-        ],
-      });
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: true,
+          outputPath: expectedArchivePath,
+          artifactPaths: [expectedArchivePath],
+          deliveryMethod: 'local',
+          results: [
+            {
+              id: 'pip-requests-2.28.0',
+              success: true,
+            },
+          ],
+        })
+      );
     });
+    expect(initializeEmailSenderMock).not.toHaveBeenCalled();
   });
 
   it('zip 선택 시에도 완료 이벤트가 디렉터리가 아닌 실제 아카이브 파일 경로를 반영해야 함', async () => {
@@ -198,17 +263,23 @@ describe('registerDownloadHandlers', () => {
     );
 
     await waitForExpectation(() => {
-      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
-        success: true,
-        outputPath: expectedArchivePath,
-        results: [
-          {
-            id: 'pip-requests-2.28.0',
-            success: true,
-          },
-        ],
-      });
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: true,
+          outputPath: expectedArchivePath,
+          artifactPaths: [expectedArchivePath],
+          deliveryMethod: 'local',
+          results: [
+            {
+              id: 'pip-requests-2.28.0',
+              success: true,
+            },
+          ],
+        })
+      );
     });
+    expect(initializeEmailSenderMock).not.toHaveBeenCalled();
   });
 
   it('아카이브 생성이 실패하면 성공 완료 이벤트 대신 실패 이벤트를 보내야 함', async () => {
@@ -305,5 +376,246 @@ describe('registerDownloadHandlers', () => {
       });
     });
     expect(createArchiveFromDirectoryMock).not.toHaveBeenCalled();
+  });
+
+  it('email 전달 선택 시 패키징 뒤 메일을 발송하고 완료 이벤트에 전달 메타데이터를 담아야 함', async () => {
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = path.join(tempDir, 'email-output');
+    const expectedArchivePath = `${outputDir}.tar.gz`;
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'tar.gz',
+          includeScripts: false,
+          concurrency: 1,
+          deliveryMethod: 'email',
+          email: {
+            to: 'offline@example.com',
+            from: 'sender@example.com',
+          },
+          fileSplit: {
+            enabled: false,
+            maxSizeMB: 10,
+          },
+          smtp: {
+            host: 'smtp.example.com',
+            port: 587,
+            user: 'sender@example.com',
+            password: 'secret',
+          },
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(initializeEmailSenderMock).toHaveBeenCalled();
+      expect(sendEmailMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'offline@example.com',
+          attachments: [expectedArchivePath],
+        })
+      );
+    });
+
+    await waitForExpectation(() => {
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: true,
+          outputPath: expectedArchivePath,
+          artifactPaths: [expectedArchivePath],
+          deliveryMethod: 'email',
+          deliveryResult: expect.objectContaining({
+            emailSent: true,
+            emailsSent: 1,
+            splitApplied: false,
+          }),
+        })
+      );
+    });
+  });
+
+  it('첨부 제한 초과이고 파일 분할이 켜져 있으면 splitFile 결과를 첨부와 완료 이벤트에 반영해야 함', async () => {
+    createArchiveFromDirectoryMock.mockImplementationOnce(async (_sourceDir: string, outputPath: string) => {
+      await fs.ensureDir(path.dirname(outputPath));
+      await fs.writeFile(outputPath, Buffer.alloc(4 * 1024));
+      return outputPath;
+    });
+
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = path.join(tempDir, 'split-output');
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'tar.gz',
+          includeScripts: false,
+          concurrency: 1,
+          deliveryMethod: 'email',
+          email: {
+            to: 'offline@example.com',
+          },
+          fileSplit: {
+            enabled: true,
+            maxSizeMB: 0.001,
+          },
+          smtp: {
+            host: 'smtp.example.com',
+            port: 587,
+            user: 'sender@example.com',
+            password: 'secret',
+          },
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(splitFileMock).toHaveBeenCalled();
+      expect(sendEmailMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attachments: expect.arrayContaining([
+            path.join(tempDir, 'bundle.tar.gz.part001'),
+            path.join(tempDir, 'bundle.tar.gz.part002'),
+            path.join(tempDir, 'bundle.tar.gz.meta.json'),
+            path.join(tempDir, 'merge.sh'),
+            path.join(tempDir, 'merge.ps1'),
+          ]),
+        })
+      );
+    });
+
+    await waitForExpectation(() => {
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: true,
+          outputPath: path.join(tempDir, 'bundle.tar.gz.part001'),
+          artifactPaths: expect.arrayContaining([
+            path.join(tempDir, 'bundle.tar.gz.part001'),
+            path.join(tempDir, 'bundle.tar.gz.part002'),
+            path.join(tempDir, 'bundle.tar.gz.meta.json'),
+            path.join(tempDir, 'merge.sh'),
+            path.join(tempDir, 'merge.ps1'),
+          ]),
+          deliveryMethod: 'email',
+          deliveryResult: expect.objectContaining({
+            splitApplied: true,
+          }),
+        })
+      );
+    });
+  });
+
+  it('첨부 제한 초과인데 파일 분할이 꺼져 있으면 메일 전달 실패로 처리해야 함', async () => {
+    createArchiveFromDirectoryMock.mockImplementationOnce(async (_sourceDir: string, outputPath: string) => {
+      await fs.ensureDir(path.dirname(outputPath));
+      await fs.writeFile(outputPath, Buffer.alloc(4 * 1024));
+      return outputPath;
+    });
+
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = path.join(tempDir, 'split-disabled-output');
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'tar.gz',
+          includeScripts: false,
+          concurrency: 1,
+          deliveryMethod: 'email',
+          email: {
+            to: 'offline@example.com',
+          },
+          fileSplit: {
+            enabled: false,
+            maxSizeMB: 0.001,
+          },
+          smtp: {
+            host: 'smtp.example.com',
+            port: 587,
+            user: 'sender@example.com',
+            password: 'secret',
+          },
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(splitFileMock).not.toHaveBeenCalled();
+      expect(sendEmailMock).not.toHaveBeenCalled();
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: false,
+          outputPath: `${outputDir}.tar.gz`,
+          artifactPaths: [`${outputDir}.tar.gz`],
+          deliveryMethod: 'email',
+        })
+      );
+    });
   });
 });

@@ -16,6 +16,8 @@ export interface Config {
   smtpPort?: number;
   smtpUser?: string;
   smtpPassword?: string; // 암호화되어 저장됨
+  smtpFrom?: string;
+  smtpTo?: string;
 
   // 기타 설정
   defaultOutputFormat: 'archive' | 'mirror' | 'withScript';

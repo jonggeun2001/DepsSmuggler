@@ -72,6 +72,7 @@ const SettingsPage: React.FC = () => {
     smtpUser,
     smtpPassword,
     smtpFrom,
+    smtpTo,
     languageVersions,
     defaultTargetOS,
     defaultArchitecture,
@@ -247,6 +248,7 @@ const SettingsPage: React.FC = () => {
           port: number;
           user?: string;
           password?: string;
+          from?: string;
         }) => Promise<boolean | { success?: boolean; error?: string }>;
       } | undefined)?.testSmtpConnection;
 
@@ -256,6 +258,7 @@ const SettingsPage: React.FC = () => {
           port: values.smtpPort,
           user: values.smtpUser,
           password: values.smtpPassword,
+          from: values.smtpFrom,
         });
         const success = typeof result === 'boolean' ? result : Boolean(result?.success);
         setSmtpTestResult(success ? 'success' : 'failed');
@@ -404,6 +407,7 @@ const SettingsPage: React.FC = () => {
       smtpUser,
       smtpPassword,
       smtpFrom,
+      smtpTo,
       languageVersions,
       defaultTargetOS,
       defaultArchitecture,
@@ -455,6 +459,7 @@ const SettingsPage: React.FC = () => {
     smtpUser,
     smtpPassword,
     smtpFrom,
+    smtpTo,
     languageVersions,
     defaultTargetOS,
     defaultArchitecture,
@@ -1742,6 +1747,14 @@ const SettingsPage: React.FC = () => {
             <Col span={12}>
               <Form.Item name="smtpPassword" label="비밀번호" style={{ marginBottom: 8 }}>
                 <Input.Password size="small" placeholder="••••••••" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={8}>
+            <Col span={24}>
+              <Form.Item name="smtpTo" label="수신자" style={{ marginBottom: 8 }}>
+                <Input size="small" placeholder="offline@example.com" />
               </Form.Item>
             </Col>
           </Row>

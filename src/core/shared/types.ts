@@ -38,6 +38,24 @@ export interface DownloadOptions {
   includeDependencies?: boolean;
   pythonVersion?: string;
   concurrency?: number;
+  deliveryMethod?: 'local' | 'email';
+  email?: {
+    to: string;
+    from?: string;
+    subject?: string;
+  };
+  fileSplit?: {
+    enabled: boolean;
+    maxSizeMB: number;
+  };
+  smtp?: {
+    host: string;
+    port: number;
+    user?: string;
+    password?: string;
+    from?: string;
+    secure?: boolean;
+  };
 }
 
 export interface DownloadUrlResult {

@@ -137,6 +137,12 @@ const HistoryPage: React.FC = () => {
           defaultOutputFormat: history.settings.outputFormat,
           includeInstallScripts: history.settings.includeScripts,
           includeDependencies: history.settings.includeDependencies,
+          ...(typeof history.settings.fileSplitEnabled === 'boolean'
+            ? { enableFileSplit: history.settings.fileSplitEnabled }
+            : {}),
+          ...(typeof history.settings.maxFileSizeMB === 'number'
+            ? { maxFileSize: history.settings.maxFileSizeMB }
+            : {}),
         });
 
         message.success(`${history.packages.length}개 패키지가 장바구니에 추가되었습니다.`);

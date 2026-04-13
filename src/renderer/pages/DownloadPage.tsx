@@ -53,7 +53,12 @@ import {
 } from '../stores/download-store';
 import { useSettingsStore } from '../stores/settings-store';
 import { useHistoryStore } from '../stores/history-store';
-import type { HistoryPackageItem, HistorySettings, HistoryStatus } from '../../types';
+import type {
+  HistoryDeliveryResult,
+  HistoryPackageItem,
+  HistorySettings,
+  HistoryStatus,
+} from '../../types';
 import type { DependencyAPI } from '../../types/electron';
 
 const { Title, Text, Paragraph } = Typography;
@@ -143,7 +148,27 @@ const DownloadPage: React.FC = () => {
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
-  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, cudaVersion, concurrentDownloads, defaultDownloadPath, downloadRenderInterval, yumDistribution, aptDistribution, apkDistribution } = useSettingsStore();
+  const {
+    defaultTargetOS,
+    defaultArchitecture,
+    includeDependencies,
+    languageVersions,
+    cudaVersion,
+    concurrentDownloads,
+    defaultDownloadPath,
+    downloadRenderInterval,
+    yumDistribution,
+    aptDistribution,
+    apkDistribution,
+    enableFileSplit,
+    maxFileSize,
+    smtpHost,
+    smtpPort,
+    smtpUser,
+    smtpPassword,
+    smtpFrom,
+    smtpTo,
+  } = useSettingsStore();
   const {
     items: downloadItems,
     isDownloading,
@@ -177,6 +202,10 @@ const DownloadPage: React.FC = () => {
   const { addHistory } = useHistoryStore();
 
   const [outputDir, setOutputDir] = useState(outputPath || defaultDownloadPath || '');
+  const [deliveryMethod, setDeliveryMethod] = useState<'local' | 'email'>('local');
+  const [completedOutputPath, setCompletedOutputPath] = useState('');
+  const [completedArtifactPaths, setCompletedArtifactPaths] = useState<string[]>([]);
+  const [completedDeliveryResult, setCompletedDeliveryResult] = useState<HistoryDeliveryResult | undefined>();
   // 의존성 확인 관련 상태
   const [isResolvingDeps, setIsResolvingDeps] = useState(false);
   const downloadCancelledRef = useRef(false);
@@ -467,6 +496,9 @@ const DownloadPage: React.FC = () => {
         setIsDownloading(false);
         setPackagingStatus('failed');
         setPackagingProgress(0);
+        setCompletedOutputPath(data.outputPath || '');
+        setCompletedArtifactPaths(data.artifactPaths || []);
+        setCompletedDeliveryResult(data.deliveryResult);
 
         if (!data.cancelled) {
           const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
@@ -490,8 +522,14 @@ const DownloadPage: React.FC = () => {
       setIsDownloading(false);
       setPackagingStatus('completed');
       setPackagingProgress(100);
+      setCompletedOutputPath(data.outputPath);
+      setCompletedArtifactPaths(data.artifactPaths || [data.outputPath]);
+      setCompletedDeliveryResult(data.deliveryResult);
+      const completionMessage = data.deliveryMethod === 'email'
+        ? '다운로드, 패키징 및 이메일 전달이 완료되었습니다'
+        : '다운로드 및 패키징이 완료되었습니다';
       scheduleLogBatch('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
-      message.success('다운로드 및 패키징이 완료되었습니다');
+      message.success(completionMessage);
 
       // 히스토리 저장
       const finalItems = useDownloadStore.getState().items;
@@ -511,6 +549,9 @@ const DownloadPage: React.FC = () => {
         outputFormat,
         includeScripts: includeInstallScripts,
         includeDependencies,
+        deliveryMethod,
+        fileSplitEnabled: enableFileSplit,
+        maxFileSizeMB: maxFileSize,
       };
 
       // 상태 계산
@@ -536,7 +577,12 @@ const DownloadPage: React.FC = () => {
         totalSize,
         historyStatus,
         completedCount,
-        failedCount
+        failedCount,
+        {
+          artifactPaths: data.artifactPaths || [data.outputPath],
+          deliveryMethod: data.deliveryMethod || historySettings.deliveryMethod,
+          deliveryResult: data.deliveryResult,
+        }
       );
 
       // 실패 없이 모두 완료되면 장바구니 자동 비우기
@@ -559,7 +605,24 @@ const DownloadPage: React.FC = () => {
       pendingLogsRef.current = [];
     };
     // downloadItems 대신 downloadItemsRef를 사용하므로 dependency에서 제거
-  }, [updateItem, updateItemsBatch, addLog, addLogsBatch, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, addHistory, clearCart]);
+  }, [
+    updateItem,
+    updateItemsBatch,
+    addLog,
+    addLogsBatch,
+    setItems,
+    setIsDownloading,
+    setPackagingStatus,
+    setPackagingProgress,
+    addHistory,
+    clearCart,
+    outputFormat,
+    includeInstallScripts,
+    includeDependencies,
+    deliveryMethod,
+    enableFileSplit,
+    maxFileSize,
+  ]);
 
   // downloadItems 변경 시 ref 동기화 (IPC 이벤트 핸들러에서 최신 상태 참조용)
   // updateItem 호출 후에도 ref가 최신 상태를 유지하도록 함
@@ -963,6 +1026,13 @@ const DownloadPage: React.FC = () => {
       return;
     }
 
+    if (deliveryMethod === 'email') {
+      if (!smtpHost || !smtpPort || !smtpFrom || !smtpTo) {
+        message.warning('이메일 전달을 사용하려면 설정에서 SMTP 서버, 발신자, 수신자를 입력하세요');
+        return;
+      }
+    }
+
     if (includeDependencies && !depsResolved) {
       message.warning('먼저 의존성 확인을 진행하세요');
       return;
@@ -995,7 +1065,13 @@ const DownloadPage: React.FC = () => {
       outputFormat,
       includeScripts: includeInstallScripts,
       includeDependencies,
+      deliveryMethod,
+      fileSplitEnabled: enableFileSplit,
+      maxFileSizeMB: maxFileSize,
     };
+    setCompletedOutputPath('');
+    setCompletedArtifactPaths([]);
+    setCompletedDeliveryResult(undefined);
 
     addLog('info', '다운로드 시작', `총 ${downloadItems.length}개 패키지`);
 
@@ -1037,6 +1113,26 @@ const DownloadPage: React.FC = () => {
         includeDependencies,
         pythonVersion: languageVersions.python,
         concurrency: concurrentDownloads,
+        deliveryMethod,
+        email: deliveryMethod === 'email'
+          ? {
+              to: smtpTo,
+              from: smtpFrom,
+            }
+          : undefined,
+        fileSplit: {
+          enabled: enableFileSplit,
+          maxSizeMB: maxFileSize,
+        },
+        smtp: deliveryMethod === 'email'
+          ? {
+              host: smtpHost,
+              port: smtpPort,
+              user: smtpUser,
+              password: smtpPassword,
+              from: smtpFrom,
+            }
+          : undefined,
       };
 
       window.electronAPI?.log?.('info', `[TIMING] Calling download.start IPC at ${Date.now() - handleStartTime}ms`);
@@ -1134,6 +1230,26 @@ const DownloadPage: React.FC = () => {
         includeDependencies: false, // 재시도 시 의존성 해결 불필요
         pythonVersion: languageVersions.python,
         concurrency: 1, // 단일 패키지이므로 1
+        deliveryMethod,
+        email: deliveryMethod === 'email'
+          ? {
+              to: smtpTo,
+              from: smtpFrom,
+            }
+          : undefined,
+        fileSplit: {
+          enabled: enableFileSplit,
+          maxSizeMB: maxFileSize,
+        },
+        smtp: deliveryMethod === 'email'
+          ? {
+              host: smtpHost,
+              port: smtpPort,
+              user: smtpUser,
+              password: smtpPassword,
+              from: smtpFrom,
+            }
+          : undefined,
       };
 
       await window.electronAPI.download.start({ packages, options });
@@ -1149,17 +1265,22 @@ const DownloadPage: React.FC = () => {
     reset();
     setDepsResolved(false);
     dependencyResolutionBypassedRef.current = false;
+    setCompletedOutputPath('');
+    setCompletedArtifactPaths([]);
+    setCompletedDeliveryResult(undefined);
+    setDeliveryMethod('local');
     navigate('/');
   };
 
   // 다운로드 폴더 열기 (Finder/Explorer)
   const handleOpenFolder = async () => {
+    const targetPath = completedOutputPath || outputDir;
     if (window.electronAPI?.openFolder) {
-      await window.electronAPI.openFolder(outputDir);
+      await window.electronAPI.openFolder(targetPath);
     } else {
-      message.info(`폴더 열기: ${outputDir}`);
+      message.info(`폴더 열기: ${targetPath}`);
     }
-    addLog('info', `다운로드 폴더 열기: ${outputDir}`);
+    addLog('info', `다운로드 폴더 열기: ${targetPath}`);
   };
 
   // 테이블 컬럼
@@ -1402,9 +1523,45 @@ const DownloadPage: React.FC = () => {
           <div>
             <Text strong>다운로드 경로:</Text>
             <Paragraph copyable style={{ marginTop: 8 }}>
-              {outputDir}
+              {completedOutputPath || outputDir}
             </Paragraph>
           </div>
+
+          <Divider />
+
+          <div>
+            <Text strong>전달 방식:</Text>
+            <Paragraph style={{ marginTop: 8 }}>
+              {deliveryMethod === 'email' ? '이메일 전달' : '로컬 저장'}
+            </Paragraph>
+          </div>
+
+          {completedArtifactPaths.length > 0 && (
+            <div>
+              <Text strong>실제 산출물:</Text>
+              <div style={{ marginTop: 8 }}>
+                {completedArtifactPaths.map((artifactPath) => (
+                  <Paragraph key={artifactPath} copyable style={{ marginBottom: 4 }}>
+                    {artifactPath}
+                  </Paragraph>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {completedDeliveryResult?.emailSent && (
+            <Alert
+              type="success"
+              showIcon
+              style={{ marginTop: 16 }}
+              message={`이메일 전달 완료 (${completedDeliveryResult.emailsSent || 1}건)`}
+              description={
+                completedDeliveryResult.splitApplied
+                  ? '첨부 제한을 넘겨 분할 파일로 전달했습니다.'
+                  : '아카이브 파일을 그대로 첨부해 전달했습니다.'
+              }
+            />
+          )}
         </Card>
 
         {/* 다운로드된 패키지 목록 */}
@@ -1486,6 +1643,34 @@ const DownloadPage: React.FC = () => {
               선택
             </Button>
           </Space.Compact>
+        </div>
+
+        <div>
+          <Text strong>전달 방식</Text>
+          <Radio.Group
+            value={deliveryMethod}
+            onChange={(event) => setDeliveryMethod(event.target.value)}
+            disabled={isDownloading}
+            style={{ display: 'block', marginTop: 8 }}
+          >
+            <Space direction="vertical">
+              <Radio value="local">로컬 저장만</Radio>
+              <Radio value="email">이메일로 전달</Radio>
+            </Space>
+          </Radio.Group>
+          {deliveryMethod === 'email' && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginTop: 12 }}
+              message="설정 화면의 SMTP 발신자/수신자와 파일 분할 값을 사용합니다."
+              description={
+                smtpTo
+                  ? `현재 수신자: ${smtpTo}`
+                  : '수신자가 비어 있습니다. 설정 화면에서 SMTP 수신자를 먼저 입력하세요.'
+              }
+            />
+          )}
         </div>
 
       </Card>

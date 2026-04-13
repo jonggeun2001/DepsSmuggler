@@ -13,7 +13,7 @@ export interface SmtpConfig {
   host: string;
   port: number;
   secure: boolean; // true for 465, false for other ports
-  auth: {
+  auth?: {
     user: string;
     pass: string;
   };
@@ -34,6 +34,8 @@ export interface SendResult {
   messageId?: string;
   error?: string;
   emailsSent?: number;
+  attachmentsSent?: number;
+  splitApplied?: boolean;
 }
 
 const DEFAULT_MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10MB
@@ -61,7 +63,7 @@ export class EmailSender {
       host: this.config.host,
       port: this.config.port,
       secure: this.config.secure,
-      auth: this.config.auth,
+      ...(this.config.auth ? { auth: this.config.auth } : {}),
     });
   }
 
@@ -110,7 +112,7 @@ export class EmailSender {
 
       // 단일 메일 발송
       const mailOptions: nodemailer.SendMailOptions = {
-        from: this.config.from || this.config.auth.user,
+        from: this.config.from || this.config.auth?.user,
         to: Array.isArray(to) ? to.join(', ') : to,
         subject,
         text: body,
@@ -126,6 +128,8 @@ export class EmailSender {
         success: true,
         messageId: info.messageId,
         emailsSent: 1,
+        attachmentsSent: mailAttachments?.length || 0,
+        splitApplied: false,
       };
     } catch (error) {
       const errorMessage = (error as Error).message;
@@ -148,6 +152,7 @@ export class EmailSender {
     const { to, subject, body, packages = [] } = options;
     const groups = await this.groupAttachmentsBySize(attachments);
     let emailsSent = 0;
+    let attachmentsSent = 0;
     const messageIds: string[] = [];
 
     for (let i = 0; i < groups.length; i++) {
@@ -160,7 +165,7 @@ export class EmailSender {
       const mailAttachments = await this.prepareAttachments(group);
 
       const mailOptions: nodemailer.SendMailOptions = {
-        from: this.config.from || this.config.auth.user,
+        from: this.config.from || this.config.auth?.user,
         to: Array.isArray(to) ? to.join(', ') : to,
         subject: partSubject,
         html: partBody,
@@ -170,6 +175,7 @@ export class EmailSender {
       const info = await this.transporter!.sendMail(mailOptions);
       messageIds.push(info.messageId);
       emailsSent++;
+      attachmentsSent += mailAttachments?.length || 0;
 
       logger.info(`분할 이메일 발송 (${i + 1}/${groups.length})`, {
         messageId: info.messageId,
@@ -180,6 +186,8 @@ export class EmailSender {
       success: true,
       messageId: messageIds.join(', '),
       emailsSent,
+      attachmentsSent,
+      splitApplied: false,
     };
   }
 

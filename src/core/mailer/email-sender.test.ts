@@ -101,6 +101,8 @@ describe('EmailSender', () => {
       expect(result.success).toBe(true);
       expect(result.messageId).toBe('test-message-id');
       expect(result.emailsSent).toBe(1);
+      expect(result.attachmentsSent).toBe(0);
+      expect(result.splitApplied).toBe(false);
     });
 
     it('여러 수신자에게 이메일을 발송해야 함', async () => {
@@ -113,6 +115,7 @@ describe('EmailSender', () => {
       const result = await sender.sendEmail(options);
 
       expect(result.success).toBe(true);
+      expect(result.attachmentsSent).toBe(0);
       expect(result.emailsSent).toBe(1);
     });
 
@@ -126,6 +129,7 @@ describe('EmailSender', () => {
       const result = await sender.sendEmail(options);
 
       expect(result.success).toBe(true);
+      expect(result.attachmentsSent).toBe(0);
     });
 
     it('첨부파일과 함께 이메일을 발송해야 함', async () => {
@@ -143,6 +147,7 @@ describe('EmailSender', () => {
       const result = await sender.sendEmail(options);
 
       expect(result.success).toBe(true);
+      expect(result.attachmentsSent).toBe(1);
     });
 
     it('패키지 정보와 함께 이메일을 발송해야 함', async () => {
@@ -214,6 +219,7 @@ describe('EmailSender', () => {
 
       expect(result.success).toBe(true);
       expect(result.emailsSent).toBeGreaterThan(1);
+      expect(result.attachmentsSent).toBe(2);
     });
   });
 
@@ -473,6 +479,26 @@ describe('발신자 주소', () => {
 
     const result = await sender.sendEmail(options);
     expect(result.success).toBe(true);
+
+    sender.close();
+  });
+
+  it('auth 없이도 from 주소로 발송 설정을 구성할 수 있어야 함', async () => {
+    const sender = new EmailSender({
+      host: 'smtp.example.com',
+      port: 25,
+      secure: false,
+      from: 'sender@example.com',
+    });
+
+    const result = await sender.sendEmail({
+      to: 'recipient@example.com',
+      subject: 'No Auth',
+      body: 'Test',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.attachmentsSent).toBe(0);
 
     sender.close();
   });

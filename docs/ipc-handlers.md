@@ -112,6 +112,7 @@ electron/
 | `download:cancel` | 취소 |
 | `download:check-path` | 출력 폴더 상태 확인 |
 | `download:clear-path` | 출력 폴더 비우기 |
+| `test-smtp-connection` | SMTP 설정으로 연결 테스트 |
 
 일반 패키지 이벤트:
 
@@ -120,9 +121,10 @@ electron/
 | `download:status` | 전체 단계 상태 |
 | `download:progress` | 개별 패키지 진행률 |
 | `download:deps-resolved` | 다운로드 전 의존성 해결 결과 |
-| `download:all-complete` | 전체 다운로드 완료. `outputPath`는 실제 산출물 경로를 담음 (`.zip`, `.tar.gz`, 또는 취소 시 작업 디렉터리) |
+| `download:all-complete` | 전체 다운로드 완료. `outputPath`는 대표 산출물 경로를, `artifactPaths`는 실제 산출물 목록을 담음. 이메일 전달 시 `deliveryMethod`, `deliveryResult`가 함께 전달됨 |
 
 참고: `dependency:resolve`의 `options.includeDependencies`가 `false`이면 메인 프로세스는 원본 패키지 목록만 반환합니다.
+참고: `download:start`는 `deliveryMethod`, `email`, `smtp`, `fileSplit` 옵션을 받아 패키징 뒤 로컬 저장 또는 이메일 전달까지 수행합니다.
 
 #### OS 패키지 채널
 

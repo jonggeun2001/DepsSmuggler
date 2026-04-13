@@ -15,6 +15,15 @@ export interface DepsResolvedData {
 export interface AllCompleteData {
   success: boolean;
   outputPath: string;
+  artifactPaths?: string[];
+  deliveryMethod?: 'local' | 'email';
+  deliveryResult?: {
+    emailSent: boolean;
+    emailsSent?: number;
+    attachmentsSent?: number;
+    splitApplied?: boolean;
+    error?: string;
+  };
   cancelled?: boolean;
   error?: string;
   results?: Array<{
@@ -24,8 +33,50 @@ export interface AllCompleteData {
   }>;
 }
 
+export interface DownloadStartOptions {
+  outputDir: string;
+  outputFormat: 'zip' | 'tar.gz';
+  includeScripts: boolean;
+  targetOS?: string;
+  architecture?: string;
+  includeDependencies?: boolean;
+  pythonVersion?: string;
+  concurrency?: number;
+  deliveryMethod?: 'local' | 'email';
+  email?: {
+    to: string;
+    from?: string;
+    subject?: string;
+  };
+  fileSplit?: {
+    enabled: boolean;
+    maxSizeMB: number;
+  };
+  smtp?: {
+    host: string;
+    port: number;
+    user?: string;
+    password?: string;
+    from?: string;
+    secure?: boolean;
+  };
+}
+
+export interface SmtpConnectionConfig {
+  host: string;
+  port: number;
+  user?: string;
+  password?: string;
+  from?: string;
+}
+
+export interface SmtpConnectionResult {
+  success: boolean;
+  error?: string;
+}
+
 export interface DownloadAPI {
-  start: (data: { packages: unknown[]; options: unknown }) => Promise<void>;
+  start: (data: { packages: unknown[]; options: DownloadStartOptions }) => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   cancel: () => Promise<void>;
@@ -237,6 +288,7 @@ export interface ElectronAPI {
   selectDirectory: () => Promise<string | null>;
   saveFile: (defaultPath: string) => Promise<string | null>;
   openFolder: (folderPath: string) => Promise<void>;
+  testSmtpConnection?: (config: SmtpConnectionConfig) => Promise<SmtpConnectionResult>;
   download: DownloadAPI;
   config: ConfigAPI;
   cache: CacheAPI;
