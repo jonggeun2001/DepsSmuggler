@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Card,
   Button,
@@ -146,6 +146,7 @@ function createPendingDownloadItems(items: PendingDownloadSource[]): DownloadIte
 
 const DownloadPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const cartItems = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
   const {
@@ -237,6 +238,16 @@ const DownloadPage: React.FC = () => {
     }
 
   }, [cartItems, downloadItems.length, setItems, clearLogs]);
+
+  useEffect(() => {
+    const restoredDeliveryMethod = (
+      location.state as { deliveryMethod?: 'local' | 'email' } | null
+    )?.deliveryMethod;
+
+    if (restoredDeliveryMethod) {
+      setDeliveryMethod(restoredDeliveryMethod);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     const includeDependenciesChanged =

@@ -130,7 +130,7 @@ const HistoryPage: React.FC = () => {
   const handleRedownload = useCallback((history: DownloadHistory) => {
     Modal.confirm({
       title: '재다운로드',
-      content: `${history.packages.length}개 패키지를 장바구니에 추가하고 다운로드 페이지로 이동하시겠습니까?`,
+      content: `${history.packages.length}개 패키지를 장바구니에 추가하고 다운로드 페이지로 이동합니다. 전달 방식은 ${getDeliveryLabel(history)}로 복원됩니다.`,
       okText: '확인',
       cancelText: '취소',
       onOk: () => {
@@ -160,7 +160,11 @@ const HistoryPage: React.FC = () => {
         });
 
         message.success(`${history.packages.length}개 패키지가 장바구니에 추가되었습니다.`);
-        navigate('/download');
+        navigate('/download', {
+          state: {
+            deliveryMethod: getDeliveryMethod(history),
+          },
+        });
       },
     });
   }, [addItem, updateSettings, navigate]);
