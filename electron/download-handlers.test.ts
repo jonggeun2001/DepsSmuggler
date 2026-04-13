@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi, waitFor } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerDownloadHandlers } from './download-handlers';
 
 const {
@@ -63,6 +63,23 @@ vi.mock('../src/core/packager/archive-packager', () => ({
   })),
 }));
 
+const waitForExpectation = async (assertion: () => void, timeoutMs = 2000): Promise<void> => {
+  const startTime = Date.now();
+  let lastError: unknown;
+
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
+  throw lastError;
+};
+
 describe('registerDownloadHandlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -113,7 +130,7 @@ describe('registerDownloadHandlers', () => {
       }
     );
 
-    await waitFor(() => {
+    await waitForExpectation(() => {
       expect(createArchiveFromDirectoryMock).toHaveBeenCalledWith(
         outputDir,
         expectedArchivePath,
@@ -130,7 +147,7 @@ describe('registerDownloadHandlers', () => {
       );
     });
 
-    await waitFor(() => {
+    await waitForExpectation(() => {
       expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
         success: true,
         outputPath: expectedArchivePath,
@@ -180,7 +197,7 @@ describe('registerDownloadHandlers', () => {
       }
     );
 
-    await waitFor(() => {
+    await waitForExpectation(() => {
       expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
         success: true,
         outputPath: expectedArchivePath,
@@ -231,7 +248,7 @@ describe('registerDownloadHandlers', () => {
       }
     );
 
-    await waitFor(() => {
+    await waitForExpectation(() => {
       expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
         success: false,
         outputPath: outputDir,
@@ -280,7 +297,7 @@ describe('registerDownloadHandlers', () => {
       }
     );
 
-    await waitFor(() => {
+    await waitForExpectation(() => {
       expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
         success: false,
         outputPath: outputDir,
