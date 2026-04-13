@@ -6,7 +6,7 @@
 
 ## 현재 화면 구조
 
-`src/renderer/App.tsx` 기준 라우트:
+현재 라우트 source of truth는 `src/renderer/index.tsx`의 `createHashRouter`입니다. `src/renderer/App.tsx`는 유사한 라우트 정의를 담고 있지만 현재 엔트리포인트에서 import되지 않는 레거시 파일입니다.
 
 | 경로 | 컴포넌트 | 역할 |
 |------|----------|------|

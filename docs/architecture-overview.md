@@ -87,7 +87,7 @@ depssmuggler/
 ### 5. CLI (`src/cli`)
 
 - `index.ts`가 `download`, `search`, `config`, `cache`, `os` 명령을 등록합니다.
-- 일반 패키지 CLI는 현재 `pip`, `conda`, `maven`, `docker` 검색과 `pip`, `conda`, `maven`, `yum`, `docker` 다운로드에 초점이 맞춰져 있습니다.
+- 일반 패키지 CLI는 현재 `pip`, `conda`, `maven`, `docker` 검색과 `pip`, `conda`, `maven`, `npm`, `docker` 다운로드에 초점이 맞춰져 있습니다.
 - OS CLI는 `list-distros`, `search`는 실동작하고, `download`, `cache`는 GUI 사용 안내를 출력합니다.
 
 ## 주요 도메인 모듈
@@ -142,10 +142,11 @@ npm run dev
 npm run build
 npm run test
 INTEGRATION_TEST=true npm run test
-npm run test:e2e
 npm run lint
 npx tsc --noEmit
 ```
+
+참고: `playwright.config.ts`는 존재하지만 현재 저장소에는 `tests/e2e` 시나리오가 커밋되어 있지 않아 E2E는 스캐폴딩 단계로 봅니다.
 
 ## 관련 문서
 

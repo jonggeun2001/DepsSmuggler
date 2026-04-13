@@ -16,8 +16,8 @@
 | Python `pip` | 지원 | 지원 | PyPI 검색/버전 조회/다운로드 |
 | Python `conda` | 지원 | 지원 | 채널 선택 지원 |
 | Java `maven` | 지원 | 지원 | 네이티브 classifier 확인 지원 |
-| Node.js `npm` | 지원 | 미지원 | 현재 CLI `search`/`download`에는 없음 |
-| OS `yum` | 지원 | 부분 지원 | CLI는 `os list-distros`, `os search`만 실사용 가능 |
+| Node.js `npm` | 지원 | 부분 지원 | CLI `download`는 지원하지만 `search`는 아직 미구현 |
+| OS `yum` | 지원 | 부분 지원 | CLI는 `os` 네임스페이스 중심이며 `download/cache`는 재구현 중 |
 | OS `apt` | 지원 | 부분 지원 | CLI `os download`는 재구현 중 안내만 출력 |
 | OS `apk` | 지원 | 부분 지원 | GUI 기준 기능이 더 완전함 |
 | Container `docker` | 지원 | 지원 | GUI는 Docker Hub 외 레지스트리 선택 UI 포함 |
@@ -34,6 +34,13 @@
 
 ```bash
 npm install
+```
+
+소스 체크아웃에서 CLI를 전역 설치하려면 먼저 빌드가 필요합니다.
+
+```bash
+npm run build
+npm install -g .
 ```
 
 ## 개발 명령어
@@ -57,10 +64,11 @@ npm run package:linux
 npm run test
 INTEGRATION_TEST=true npm run test
 npm run test:coverage
-npm run test:e2e
 npm run lint
 npx tsc --noEmit
 ```
+
+`playwright.config.ts`는 존재하지만 현재 저장소에는 `tests/e2e` 시나리오가 없어 `npm run test:e2e`를 상시 검증 명령으로 보지 않습니다.
 
 ## 사용 예시
 
@@ -89,6 +97,7 @@ depssmuggler search nginx -t docker
 # 일반 패키지 다운로드
 depssmuggler download -t pip -p requests -V 2.31.0 -o ./output
 depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0
+depssmuggler download -t npm -p react -V 19.2.0
 depssmuggler download -t docker -p nginx -V latest
 
 # 파일 입력 기반 다운로드
@@ -99,7 +108,7 @@ depssmuggler os list-distros
 depssmuggler os search nginx --distro rocky-9
 ```
 
-현재 CLI의 `os download`, `os cache stats`, `os cache clear`는 재구현 중이며 Electron GUI 사용을 안내합니다.
+현재 CLI의 `download`는 `pip`, `conda`, `maven`, `npm`, `docker` 중심이며, OS 패키지는 `os` 네임스페이스에서 다룹니다. 다만 `os download`, `os cache stats`, `os cache clear`는 재구현 중이며 Electron GUI 사용을 안내합니다.
 
 ## 저장 위치
 

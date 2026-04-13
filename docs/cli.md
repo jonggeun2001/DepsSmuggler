@@ -13,7 +13,8 @@ npm run cli -- --help
 # 빌드 후 직접 실행
 node dist/src/cli/index.js --help
 
-# 글로벌 설치 후 실행
+# source checkout에서 글로벌 설치 후 실행
+npm run build
 npm install -g .
 depssmuggler --help
 ```
@@ -44,7 +45,7 @@ depssmuggler
 
 ## `download`
 
-일반 패키지 다운로드 명령입니다. 현재 도움말과 구현 기준으로 `pip`, `conda`, `maven`, `yum`, `docker` 타입을 처리합니다.
+일반 패키지 다운로드 명령입니다. 현재 구현 기준으로 `pip`, `conda`, `maven`, `npm`, `docker` 타입을 처리합니다.
 
 ### 사용법
 
@@ -56,7 +57,7 @@ depssmuggler download [옵션]
 
 | 옵션 | 설명 | 기본값 |
 |------|------|--------|
-| `-t, --type <type>` | 패키지 타입 (`pip`, `conda`, `maven`, `yum`, `docker`) | `pip` |
+| `-t, --type <type>` | 패키지 타입 (`pip`, `conda`, `maven`, `npm`, `docker`) | `pip` |
 | `-p, --package <name>` | 패키지명 | - |
 | `-V, --pkg-version <version>` | 패키지 버전 | `latest` |
 | `-a, --arch <arch>` | 아키텍처 | `x86_64` |
@@ -71,6 +72,7 @@ depssmuggler download [옵션]
 ```bash
 depssmuggler download -t pip -p requests -V 2.31.0
 depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0
+depssmuggler download -t npm -p react -V 19.2.0
 depssmuggler download -t docker -p nginx -V latest
 depssmuggler download -t pip --file requirements.txt -o ./packages
 depssmuggler download -t pip -p flask -f tar.gz
@@ -80,7 +82,7 @@ depssmuggler download -t pip -p flask -f tar.gz
 
 - 다운로드 성공 시 아카이브 생성과 설치 스크립트 생성을 연달아 수행합니다.
 - 출력 형식은 현재 `zip` 또는 `tar.gz`만 지원합니다.
-- `npm`, `apt`, `apk`는 이 명령의 실사용 대상이 아니며 GUI 흐름을 우선 사용해야 합니다.
+- OS 패키지(`yum`, `apt`, `apk`)는 이 명령이 아니라 `os` 네임스페이스를 사용해야 합니다.
 
 ## `search`
 
@@ -190,7 +192,7 @@ depssmuggler cache list
 ## 현재 한계
 
 - CLI는 GUI보다 지원 범위가 좁습니다.
-- `npm`은 GUI 중심 기능이며 CLI 일반 명령에는 아직 연결되지 않았습니다.
+- 일반 `search` 명령에는 `npm`이 아직 연결되어 있지 않습니다.
 - OS 패키지 CLI는 조회 중심이며 다운로드/캐시는 GUI 흐름이 기준입니다.
 
 ## 관련 문서

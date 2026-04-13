@@ -2,7 +2,7 @@
 
 ## 개요
 
-이 저장소는 Vitest 기반 단위/통합 테스트와 Playwright 기반 E2E 테스트를 함께 사용합니다. CI는 GitHub Actions에서 테스트, 빌드, CLI 스모크, 타입 체크, 커버리지를 분리해 실행합니다.
+이 저장소는 Vitest 기반 단위/통합 테스트를 운용하고, Playwright는 설정 파일만 준비된 스캐폴딩 상태입니다. CI는 GitHub Actions에서 테스트, 빌드, CLI 스모크, 타입 체크, 커버리지를 분리해 실행합니다.
 
 ## 로컬 검증 명령
 
@@ -15,9 +15,6 @@ INTEGRATION_TEST=true npm run test
 
 # 커버리지
 npm run test:coverage
-
-# E2E
-npm run test:e2e
 
 # 린트/타입 체크
 npm run lint
@@ -57,14 +54,19 @@ npx tsc --noEmit
 - `src/core/downloaders/apk.integration.test.ts`
 - `src/core/downloaders/os.integration.test.ts`
 
-### 3. E2E 테스트
+### 3. E2E 스캐폴딩
 
 - 설정 파일: `playwright.config.ts`
-- 테스트 디렉터리: `tests/e2e`
+- 설정상 테스트 디렉터리: `tests/e2e`
 - 브라우저 프로젝트: `chromium`
 - 로컬 web server: `npm run dev:vite`
 
-기본 동작:
+현재 상태:
+
+- `playwright.config.ts`는 존재하지만 저장소에는 `tests/e2e` 디렉터리와 시나리오 파일이 커밋되어 있지 않습니다.
+- 따라서 `npm run test:e2e`는 "구성은 준비돼 있지만 기본 회귀 검증 체계는 아직 아님"으로 봐야 합니다.
+
+구성 동작:
 
 - `CI` 환경에서는 retry `2`, worker `1`
 - 로컬에서는 기존 `http://localhost:3000` 서버 재사용 가능
