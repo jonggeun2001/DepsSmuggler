@@ -35,10 +35,12 @@ vi.mock('fs-extra', () => ({
 
 vi.mock('cli-progress', () => ({
   default: {
-    MultiBar: vi.fn(() => ({
-      create,
-      stop,
-    })),
+    MultiBar: vi.fn(function MultiBarMock() {
+      return {
+        create,
+        stop,
+      };
+    }),
     Presets: {
       shades_classic: {},
     },
