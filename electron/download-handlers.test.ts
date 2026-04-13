@@ -312,4 +312,56 @@ describe('registerDownloadHandlers', () => {
       })
     );
   });
+
+  it('os:download:start에서 취소되면 최종 성공 산출물 없이 cancelled 결과를 반환한다', async () => {
+    const mockWindow = {
+      webContents: {
+        send: windowSend,
+      },
+    };
+
+    yumDownloadPackage.mockReset();
+
+    registerDownloadHandlers(() => mockWindow as never);
+
+    const osDownloadHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'os:download:start'
+    )?.[1];
+    const osCancelHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'os:download:cancel'
+    )?.[1];
+
+    yumDownloadPackage.mockImplementationOnce(async () => {
+      await osCancelHandler({}, {});
+      return {
+        success: false,
+        error: new Error('Download cancelled'),
+        cancelled: true,
+      };
+    });
+
+    const result = await osDownloadHandler(
+      {},
+      {
+        packages: [rootPackage, dependencyPackage],
+        outputDir: '/downloads',
+        distribution,
+        architecture: 'x86_64',
+        resolveDependencies: false,
+      }
+    );
+
+    expect(archiveCreateArchive).not.toHaveBeenCalled();
+    expect(repoCreateLocalRepo).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: [],
+        cancelled: true,
+        generatedOutputs: [],
+        warnings: expect.arrayContaining([
+          expect.stringContaining('최종 출력물은 생성되지 않았습니다'),
+        ]),
+      })
+    );
+  });
 });

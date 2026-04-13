@@ -88,6 +88,7 @@ let downloadCancelled = false;
 let downloadPaused = false;
 let downloadAbortController: AbortController | null = null;
 let osDownloadCancelled = false;
+let osDownloadAbortController: AbortController | null = null;
 
 // mainWindow 참조를 저장할 변수
 let getMainWindow: () => BrowserWindow | null = () => null;
@@ -233,7 +234,8 @@ function getOSDownloaderForDistribution(
   architecture: OSArchitecture,
   outputDir: string,
   concurrency: number,
-  mainWindow: BrowserWindow | null
+  mainWindow: BrowserWindow | null,
+  abortSignal?: AbortSignal
 ) {
   const onError = createOSDownloadErrorHandler(mainWindow);
   const onProgress = (progress: OSDownloadProgress) => {
@@ -246,6 +248,7 @@ function getOSDownloaderForDistribution(
     repositories: distribution.defaultRepos,
     outputDir,
     concurrency,
+    abortSignal,
     onProgress,
     onError,
   };
@@ -979,12 +982,14 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
       }
 
       const stagingDir = await fse.mkdtemp(path.join(outputDir, '.depssmuggler-os-'));
+      osDownloadAbortController = new AbortController();
       const downloader = getOSDownloaderForDistribution(
         distribution,
         architecture,
         stagingDir,
         concurrency,
-        mainWindow
+        mainWindow,
+        osDownloadAbortController.signal
       );
       const downloadedFiles = new Map<string, string>();
       const successfulPackages: OSPackageInfo[] = [];
@@ -995,7 +1000,16 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
       try {
         for (const [index, pkg] of packagesToDownload.entries()) {
           if (osDownloadCancelled) {
+            if (successfulPackages.length > 0) {
+              warnings.push(
+                `다운로드 취소로 임시 파일 ${successfulPackages.length}개를 정리했습니다. 최종 출력물은 생성되지 않았습니다.`
+              );
+            } else {
+              warnings.push('다운로드가 취소되어 최종 출력물을 생성하지 않았습니다.');
+            }
             skippedPackages.push(...packagesToDownload.slice(index));
+            successfulPackages.length = 0;
+            downloadedFiles.clear();
             break;
           }
 
@@ -1010,19 +1024,17 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           });
 
           const result = await downloader.downloadPackage(pkg);
-          if (osDownloadCancelled) {
-            if (result.success && result.filePath) {
-              successfulPackages.push(pkg);
-              downloadedFiles.set(`${pkg.name}-${pkg.version}`, result.filePath);
-            } else if (result.skipped) {
-              skippedPackages.push(pkg);
+          if (result.cancelled || osDownloadCancelled) {
+            if (successfulPackages.length > 0) {
+              warnings.push(
+                `다운로드 취소로 임시 파일 ${successfulPackages.length}개를 정리했습니다. 최종 출력물은 생성되지 않았습니다.`
+              );
             } else {
-              failedPackages.push({
-                package: pkg,
-                error: result.error?.message || '다운로드 실패',
-              });
+              warnings.push('다운로드가 취소되어 최종 출력물을 생성하지 않았습니다.');
             }
-            skippedPackages.push(...packagesToDownload.slice(index + 1));
+            skippedPackages.push(...packagesToDownload.slice(index));
+            successfulPackages.length = 0;
+            downloadedFiles.clear();
             break;
           }
 
@@ -1119,6 +1131,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
         });
       } finally {
         osDownloadCancelled = false;
+        osDownloadAbortController = null;
         await fse.remove(stagingDir);
       }
     }
@@ -1126,6 +1139,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
 
   ipcMain.handle('os:download:cancel', async () => {
     osDownloadCancelled = true;
+    osDownloadAbortController?.abort();
     return { success: true };
   });
 

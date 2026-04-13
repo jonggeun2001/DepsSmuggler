@@ -80,7 +80,22 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
     }
   };
 
+  const getManualRepositorySetupGuide = (): string => {
+    switch (packageManager) {
+      case 'yum':
+        return '저장소 경로를 가리키는 .repo 파일을 만들고 baseurl=file:///경로/repository 로 등록하세요.';
+      case 'apt':
+        return "sources.list.d에 'deb [trusted=yes] file:/경로/repository ./' 항목을 추가하세요.";
+      case 'apk':
+        return 'apk add --repository /경로/repository --allow-untrusted <패키지명>';
+      default:
+        return '패키지 관리자에 맞는 로컬 저장소 등록 절차를 수동으로 진행하세요.';
+    }
+  };
+
   const isSuccess = !cancelled && failed.length === 0;
+  const hasRepositorySetupScript =
+    outputOptions.generateScripts && outputOptions.scriptTypes.includes('local-repo');
   const title = cancelled
     ? '다운로드 취소됨'
     : isSuccess
@@ -162,56 +177,76 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
       )}
 
       {/* 포함된 파일 목록 */}
-      <div className="result-section">
-        <h3 className="section-title">포함된 파일</h3>
-        <ul className="file-list">
-          <li>
-            <span className="file-icon">📦</span>
-            패키지 파일 ({success.length}개)
-          </li>
-          {outputOptions.generateScripts && outputOptions.scriptTypes?.length > 0 && (
-            <>
-              {outputOptions.scriptTypes.includes('dependency-order') && (
-                <li>
-                  <span className="file-icon">📜</span>
-                  install.sh - 의존성 순서 설치 스크립트
-                </li>
-              )}
-              {outputOptions.scriptTypes.includes('local-repo') && (
-                <li>
-                  <span className="file-icon">📜</span>
-                  setup-repo.sh - 로컬 저장소 설정 스크립트
-                </li>
-              )}
-            </>
-          )}
-          <li>
-            <span className="file-icon">📄</span>
-            metadata.json - 패키지 메타데이터
-          </li>
-          <li>
-            <span className="file-icon">📖</span>
-            README.txt - 사용 안내
-          </li>
-        </ul>
-      </div>
+      {generatedOutputs.length > 0 && (
+        <div className="result-section">
+          <h3 className="section-title">포함된 파일</h3>
+          <ul className="file-list">
+            <li>
+              <span className="file-icon">📦</span>
+              패키지 파일 ({success.length}개)
+            </li>
+            {outputOptions.generateScripts && outputOptions.scriptTypes?.length > 0 && (
+              <>
+                {outputOptions.scriptTypes.includes('dependency-order') && (
+                  <li>
+                    <span className="file-icon">📜</span>
+                    install.sh - 의존성 순서 설치 스크립트
+                  </li>
+                )}
+                {outputOptions.scriptTypes.includes('local-repo') && (
+                  <li>
+                    <span className="file-icon">📜</span>
+                    setup-repo.sh - 로컬 저장소 설정 스크립트
+                  </li>
+                )}
+              </>
+            )}
+            <li>
+              <span className="file-icon">📄</span>
+              metadata.json - 패키지 메타데이터
+            </li>
+            <li>
+              <span className="file-icon">📖</span>
+              README.txt - 사용 안내
+            </li>
+          </ul>
+        </div>
+      )}
 
       {/* 설치 방법 안내 */}
       <div className="result-section">
         <h3 className="section-title">설치 방법</h3>
         <div className="install-guide">
-          {outputOptions.type === 'repository' || outputOptions.type === 'both' ? (
+          {cancelled && generatedOutputs.length === 0 ? (
+            <p className="guide-step">
+              최종 출력물이 생성되지 않았습니다. 다시 다운로드를 완료한 후 설치를 진행하세요.
+            </p>
+          ) : outputOptions.type === 'repository' || outputOptions.type === 'both' ? (
             <>
               <p className="guide-step">
                 <strong>1.</strong> 다운로드한 폴더를 폐쇄망 서버에 복사합니다.
               </p>
-              <p className="guide-step">
-                <strong>2.</strong> 로컬 저장소 설정 스크립트를 실행합니다:
-              </p>
-              <code className="guide-code">sudo bash setup-repo.sh</code>
-              <p className="guide-step">
-                <strong>3.</strong> 패키지를 설치합니다:
-              </p>
+              {hasRepositorySetupScript ? (
+                <>
+                  <p className="guide-step">
+                    <strong>2.</strong> 로컬 저장소 설정 스크립트를 실행합니다:
+                  </p>
+                  <code className="guide-code">sudo bash setup-repo.sh</code>
+                  <p className="guide-step">
+                    <strong>3.</strong> 패키지를 설치합니다:
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="guide-step">
+                    <strong>2.</strong> `setup-repo.sh`는 생성되지 않았습니다. 로컬 저장소를 수동으로 등록하세요:
+                  </p>
+                  <code className="guide-code">{getManualRepositorySetupGuide()}</code>
+                  <p className="guide-step">
+                    <strong>3.</strong> 패키지를 설치합니다:
+                  </p>
+                </>
+              )}
               <code className="guide-code">{getInstallCommand()}</code>
             </>
           ) : (

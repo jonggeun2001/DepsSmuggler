@@ -130,7 +130,7 @@ electron/
 |------|------|
 | `os:resolveDependencies` | OS 패키지 의존성 해결 |
 | `os:download:start` | OS 패키지 전용 end-to-end 다운로드 시작. 필요 시 의존성 해결, 원본 패키지 다운로드, `archive/repository/both` 패키징까지 수행하고 `warnings`, `unresolved`, `conflicts`, `generatedOutputs`, `cancelled`를 함께 반환 |
-| `os:download:cancel` | OS 패키지 전용 다운로드 취소 요청 |
+| `os:download:cancel` | OS 패키지 전용 다운로드 취소 요청. 현재 전송 중인 fetch에도 abort 신호를 전달하고, 취소 시 최종 출력물이 없으면 성공 산출물로 보고하지 않음 |
 | `os:cache:stats` | OS 캐시 통계 조회 placeholder (`{ size: 0, count: 0, path: '' }`) |
 | `os:cache:clear` | OS 캐시 초기화 placeholder (`{ success: true }`만 반환) |
 

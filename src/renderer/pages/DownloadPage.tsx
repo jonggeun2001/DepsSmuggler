@@ -1208,7 +1208,9 @@ const DownloadPage: React.FC = () => {
         return;
       }
 
-      addOSDownloadHistory(result);
+      if (!result.cancelled) {
+        addOSDownloadHistory(result);
+      }
       setOSResult(result);
 
       if (!result.cancelled) {
