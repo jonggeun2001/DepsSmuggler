@@ -1106,7 +1106,13 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           try {
             if (outputOptions.type === 'archive' || outputOptions.type === 'both') {
               const archivePackager = new OSArchivePackager();
-              const archivePath = await archivePackager.createArchive(
+              const archiveOutput = {
+                type: 'archive' as const,
+                path: `${path.join(outputDir, 'os-packages')}.${outputOptions.archiveFormat === 'tar.gz' ? 'tar.gz' : 'zip'}`,
+                label: `압축 파일 (${outputOptions.archiveFormat || 'zip'})`,
+              };
+              generatedOutputs.push(archiveOutput);
+              await archivePackager.createArchive(
                 successfulPackages,
                 downloadedFiles,
                 {
@@ -1118,11 +1124,6 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                   repoName: 'depssmuggler-local',
                 }
               );
-              generatedOutputs.push({
-                type: 'archive',
-                path: archivePath,
-                label: `압축 파일 (${outputOptions.archiveFormat || 'zip'})`,
-              });
 
               if (osDownloadCancelled) {
                 await cleanupGeneratedOutputs(generatedOutputs);
@@ -1135,6 +1136,11 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
             if (!osDownloadCancelled && (outputOptions.type === 'repository' || outputOptions.type === 'both')) {
               const repoPath = path.join(outputDir, 'repository');
               const repoPackager = new OSRepoPackager();
+              generatedOutputs.push({
+                type: 'repository',
+                path: repoPath,
+                label: '로컬 저장소',
+              });
               await repoPackager.createLocalRepo(successfulPackages, downloadedFiles, {
                 packageManager: distribution.packageManager,
                 outputPath: repoPath,
@@ -1152,12 +1158,6 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                   outputOptions.scriptTypes
                 );
               }
-
-              generatedOutputs.push({
-                type: 'repository',
-                path: repoPath,
-                label: '로컬 저장소',
-              });
 
               if (osDownloadCancelled) {
                 await cleanupGeneratedOutputs(generatedOutputs);

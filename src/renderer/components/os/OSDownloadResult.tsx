@@ -255,7 +255,7 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
       <div className="result-section">
         <h3 className="section-title">설치 방법</h3>
         <div className="install-guide">
-          {cancelled && generatedOutputs.length === 0 ? (
+          {generatedOutputs.length === 0 ? (
             <p className="guide-step">
               최종 출력물이 생성되지 않았습니다. 다시 다운로드를 완료한 후 설치를 진행하세요.
             </p>
