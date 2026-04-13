@@ -23,8 +23,9 @@ async function collectPackageCacheStats() {
   ]);
 
   const totalSize = (pipStats.diskSize || 0) + (mavenStats.diskSize || 0) + (condaStats.totalSize || 0);
+  const pipEntryCount = Math.max(pipStats.memoryEntries || 0, pipStats.diskEntries || 0);
   const entryCount =
-    (pipStats.memoryEntries || 0) +
+    pipEntryCount +
     (npmStats.entries || 0) +
     (mavenStats.memoryEntries || 0) +
     (condaStats.entries?.length || 0);
