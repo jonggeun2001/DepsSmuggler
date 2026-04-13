@@ -1073,8 +1073,13 @@ const WizardPage: React.FC = () => {
 
   const stepItems = getStepItems();
   const osCartItemCount = cartItems.filter((item) => ['yum', 'apt', 'apk'].includes(item.type)).length;
+  const osCartManagers = new Set(
+    cartItems
+      .filter((item) => ['yum', 'apt', 'apk'].includes(item.type))
+      .map((item) => item.type)
+  );
   const canOpenDedicatedOSDownload =
-    osCartItemCount > 0 && osCartItemCount === cartItems.length;
+    osCartItemCount > 0 && osCartItemCount === cartItems.length && osCartManagers.size === 1;
 
   // 현재 표시할 단계 인덱스 계산 (환경확인 단계 제거됨)
   // 모든 패키지 타입: 0(카테고리) -> 1(패키지타입) -> 2(검색) -> 3(버전)

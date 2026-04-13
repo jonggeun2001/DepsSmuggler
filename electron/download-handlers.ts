@@ -1103,67 +1103,75 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
             phase: 'packaging',
           });
 
-          if (outputOptions.type === 'archive' || outputOptions.type === 'both') {
-            const archivePackager = new OSArchivePackager();
-            const archivePath = await archivePackager.createArchive(
-              successfulPackages,
-              downloadedFiles,
-              {
-                format: outputOptions.archiveFormat || 'zip',
-                outputPath: path.join(outputDir, 'os-packages'),
-                includeScripts: outputOptions.generateScripts,
-                scriptTypes: outputOptions.scriptTypes,
-                packageManager: distribution.packageManager,
-                repoName: 'depssmuggler-local',
-              }
-            );
-            generatedOutputs.push({
-              type: 'archive',
-              path: archivePath,
-              label: `압축 파일 (${outputOptions.archiveFormat || 'zip'})`,
-            });
-
-            if (osDownloadCancelled) {
-              await cleanupGeneratedOutputs(generatedOutputs);
-              generatedOutputs.length = 0;
-              successfulPackages.length = 0;
-              warnings.push('패키징 단계에서 취소되어 생성 중이던 출력물을 정리했습니다.');
-            }
-          }
-
-          if (!osDownloadCancelled && (outputOptions.type === 'repository' || outputOptions.type === 'both')) {
-            const repoPath = path.join(outputDir, 'repository');
-            const repoPackager = new OSRepoPackager();
-            await repoPackager.createLocalRepo(successfulPackages, downloadedFiles, {
-              packageManager: distribution.packageManager,
-              outputPath: repoPath,
-              repoName: 'depssmuggler-local',
-              includeSetupScript:
-                outputOptions.generateScripts &&
-                outputOptions.scriptTypes.includes('local-repo'),
-            });
-
-            if (outputOptions.generateScripts) {
-              await writeRepositoryScripts(
-                repoPath,
+          try {
+            if (outputOptions.type === 'archive' || outputOptions.type === 'both') {
+              const archivePackager = new OSArchivePackager();
+              const archivePath = await archivePackager.createArchive(
                 successfulPackages,
-                distribution.packageManager,
-                outputOptions.scriptTypes
+                downloadedFiles,
+                {
+                  format: outputOptions.archiveFormat || 'zip',
+                  outputPath: path.join(outputDir, 'os-packages'),
+                  includeScripts: outputOptions.generateScripts,
+                  scriptTypes: outputOptions.scriptTypes,
+                  packageManager: distribution.packageManager,
+                  repoName: 'depssmuggler-local',
+                }
               );
+              generatedOutputs.push({
+                type: 'archive',
+                path: archivePath,
+                label: `압축 파일 (${outputOptions.archiveFormat || 'zip'})`,
+              });
+
+              if (osDownloadCancelled) {
+                await cleanupGeneratedOutputs(generatedOutputs);
+                generatedOutputs.length = 0;
+                successfulPackages.length = 0;
+                warnings.push('패키징 단계에서 취소되어 생성 중이던 출력물을 정리했습니다.');
+              }
             }
 
-            generatedOutputs.push({
-              type: 'repository',
-              path: repoPath,
-              label: '로컬 저장소',
-            });
+            if (!osDownloadCancelled && (outputOptions.type === 'repository' || outputOptions.type === 'both')) {
+              const repoPath = path.join(outputDir, 'repository');
+              const repoPackager = new OSRepoPackager();
+              await repoPackager.createLocalRepo(successfulPackages, downloadedFiles, {
+                packageManager: distribution.packageManager,
+                outputPath: repoPath,
+                repoName: 'depssmuggler-local',
+                includeSetupScript:
+                  outputOptions.generateScripts &&
+                  outputOptions.scriptTypes.includes('local-repo'),
+              });
 
-            if (osDownloadCancelled) {
+              if (outputOptions.generateScripts) {
+                await writeRepositoryScripts(
+                  repoPath,
+                  successfulPackages,
+                  distribution.packageManager,
+                  outputOptions.scriptTypes
+                );
+              }
+
+              generatedOutputs.push({
+                type: 'repository',
+                path: repoPath,
+                label: '로컬 저장소',
+              });
+
+              if (osDownloadCancelled) {
+                await cleanupGeneratedOutputs(generatedOutputs);
+                generatedOutputs.length = 0;
+                successfulPackages.length = 0;
+                warnings.push('패키징 단계에서 취소되어 생성 중이던 출력물을 정리했습니다.');
+              }
+            }
+          } catch (error) {
+            if (generatedOutputs.length > 0) {
               await cleanupGeneratedOutputs(generatedOutputs);
               generatedOutputs.length = 0;
-              successfulPackages.length = 0;
-              warnings.push('패키징 단계에서 취소되어 생성 중이던 출력물을 정리했습니다.');
             }
+            throw error;
           }
         }
 
