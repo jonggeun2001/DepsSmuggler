@@ -312,6 +312,8 @@ export interface HistorySettings {
   includeScripts: boolean;
   /** 의존성 포함 여부 */
   includeDependencies: boolean;
+  /** OS 전용 출력 옵션 */
+  osOutputOptions?: OSPackageOutputOptions;
 }
 
 /** 다운로드 히스토리 상태 */
@@ -338,3 +340,4 @@ export interface DownloadHistory {
   /** 실패한 파일 수 */
   failedCount?: number;
 }
+import type { OSPackageOutputOptions } from '../core/downloaders/os-shared/types';

@@ -134,6 +134,8 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
   const isSuccess = !cancelled && failed.length === 0 && skipped.length === 0;
   const hasRepositorySetupScript =
     outputOptions.generateScripts && outputOptions.scriptTypes.includes('local-repo');
+  const hasArchiveInstallScript =
+    outputOptions.generateScripts && outputOptions.scriptTypes.includes('dependency-order');
   const title = cancelled
     ? '다운로드 취소됨'
     : isSuccess
@@ -299,10 +301,21 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
               <p className="guide-step">
                 <strong>1.</strong> 압축 파일을 폐쇄망 서버에 복사하고 압축을 풉니다.
               </p>
-              <p className="guide-step">
-                <strong>2.</strong> 설치 스크립트를 실행합니다:
-              </p>
-              <code className="guide-code">sudo bash install.sh</code>
+              {hasArchiveInstallScript ? (
+                <>
+                  <p className="guide-step">
+                    <strong>2.</strong> 설치 스크립트를 실행합니다:
+                  </p>
+                  <code className="guide-code">sudo bash install.sh</code>
+                </>
+              ) : (
+                <>
+                  <p className="guide-step">
+                    <strong>2.</strong> 설치 스크립트는 포함되지 않았습니다. 패키지를 수동으로 설치하세요:
+                  </p>
+                  <code className="guide-code">{getInstallCommand()}</code>
+                </>
+              )}
             </>
           )}
         </div>

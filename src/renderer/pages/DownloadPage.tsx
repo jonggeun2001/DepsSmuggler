@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Card,
   Button,
@@ -229,6 +229,7 @@ function createPendingDownloadItems(items: PendingDownloadSource[]): DownloadIte
 }
 
 const DownloadPage: React.FC = () => {
+  const location = useLocation();
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
   const removeCartItem = useCartStore((state) => state.removeItem);
@@ -267,6 +268,7 @@ const DownloadPage: React.FC = () => {
   const { addHistory } = useHistoryStore();
 
   const [outputDir, setOutputDir] = useState(outputPath || defaultDownloadPath || '');
+  const historyOSOutputOptions = (location.state as { osOutputOptions?: OSPackageOutputOptions } | null)?.osOutputOptions;
   const osCartItems = useMemo(() => cartItems.filter(isOSCartItem), [cartItems]);
   const hasOnlyOSPackages = cartItems.length > 0 && osCartItems.length === cartItems.length;
   const osPackageManagers = useMemo(
@@ -1125,6 +1127,7 @@ const DownloadPage: React.FC = () => {
       outputFormat: result.outputOptions.archiveFormat || 'zip',
       includeScripts: result.outputOptions.generateScripts,
       includeDependencies,
+      osOutputOptions: result.outputOptions,
     };
 
     const failedCount = result.failed.length + result.unresolved.length;
@@ -1720,6 +1723,7 @@ const DownloadPage: React.FC = () => {
             packages={osPackages}
             distribution={osDistribution}
             isDownloading={osDownloading}
+            initialOutputOptions={historyOSOutputOptions}
             onRemovePackage={(pkg) => {
               const item = osCartItems.find(
                 (cartItem) =>
