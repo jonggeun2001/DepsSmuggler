@@ -26,6 +26,7 @@ import {
   SearchOutlined,
   PlusOutlined,
   ShoppingCartOutlined,
+  DownloadOutlined,
   AppstoreOutlined,
   CodeOutlined,
   CloudServerOutlined,
@@ -165,6 +166,36 @@ interface SearchResult {
   artifactId?: string;
 }
 
+interface OSCartContextSnapshot {
+  distributionId: string;
+  architecture: Architecture;
+  packageManager: 'yum' | 'apt' | 'apk';
+}
+
+function getOSCartContextSnapshot(
+  metadata: Record<string, unknown> | undefined
+): OSCartContextSnapshot | null {
+  const raw = metadata?.osContext;
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const { distributionId, architecture, packageManager } = raw as Partial<OSCartContextSnapshot>;
+  if (
+    typeof distributionId !== 'string' ||
+    typeof architecture !== 'string' ||
+    (packageManager !== 'yum' && packageManager !== 'apt' && packageManager !== 'apk')
+  ) {
+    return null;
+  }
+
+  return {
+    distributionId,
+    architecture: architecture as Architecture,
+    packageManager,
+  };
+}
+
 const WizardPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -215,7 +246,7 @@ const WizardPage: React.FC = () => {
   // 드롭다운 hover 상태 (Windows Electron 스크롤 문제 해결용)
   const [isOverDropdown, setIsOverDropdown] = useState(false);
 
-  const { addItem, hasItem } = useCartStore();
+  const { addItem, hasItem, items: cartItems } = useCartStore();
   const {
     languageVersions,
     defaultArchitecture,
@@ -1002,6 +1033,25 @@ const WizardPage: React.FC = () => {
       return architecture;
     };
     const effectiveArch = getEffectiveArchitecture();
+    const osCartContext = packageType === 'yum'
+      ? {
+          distributionId: yumDistribution.id,
+          architecture: effectiveArch,
+          packageManager: 'yum' as const,
+        }
+      : packageType === 'apt'
+      ? {
+          distributionId: aptDistribution.id,
+          architecture: effectiveArch,
+          packageManager: 'apt' as const,
+        }
+      : packageType === 'apk'
+      ? {
+          distributionId: apkDistribution.id,
+          architecture: effectiveArch,
+          packageManager: 'apk' as const,
+        }
+      : null;
 
     // Docker 이미지: 레지스트리 정보 포함
     const dockerMetadata = packageType === 'docker' ? {
@@ -1026,6 +1076,9 @@ const WizardPage: React.FC = () => {
         // OS 패키지 전체 정보 (의존성 해결에 사용)
         ...(osPackageTypes.includes(packageType) && selectedPackage.osPackageInfo && {
           osPackageInfo: selectedPackage.osPackageInfo,
+        }),
+        ...(osCartContext && {
+          osContext: osCartContext,
         }),
       },
       // OS 패키지 메타데이터 포함
@@ -1071,6 +1124,28 @@ const WizardPage: React.FC = () => {
   };
 
   const stepItems = getStepItems();
+  const osCartItemCount = cartItems.filter((item) => ['yum', 'apt', 'apk'].includes(item.type)).length;
+  const osCartManagers = new Set(
+    cartItems
+      .filter((item) => ['yum', 'apt', 'apk'].includes(item.type))
+      .map((item) => item.type)
+  );
+  const osCartSnapshots = cartItems
+    .filter((item) => ['yum', 'apt', 'apk'].includes(item.type))
+    .map((item) => getOSCartContextSnapshot(item.metadata));
+  const osCartSnapshotKeys = new Set(
+    osCartSnapshots
+      .filter((snapshot): snapshot is OSCartContextSnapshot => snapshot !== null)
+      .map((snapshot) => `${snapshot.packageManager}:${snapshot.distributionId}:${snapshot.architecture}`)
+  );
+  const hasInvalidOSSnapshots =
+    osCartSnapshots.some((snapshot) => snapshot === null) ||
+    osCartSnapshotKeys.size > 1;
+  const canOpenDedicatedOSDownload =
+    osCartItemCount > 0 &&
+    osCartItemCount === cartItems.length &&
+    osCartManagers.size === 1 &&
+    !hasInvalidOSSnapshots;
 
   // 현재 표시할 단계 인덱스 계산 (환경확인 단계 제거됨)
   // 모든 패키지 타입: 0(카테고리) -> 1(패키지타입) -> 2(검색) -> 3(버전)
@@ -1682,6 +1757,41 @@ const WizardPage: React.FC = () => {
       />
 
       {renderCurrentStep()}
+
+      {category === 'os' && osCartItemCount > 0 && (
+        <Card
+          style={{ marginTop: 24 }}
+          title="OS 패키지 장바구니"
+          extra={<Tag color="blue">{osCartItemCount}개 선택됨</Tag>}
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Text type="secondary">
+              현재 라우트된 다운로드 페이지에서 OS 전용 출력 옵션과 진행 화면을 사용할 수 있습니다.
+            </Text>
+            <Space wrap>
+              <Button icon={<ShoppingCartOutlined />} onClick={() => navigate('/cart')}>
+                장바구니 보기
+              </Button>
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                onClick={() => navigate('/download')}
+                disabled={!canOpenDedicatedOSDownload}
+              >
+                OS 다운로드 진행
+              </Button>
+            </Space>
+            {!canOpenDedicatedOSDownload && (
+              <Alert
+                type="info"
+                showIcon
+                message="전용 경로는 하나의 OS 패키지 관리자와 동일한 배포판/아키텍처 조합에서만 활성화됩니다"
+                description="다른 라이브러리, 다른 OS 패키지 관리자, 또는 서로 다른 배포판/아키텍처 스냅샷이 같이 담겨 있으면 일반 다운로드 경로를 사용하세요."
+              />
+            )}
+          </Space>
+        </Card>
+      )}
 
       {/* pip 인덱스 URL 저장 모달 */}
       <Modal

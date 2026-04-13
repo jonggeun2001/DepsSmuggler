@@ -118,10 +118,12 @@ depssmuggler/
 
 ### OS 패키지 다운로드
 
-1. Renderer가 `os:getAllDistributions`, `os:search`, `os:resolveDependencies` 호출
-2. `search-handlers.ts`가 `yum/apt/apk` resolver를 통해 검색/의존성 계산
-3. 현재 라우트된 GUI는 결과를 일반 장바구니/다운로드 흐름으로 넘기고, `DownloadPage.tsx`에서 `download:start`를 호출합니다.
-4. `os:download:start`와 OS 전용 진행률/출력 옵션 경로도 코드에는 남아 있지만, 현재 화면 기준 end-to-end 기본 경로는 아닙니다.
+1. `WizardPage.tsx`가 `os:search`로 `yum/apt/apk` 패키지를 찾고, 전체 `OSPackageInfo`를 장바구니 메타데이터로 유지합니다.
+2. OS 패키지 전용 장바구니만 담긴 상태에서 `WizardPage.tsx`와 `DownloadPage.tsx`가 동일 라우트(`/download`) 안에서 OS 전용 다운로드 화면으로 전환됩니다.
+3. `DownloadPage.tsx`가 `os:getDistribution`으로 선택된 배포판 전체 설정을 읽고 `archive | repository | both` 출력 옵션을 노출합니다. `repository`/`both`에서는 로컬 저장소 설정 스크립트가 기본 포함됩니다.
+4. 실제 다운로드 시작은 `os:download:start` 하나로 통합되어, 메인 프로세스가 필요 시 의존성 해결과 패키징까지 수행합니다. 미해결 의존성은 이 단계에서 즉시 중단되고, resolving 단계 취소도 오류보다 우선해 중단 결과를 반환합니다.
+5. 진행률은 `os:download:progress`로, 취소는 `os:download:cancel`로 처리됩니다. 취소 요청은 현재 OS 패키지 전송의 `fetch`에도 abort 신호를 전달합니다.
+6. 결과 출력물 경로와 `generatedOutputs`, `warnings`, `conflicts`, `cancelled` 상태는 `os:download:start` 반환값으로 렌더러에 전달됩니다. 취소로 최종 산출물이 생성되지 않은 경우에는 임시 다운로드를 성공으로 승격하지 않고, routed OS 결과 화면에서 중단 상태와 실제 생성물만 안내합니다.
 
 ## 상태 저장
 
@@ -150,7 +152,7 @@ npm run lint
 npx tsc --noEmit
 ```
 
-참고: `playwright.config.ts`는 존재하지만 현재 저장소에는 `tests/e2e` 시나리오가 커밋되어 있지 않아 E2E는 스캐폴딩 단계로 봅니다.
+참고: `tests/e2e/os-package-download.spec.ts`가 routed OS 다운로드 흐름의 최소 E2E 스모크를 담당합니다. 다만 로컬 실행에는 Playwright 의존성 설치가 필요합니다.
 
 ## 관련 문서
 

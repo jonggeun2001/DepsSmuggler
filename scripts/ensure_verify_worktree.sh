@@ -2,6 +2,11 @@
 set -euo pipefail
 
 WT_PATH="${1:-$(pwd)}"
+VERIFY_SCRIPT="$WT_PATH/scripts/verify-worktree.sh"
+
+if [ -f "$VERIFY_SCRIPT" ]; then
+  exit 0
+fi
 
 if [ ! -d "$WT_PATH" ]; then
   echo "worktree 경로를 찾을 수 없습니다: $WT_PATH" >&2
@@ -43,6 +48,11 @@ PACKAGE_MANAGER="${PACKAGE_MANAGER}"
 TEST_SCRIPT='${TEST_SCRIPT}'
 
 cd "\$REPO_ROOT"
+
+if [ ! -d node_modules ]; then
+  echo "node_modules not found in \$REPO_ROOT. Install dependencies before running verification." >&2
+  exit 1
+fi
 
 echo "[verify-worktree] package manager: \$PACKAGE_MANAGER"
 echo "[verify-worktree] script: \$TEST_SCRIPT"

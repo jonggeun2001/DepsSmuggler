@@ -3,7 +3,7 @@
  * OS 패키지 장바구니 컴포넌트 - 선택된 패키지 목록과 출력 옵션
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { OSOutputOptions } from './OSOutputOptions';
 import type {
   OSPackageInfo,
@@ -19,6 +19,7 @@ interface OSPackageCartProps {
   onClearAll: () => void;
   onStartDownload: (outputOptions: OSPackageOutputOptions) => void;
   isDownloading?: boolean;
+  initialOutputOptions?: OSPackageOutputOptions;
 }
 
 const DEFAULT_OUTPUT_OPTIONS: OSPackageOutputOptions = {
@@ -35,8 +36,17 @@ export const OSPackageCart: React.FC<OSPackageCartProps> = ({
   onClearAll,
   onStartDownload,
   isDownloading = false,
+  initialOutputOptions,
 }) => {
-  const [outputOptions, setOutputOptions] = useState<OSPackageOutputOptions>(DEFAULT_OUTPUT_OPTIONS);
+  const [outputOptions, setOutputOptions] = useState<OSPackageOutputOptions>(
+    initialOutputOptions || DEFAULT_OUTPUT_OPTIONS
+  );
+
+  useEffect(() => {
+    if (initialOutputOptions) {
+      setOutputOptions(initialOutputOptions);
+    }
+  }, [initialOutputOptions]);
   const [showOutputOptions, setShowOutputOptions] = useState(false);
 
   const totalSize = useMemo(() => {

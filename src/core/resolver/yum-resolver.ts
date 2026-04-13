@@ -33,8 +33,13 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
     const activeRepos = this.options.repositories.filter((r) => r.enabled);
 
     for (const repo of activeRepos) {
+      this.throwIfAborted();
       try {
-        const parser = new YumMetadataParser(repo, this.options.architecture);
+        const parser = new YumMetadataParser(
+          repo,
+          this.options.architecture,
+          this.options.abortSignal
+        );
         this.parsers.set(repo.id, parser);
         const cacheKey = OSCacheManager.createKey(
           'yum',
@@ -81,6 +86,9 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
           0
         );
       } catch (error) {
+        if ((error as { name?: string })?.name === 'AbortError') {
+          throw error;
+        }
         console.error(`Failed to load metadata from ${repo.name}:`, error);
       }
     }

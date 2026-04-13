@@ -215,11 +215,15 @@ export interface OSPackageAPI {
     start: (options: {
       packages: unknown[];
       outputDir: string;
+      distribution: unknown;
+      architecture: string;
       resolveDependencies?: boolean;
       includeOptionalDeps?: boolean;
       verifyGPG?: boolean;
       concurrency?: number;
+      outputOptions?: unknown;
     }) => Promise<unknown>;
+    cancel: () => Promise<{ success: boolean }>;
     onProgress: (callback: (progress: unknown) => void) => () => void;
   };
   cache: {

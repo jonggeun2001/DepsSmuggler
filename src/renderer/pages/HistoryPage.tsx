@@ -140,7 +140,11 @@ const HistoryPage: React.FC = () => {
         });
 
         message.success(`${history.packages.length}개 패키지가 장바구니에 추가되었습니다.`);
-        navigate('/download');
+        navigate('/download', {
+          state: {
+            osOutputOptions: history.settings.osOutputOptions,
+          },
+        });
       },
     });
   }, [addItem, updateSettings, navigate]);

@@ -27,13 +27,15 @@ export class ApkMetadataParser {
   private baseUrl: string;
   private architecture: OSArchitecture;
   private repository: Repository;
+  private abortSignal?: AbortSignal;
   private maxRetries = 3;
   private retryDelay = 1000;
 
-  constructor(repository: Repository, architecture: OSArchitecture) {
+  constructor(repository: Repository, architecture: OSArchitecture, abortSignal?: AbortSignal) {
     this.repository = repository;
     this.baseUrl = repository.baseUrl.replace(/\/$/, '');
     this.architecture = architecture;
+    this.abortSignal = abortSignal;
   }
 
   /**
@@ -46,7 +48,15 @@ export class ApkMetadataParser {
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
-        const response = await fetch(url);
+        if (this.abortSignal?.aborted) {
+          const abortError = new Error('Metadata load cancelled');
+          abortError.name = 'AbortError';
+          throw abortError;
+        }
+
+        const response = await fetch(url, {
+          signal: this.abortSignal,
+        });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
@@ -55,6 +65,9 @@ export class ApkMetadataParser {
         return { data, status: response.status };
       } catch (error) {
         lastError = error as Error;
+        if (this.abortSignal?.aborted || (lastError as { name?: string }).name === 'AbortError') {
+          throw lastError;
+        }
         if (attempt < this.maxRetries) {
           await new Promise((resolve) => setTimeout(resolve, this.retryDelay * attempt));
         }
@@ -444,14 +457,32 @@ export class ApkDownloader extends BaseOSDownloader {
 
 // 싱글톤 인스턴스
 let apkDownloaderInstance: ApkDownloader | null = null;
+let apkDownloaderKey: string | null = null;
 
 export function getApkDownloader(options?: BaseDownloaderOptions): ApkDownloader {
-  if (!apkDownloaderInstance && options) {
-    apkDownloaderInstance = new ApkDownloader(options);
-  }
-  // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
-  if (!apkDownloaderInstance) {
+  if (!options && !apkDownloaderInstance) {
     throw new Error('ApkDownloader requires BaseDownloaderOptions');
+  }
+
+  if (!options) {
+    return apkDownloaderInstance!;
+  }
+
+  const bypassCache = Boolean(options.abortSignal) || Boolean(options.onProgress) || Boolean(options.onError);
+  const currentKey = JSON.stringify({
+    distributionId: options.distribution.id,
+    architecture: options.architecture,
+    outputDir: options.outputDir,
+    concurrency: options.concurrency,
+  });
+
+  if (bypassCache) {
+    return new ApkDownloader(options);
+  }
+
+  if (!apkDownloaderInstance || apkDownloaderKey !== currentKey) {
+    apkDownloaderInstance = new ApkDownloader(options);
+    apkDownloaderKey = currentKey;
   }
   return apkDownloaderInstance;
 }

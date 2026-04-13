@@ -27,6 +27,10 @@ export interface DownloadResult {
   filePath?: string;
   /** 에러 */
   error?: Error;
+  /** 사용자가 건너뛰기를 선택했는지 여부 */
+  skipped?: boolean;
+  /** 사용자가 다운로드를 취소했는지 여부 */
+  cancelled?: boolean;
   /** 검증 결과 */
   verification?: VerificationResult;
 }
@@ -53,6 +57,8 @@ export interface BaseDownloaderOptions {
   concurrency: number;
   /** GPG 검증기 */
   gpgVerifier?: GPGVerifier;
+  /** 다운로드 취소 신호 */
+  abortSignal?: AbortSignal;
   /** 진행 콜백 */
   onProgress?: (progress: OSDownloadProgress) => void;
   /** 에러 콜백 */
@@ -91,10 +97,28 @@ export abstract class BaseOSDownloader {
    */
   protected abstract getFilename(pkg: OSPackageInfo): string;
 
+  protected createAbortError(): Error {
+    const error = new Error('Download cancelled');
+    error.name = 'AbortError';
+    return error;
+  }
+
+  protected isAbortError(error: unknown): boolean {
+    return this.options.abortSignal?.aborted === true || (error as { name?: string })?.name === 'AbortError';
+  }
+
   /**
    * 단일 패키지 다운로드
    */
   async downloadPackage(pkg: OSPackageInfo): Promise<DownloadResult> {
+    if (this.options.abortSignal?.aborted) {
+      return {
+        success: false,
+        error: this.createAbortError(),
+        cancelled: true,
+      };
+    }
+
     const url = this.getDownloadUrl(pkg);
     const filename = this.getFilename(pkg);
     const filePath = path.join(this.options.outputDir, filename);
@@ -124,6 +148,14 @@ export abstract class BaseOSDownloader {
       } catch (error) {
         lastError = error as Error;
 
+        if (this.isAbortError(lastError)) {
+          return {
+            success: false,
+            error: this.createAbortError(),
+            cancelled: true,
+          };
+        }
+
         if (attempt < this.maxRetries) {
           // 재시도 전 대기
           await new Promise((resolve) => setTimeout(resolve, this.retryDelay * attempt));
@@ -145,6 +177,7 @@ export abstract class BaseOSDownloader {
               return {
                 success: false,
                 error: lastError,
+                skipped: true,
               };
             } else {
               throw lastError;
@@ -168,7 +201,13 @@ export abstract class BaseOSDownloader {
     destPath: string,
     pkg: OSPackageInfo
   ): Promise<void> {
-    const response = await fetch(url);
+    if (this.options.abortSignal?.aborted) {
+      throw this.createAbortError();
+    }
+
+    const response = await fetch(url, {
+      signal: this.options.abortSignal,
+    });
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -188,6 +227,10 @@ export abstract class BaseOSDownloader {
     let currentSpeed = 0;
 
     while (true) {
+      if (this.options.abortSignal?.aborted) {
+        throw this.createAbortError();
+      }
+
       const { done, value } = await reader.read();
 
       if (done) break;
