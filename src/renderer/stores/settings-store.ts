@@ -191,6 +191,32 @@ const defaultSettings = {
   _initialized: false,
 };
 
+const isSupportedOutputFormat = (value: unknown): value is SettingsState['defaultOutputFormat'] =>
+  value === 'zip' || value === 'tar.gz';
+
+const migrateLegacyOutputSettings = (fileConfig: Record<string, unknown>): Record<string, unknown> => {
+  const migratedConfig = { ...fileConfig };
+  const rawOutputFormat = fileConfig.defaultOutputFormat;
+  const rawArchiveType = fileConfig.defaultArchiveType;
+  const migratedArchiveType = rawArchiveType === 'tar.gz' ? 'tar.gz' : defaultSettings.defaultOutputFormat;
+
+  if (!isSupportedOutputFormat(rawOutputFormat)) {
+    if (rawOutputFormat === 'archive' || rawOutputFormat === 'mirror' || rawOutputFormat === 'withScript') {
+      migratedConfig.defaultOutputFormat = migratedArchiveType;
+    } else {
+      migratedConfig.defaultOutputFormat = defaultSettings.defaultOutputFormat;
+    }
+  }
+
+  if (rawOutputFormat === 'withScript' && typeof fileConfig.includeInstallScripts !== 'boolean') {
+    migratedConfig.includeInstallScripts = true;
+  }
+
+  delete migratedConfig.defaultArchiveType;
+
+  return migratedConfig;
+};
+
 // Electron IPC를 통한 파일 기반 스토리지 (Windows, macOS, Linux 지원)
 // 설정 파일 위치: ~/.depssmuggler/settings.json
 const electronStorage: StateStorage = {
@@ -290,8 +316,9 @@ export const useSettingsStore = create<SettingsState>()(
           try {
             const fileConfig = await window.electronAPI.config.get();
             if (fileConfig && typeof fileConfig === 'object') {
+              const normalizedConfig = migrateLegacyOutputSettings(fileConfig as Record<string, unknown>);
               // 파일에 저장된 설정을 현재 상태와 병합 (새 설정 항목 대응)
-              const mergedConfig = { ...defaultSettings, ...fileConfig, _initialized: true };
+              const mergedConfig = { ...defaultSettings, ...normalizedConfig, _initialized: true };
               set(mergedConfig);
               console.debug('[settings-store] 설정 파일에서 로드 완료');
               return;

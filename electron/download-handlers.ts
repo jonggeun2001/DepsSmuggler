@@ -431,13 +431,23 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
 
         if (!downloadCancelled) {
           let finalOutputPath = outputDir;
+          const isSupportedOutputFormat = outputFormat === 'zip' || outputFormat === 'tar.gz';
 
           // 설치 스크립트 생성 (의존성 포함)
           if (includeScripts) {
             generateInstallScripts(outputDir, allPackages);
           }
 
-          if (outputFormat === 'zip' || outputFormat === 'tar.gz') {
+          if (!isSupportedOutputFormat) {
+            mainWindow?.webContents.send('download:all-complete', {
+              success: false,
+              outputPath: outputDir,
+              error: `지원하지 않는 출력 형식입니다: ${String(outputFormat)}`,
+            });
+            return;
+          }
+
+          if (isSupportedOutputFormat) {
             try {
               const archivePath = `${outputDir}.${outputFormat === 'zip' ? 'zip' : 'tar.gz'}`;
               const archivePackager = getArchivePackager();

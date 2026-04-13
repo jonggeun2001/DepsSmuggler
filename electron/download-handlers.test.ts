@@ -247,4 +247,49 @@ describe('registerDownloadHandlers', () => {
       results: expect.any(Array),
     });
   });
+
+  it('지원하지 않는 출력 형식은 조용히 성공시키지 말고 실패로 처리해야 함', async () => {
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = '/tmp/depssmuggler-gui-output-legacy';
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'archive',
+          includeScripts: false,
+          concurrency: 1,
+        },
+      }
+    );
+
+    await flushDownloadWork();
+
+    expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
+      success: false,
+      outputPath: outputDir,
+      error: '지원하지 않는 출력 형식입니다: archive',
+    });
+    expect(createArchiveFromDirectoryMock).not.toHaveBeenCalled();
+  });
 });
