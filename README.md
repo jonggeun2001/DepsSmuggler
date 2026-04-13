@@ -16,7 +16,7 @@
 | Python `pip` | 지원 | 지원 | PyPI 검색/버전 조회/다운로드 |
 | Python `conda` | 지원 | 지원 | 채널 선택 지원 |
 | Java `maven` | 지원 | 지원 | 네이티브 classifier 확인 지원 |
-| Node.js `npm` | 지원 | 부분 지원 | CLI `download`는 지원하지만 `search`는 아직 미구현 |
+| Node.js `npm` | 지원 | 지원 | npm Registry 검색/버전 조회/다운로드 |
 | OS `yum` | 지원 | 부분 지원 | CLI는 `os` 네임스페이스 중심이며 `download/cache`는 재구현 중 |
 | OS `apt` | 지원 | 부분 지원 | CLI `os download`는 재구현 중 안내만 출력 |
 | OS `apk` | 지원 | 부분 지원 | GUI 기준 기능이 더 완전함 |
