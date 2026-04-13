@@ -33,8 +33,6 @@ export interface DownloadAPI {
     deleted?: boolean;
   }>;
   onProgress: (callback: (progress: unknown) => void) => () => void;
-  onComplete: (callback: (result: unknown) => void) => () => void;
-  onError: (callback: (error: unknown) => void) => () => void;
   onStatus?: (callback: (status: DownloadStatusData) => void) => () => void;
   onDepsResolved?: (callback: (data: DepsResolvedData) => void) => () => void;
   onAllComplete?: (callback: (data: AllCompleteData) => void) => () => void;
@@ -45,12 +43,6 @@ export interface ConfigAPI {
   set: (config: unknown) => Promise<{ success: boolean; error?: string }>;
   reset: () => Promise<{ success: boolean; error?: string }>;
   getPath: () => Promise<string>;
-}
-
-export interface FileSystemAPI {
-  selectDirectory: () => Promise<string | null>;
-  selectFile: (filters?: unknown) => Promise<string | null>;
-  readFile: (filePath: string) => Promise<string>;
 }
 
 export interface CacheAPI {
@@ -234,7 +226,6 @@ export interface ElectronAPI {
   openFolder: (folderPath: string) => Promise<void>;
   download: DownloadAPI;
   config: ConfigAPI;
-  fs: FileSystemAPI;
   cache: CacheAPI;
   search: SearchAPI;
   dependency?: DependencyAPI;

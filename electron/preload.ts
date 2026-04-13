@@ -44,18 +44,6 @@ const electronAPI = {
       ipcRenderer.on('download:progress', handler);
       return () => ipcRenderer.removeListener('download:progress', handler);
     },
-    onComplete: (callback: (result: unknown) => void): () => void => {
-      const handler = (_event: Electron.IpcRendererEvent, result: unknown) =>
-        callback(result);
-      ipcRenderer.on('download:complete', handler);
-      return () => ipcRenderer.removeListener('download:complete', handler);
-    },
-    onError: (callback: (error: unknown) => void): () => void => {
-      const handler = (_event: Electron.IpcRendererEvent, error: unknown) =>
-        callback(error);
-      ipcRenderer.on('download:error', handler);
-      return () => ipcRenderer.removeListener('download:error', handler);
-    },
     // 의존성 해결 상태 이벤트
     onStatus: (callback: (status: { phase: string; message: string }) => void): () => void => {
       const handler = (_event: Electron.IpcRendererEvent, status: { phase: string; message: string }) =>
@@ -90,16 +78,6 @@ const electronAPI = {
     set: (config: unknown): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('config:set', config),
     reset: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('config:reset'),
     getPath: (): Promise<string> => ipcRenderer.invoke('config:getPath'),
-  },
-
-  // 파일 시스템 관련 (향후 구현)
-  fs: {
-    selectDirectory: (): Promise<string | null> =>
-      ipcRenderer.invoke('fs:select-directory'),
-    selectFile: (filters?: unknown): Promise<string | null> =>
-      ipcRenderer.invoke('fs:select-file', filters),
-    readFile: (filePath: string): Promise<string> =>
-      ipcRenderer.invoke('fs:read-file', filePath),
   },
 
   // 패키지 메타데이터 캐시 관련

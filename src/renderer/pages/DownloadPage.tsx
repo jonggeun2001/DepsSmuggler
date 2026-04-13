@@ -273,28 +273,6 @@ const DownloadPage: React.FC = () => {
       }
     });
 
-    const unsubComplete = window.electronAPI.download.onComplete((result: unknown) => {
-      const r = result as { id: string };
-      scheduleBatchUpdate(r.id, { status: 'completed', progress: 100 });
-      // ref를 사용하여 최신 아이템 목록에서 조회 (클로저 문제 방지)
-      const completedItem = downloadItemsRef.current.find(i => i.id === r.id);
-      const displayName = completedItem
-        ? `${completedItem.name} (v${completedItem.version})`
-        : r.id;
-      scheduleLogBatch('success', `다운로드 완료: ${displayName}`);
-    });
-
-    const unsubError = window.electronAPI.download.onError((error: unknown) => {
-      const e = error as { id: string; message: string };
-      // ref를 사용하여 최신 아이템 목록에서 조회 (클로저 문제 방지)
-      const item = downloadItemsRef.current.find(i => i.id === e.id);
-      if (item) {
-        scheduleBatchUpdate(e.id, { status: 'failed', error: e.message });
-        const displayName = `${item.name} (v${item.version})`;
-        scheduleLogBatch('error', `다운로드 실패: ${displayName}`, e.message);
-      }
-    });
-
     // 의존성 해결 상태 리스너
     const unsubStatus = window.electronAPI.download.onStatus?.((status) => {
       if (status.phase === 'resolving') {
@@ -474,8 +452,6 @@ const DownloadPage: React.FC = () => {
 
     return () => {
       unsubProgress();
-      unsubComplete();
-      unsubError();
       unsubStatus?.();
       unsubDepsResolved?.();
       unsubAllComplete?.();
