@@ -439,6 +439,24 @@ export interface MavenCacheStats {
   pendingRequests: number;
   oldestEntry: number | null;
   newestEntry: number | null;
+  diskSize: number;
+}
+
+function getDirectorySizeSync(dirPath: string): number {
+  if (!fs.existsSync(dirPath)) {
+    return 0;
+  }
+
+  const entries = fs.readdirSync(dirPath);
+  let totalSize = 0;
+
+  for (const entry of entries) {
+    const entryPath = path.join(dirPath, entry);
+    const stats = fs.statSync(entryPath);
+    totalSize += stats.isDirectory() ? getDirectorySizeSync(entryPath) : stats.size;
+  }
+
+  return totalSize;
 }
 
 export function getMavenCacheStats(): MavenCacheStats {
@@ -459,6 +477,7 @@ export function getMavenCacheStats(): MavenCacheStats {
     pendingRequests: pendingRequests.size,
     oldestEntry: oldest,
     newestEntry: newest,
+    diskSize: getDirectorySizeSync(DEFAULT_CACHE_DIR),
   };
 }
 

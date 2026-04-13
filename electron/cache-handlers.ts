@@ -22,7 +22,7 @@ async function collectCacheStats() {
     condaCache.getCacheStats(),
   ]);
 
-  const totalSize = (pipStats.diskSize || 0) + (condaStats.totalSize || 0);
+  const totalSize = (pipStats.diskSize || 0) + (mavenStats.diskSize || 0) + (condaStats.totalSize || 0);
   const entryCount =
     (pipStats.memoryEntries || 0) +
     (npmStats.entries || 0) +
