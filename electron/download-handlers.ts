@@ -1136,6 +1136,18 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           });
         }
 
+        if (osDownloadCancelled) {
+          if (successfulPackages.length > 0) {
+            warnings.push(
+              `다운로드 취소로 임시 파일 ${successfulPackages.length}개를 정리했습니다. 최종 출력물은 생성되지 않았습니다.`
+            );
+          } else {
+            warnings.push('다운로드가 취소되어 최종 출력물을 생성하지 않았습니다.');
+          }
+          successfulPackages.length = 0;
+          downloadedFiles.clear();
+        }
+
         if (!osDownloadCancelled && successfulPackages.length > 0) {
           emitOSProgress(mainWindow, {
             currentPackage: '결과 패키징',

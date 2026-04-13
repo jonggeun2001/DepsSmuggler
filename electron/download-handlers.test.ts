@@ -622,11 +622,17 @@ describe('registerDownloadHandlers', () => {
     )?.[1];
 
     yumDownloadPackage.mockImplementationOnce(async () => {
+      return {
+        success: true,
+        filePath: '/tmp/bash-5.1.8.rpm',
+      };
+    });
+    yumDownloadPackage.mockImplementationOnce(async () => {
       await osCancelHandler({}, {});
       return {
         success: false,
-        error: new Error('Download cancelled'),
-        cancelled: true,
+        error: new Error('사용자 취소'),
+        skipped: true,
       };
     });
 

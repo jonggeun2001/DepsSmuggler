@@ -303,14 +303,16 @@ const DownloadPage: React.FC = () => {
     () => Array.from(new Set(osCartItems.map((item) => item.type))),
     [osCartItems]
   );
+  const osCartSnapshots = useMemo(
+    () => osCartItems.map(getOSCartContextSnapshot),
+    [osCartItems]
+  );
   const osCartContext = useMemo<OSCartContextSnapshot | null>(() => {
     if (!hasOnlyOSPackages || osPackageManagers.length !== 1) {
       return null;
     }
 
-    const packageManager = osPackageManagers[0] as SupportedOSPackageManager;
-    const snapshots = osCartItems.map(getOSCartContextSnapshot);
-    const presentSnapshots = snapshots.filter(
+    const presentSnapshots = osCartSnapshots.filter(
       (snapshot): snapshot is OSCartContextSnapshot => snapshot !== null
     );
 
@@ -338,6 +340,7 @@ const DownloadPage: React.FC = () => {
     aptDistribution.id,
     hasOnlyOSPackages,
     osCartItems,
+    osCartSnapshots,
     osPackageManagers,
     yumDistribution.architecture,
     yumDistribution.id,
@@ -1694,10 +1697,11 @@ const DownloadPage: React.FC = () => {
   // 전체 다운로드 속도 (이동 평균 기반)
   const totalSpeed = calculateOverallSpeed();
   const isOSPackaging = osProgress?.phase === 'packaging';
+  const hasMissingOSCartSnapshots = osCartSnapshots.some((snapshot) => snapshot === null);
   const requiresOSCartReselection =
     hasOnlyOSPackages &&
     osCartItems.length > 0 &&
-    osCartContext === null &&
+    hasMissingOSCartSnapshots &&
     !osDownloading &&
     osResult === null;
 
