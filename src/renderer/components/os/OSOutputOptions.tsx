@@ -59,10 +59,38 @@ export const OSOutputOptions: React.FC<OSOutputOptionsProps> = ({
   onChange,
   packageManager,
 }) => {
+  const requiresLocalRepoScript = value.type === 'repository' || value.type === 'both';
+  const effectiveGenerateScripts = requiresLocalRepoScript || value.generateScripts;
+
+  const normalizeScriptTypes = (
+    scriptTypes: ScriptType[],
+    type: OutputType,
+    generateScripts: boolean
+  ): ScriptType[] => {
+    if (!generateScripts) {
+      return [];
+    }
+
+    const normalized = new Set<ScriptType>(scriptTypes.length > 0 ? scriptTypes : ['dependency-order']);
+    normalized.add('dependency-order');
+
+    if (type === 'repository' || type === 'both') {
+      normalized.add('local-repo');
+    }
+
+    return Array.from(normalized);
+  };
+
   const handleTypeChange = (type: OutputType) => {
+    const nextGenerateScripts = type === 'repository' || type === 'both'
+      ? true
+      : value.generateScripts;
+
     onChange({
       ...value,
       type,
+      generateScripts: nextGenerateScripts,
+      scriptTypes: normalizeScriptTypes(value.scriptTypes || [], type, nextGenerateScripts),
     });
   };
 
@@ -74,14 +102,22 @@ export const OSOutputOptions: React.FC<OSOutputOptionsProps> = ({
   };
 
   const handleGenerateScriptsChange = (generateScripts: boolean) => {
+    if (requiresLocalRepoScript) {
+      return;
+    }
+
     onChange({
       ...value,
       generateScripts,
-      scriptTypes: generateScripts ? ['dependency-order'] : [],
+      scriptTypes: normalizeScriptTypes(value.scriptTypes || [], value.type, generateScripts),
     });
   };
 
   const handleScriptTypeToggle = (scriptType: ScriptType) => {
+    if (requiresLocalRepoScript && scriptType === 'local-repo') {
+      return;
+    }
+
     const currentTypes = value.scriptTypes || [];
     const newTypes = currentTypes.includes(scriptType)
       ? currentTypes.filter((t) => t !== scriptType)
@@ -89,7 +125,7 @@ export const OSOutputOptions: React.FC<OSOutputOptionsProps> = ({
 
     onChange({
       ...value,
-      scriptTypes: newTypes,
+      scriptTypes: normalizeScriptTypes(newTypes, value.type, effectiveGenerateScripts),
     });
   };
 
@@ -167,7 +203,8 @@ export const OSOutputOptions: React.FC<OSOutputOptionsProps> = ({
           <label className="switch">
             <input
               type="checkbox"
-              checked={value.generateScripts}
+              checked={effectiveGenerateScripts}
+              disabled={requiresLocalRepoScript}
               onChange={(e) => handleGenerateScriptsChange(e.target.checked)}
             />
             <span className="slider"></span>
@@ -175,11 +212,12 @@ export const OSOutputOptions: React.FC<OSOutputOptionsProps> = ({
         </div>
         <p className="option-hint">
           폐쇄망에서 패키지를 쉽게 설치할 수 있는 Bash 스크립트를 생성합니다.
+          {requiresLocalRepoScript && ' 로컬 저장소 출력에서는 설정 스크립트가 필수로 포함됩니다.'}
         </p>
       </div>
 
       {/* 스크립트 종류 선택 */}
-      {value.generateScripts && (
+      {effectiveGenerateScripts && (
         <div className="option-group">
           <label className="option-label">스크립트 종류</label>
           <div className="script-type-options">
@@ -187,12 +225,21 @@ export const OSOutputOptions: React.FC<OSOutputOptionsProps> = ({
               <label
                 key={option.value}
                 className={`script-type-checkbox ${
-                  value.scriptTypes?.includes(option.value) ? 'checked' : ''
+                  normalizeScriptTypes(
+                    value.scriptTypes || [],
+                    value.type,
+                    effectiveGenerateScripts
+                  ).includes(option.value) ? 'checked' : ''
                 }`}
               >
                 <input
                   type="checkbox"
-                  checked={value.scriptTypes?.includes(option.value) || false}
+                  checked={normalizeScriptTypes(
+                    value.scriptTypes || [],
+                    value.type,
+                    effectiveGenerateScripts
+                  ).includes(option.value)}
+                  disabled={requiresLocalRepoScript && option.value === 'local-repo'}
                   onChange={() => handleScriptTypeToggle(option.value)}
                 />
                 <div className="checkbox-content">

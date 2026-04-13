@@ -57,13 +57,19 @@ export class YumMetadataParser {
   private baseUrl: string;
   private repository: Repository;
   private architecture: OSArchitecture;
+  private abortSignal?: AbortSignal;
   private xmlParser: XMLParser;
   private maxRetries = 3;
   private retryDelay = 1000;
 
-  constructor(repository: Repository, architecture: OSArchitecture = 'x86_64') {
+  constructor(
+    repository: Repository,
+    architecture: OSArchitecture = 'x86_64',
+    abortSignal?: AbortSignal
+  ) {
     this.repository = repository;
     this.architecture = architecture;
+    this.abortSignal = abortSignal;
     this.baseUrl = this.resolveUrlVariables(repository.baseUrl);
     this.xmlParser = new XMLParser({
       ignoreAttributes: false,
@@ -103,7 +109,15 @@ export class YumMetadataParser {
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
-        const response = await fetch(url);
+        if (this.abortSignal?.aborted) {
+          const abortError = new Error('Metadata load cancelled');
+          abortError.name = 'AbortError';
+          throw abortError;
+        }
+
+        const response = await fetch(url, {
+          signal: this.abortSignal,
+        });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
@@ -118,6 +132,9 @@ export class YumMetadataParser {
         return { data, status: response.status };
       } catch (error) {
         lastError = error as Error;
+        if (this.abortSignal?.aborted || (lastError as { name?: string }).name === 'AbortError') {
+          throw lastError;
+        }
         if (attempt < this.maxRetries) {
           await new Promise((resolve) => setTimeout(resolve, this.retryDelay * attempt));
         }
@@ -530,14 +547,32 @@ export class YumDownloader extends BaseOSDownloader {
 
 // 싱글톤 인스턴스
 let yumDownloaderInstance: YumDownloader | null = null;
+let yumDownloaderKey: string | null = null;
 
 export function getYumDownloader(options?: BaseDownloaderOptions): YumDownloader {
-  if (!yumDownloaderInstance && options) {
-    yumDownloaderInstance = new YumDownloader(options);
-  }
-  // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
-  if (!yumDownloaderInstance) {
+  if (!options && !yumDownloaderInstance) {
     throw new Error('YumDownloader requires BaseDownloaderOptions');
+  }
+
+  if (!options) {
+    return yumDownloaderInstance!;
+  }
+
+  const bypassCache = Boolean(options.abortSignal) || Boolean(options.onProgress) || Boolean(options.onError);
+  const currentKey = JSON.stringify({
+    distributionId: options.distribution.id,
+    architecture: options.architecture,
+    outputDir: options.outputDir,
+    concurrency: options.concurrency,
+  });
+
+  if (bypassCache) {
+    return new YumDownloader(options);
+  }
+
+  if (!yumDownloaderInstance || yumDownloaderKey !== currentKey) {
+    yumDownloaderInstance = new YumDownloader(options);
+    yumDownloaderKey = currentKey;
   }
   return yumDownloaderInstance;
 }

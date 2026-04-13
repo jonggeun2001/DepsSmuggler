@@ -318,6 +318,8 @@ export interface HistorySettings {
   fileSplitEnabled?: boolean;
   /** 파일 분할 기준 크기 (MB) */
   maxFileSizeMB?: number;
+  /** OS 전용 출력 옵션 */
+  osOutputOptions?: OSPackageOutputOptions;
 }
 
 export interface HistoryDeliveryResult {
@@ -358,3 +360,4 @@ export interface DownloadHistory {
   /** 실패한 파일 수 */
   failedCount?: number;
 }
+import type { OSPackageOutputOptions } from '../core/downloaders/os-shared/types';

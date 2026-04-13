@@ -111,23 +111,29 @@ export function createResolverFactory<T>(
   name: string
 ): (options?: DependencyResolverOptions) => T {
   let instance: T | null = null;
-  let distributionId: string | null = null;
+  let cacheKey: string | null = null;
 
   return (options?: DependencyResolverOptions): T => {
     if (!options) {
       throw new Error(`${name} requires DependencyResolverOptions`);
     }
 
-    const currentDistributionId = options.distribution?.id;
+    const bypassCache = Boolean(options.abortSignal) || Boolean(options.onProgress);
+    const currentKey = JSON.stringify({
+      distributionId: options.distribution?.id ?? null,
+      architecture: options.architecture,
+      includeOptional: options.includeOptional,
+      includeRecommends: options.includeRecommends,
+      repositories: options.repositories.map((repo) => repo.id),
+    });
 
-    // 배포판이 변경되면 새 인스턴스 생성
-    if (instance && distributionId !== currentDistributionId) {
-      instance = null;
+    if (bypassCache) {
+      return new ResolverClass(options);
     }
 
-    if (!instance) {
+    if (!instance || cacheKey !== currentKey) {
       instance = new ResolverClass(options);
-      distributionId = currentDistributionId ?? null;
+      cacheKey = currentKey;
     }
 
     return instance;

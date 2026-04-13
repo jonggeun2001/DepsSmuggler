@@ -44,18 +44,21 @@ export class AptMetadataParser {
   private component: string;
   private architecture: OSArchitecture;
   private repository: Repository;
+  private abortSignal?: AbortSignal;
   private maxRetries = 3;
   private retryDelay = 1000;
 
   constructor(
     repository: Repository,
     component: string,
-    architecture: OSArchitecture
+    architecture: OSArchitecture,
+    abortSignal?: AbortSignal
   ) {
     this.repository = repository;
     this.baseUrl = repository.baseUrl.replace(/\/$/, '');
     this.component = component;
     this.architecture = architecture;
+    this.abortSignal = abortSignal;
   }
 
   /**
@@ -69,7 +72,15 @@ export class AptMetadataParser {
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
-        const response = await fetch(url);
+        if (this.abortSignal?.aborted) {
+          const abortError = new Error('Metadata load cancelled');
+          abortError.name = 'AbortError';
+          throw abortError;
+        }
+
+        const response = await fetch(url, {
+          signal: this.abortSignal,
+        });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
@@ -84,6 +95,9 @@ export class AptMetadataParser {
         return { data, status: response.status };
       } catch (error) {
         lastError = error as Error;
+        if (this.abortSignal?.aborted || (lastError as { name?: string }).name === 'AbortError') {
+          throw lastError;
+        }
         if (attempt < this.maxRetries) {
           await new Promise((resolve) => setTimeout(resolve, this.retryDelay * attempt));
         }
@@ -527,14 +541,32 @@ export class AptDownloader extends BaseOSDownloader {
 
 // 싱글톤 인스턴스
 let aptDownloaderInstance: AptDownloader | null = null;
+let aptDownloaderKey: string | null = null;
 
 export function getAptDownloader(options?: BaseDownloaderOptions): AptDownloader {
-  if (!aptDownloaderInstance && options) {
-    aptDownloaderInstance = new AptDownloader(options);
-  }
-  // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
-  if (!aptDownloaderInstance) {
+  if (!options && !aptDownloaderInstance) {
     throw new Error('AptDownloader requires BaseDownloaderOptions');
+  }
+
+  if (!options) {
+    return aptDownloaderInstance!;
+  }
+
+  const bypassCache = Boolean(options.abortSignal) || Boolean(options.onProgress) || Boolean(options.onError);
+  const currentKey = JSON.stringify({
+    distributionId: options.distribution.id,
+    architecture: options.architecture,
+    outputDir: options.outputDir,
+    concurrency: options.concurrency,
+  });
+
+  if (bypassCache) {
+    return new AptDownloader(options);
+  }
+
+  if (!aptDownloaderInstance || aptDownloaderKey !== currentKey) {
+    aptDownloaderInstance = new AptDownloader(options);
+    aptDownloaderKey = currentKey;
   }
   return aptDownloaderInstance;
 }

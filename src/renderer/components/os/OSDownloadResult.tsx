@@ -17,6 +17,10 @@ interface OSDownloadResultProps {
   outputPath: string;
   outputOptions: OSPackageOutputOptions;
   packageManager: OSPackageManager;
+  generatedOutputs?: Array<{ type: 'archive' | 'repository'; path: string; label: string }>;
+  warnings?: string[];
+  conflicts?: Array<{ package: string; versions: OSPackageInfo[] }>;
+  cancelled?: boolean;
   onOpenFolder: () => void;
   onClose: () => void;
 }
@@ -28,6 +32,10 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
   outputPath,
   outputOptions,
   packageManager,
+  generatedOutputs = [],
+  warnings = [],
+  conflicts = [],
+  cancelled = false,
   onOpenFolder,
   onClose,
 }) => {
@@ -54,17 +62,20 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
   };
 
   const getInstallCommand = (): string => {
+    const useRepositoryInstall =
+      outputOptions.type === 'repository' || outputOptions.type === 'both';
+
     switch (packageManager) {
       case 'yum':
-        return outputOptions.type === 'repository'
+        return useRepositoryInstall
           ? 'yum install <패키지명>'
           : 'rpm -ivh <패키지.rpm>';
       case 'apt':
-        return outputOptions.type === 'repository'
+        return useRepositoryInstall
           ? 'apt install <패키지명>'
           : 'dpkg -i <패키지.deb>';
       case 'apk':
-        return outputOptions.type === 'repository'
+        return useRepositoryInstall
           ? 'apk add <패키지명>'
           : 'apk add --allow-untrusted <패키지.apk>';
       default:
@@ -72,20 +83,76 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
     }
   };
 
-  const isSuccess = failed.length === 0;
+  const repositoryPath =
+    generatedOutputs.find((output) => output.type === 'repository')?.path || `${outputPath}/repository`;
+
+  const getManualRepositorySetupSteps = (): Array<{ title: string; command: string }> => {
+    switch (packageManager) {
+      case 'yum':
+        return [
+          {
+            title: '로컬 저장소를 등록합니다:',
+            command: `sudo sh -c 'printf "[depssmuggler-local]\\nname=depssmuggler-local\\nbaseurl=file://${repositoryPath}\\nenabled=1\\ngpgcheck=0\\n" > /etc/yum.repos.d/depssmuggler-local.repo'`,
+          },
+          {
+            title: '메타데이터를 갱신합니다:',
+            command: 'sudo yum makecache',
+          },
+        ];
+      case 'apt':
+        return [
+          {
+            title: 'sources.list.d에 로컬 저장소를 추가합니다:',
+            command: `echo "deb [trusted=yes] file://${repositoryPath} ./" | sudo tee /etc/apt/sources.list.d/depssmuggler-local.list`,
+          },
+          {
+            title: '패키지 목록을 갱신합니다:',
+            command: 'sudo apt-get update',
+          },
+        ];
+      case 'apk':
+        return [
+          {
+            title: '/etc/apk/repositories 에 로컬 저장소를 추가합니다:',
+            command: `echo "${repositoryPath}" | sudo tee -a /etc/apk/repositories`,
+          },
+          {
+            title: '패키지 목록을 갱신합니다:',
+            command: 'sudo apk update --allow-untrusted',
+          },
+        ];
+      default:
+        return [
+          {
+            title: '패키지 관리자에 맞는 로컬 저장소 등록 절차를 수동으로 진행하세요:',
+            command: repositoryPath,
+          },
+        ];
+    }
+  };
+
+  const isSuccess = !cancelled && failed.length === 0 && skipped.length === 0;
+  const hasRepositorySetupScript =
+    outputOptions.generateScripts && outputOptions.scriptTypes.includes('local-repo');
+  const hasArchiveInstallScript =
+    outputOptions.generateScripts && outputOptions.scriptTypes.includes('dependency-order');
+  const title = cancelled
+    ? '다운로드 취소됨'
+    : isSuccess
+    ? '다운로드 완료!'
+    : '다운로드 완료 (일부 실패)';
+  const summary = cancelled
+    ? `${success.length}개 패키지 다운로드 성공 후 작업이 중단되었습니다`
+    : `${success.length}개 패키지 다운로드 성공${failed.length > 0 ? `, ${failed.length}개 실패` : ''}${skipped.length > 0 ? `, ${skipped.length}개 건너뜀` : ''}`;
 
   return (
     <div className="os-download-result">
       {/* 헤더 */}
       <div className={`result-header ${isSuccess ? 'success' : 'warning'}`}>
-        <span className="result-icon">{isSuccess ? '✅' : '⚠️'}</span>
+        <span className="result-icon">{isSuccess ? '✅' : cancelled ? '🛑' : '⚠️'}</span>
         <div className="result-title">
-          <h2>{isSuccess ? '다운로드 완료!' : '다운로드 완료 (일부 실패)'}</h2>
-          <p>
-            {success.length}개 패키지 다운로드 성공
-            {failed.length > 0 && `, ${failed.length}개 실패`}
-            {skipped.length > 0 && `, ${skipped.length}개 건너뜀`}
-          </p>
+          <h2>{title}</h2>
+          <p>{summary}</p>
         </div>
       </div>
 
@@ -105,57 +172,128 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
         </div>
       </div>
 
-      {/* 포함된 파일 목록 */}
-      <div className="result-section">
-        <h3 className="section-title">포함된 파일</h3>
-        <ul className="file-list">
-          <li>
-            <span className="file-icon">📦</span>
-            패키지 파일 ({success.length}개)
-          </li>
-          {outputOptions.generateScripts && outputOptions.scriptTypes?.length > 0 && (
-            <>
-              {outputOptions.scriptTypes.includes('dependency-order') && (
-                <li>
-                  <span className="file-icon">📜</span>
-                  install.sh - 의존성 순서 설치 스크립트
+      {(warnings.length > 0 || conflicts.length > 0) && (
+        <div className="result-section warnings">
+          <h3 className="section-title">확인할 사항</h3>
+          {warnings.length > 0 && (
+            <ul className="failed-list">
+              {warnings.map((warning, index) => (
+                <li key={`warning-${index}`}>
+                  <span className="error-msg">{warning}</span>
                 </li>
-              )}
-              {outputOptions.scriptTypes.includes('local-repo') && (
-                <li>
-                  <span className="file-icon">📜</span>
-                  setup-repo.sh - 로컬 저장소 설정 스크립트
-                </li>
-              )}
-            </>
+              ))}
+            </ul>
           )}
-          <li>
-            <span className="file-icon">📄</span>
-            metadata.json - 패키지 메타데이터
-          </li>
-          <li>
-            <span className="file-icon">📖</span>
-            README.txt - 사용 안내
-          </li>
-        </ul>
-      </div>
+          {conflicts.length > 0 && (
+            <ul className="failed-list">
+              {conflicts.map((conflict) => (
+                <li key={conflict.package}>
+                  <span className="pkg-name">{conflict.package}</span>
+                  <span className="error-msg">
+                    {conflict.versions.map((pkg) => pkg.version).join(', ')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {generatedOutputs.length > 0 && (
+        <div className="result-section">
+          <h3 className="section-title">생성된 출력물</h3>
+          <ul className="file-list">
+            {generatedOutputs.map((item) => (
+              <li key={`${item.type}-${item.path}`}>
+                <span className="file-icon">{item.type === 'archive' ? '🗜️' : '🗂️'}</span>
+                <div className="generated-output">
+                  <strong>{item.label}</strong>
+                  <code>{item.path}</code>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* 포함된 파일 목록 */}
+      {generatedOutputs.length > 0 && (
+        <div className="result-section">
+          <h3 className="section-title">포함된 파일</h3>
+          <ul className="file-list">
+            <li>
+              <span className="file-icon">📦</span>
+              패키지 파일 ({success.length}개)
+            </li>
+            {outputOptions.generateScripts && outputOptions.scriptTypes?.length > 0 && (
+              <>
+                {outputOptions.scriptTypes.includes('dependency-order') && (
+                  <li>
+                    <span className="file-icon">📜</span>
+                    install.sh - 의존성 순서 설치 스크립트
+                  </li>
+                )}
+                {outputOptions.scriptTypes.includes('local-repo') && (
+                  <li>
+                    <span className="file-icon">📜</span>
+                    setup-repo.sh - 로컬 저장소 설정 스크립트
+                  </li>
+                )}
+              </>
+            )}
+            <li>
+              <span className="file-icon">📄</span>
+              metadata.json - 패키지 메타데이터
+            </li>
+            <li>
+              <span className="file-icon">📖</span>
+              README.txt - 사용 안내
+            </li>
+          </ul>
+        </div>
+      )}
 
       {/* 설치 방법 안내 */}
       <div className="result-section">
         <h3 className="section-title">설치 방법</h3>
         <div className="install-guide">
-          {outputOptions.type === 'repository' || outputOptions.type === 'both' ? (
+          {generatedOutputs.length === 0 ? (
+            <p className="guide-step">
+              최종 출력물이 생성되지 않았습니다. 다시 다운로드를 완료한 후 설치를 진행하세요.
+            </p>
+          ) : outputOptions.type === 'repository' || outputOptions.type === 'both' ? (
             <>
               <p className="guide-step">
                 <strong>1.</strong> 다운로드한 폴더를 폐쇄망 서버에 복사합니다.
               </p>
-              <p className="guide-step">
-                <strong>2.</strong> 로컬 저장소 설정 스크립트를 실행합니다:
-              </p>
-              <code className="guide-code">sudo bash setup-repo.sh</code>
-              <p className="guide-step">
-                <strong>3.</strong> 패키지를 설치합니다:
-              </p>
+              {hasRepositorySetupScript ? (
+                <>
+                  <p className="guide-step">
+                    <strong>2.</strong> 로컬 저장소 설정 스크립트를 실행합니다:
+                  </p>
+                  <code className="guide-code">sudo bash setup-repo.sh</code>
+                  <p className="guide-step">
+                    <strong>3.</strong> 패키지를 설치합니다:
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="guide-step">
+                    <strong>2.</strong> `setup-repo.sh`는 생성되지 않았습니다. 로컬 저장소를 수동으로 등록하세요:
+                  </p>
+                  {getManualRepositorySetupSteps().map((step, index) => (
+                    <div key={step.command}>
+                      <p className="guide-step">
+                        {index === 0 ? <strong>2.</strong> : <strong>추가.</strong>} {step.title}
+                      </p>
+                      <code className="guide-code">{step.command}</code>
+                    </div>
+                  ))}
+                  <p className="guide-step">
+                    <strong>3.</strong> 패키지를 설치합니다:
+                  </p>
+                </>
+              )}
               <code className="guide-code">{getInstallCommand()}</code>
             </>
           ) : (
@@ -163,10 +301,21 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
               <p className="guide-step">
                 <strong>1.</strong> 압축 파일을 폐쇄망 서버에 복사하고 압축을 풉니다.
               </p>
-              <p className="guide-step">
-                <strong>2.</strong> 설치 스크립트를 실행합니다:
-              </p>
-              <code className="guide-code">sudo bash install.sh</code>
+              {hasArchiveInstallScript ? (
+                <>
+                  <p className="guide-step">
+                    <strong>2.</strong> 설치 스크립트를 실행합니다:
+                  </p>
+                  <code className="guide-code">sudo bash install.sh</code>
+                </>
+              ) : (
+                <>
+                  <p className="guide-step">
+                    <strong>2.</strong> 설치 스크립트는 포함되지 않았습니다. 패키지를 수동으로 설치하세요:
+                  </p>
+                  <code className="guide-code">{getInstallCommand()}</code>
+                </>
+              )}
             </>
           )}
         </div>
@@ -260,6 +409,18 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
         .summary-value {
           font-weight: 500;
           color: #1a1a2e;
+        }
+
+        .generated-output {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .generated-output code {
+          font-size: 12px;
+          color: #64748b;
+          word-break: break-all;
         }
 
         .summary-value.path {

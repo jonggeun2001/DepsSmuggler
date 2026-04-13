@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Card,
@@ -44,7 +44,8 @@ import {
   RightOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { useCartStore } from '../stores/cart-store';
+import { OSDownloadProgress, OSDownloadResult, OSPackageCart } from '../components/os';
+import { useCartStore, type CartItem } from '../stores/cart-store';
 import {
   useDownloadStore,
   DownloadItem,
@@ -60,6 +61,14 @@ import type {
   HistoryStatus,
 } from '../../types';
 import type { AllCompleteData, DependencyAPI } from '../../types/electron';
+import type {
+  OSPackageInfo,
+  OSPackageOutputOptions,
+  OSDistribution,
+  OSPackageManager,
+  OSDownloadProgress as OSDownloadProgressData,
+  PackageDependency,
+} from '../../core/downloaders/os-shared/types';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -121,6 +130,114 @@ interface PendingDownloadSource {
   extras?: string[];
 }
 
+const OS_PACKAGE_TYPES = new Set(['yum', 'apt', 'apk']);
+
+type SupportedOSPackageManager = 'yum' | 'apt' | 'apk';
+
+interface OSDownloadResultData {
+  success: OSPackageInfo[];
+  failed: Array<{ package: OSPackageInfo; error: string }>;
+  skipped: OSPackageInfo[];
+  outputPath: string;
+  packageManager: OSPackageManager;
+  outputOptions: OSPackageOutputOptions;
+  generatedOutputs?: Array<{ type: 'archive' | 'repository'; path: string; label: string }>;
+  warnings: string[];
+  unresolved: PackageDependency[];
+  conflicts: Array<{ package: string; versions: OSPackageInfo[] }>;
+  cancelled: boolean;
+}
+
+interface OSCartContextSnapshot {
+  distributionId: string;
+  architecture: string;
+  packageManager: SupportedOSPackageManager;
+}
+
+function isOSCartItem(item: CartItem): item is CartItem & { type: SupportedOSPackageManager } {
+  return OS_PACKAGE_TYPES.has(item.type);
+}
+
+function getOSCartContextSnapshot(item: CartItem): OSCartContextSnapshot | null {
+  const raw = item.metadata?.osContext;
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const { distributionId, architecture, packageManager } = raw as Partial<OSCartContextSnapshot>;
+  if (
+    typeof distributionId !== 'string' ||
+    typeof architecture !== 'string' ||
+    (packageManager !== 'yum' && packageManager !== 'apt' && packageManager !== 'apk')
+  ) {
+    return null;
+  }
+
+  return {
+    distributionId,
+    architecture,
+    packageManager,
+  };
+}
+
+function toOSPackageInfo(item: CartItem): OSPackageInfo | null {
+  const raw = item.metadata?.osPackageInfo as OSPackageInfo | undefined;
+  if (raw) {
+    return raw;
+  }
+
+  if (!item.repository || !item.location || !item.arch) {
+    return null;
+  }
+
+  return {
+    name: item.name,
+    version: item.version,
+    architecture: item.arch,
+    size: 0,
+    checksum: { type: 'sha256', value: '' },
+    location: item.location,
+    repository: item.repository,
+    dependencies: [],
+    description: typeof item.metadata?.description === 'string' ? item.metadata.description : undefined,
+    summary: typeof item.metadata?.description === 'string' ? item.metadata.description : undefined,
+  };
+}
+
+function formatDependencyRequirement(requirement: PackageDependency): string {
+  if (!requirement.version) {
+    return requirement.name;
+  }
+
+  return `${requirement.name} ${requirement.operator || '='} ${requirement.version}`;
+}
+
+function buildOSDependencyIssueMessage(result: Pick<OSDownloadResultData, 'warnings' | 'unresolved' | 'conflicts'>): string {
+  const sections: string[] = [];
+
+  if (result.unresolved.length > 0) {
+    sections.push(
+      `해결되지 않은 의존성:\n${result.unresolved
+        .map((dependency) => `- ${formatDependencyRequirement(dependency)}`)
+        .join('\n')}`
+    );
+  }
+
+  if (result.conflicts.length > 0) {
+    sections.push(
+      `버전 충돌:\n${result.conflicts
+        .map((conflict) => `- ${conflict.package}: ${conflict.versions.map((pkg) => pkg.version).join(', ')}`)
+        .join('\n')}`
+    );
+  }
+
+  if (result.warnings.length > 0) {
+    sections.push(`경고:\n${result.warnings.map((warning) => `- ${warning}`).join('\n')}`);
+  }
+
+  return sections.join('\n\n');
+}
+
 function createPendingDownloadItems(items: PendingDownloadSource[]): DownloadItem[] {
   return items.map((item) => ({
     id: item.id,
@@ -145,9 +262,10 @@ function createPendingDownloadItems(items: PendingDownloadSource[]): DownloadIte
 }
 
 const DownloadPage: React.FC = () => {
-  const navigate = useNavigate();
   const location = useLocation();
+  const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
+  const removeCartItem = useCartStore((state) => state.removeItem);
   const clearCart = useCartStore((state) => state.clearCart);
   const {
     defaultTargetOS,
@@ -208,6 +326,73 @@ const DownloadPage: React.FC = () => {
   const [completedArtifactPaths, setCompletedArtifactPaths] = useState<string[]>([]);
   const [completedDeliveryResult, setCompletedDeliveryResult] = useState<HistoryDeliveryResult | undefined>();
   const [completedError, setCompletedError] = useState('');
+  const historyDownloadState = (
+    location.state as { deliveryMethod?: 'local' | 'email'; osOutputOptions?: OSPackageOutputOptions } | null
+  );
+  const historyOSOutputOptions = historyDownloadState?.osOutputOptions;
+  const osCartItems = useMemo(() => cartItems.filter(isOSCartItem), [cartItems]);
+  const hasOnlyOSPackages = cartItems.length > 0 && osCartItems.length === cartItems.length;
+  const osPackageManagers = useMemo(
+    () => Array.from(new Set(osCartItems.map((item) => item.type))),
+    [osCartItems]
+  );
+  const osCartSnapshots = useMemo(
+    () => osCartItems.map(getOSCartContextSnapshot),
+    [osCartItems]
+  );
+  const osCartContext = useMemo<OSCartContextSnapshot | null>(() => {
+    if (!hasOnlyOSPackages || osPackageManagers.length !== 1) {
+      return null;
+    }
+
+    const presentSnapshots = osCartSnapshots.filter(
+      (snapshot): snapshot is OSCartContextSnapshot => snapshot !== null
+    );
+
+    if (presentSnapshots.length !== osCartItems.length) {
+      return null;
+    }
+
+    if (presentSnapshots.length === 0) {
+      return null;
+    }
+
+    const [firstSnapshot] = presentSnapshots;
+    const hasMixedSnapshots = presentSnapshots.some(
+      (snapshot) =>
+        snapshot.packageManager !== firstSnapshot.packageManager ||
+        snapshot.distributionId !== firstSnapshot.distributionId ||
+        snapshot.architecture !== firstSnapshot.architecture
+    );
+
+    return hasMixedSnapshots ? null : firstSnapshot;
+  }, [
+    apkDistribution.architecture,
+    apkDistribution.id,
+    aptDistribution.architecture,
+    aptDistribution.id,
+    hasOnlyOSPackages,
+    osCartItems,
+    osCartSnapshots,
+    osPackageManagers,
+    yumDistribution.architecture,
+    yumDistribution.id,
+  ]);
+  const [persistedOSContext, setPersistedOSContext] = useState<OSCartContextSnapshot | null>(null);
+  const effectiveOSContext = osCartContext ?? persistedOSContext;
+  const isDedicatedOSFlow = hasOnlyOSPackages && osCartContext !== null;
+  const activeOSPackageManager = effectiveOSContext?.packageManager ?? null;
+  const osPackages = useMemo(
+    () => osCartItems.map(toOSPackageInfo).filter(Boolean) as OSPackageInfo[],
+    [osCartItems]
+  );
+  const [osDistribution, setOSDistribution] = useState<OSDistribution | null>(null);
+  const [osProgress, setOSProgress] = useState<OSDownloadProgressData | null>(null);
+  const [osDownloading, setOSDownloading] = useState(false);
+  const [osResult, setOSResult] = useState<OSDownloadResultData | null>(null);
+  const [osDownloadError, setOSDownloadError] = useState<string | null>(null);
+  const shouldRenderDedicatedOSFlow =
+    isDedicatedOSFlow || osDownloading || osResult !== null;
   // 의존성 확인 관련 상태
   const [isResolvingDeps, setIsResolvingDeps] = useState(false);
   const downloadCancelledRef = useRef(false);
@@ -240,14 +425,58 @@ const DownloadPage: React.FC = () => {
   }, [cartItems, downloadItems.length, setItems, clearLogs]);
 
   useEffect(() => {
-    const restoredDeliveryMethod = (
-      location.state as { deliveryMethod?: 'local' | 'email' } | null
-    )?.deliveryMethod;
+    const restoredDeliveryMethod = historyDownloadState?.deliveryMethod;
 
     if (restoredDeliveryMethod) {
       setDeliveryMethod(restoredDeliveryMethod);
     }
-  }, [location.state]);
+  }, [historyDownloadState]);
+
+  useEffect(() => {
+    if (osCartContext) {
+      setPersistedOSContext(osCartContext);
+    }
+  }, [osCartContext]);
+
+  useEffect(() => {
+    if (!shouldRenderDedicatedOSFlow || !effectiveOSContext || !window.electronAPI?.os?.getDistribution) {
+      setOSDistribution(null);
+      return;
+    }
+
+    let active = true;
+
+    window.electronAPI.os.getDistribution(effectiveOSContext.distributionId)
+      .then((distribution) => {
+        if (active) {
+          setOSDistribution((distribution as OSDistribution | undefined) || null);
+        }
+      })
+      .catch((error) => {
+        console.error('OS 배포판 정보를 불러오지 못했습니다:', error);
+        if (active) {
+          setOSDistribution(null);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    effectiveOSContext,
+    shouldRenderDedicatedOSFlow,
+  ]);
+
+  useEffect(() => {
+    if (!isDedicatedOSFlow || !window.electronAPI?.os?.download?.onProgress) {
+      setOSProgress(null);
+      return;
+    }
+
+    return window.electronAPI.os.download.onProgress((progress) => {
+      setOSProgress(progress as OSDownloadProgressData);
+    });
+  }, [isDedicatedOSFlow]);
 
   useEffect(() => {
     const includeDependenciesChanged =
@@ -1063,6 +1292,187 @@ const DownloadPage: React.FC = () => {
     }
   };
 
+  const addOSDownloadHistory = (result: OSDownloadResultData) => {
+    if (cartSnapshotRef.current.length === 0) {
+      return;
+    }
+
+    const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
+      type: item.type,
+      name: item.name,
+      version: item.version,
+      arch: item.arch,
+      languageVersion: item.languageVersion,
+      metadata: isOSCartItem(item) && effectiveOSContext
+        ? {
+            ...item.metadata,
+            osContext: {
+              distributionId: effectiveOSContext.distributionId,
+              architecture: effectiveOSContext.architecture,
+              packageManager: effectiveOSContext.packageManager,
+            },
+          }
+        : item.metadata,
+    }));
+
+    const historySettings: HistorySettings = {
+      outputFormat: result.outputOptions.archiveFormat || 'zip',
+      includeScripts: result.outputOptions.generateScripts,
+      includeDependencies,
+      osOutputOptions: result.outputOptions,
+    };
+
+    const failedCount = result.failed.length + result.unresolved.length;
+    const downloadedCount = result.success.length;
+    let historyStatus: HistoryStatus = 'success';
+
+    if (result.cancelled || failedCount > 0 || result.skipped.length > 0) {
+      historyStatus = downloadedCount > 0 ? 'partial' : 'failed';
+    }
+
+    const totalSize = result.success.reduce((sum, item) => sum + (item.size || 0), 0);
+
+    addHistory(
+      historyPackages,
+      historySettings,
+      result.outputPath,
+      totalSize,
+      historyStatus,
+      downloadedCount,
+      failedCount
+    );
+  };
+
+  const handleStartOSDownload = async (outputOptions: OSPackageOutputOptions) => {
+    if (!outputDir) {
+      message.warning('출력 폴더를 선택하세요');
+      return;
+    }
+
+    if (!activeOSPackageManager || !osDistribution || !effectiveOSContext) {
+      message.error('OS 배포판 정보를 아직 불러오지 못했습니다');
+      return;
+    }
+
+    if (osPackages.length !== osCartItems.length) {
+      message.error('장바구니의 OS 패키지 메타데이터가 부족합니다. 다시 검색 후 담아주세요.');
+      return;
+    }
+
+    const canProceed = await checkOutputPath();
+    if (!canProceed) {
+      return;
+    }
+
+    const osDownloadAPI = window.electronAPI?.os?.download;
+
+    if (!osDownloadAPI?.start) {
+      message.error('OS 패키지 다운로드 API를 사용할 수 없습니다');
+      return;
+    }
+
+    cartSnapshotRef.current = [...osCartItems];
+    setPersistedOSContext(effectiveOSContext);
+    setOSDownloadError(null);
+    setOSResult(null);
+    setOSDownloading(true);
+    setOSProgress({
+      phase: 'resolving',
+      currentPackage: '의존성 확인 준비',
+      currentIndex: 0,
+      totalPackages: osPackages.length,
+      bytesDownloaded: 0,
+      totalBytes: 0,
+      speed: 0,
+    });
+
+    try {
+      const result = await osDownloadAPI.start({
+        packages: osPackages,
+        outputDir,
+        distribution: osDistribution,
+        architecture: effectiveOSContext.architecture,
+        resolveDependencies: includeDependencies,
+        includeOptionalDeps: includeDependencies,
+        concurrency: concurrentDownloads,
+        outputOptions,
+      }) as OSDownloadResultData;
+
+      if (result.unresolved.length > 0) {
+        setOSDownloadError(buildOSDependencyIssueMessage(result));
+        message.error('해결되지 않은 OS 의존성이 있어 다운로드를 시작하지 않았습니다');
+        return;
+      }
+
+      if (!result.cancelled) {
+        addOSDownloadHistory(result);
+      }
+      setOSResult(result);
+
+      if (!result.cancelled) {
+        setOSProgress({
+          phase: 'packaging',
+          currentPackage: '완료',
+          currentIndex: result.success.length,
+          totalPackages: result.success.length || osPackages.length,
+          bytesDownloaded: result.success.length,
+          totalBytes: result.success.length || osPackages.length,
+          speed: 0,
+        });
+      }
+
+      if (!result.cancelled && result.failed.length === 0 && result.skipped.length === 0) {
+        clearCart();
+      }
+
+      if (result.cancelled) {
+        message.warning('OS 패키지 다운로드가 취소되었습니다');
+      } else if (result.failed.length > 0 || result.skipped.length > 0) {
+        message.warning('OS 패키지 다운로드가 부분 완료되었습니다');
+      } else {
+        message.success('OS 패키지 다운로드가 완료되었습니다');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setOSDownloadError(errorMessage);
+      message.error('OS 패키지 다운로드 중 오류가 발생했습니다');
+    } finally {
+      setOSDownloading(false);
+    }
+  };
+
+  const handleCancelOSDownload = () => {
+    if (osProgress?.phase === 'packaging') {
+      message.info('패키징 단계에서는 취소할 수 없습니다');
+      return;
+    }
+
+    Modal.confirm({
+      title: 'OS 패키지 다운로드 취소',
+      content: '진행 중인 OS 패키지 다운로드를 취소하시겠습니까?',
+      okText: '취소',
+      okType: 'danger',
+      cancelText: '계속',
+      onOk: async () => {
+        if (!window.electronAPI?.os?.download?.cancel) {
+          message.error('OS 패키지 취소 API를 사용할 수 없습니다');
+          return;
+        }
+
+        await window.electronAPI.os.download.cancel();
+        setOSProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                currentPackage: '취소 요청 중',
+              }
+            : prev
+        );
+        message.warning('OS 패키지 다운로드 취소를 요청했습니다');
+      },
+    });
+  };
+
   // 다운로드 시작
   const handleStartDownload = async () => {
     const handleStartTime = Date.now();
@@ -1318,6 +1728,10 @@ const DownloadPage: React.FC = () => {
     setCompletedDeliveryResult(undefined);
     setCompletedError('');
     setDeliveryMethod('local');
+    setOSProgress(null);
+    setOSResult(null);
+    setOSDownloadError(null);
+    setOSDownloading(false);
     navigate('/');
   };
 
@@ -1455,6 +1869,14 @@ const DownloadPage: React.FC = () => {
 
   // 전체 다운로드 속도 (이동 평균 기반)
   const totalSpeed = calculateOverallSpeed();
+  const isOSPackaging = osProgress?.phase === 'packaging';
+  const hasMissingOSCartSnapshots = osCartSnapshots.some((snapshot) => snapshot === null);
+  const requiresOSCartReselection =
+    hasOnlyOSPackages &&
+    osCartItems.length > 0 &&
+    hasMissingOSCartSnapshots &&
+    !osDownloading &&
+    osResult === null;
 
   // 크기 포맷팅 함수
   const formatBytes = (bytes: number) => {
@@ -1491,6 +1913,125 @@ const DownloadPage: React.FC = () => {
       hasFailures: failedCount > 0,
     };
   };
+
+  if (shouldRenderDedicatedOSFlow) {
+    return (
+      <div>
+        <Title level={3}>OS 패키지 다운로드</Title>
+        <Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
+          {osDistribution
+            ? `${osDistribution.name}용 로컬 저장소 또는 압축 결과물을 생성합니다.`
+            : '배포판 정보를 불러오는 중입니다.'}
+        </Text>
+
+        <Card title="다운로드 경로" style={{ marginBottom: 24 }}>
+          <Text strong>출력 폴더</Text>
+          <Space.Compact style={{ width: '100%', marginTop: 8 }}>
+            <Input
+              value={outputDir}
+              onChange={(e) => setOutputDir(e.target.value)}
+              placeholder="다운로드 폴더 경로"
+              disabled={osDownloading}
+            />
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={handleSelectFolder}
+              disabled={osDownloading}
+            >
+              선택
+            </Button>
+          </Space.Compact>
+        </Card>
+
+        {osDownloadError && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 24 }}
+            message="OS 패키지 다운로드 실패"
+            description={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{osDownloadError}</pre>}
+          />
+        )}
+
+        {osResult ? (
+          <OSDownloadResult
+            success={osResult.success}
+            failed={osResult.failed}
+            skipped={osResult.skipped}
+            outputPath={osResult.outputPath}
+            outputOptions={osResult.outputOptions}
+            packageManager={osResult.packageManager}
+            generatedOutputs={osResult.generatedOutputs}
+            warnings={osResult.warnings}
+            conflicts={osResult.conflicts}
+            cancelled={osResult.cancelled}
+            onOpenFolder={handleOpenFolder}
+            onClose={handleComplete}
+          />
+        ) : osDownloading ? (
+          <div>
+            <OSDownloadProgress
+              progress={osProgress}
+              packageCount={osPackages.length}
+              outputDir={outputDir}
+            />
+            <div style={{ marginTop: 16, textAlign: 'right' }}>
+              <Button
+                danger
+                icon={<StopOutlined />}
+                onClick={handleCancelOSDownload}
+                disabled={isOSPackaging}
+              >
+                다운로드 취소
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <OSPackageCart
+            packages={osPackages}
+            distribution={osDistribution}
+            isDownloading={osDownloading}
+            initialOutputOptions={historyOSOutputOptions}
+            onRemovePackage={(pkg) => {
+              const item = osCartItems.find(
+                (cartItem) =>
+                  cartItem.name === pkg.name &&
+                  cartItem.version === pkg.version &&
+                  cartItem.type === activeOSPackageManager
+              );
+              if (item) {
+                removeCartItem(item.id);
+              }
+            }}
+            onClearAll={clearCart}
+            onStartDownload={handleStartOSDownload}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (requiresOSCartReselection) {
+    return (
+      <Card>
+        <Alert
+          type="warning"
+          showIcon
+          message="기존 OS 장바구니는 다시 선택이 필요합니다"
+          description="이 장바구니 항목에는 배포판/아키텍처 스냅샷이 없어 전용 OS 다운로드를 안전하게 재개할 수 없습니다. Wizard에서 같은 배포판과 아키텍처로 패키지를 다시 담아 주세요."
+          style={{ marginBottom: 16 }}
+        />
+        <Space>
+          <Button type="primary" onClick={() => navigate('/wizard')}>
+            Wizard로 이동
+          </Button>
+          <Button onClick={clearCart}>
+            장바구니 비우기
+          </Button>
+        </Space>
+      </Card>
+    );
+  }
 
   // 빈 장바구니 상태
   if (cartItems.length === 0 && downloadItems.length === 0) {
