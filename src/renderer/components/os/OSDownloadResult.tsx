@@ -131,7 +131,7 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
     }
   };
 
-  const isSuccess = !cancelled && failed.length === 0;
+  const isSuccess = !cancelled && failed.length === 0 && skipped.length === 0;
   const hasRepositorySetupScript =
     outputOptions.generateScripts && outputOptions.scriptTypes.includes('local-repo');
   const title = cancelled

@@ -35,6 +35,8 @@ export interface DependencyResolverOptions {
   includeRecommends: boolean;
   /** 진행 콜백 */
   onProgress?: (message: string, current: number, total: number) => void;
+  /** 취소 신호 */
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -73,6 +75,18 @@ export abstract class BaseOSDependencyResolver {
     return `${pkg.name}-${pkg.version}-${pkg.architecture}`;
   }
 
+  protected createAbortError(): Error {
+    const error = new Error('Dependency resolution cancelled');
+    error.name = 'AbortError';
+    return error;
+  }
+
+  protected throwIfAborted(): void {
+    if (this.options.abortSignal?.aborted) {
+      throw this.createAbortError();
+    }
+  }
+
   /**
    * 의존성 해결 (메인 엔트리)
    */
@@ -80,12 +94,16 @@ export abstract class BaseOSDependencyResolver {
     const tree = new OSDependencyTree();
     this.resolvedPackages.clear();
 
+    this.throwIfAborted();
+
     // 메타데이터 로드
     await this.loadMetadata();
+    this.throwIfAborted();
 
     // 각 패키지의 의존성 해결
     const totalPackages = packages.length;
     for (let i = 0; i < packages.length; i++) {
+      this.throwIfAborted();
       const pkg = packages[i];
       this.options.onProgress?.(
         `Resolving dependencies for ${pkg.name}`,
@@ -130,6 +148,7 @@ export abstract class BaseOSDependencyResolver {
     let iterations = 0;
 
     while (queue.length > 0 && iterations < MAX_ITERATIONS) {
+      this.throwIfAborted();
       iterations++;
       const currentPkg = queue.shift()!;
       const pkgKey = this.getPackageKey(currentPkg);
@@ -153,9 +172,11 @@ export abstract class BaseOSDependencyResolver {
       tree.addNode(currentPkg);
 
       // 의존성 가져오기
+      this.throwIfAborted();
       const dependencies = await this.fetchDependencies(currentPkg);
 
       for (const dep of dependencies) {
+        this.throwIfAborted();
         // 선택적 의존성 필터링
         if (dep.isOptional && !this.options.includeOptional) {
           continue;

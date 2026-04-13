@@ -57,13 +57,19 @@ export class YumMetadataParser {
   private baseUrl: string;
   private repository: Repository;
   private architecture: OSArchitecture;
+  private abortSignal?: AbortSignal;
   private xmlParser: XMLParser;
   private maxRetries = 3;
   private retryDelay = 1000;
 
-  constructor(repository: Repository, architecture: OSArchitecture = 'x86_64') {
+  constructor(
+    repository: Repository,
+    architecture: OSArchitecture = 'x86_64',
+    abortSignal?: AbortSignal
+  ) {
     this.repository = repository;
     this.architecture = architecture;
+    this.abortSignal = abortSignal;
     this.baseUrl = this.resolveUrlVariables(repository.baseUrl);
     this.xmlParser = new XMLParser({
       ignoreAttributes: false,
@@ -103,7 +109,15 @@ export class YumMetadataParser {
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
-        const response = await fetch(url);
+        if (this.abortSignal?.aborted) {
+          const abortError = new Error('Metadata load cancelled');
+          abortError.name = 'AbortError';
+          throw abortError;
+        }
+
+        const response = await fetch(url, {
+          signal: this.abortSignal,
+        });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }

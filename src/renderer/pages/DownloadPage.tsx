@@ -1225,7 +1225,7 @@ const DownloadPage: React.FC = () => {
         });
       }
 
-      if (!result.cancelled && result.failed.length === 0) {
+      if (!result.cancelled && result.failed.length === 0 && result.skipped.length === 0) {
         clearCart();
       }
 

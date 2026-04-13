@@ -177,7 +177,8 @@ function getOSResolverForDistribution(
   distribution: OSDistribution,
   architecture: OSArchitecture,
   includeOptionalDeps: boolean,
-  mainWindow: BrowserWindow | null
+  mainWindow: BrowserWindow | null,
+  abortSignal?: AbortSignal
 ) {
   const onProgress = (message: string, current: number, total: number) => {
     emitOSProgress(mainWindow, {
@@ -205,6 +206,7 @@ function getOSResolverForDistribution(
         includeRecommends: includeOptionalDeps,
         distribution,
         onProgress,
+        abortSignal,
       });
     case 'apt':
       return getAptResolver({
@@ -214,6 +216,7 @@ function getOSResolverForDistribution(
         includeRecommends: includeOptionalDeps,
         distribution,
         onProgress,
+        abortSignal,
       });
     case 'apk':
       return getApkResolver({
@@ -223,6 +226,7 @@ function getOSResolverForDistribution(
         includeRecommends: includeOptionalDeps,
         distribution,
         onProgress,
+        abortSignal,
       });
     default:
       throw new Error(`Unsupported package manager: ${distribution.packageManager}`);
@@ -935,6 +939,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
 
       log.info(`Starting OS package download: ${packages.length} packages to ${outputDir}`);
       osDownloadCancelled = false;
+      osDownloadAbortController = new AbortController();
 
       await fse.ensureDir(outputDir);
 
@@ -944,16 +949,33 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           distribution,
           architecture,
           includeOptionalDeps ?? false,
-          mainWindow
+          mainWindow,
+          osDownloadAbortController.signal
         );
-        const resolved = await resolver.resolveDependencies(packages);
-        packagesToDownload = resolved.packages;
-        warnings.push(...resolved.warnings);
-        unresolved = resolved.unresolved;
-        conflicts = resolved.conflicts;
+        try {
+          const resolved = await resolver.resolveDependencies(packages);
+          packagesToDownload = resolved.packages;
+          warnings.push(...resolved.warnings);
+          unresolved = resolved.unresolved;
+          conflicts = resolved.conflicts;
+        } catch (error) {
+          if ((error as { name?: string })?.name === 'AbortError' || osDownloadCancelled) {
+            warnings.push('의존성 해결 단계에서 취소되어 다운로드를 시작하지 않았습니다.');
+            osDownloadAbortController = null;
+            return buildOSDownloadStartResult({
+              outputDir,
+              distribution,
+              outputOptions,
+              warnings,
+              cancelled: true,
+            });
+          }
+          throw error;
+        }
 
         if (osDownloadCancelled) {
           warnings.push('의존성 해결 단계에서 취소되어 다운로드를 시작하지 않았습니다.');
+          osDownloadAbortController = null;
           return buildOSDownloadStartResult({
             outputDir,
             distribution,
@@ -986,6 +1008,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           speed: 0,
           phase: 'resolving',
         });
+        osDownloadAbortController = null;
         return buildOSDownloadStartResult({
           outputDir,
           distribution,
@@ -997,7 +1020,6 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
       }
 
       const stagingDir = await fse.mkdtemp(path.join(outputDir, '.depssmuggler-os-'));
-      osDownloadAbortController = new AbortController();
       const downloader = getOSDownloaderForDistribution(
         distribution,
         architecture,

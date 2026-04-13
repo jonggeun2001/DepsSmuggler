@@ -27,13 +27,15 @@ export class ApkMetadataParser {
   private baseUrl: string;
   private architecture: OSArchitecture;
   private repository: Repository;
+  private abortSignal?: AbortSignal;
   private maxRetries = 3;
   private retryDelay = 1000;
 
-  constructor(repository: Repository, architecture: OSArchitecture) {
+  constructor(repository: Repository, architecture: OSArchitecture, abortSignal?: AbortSignal) {
     this.repository = repository;
     this.baseUrl = repository.baseUrl.replace(/\/$/, '');
     this.architecture = architecture;
+    this.abortSignal = abortSignal;
   }
 
   /**
@@ -46,7 +48,15 @@ export class ApkMetadataParser {
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
-        const response = await fetch(url);
+        if (this.abortSignal?.aborted) {
+          const abortError = new Error('Metadata load cancelled');
+          abortError.name = 'AbortError';
+          throw abortError;
+        }
+
+        const response = await fetch(url, {
+          signal: this.abortSignal,
+        });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }

@@ -44,18 +44,21 @@ export class AptMetadataParser {
   private component: string;
   private architecture: OSArchitecture;
   private repository: Repository;
+  private abortSignal?: AbortSignal;
   private maxRetries = 3;
   private retryDelay = 1000;
 
   constructor(
     repository: Repository,
     component: string,
-    architecture: OSArchitecture
+    architecture: OSArchitecture,
+    abortSignal?: AbortSignal
   ) {
     this.repository = repository;
     this.baseUrl = repository.baseUrl.replace(/\/$/, '');
     this.component = component;
     this.architecture = architecture;
+    this.abortSignal = abortSignal;
   }
 
   /**
@@ -69,7 +72,15 @@ export class AptMetadataParser {
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
-        const response = await fetch(url);
+        if (this.abortSignal?.aborted) {
+          const abortError = new Error('Metadata load cancelled');
+          abortError.name = 'AbortError';
+          throw abortError;
+        }
+
+        const response = await fetch(url, {
+          signal: this.abortSignal,
+        });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }

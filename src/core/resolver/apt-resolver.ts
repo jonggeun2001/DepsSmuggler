@@ -33,15 +33,18 @@ export class AptDependencyResolver extends BaseOSDependencyResolver {
 
     // 각 저장소의 각 컴포넌트 로드
     for (const repo of activeRepos) {
+      this.throwIfAborted();
       // URL에서 컴포넌트 추출 (예: main, universe, restricted)
       const components = this.extractComponents(repo);
 
       for (const component of components) {
+        this.throwIfAborted();
         try {
           const parser = new AptMetadataParser(
             repo,
             component,
-            this.options.architecture
+            this.options.architecture,
+            this.options.abortSignal
           );
 
           const key = `${repo.id}-${component}`;
@@ -76,6 +79,9 @@ export class AptDependencyResolver extends BaseOSDependencyResolver {
             0
           );
         } catch (error) {
+          if ((error as { name?: string })?.name === 'AbortError') {
+            throw error;
+          }
           console.warn(`Failed to load ${component} from ${repo.name}:`, error);
         }
       }
