@@ -106,7 +106,8 @@
 
 - Electron 환경에서는 settings store가 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화됩니다.
 - 기본 다운로드 출력 형식은 현재 renderer 기준 `zip` 또는 `tar.gz`입니다.
-- 히스토리 데이터는 IPC를 통해 `~/.depssmuggler/history.json`에 저장됩니다.
+- 현재 UI 히스토리의 source of truth는 Zustand persist 키 `depssmuggler-history`입니다.
+- `window.electronAPI.history.*`와 `~/.depssmuggler/history.json` 기반 파일 히스토리도 존재하지만, 현재 렌더러에서는 부분적으로만 연결되어 있습니다.
 
 ## 사용자 흐름
 
