@@ -538,14 +538,32 @@ export class AptDownloader extends BaseOSDownloader {
 
 // 싱글톤 인스턴스
 let aptDownloaderInstance: AptDownloader | null = null;
+let aptDownloaderKey: string | null = null;
 
 export function getAptDownloader(options?: BaseDownloaderOptions): AptDownloader {
-  if (!aptDownloaderInstance && options) {
-    aptDownloaderInstance = new AptDownloader(options);
-  }
-  // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
-  if (!aptDownloaderInstance) {
+  if (!options && !aptDownloaderInstance) {
     throw new Error('AptDownloader requires BaseDownloaderOptions');
+  }
+
+  if (!options) {
+    return aptDownloaderInstance!;
+  }
+
+  const bypassCache = Boolean(options.abortSignal) || Boolean(options.onProgress) || Boolean(options.onError);
+  const currentKey = JSON.stringify({
+    distributionId: options.distribution.id,
+    architecture: options.architecture,
+    outputDir: options.outputDir,
+    concurrency: options.concurrency,
+  });
+
+  if (bypassCache) {
+    return new AptDownloader(options);
+  }
+
+  if (!aptDownloaderInstance || aptDownloaderKey !== currentKey) {
+    aptDownloaderInstance = new AptDownloader(options);
+    aptDownloaderKey = currentKey;
   }
   return aptDownloaderInstance;
 }

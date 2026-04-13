@@ -454,14 +454,32 @@ export class ApkDownloader extends BaseOSDownloader {
 
 // 싱글톤 인스턴스
 let apkDownloaderInstance: ApkDownloader | null = null;
+let apkDownloaderKey: string | null = null;
 
 export function getApkDownloader(options?: BaseDownloaderOptions): ApkDownloader {
-  if (!apkDownloaderInstance && options) {
-    apkDownloaderInstance = new ApkDownloader(options);
-  }
-  // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
-  if (!apkDownloaderInstance) {
+  if (!options && !apkDownloaderInstance) {
     throw new Error('ApkDownloader requires BaseDownloaderOptions');
+  }
+
+  if (!options) {
+    return apkDownloaderInstance!;
+  }
+
+  const bypassCache = Boolean(options.abortSignal) || Boolean(options.onProgress) || Boolean(options.onError);
+  const currentKey = JSON.stringify({
+    distributionId: options.distribution.id,
+    architecture: options.architecture,
+    outputDir: options.outputDir,
+    concurrency: options.concurrency,
+  });
+
+  if (bypassCache) {
+    return new ApkDownloader(options);
+  }
+
+  if (!apkDownloaderInstance || apkDownloaderKey !== currentKey) {
+    apkDownloaderInstance = new ApkDownloader(options);
+    apkDownloaderKey = currentKey;
   }
   return apkDownloaderInstance;
 }

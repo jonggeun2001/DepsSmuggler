@@ -544,14 +544,32 @@ export class YumDownloader extends BaseOSDownloader {
 
 // 싱글톤 인스턴스
 let yumDownloaderInstance: YumDownloader | null = null;
+let yumDownloaderKey: string | null = null;
 
 export function getYumDownloader(options?: BaseDownloaderOptions): YumDownloader {
-  if (!yumDownloaderInstance && options) {
-    yumDownloaderInstance = new YumDownloader(options);
-  }
-  // options가 없을 때는 인스턴스 생성을 미룸 (options 필수)
-  if (!yumDownloaderInstance) {
+  if (!options && !yumDownloaderInstance) {
     throw new Error('YumDownloader requires BaseDownloaderOptions');
+  }
+
+  if (!options) {
+    return yumDownloaderInstance!;
+  }
+
+  const bypassCache = Boolean(options.abortSignal) || Boolean(options.onProgress) || Boolean(options.onError);
+  const currentKey = JSON.stringify({
+    distributionId: options.distribution.id,
+    architecture: options.architecture,
+    outputDir: options.outputDir,
+    concurrency: options.concurrency,
+  });
+
+  if (bypassCache) {
+    return new YumDownloader(options);
+  }
+
+  if (!yumDownloaderInstance || yumDownloaderKey !== currentKey) {
+    yumDownloaderInstance = new YumDownloader(options);
+    yumDownloaderKey = currentKey;
   }
   return yumDownloaderInstance;
 }
