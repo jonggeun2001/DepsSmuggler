@@ -91,7 +91,7 @@ depssmuggler download -t pip -p flask -f tar.gz
 
 ## `search`
 
-일반 패키지 검색 명령입니다. 구현상 `pip`, `conda`, `maven`, `docker`만 직접 검색합니다.
+일반 패키지 검색 명령입니다. 구현상 `pip`, `conda`, `maven`, `npm`, `docker`를 직접 검색합니다.
 
 ### 사용법
 
@@ -111,13 +111,13 @@ depssmuggler search <query> [옵션]
 ```bash
 depssmuggler search requests -t pip
 depssmuggler search spring -t maven -l 10
+depssmuggler search react -t npm
 depssmuggler search nginx -t docker
 ```
 
 ### 참고
 
 - `yum`, `apt`, `apk`를 `search`로 호출하면 CLI는 `os search` 사용을 안내하고 종료합니다.
-- `npm`은 현재 일반 `search` 명령에 구현되어 있지 않습니다.
 
 ## `os`
 
@@ -147,9 +147,14 @@ depssmuggler os search bash --distro ubuntu-22.04 --arch amd64
 
 ```bash
 depssmuggler os download httpd --distro rocky-9
+depssmuggler os download httpd nginx --distro rocky-9 --format both --scripts
+depssmuggler os download bash --distro ubuntu-22.04 --arch amd64 --format repository
 ```
 
-현재 구현은 실제 다운로드를 수행하지 않고, 재구현 중이라는 안내와 함께 Electron GUI 사용을 권장합니다.
+- 배포판 ID와 아키텍처를 기준으로 OS resolver를 실행해 전이 의존성을 함께 계산합니다.
+- `--format archive|repository|both`에 따라 아카이브, 로컬 저장소, 또는 둘 다 생성합니다.
+- `--scripts`를 주면 설치 스크립트와 로컬 저장소 설정 스크립트를 함께 생성합니다.
+- OS 메타데이터 캐시는 `~/.depssmuggler/cache/os-packages` 아래 persistent JSON 파일로 관리됩니다.
 
 ### `os cache`
 
@@ -158,7 +163,8 @@ depssmuggler os cache stats
 depssmuggler os cache clear
 ```
 
-현재 구현은 실제 캐시 조작 대신 GUI 사용을 안내합니다.
+- `stats`는 OS 메타데이터 캐시 디렉터리, 항목 수, 총 크기를 출력합니다.
+- `clear`는 OS 메타데이터 캐시 JSON 파일만 삭제합니다. `--force`가 없으면 확인 프롬프트를 표시합니다.
 
 ## `config`
 
@@ -197,8 +203,8 @@ depssmuggler cache list
 ## 현재 한계
 
 - CLI는 GUI보다 지원 범위가 좁습니다.
-- 일반 `search` 명령에는 `npm`이 아직 연결되어 있지 않습니다.
-- OS 패키지 CLI는 조회 중심이며 다운로드/캐시는 GUI 흐름이 기준입니다.
+- OS 패키지 CLI는 `list-distros`, `search`, `download`, `cache`를 독립적으로 수행하며 Electron GUI에 의존하지 않습니다.
+- 일반 패키지 `search`는 `pip`, `conda`, `maven`, `npm`, `docker`에 연결되어 있지만, GUI 전용 위자드/시각화 흐름은 CLI에 없습니다.
 - `cache list`는 현재 캐시 루트가 디렉터리 위주라는 가정을 두고 있어, `cache-manifest.json` 같은 일반 파일이 섞인 경우 실패할 수 있습니다.
 
 ## 관련 문서
