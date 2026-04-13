@@ -211,13 +211,19 @@ const DownloadPage: React.FC = () => {
     const includeDependenciesChanged =
       previousIncludeDependenciesRef.current !== includeDependencies;
     previousIncludeDependenciesRef.current = includeDependencies;
+    const currentOriginalIds = new Set(
+      downloadItems.filter((item) => !item.isDependency).map((item) => item.id)
+    );
+    const hasSameCartAsQueue =
+      cartItems.length === currentOriginalIds.size &&
+      cartItems.every((item) => currentOriginalIds.has(item.id));
 
     if (isDownloading || cartItems.length === 0) {
       return;
     }
 
     if (!includeDependencies) {
-      if (!includeDependenciesChanged && downloadItems.length > 0) {
+      if (!includeDependenciesChanged && downloadItems.length > 0 && hasSameCartAsQueue) {
         return;
       }
 
@@ -236,7 +242,7 @@ const DownloadPage: React.FC = () => {
       setDepsResolved(false);
       dependencyResolutionBypassedRef.current = false;
     }
-  }, [cartItems, downloadItems.length, includeDependencies, isDownloading, setDepsResolved, setItems]);
+  }, [cartItems, downloadItems, includeDependencies, isDownloading, setDepsResolved, setItems]);
 
   // IPC 이벤트 리스너 설정
   useEffect(() => {

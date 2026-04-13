@@ -98,9 +98,15 @@ export interface DependencyResolveResult {
 }
 
 export interface DependencyResolveOptions {
+  includeDependencies?: boolean;
   targetOS?: string;
   architecture?: string;
   pythonVersion?: string;
+  cudaVersion?: string | null;
+  yumDistribution?: { id: string; architecture: string };
+  aptDistribution?: { id: string; architecture: string };
+  apkDistribution?: { id: string; architecture: string };
+  includeRecommends?: boolean;
 }
 
 export interface DependencyProgressInfo {
