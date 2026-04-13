@@ -6,6 +6,7 @@ import { PackageInfo, PackageType, Architecture } from '../../types';
 import { getDownloadManager, OverallProgress } from '../../core/download-manager';
 import { getArchivePackager, ArchiveFormat } from '../../core/packager/archive-packager';
 import { getScriptGenerator } from '../../core/packager/script-generator';
+import { DownloadPackage, resolveAllDependencies } from '../../core/shared';
 
 // 다운로드 옵션
 interface DownloadOptions {
@@ -18,6 +19,70 @@ interface DownloadOptions {
   file?: string;
   deps: boolean;
   concurrency: string;
+}
+
+function toDownloadPackage(pkg: PackageInfo): DownloadPackage {
+  return {
+    id: `${pkg.type}-${pkg.name}-${pkg.version}`,
+    type: pkg.type,
+    name: pkg.name,
+    version: pkg.version,
+    architecture: pkg.arch,
+    metadata: pkg.metadata as Record<string, unknown> | undefined,
+  };
+}
+
+function toPackageInfo(pkg: DownloadPackage): PackageInfo {
+  const metadata: Record<string, unknown> = { ...(pkg.metadata ?? {}) };
+
+  if (pkg.size !== undefined && metadata.size === undefined) {
+    metadata.size = pkg.size;
+  }
+  if (pkg.downloadUrl && metadata.downloadUrl === undefined) {
+    metadata.downloadUrl = pkg.downloadUrl;
+  }
+  if (pkg.repository && metadata.repository === undefined) {
+    metadata.repository = pkg.repository;
+  }
+  if (pkg.location && metadata.location === undefined) {
+    metadata.location = pkg.location;
+  }
+  if (pkg.filename && metadata.filename === undefined) {
+    metadata.filename = pkg.filename;
+  }
+  if (pkg.indexUrl && metadata.indexUrl === undefined) {
+    metadata.indexUrl = pkg.indexUrl;
+  }
+  if (pkg.extras && metadata.extras === undefined) {
+    metadata.extras = pkg.extras;
+  }
+  if (pkg.classifier && metadata.classifier === undefined) {
+    metadata.classifier = pkg.classifier;
+  }
+
+  return {
+    type: pkg.type as PackageType,
+    name: pkg.name,
+    version: pkg.version,
+    arch: pkg.architecture as Architecture | undefined,
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+  };
+}
+
+async function preparePackagesForDownload(
+  packages: PackageInfo[],
+  options: Pick<DownloadOptions, 'arch' | 'deps'>
+): Promise<PackageInfo[]> {
+  if (!options.deps) {
+    return packages;
+  }
+
+  const resolved = await resolveAllDependencies(packages.map(toDownloadPackage), {
+    architecture: options.arch,
+    includeDependencies: true,
+  });
+
+  return resolved.allPackages.map(toPackageInfo);
 }
 
 /**
@@ -50,6 +115,16 @@ export async function downloadCommand(options: DownloadOptions): Promise<void> {
     }
 
     console.log(chalk.green(`✓ ${packages.length}개 패키지 준비 완료`));
+
+    const requestedCount = packages.length;
+    packages = await preparePackagesForDownload(packages, {
+      arch: options.arch,
+      deps: options.deps,
+    });
+
+    if (options.deps) {
+      console.log(chalk.green(`✓ 의존성 해결 완료: ${requestedCount}개 → ${packages.length}개 패키지`));
+    }
 
     // 출력 경로 생성
     const outputPath = path.resolve(options.output);

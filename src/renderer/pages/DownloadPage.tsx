@@ -100,6 +100,45 @@ const logIcons: Record<LogEntry['level'], React.ReactNode> = {
   success: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
 };
 
+interface PendingDownloadSource {
+  id: string;
+  name: string;
+  version: string;
+  type?: string;
+  arch?: string;
+  downloadUrl?: string;
+  filename?: string;
+  metadata?: Record<string, unknown>;
+  classifier?: string;
+  repository?: unknown;
+  location?: string;
+  indexUrl?: string;
+  extras?: string[];
+}
+
+function createPendingDownloadItems(items: PendingDownloadSource[]): DownloadItem[] {
+  return items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    version: item.version,
+    type: item.type,
+    arch: item.arch,
+    status: 'pending' as DownloadStatus,
+    progress: 0,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    speed: 0,
+    downloadUrl: item.downloadUrl,
+    filename: item.filename,
+    metadata: item.metadata,
+    classifier: item.classifier,
+    repository: item.repository,
+    location: item.location,
+    indexUrl: item.indexUrl,
+    extras: item.extras,
+  }));
+}
+
 const DownloadPage: React.FC = () => {
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
@@ -142,6 +181,7 @@ const DownloadPage: React.FC = () => {
   const [isResolvingDeps, setIsResolvingDeps] = useState(false);
   const downloadCancelledRef = useRef(false);
   const downloadPausedRef = useRef(false);
+  const dependencyResolutionBypassedRef = useRef(false);
   // 다운로드 아이템 목록을 ref로 유지 (SSE 이벤트 핸들러에서 최신 상태 참조용)
   const downloadItemsRef = useRef<DownloadItem[]>([]);
   // 히스토리 저장용 장바구니 데이터 (다운로드 시작 시 스냅샷)
@@ -159,22 +199,35 @@ const DownloadPage: React.FC = () => {
   // 초기화
   useEffect(() => {
     if (cartItems.length > 0 && downloadItems.length === 0) {
-      const items: DownloadItem[] = cartItems.map((item) => ({
-        id: item.id,
-        name: item.name,
-        version: item.version,
-        type: item.type,
-        status: 'pending' as DownloadStatus,
-        progress: 0,
-        downloadedBytes: 0,
-        totalBytes: 0,
-        speed: 0,
-      }));
+      const items = createPendingDownloadItems(cartItems);
       setItems(items);
       clearLogs();
     }
 
   }, [cartItems, downloadItems.length, setItems, clearLogs]);
+
+  useEffect(() => {
+    if (isDownloading || cartItems.length === 0) {
+      return;
+    }
+
+    if (!includeDependencies) {
+      const items = createPendingDownloadItems(cartItems);
+      setItems(items);
+      downloadItemsRef.current = items;
+      setDepsResolved(true);
+      dependencyResolutionBypassedRef.current = true;
+      return;
+    }
+
+    if (dependencyResolutionBypassedRef.current) {
+      const items = createPendingDownloadItems(cartItems);
+      setItems(items);
+      downloadItemsRef.current = items;
+      setDepsResolved(false);
+      dependencyResolutionBypassedRef.current = false;
+    }
+  }, [cartItems, includeDependencies, isDownloading, setDepsResolved, setItems]);
 
   // IPC 이벤트 리스너 설정
   useEffect(() => {
@@ -675,8 +728,19 @@ const DownloadPage: React.FC = () => {
       return;
     }
 
+    if (!includeDependencies) {
+      const items = createPendingDownloadItems(cartItems);
+      setItems(items);
+      downloadItemsRef.current = items;
+      setDepsResolved(true);
+      dependencyResolutionBypassedRef.current = true;
+      addLog('info', '의존성 자동 포함이 꺼져 있어 원본 패키지만 다운로드합니다');
+      return;
+    }
+
     setIsResolvingDeps(true);
     setDepsResolved(false);
+    dependencyResolutionBypassedRef.current = false;
     addLog('info', '의존성 확인 시작', `${cartItems.length}개 패키지`);
 
     // 진행 상황 리스너 등록
@@ -833,7 +897,7 @@ const DownloadPage: React.FC = () => {
           filename: pkg.filename,
           metadata: pkg.metadata,
           // Maven classifier 전달
-          classifier: (pkg as unknown as { classifier?: string }).classifier,
+          classifier: pkg.classifier,
         };
       });
 
@@ -859,6 +923,7 @@ const DownloadPage: React.FC = () => {
       }
 
       setDepsResolved(true);
+      dependencyResolutionBypassedRef.current = false;
       message.success(`의존성 확인 완료: ${totalCount}개 패키지 (${formatSize(totalSize)})`);
     } catch (error) {
       addLog('error', '의존성 확인 실패', String(error));
@@ -880,7 +945,7 @@ const DownloadPage: React.FC = () => {
       return;
     }
 
-    if (!depsResolved) {
+    if (includeDependencies && !depsResolved) {
       message.warning('먼저 의존성 확인을 진행하세요');
       return;
     }
@@ -925,19 +990,19 @@ const DownloadPage: React.FC = () => {
         type: item.type,
         name: item.name,
         version: item.version,
-        architecture: (item as unknown as { arch?: string }).arch,
+        architecture: item.arch,
         // 패키지 다운로드 정보 (conda, yum, apt, apk 등에서 사용)
         downloadUrl: item.downloadUrl,
         metadata: item.metadata,
         // OS 패키지용 필드 (레거시 호환)
-        repository: (item as unknown as { repository?: string }).repository,
-        location: (item as unknown as { location?: string }).location,
+        repository: item.repository,
+        location: item.location,
         // pip 커스텀 인덱스 URL 전달
-        indexUrl: (item as unknown as { indexUrl?: string }).indexUrl,
+        indexUrl: item.indexUrl,
         // pip extras 전달
-        extras: (item as unknown as { extras?: string[] }).extras,
+        extras: item.extras,
         // Maven classifier 전달
-        classifier: (item as unknown as { classifier?: string }).classifier,
+        classifier: item.classifier,
       }));
 
       const options = {
@@ -1030,11 +1095,11 @@ const DownloadPage: React.FC = () => {
         type: item.type,
         name: item.name,
         version: item.version,
-        architecture: (item as unknown as { arch?: string }).arch,
-        downloadUrl: (item as unknown as { downloadUrl?: string }).downloadUrl,
-        repository: (item as unknown as { repository?: string }).repository,
-        location: (item as unknown as { location?: string }).location,
-        metadata: (item as unknown as { metadata?: unknown }).metadata,
+        architecture: item.arch,
+        downloadUrl: item.downloadUrl,
+        repository: item.repository,
+        location: item.location,
+        metadata: item.metadata,
       }];
 
       const options = {
@@ -1060,6 +1125,7 @@ const DownloadPage: React.FC = () => {
   const handleComplete = () => {
     reset();
     setDepsResolved(false);
+    dependencyResolutionBypassedRef.current = false;
     navigate('/');
   };
 
@@ -1470,8 +1536,8 @@ const DownloadPage: React.FC = () => {
           </div>
         )}
 
-        {/* 의존성 확인 완료 후 Collapse 트리 구조로, 미완료 시 기본 Table로 표시 */}
-        {depsResolved ? (
+        {/* 의존성 포함 시에만 Collapse 트리 구조를 표시하고, 그 외에는 기본 Table을 사용 */}
+        {includeDependencies && depsResolved ? (
           <Collapse
             bordered={false}
             expandIcon={({ isActive }) => (
@@ -1619,7 +1685,7 @@ const DownloadPage: React.FC = () => {
       {/* 액션 버튼 */}
       <Card style={{ marginBottom: 24 }}>
         <Space>
-          {!isDownloading && !allCompleted && !depsResolved && (
+          {includeDependencies && !isDownloading && !allCompleted && !depsResolved && (
             <Button
               type="primary"
               icon={isResolvingDeps ? <LoadingOutlined /> : <SearchOutlined />}
@@ -1631,31 +1697,24 @@ const DownloadPage: React.FC = () => {
               {isResolvingDeps ? '의존성 확인 중...' : '의존성 확인'}
             </Button>
           )}
-          {!isDownloading && !allCompleted && depsResolved && (
+          {!isDownloading && !allCompleted && (depsResolved || !includeDependencies) && (
             <>
-              <Button
-                icon={<SearchOutlined />}
-                size="large"
-                onClick={() => {
-                  setDepsResolved(false);
-                  // 기존 아이템을 원본 장바구니로 초기화
-                  const items: DownloadItem[] = cartItems.map((item) => ({
-                    id: item.id,
-                    name: item.name,
-                    version: item.version,
-                    type: item.type,
-                    status: 'pending' as DownloadStatus,
-                    progress: 0,
-                    downloadedBytes: 0,
-                    totalBytes: 0,
-                    speed: 0,
-                  }));
-                  setItems(items);
-                  addLog('info', '의존성 확인 초기화');
-                }}
-              >
-                다시 확인
-              </Button>
+              {includeDependencies && depsResolved && (
+                <Button
+                  icon={<SearchOutlined />}
+                  size="large"
+                  onClick={() => {
+                    setDepsResolved(false);
+                    dependencyResolutionBypassedRef.current = false;
+                    const items = createPendingDownloadItems(cartItems);
+                    setItems(items);
+                    downloadItemsRef.current = items;
+                    addLog('info', '의존성 확인 초기화');
+                  }}
+                >
+                  다시 확인
+                </Button>
+              )}
               <Button
                 type="primary"
                 icon={<DownloadOutlined />}

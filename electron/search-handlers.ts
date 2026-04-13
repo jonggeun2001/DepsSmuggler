@@ -497,6 +497,7 @@ export function registerSearchHandlers(): void {
   ipcMain.handle('dependency:resolve', async (event, data: {
     packages: DownloadPackage[];
     options?: {
+      includeDependencies?: boolean;
       targetOS?: string;
       architecture?: string;
       pythonVersion?: string;
@@ -533,6 +534,7 @@ export function registerSearchHandlers(): void {
 
     try {
       const resolved = await resolveAllDependencies(packages, {
+        includeDependencies: options?.includeDependencies,
         targetOS: options?.targetOS as 'any' | 'windows' | 'macos' | 'linux' | undefined,
         architecture: options?.architecture,
         pythonVersion: options?.pythonVersion,

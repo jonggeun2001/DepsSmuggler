@@ -193,6 +193,8 @@ interface DownloadOptions {
 | `search:suggest` | type, query, options? | 자동완성 제안 (2자 이상) |
 | `dependency:resolve` | `{ packages, options }` | 의존성 해결 |
 
+`dependency:resolve`의 `options.includeDependencies`가 `false`이면 메인 프로세스는 원본 패키지 목록만 반환합니다. 렌더러는 이를 이용해 의존성 포함 다운로드를 끈 상태에서도 동일한 IPC 계약을 유지할 수 있습니다.
+
 ### 지원 패키지 타입
 
 - `pip`: PyPI 검색 (Simple API + JSON API)
