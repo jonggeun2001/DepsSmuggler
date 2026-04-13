@@ -67,6 +67,8 @@ depssmuggler download [옵션]
 | `--no-deps` | 의존성 해결 비활성화 | `false` |
 | `--concurrency <num>` | 동시 다운로드 수 | `3` |
 
+기본 동작은 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 의존성을 함께 해결해 다운로드하는 것입니다. `--no-deps`를 지정하면 원본 패키지 목록만 다운로드합니다. 라이브러리 패키지의 의존성 해결이 실패하면 명령은 오류로 종료됩니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
+
 ### 예시
 
 ```bash

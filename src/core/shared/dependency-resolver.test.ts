@@ -161,6 +161,33 @@ describe('dependency-resolver', () => {
       expect(result.dependencyTrees).toHaveLength(1);
     });
 
+    it('includeDependencies가 false면 원본 패키지만 반환', async () => {
+      const mockResolver = {
+        resolveDependencies: vi.fn(),
+      };
+      vi.mocked(getPipResolver).mockReturnValue(mockResolver as any);
+
+      const packages: DownloadPackage[] = [
+        {
+          id: 'test-1',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+        },
+      ];
+
+      const result = await resolveAllDependencies(
+        packages,
+        { includeDependencies: false } as DependencyResolverOptions
+      );
+
+      expect(mockResolver.resolveDependencies).not.toHaveBeenCalled();
+      expect(result.originalPackages).toEqual(packages);
+      expect(result.allPackages).toEqual(packages);
+      expect(result.dependencyTrees).toEqual([]);
+      expect(result.failedPackages).toEqual([]);
+    });
+
     it('pip 패키지에 targetOS와 pythonVersion 옵션 전달', async () => {
       const mockPipResult = {
         root: {

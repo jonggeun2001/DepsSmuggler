@@ -122,6 +122,8 @@ electron/
 | `download:deps-resolved` | 다운로드 전 의존성 해결 결과 |
 | `download:all-complete` | 전체 다운로드 완료 |
 
+참고: `dependency:resolve`의 `options.includeDependencies`가 `false`이면 메인 프로세스는 원본 패키지 목록만 반환합니다.
+
 #### OS 패키지 채널
 
 | 채널 | 설명 |
