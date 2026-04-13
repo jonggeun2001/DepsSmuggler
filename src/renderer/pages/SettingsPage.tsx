@@ -241,24 +241,37 @@ const SettingsPage: React.FC = () => {
     setTestingSmtp(true);
     setSmtpTestResult(null);
     try {
-      if (window.electronAPI?.testSmtpConnection) {
-        const result = await window.electronAPI.testSmtpConnection({
+      const smtpTester = (window.electronAPI as typeof window.electronAPI & {
+        testSmtpConnection?: (config: {
+          host: string;
+          port: number;
+          user?: string;
+          password?: string;
+        }) => Promise<boolean | { success?: boolean; error?: string }>;
+      } | undefined)?.testSmtpConnection;
+
+      if (smtpTester) {
+        const result = await smtpTester({
           host: values.smtpHost,
           port: values.smtpPort,
           user: values.smtpUser,
           password: values.smtpPassword,
         });
-        setSmtpTestResult(result ? 'success' : 'failed');
-        if (result) {
+        const success = typeof result === 'boolean' ? result : Boolean(result?.success);
+        setSmtpTestResult(success ? 'success' : 'failed');
+        if (success) {
           message.success('SMTP 연결 테스트 성공');
         } else {
           message.error('SMTP 연결 테스트 실패');
         }
-      } else {
-        // 개발 환경 시뮬레이션
+      } else if (!window.electronAPI) {
+        // 브라우저 개발 환경 시뮬레이션
         await new Promise(resolve => setTimeout(resolve, 1500));
         setSmtpTestResult('success');
         message.success('SMTP 연결 테스트 성공 (시뮬레이션)');
+      } else {
+        setSmtpTestResult('failed');
+        message.warning('현재 Electron 빌드에는 SMTP 연결 테스트 IPC가 연결되어 있지 않습니다');
       }
     } catch (error) {
       setSmtpTestResult('failed');
