@@ -182,6 +182,7 @@ const DownloadPage: React.FC = () => {
   const downloadCancelledRef = useRef(false);
   const downloadPausedRef = useRef(false);
   const dependencyResolutionBypassedRef = useRef(false);
+  const previousIncludeDependenciesRef = useRef(includeDependencies);
   // 다운로드 아이템 목록을 ref로 유지 (SSE 이벤트 핸들러에서 최신 상태 참조용)
   const downloadItemsRef = useRef<DownloadItem[]>([]);
   // 히스토리 저장용 장바구니 데이터 (다운로드 시작 시 스냅샷)
@@ -207,11 +208,19 @@ const DownloadPage: React.FC = () => {
   }, [cartItems, downloadItems.length, setItems, clearLogs]);
 
   useEffect(() => {
+    const includeDependenciesChanged =
+      previousIncludeDependenciesRef.current !== includeDependencies;
+    previousIncludeDependenciesRef.current = includeDependencies;
+
     if (isDownloading || cartItems.length === 0) {
       return;
     }
 
     if (!includeDependencies) {
+      if (!includeDependenciesChanged && downloadItems.length > 0) {
+        return;
+      }
+
       const items = createPendingDownloadItems(cartItems);
       setItems(items);
       downloadItemsRef.current = items;
@@ -220,14 +229,14 @@ const DownloadPage: React.FC = () => {
       return;
     }
 
-    if (dependencyResolutionBypassedRef.current) {
+    if (dependencyResolutionBypassedRef.current && includeDependenciesChanged) {
       const items = createPendingDownloadItems(cartItems);
       setItems(items);
       downloadItemsRef.current = items;
       setDepsResolved(false);
       dependencyResolutionBypassedRef.current = false;
     }
-  }, [cartItems, includeDependencies, isDownloading, setDepsResolved, setItems]);
+  }, [cartItems, downloadItems.length, includeDependencies, isDownloading, setDepsResolved, setItems]);
 
   // IPC 이벤트 리스너 설정
   useEffect(() => {
