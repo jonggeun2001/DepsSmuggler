@@ -26,6 +26,7 @@ import {
   SearchOutlined,
   PlusOutlined,
   ShoppingCartOutlined,
+  DownloadOutlined,
   AppstoreOutlined,
   CodeOutlined,
   CloudServerOutlined,
@@ -215,7 +216,7 @@ const WizardPage: React.FC = () => {
   // 드롭다운 hover 상태 (Windows Electron 스크롤 문제 해결용)
   const [isOverDropdown, setIsOverDropdown] = useState(false);
 
-  const { addItem, hasItem } = useCartStore();
+  const { addItem, hasItem, items: cartItems } = useCartStore();
   const {
     languageVersions,
     defaultArchitecture,
@@ -1071,6 +1072,9 @@ const WizardPage: React.FC = () => {
   };
 
   const stepItems = getStepItems();
+  const osCartItemCount = cartItems.filter((item) => ['yum', 'apt', 'apk'].includes(item.type)).length;
+  const canOpenDedicatedOSDownload =
+    osCartItemCount > 0 && osCartItemCount === cartItems.length;
 
   // 현재 표시할 단계 인덱스 계산 (환경확인 단계 제거됨)
   // 모든 패키지 타입: 0(카테고리) -> 1(패키지타입) -> 2(검색) -> 3(버전)
@@ -1682,6 +1686,41 @@ const WizardPage: React.FC = () => {
       />
 
       {renderCurrentStep()}
+
+      {category === 'os' && osCartItemCount > 0 && (
+        <Card
+          style={{ marginTop: 24 }}
+          title="OS 패키지 장바구니"
+          extra={<Tag color="blue">{osCartItemCount}개 선택됨</Tag>}
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Text type="secondary">
+              현재 라우트된 다운로드 페이지에서 OS 전용 출력 옵션과 진행 화면을 사용할 수 있습니다.
+            </Text>
+            <Space wrap>
+              <Button icon={<ShoppingCartOutlined />} onClick={() => navigate('/cart')}>
+                장바구니 보기
+              </Button>
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                onClick={() => navigate('/download')}
+                disabled={!canOpenDedicatedOSDownload}
+              >
+                OS 다운로드 진행
+              </Button>
+            </Space>
+            {!canOpenDedicatedOSDownload && (
+              <Alert
+                type="info"
+                showIcon
+                message="전용 경로는 하나의 OS 패키지 관리자 조합에서만 활성화됩니다"
+                description="다른 라이브러리 또는 다른 OS 패키지 관리자가 같이 담겨 있으면 일반 다운로드 경로를 사용하세요."
+              />
+            )}
+          </Space>
+        </Card>
+      )}
 
       {/* pip 인덱스 URL 저장 모달 */}
       <Modal

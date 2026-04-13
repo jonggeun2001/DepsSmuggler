@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Card,
@@ -44,7 +44,8 @@ import {
   RightOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { useCartStore } from '../stores/cart-store';
+import { OSDownloadProgress, OSDownloadResult, OSPackageCart } from '../components/os';
+import { useCartStore, type CartItem } from '../stores/cart-store';
 import {
   useDownloadStore,
   DownloadItem,
@@ -55,6 +56,13 @@ import { useSettingsStore } from '../stores/settings-store';
 import { useHistoryStore } from '../stores/history-store';
 import type { HistoryPackageItem, HistorySettings, HistoryStatus } from '../../types';
 import type { DependencyAPI } from '../../types/electron';
+import type {
+  OSPackageInfo,
+  OSPackageOutputOptions,
+  OSDistribution,
+  OSPackageManager,
+  OSDownloadProgress as OSDownloadProgressData,
+} from '../../core/downloaders/os-shared/types';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -116,6 +124,48 @@ interface PendingDownloadSource {
   extras?: string[];
 }
 
+const OS_PACKAGE_TYPES = new Set(['yum', 'apt', 'apk']);
+
+type SupportedOSPackageManager = 'yum' | 'apt' | 'apk';
+
+interface OSDownloadResultData {
+  success: OSPackageInfo[];
+  failed: Array<{ package: OSPackageInfo; error: string }>;
+  skipped: OSPackageInfo[];
+  outputPath: string;
+  packageManager: OSPackageManager;
+  outputOptions: OSPackageOutputOptions;
+  generatedOutputs?: Array<{ type: 'archive' | 'repository'; path: string; label: string }>;
+}
+
+function isOSCartItem(item: CartItem): item is CartItem & { type: SupportedOSPackageManager } {
+  return OS_PACKAGE_TYPES.has(item.type);
+}
+
+function toOSPackageInfo(item: CartItem): OSPackageInfo | null {
+  const raw = item.metadata?.osPackageInfo as OSPackageInfo | undefined;
+  if (raw) {
+    return raw;
+  }
+
+  if (!item.repository || !item.location || !item.arch) {
+    return null;
+  }
+
+  return {
+    name: item.name,
+    version: item.version,
+    architecture: item.arch,
+    size: 0,
+    checksum: { type: 'sha256', value: '' },
+    location: item.location,
+    repository: item.repository,
+    dependencies: [],
+    description: typeof item.metadata?.description === 'string' ? item.metadata.description : undefined,
+    summary: typeof item.metadata?.description === 'string' ? item.metadata.description : undefined,
+  };
+}
+
 function createPendingDownloadItems(items: PendingDownloadSource[]): DownloadItem[] {
   return items.map((item) => ({
     id: item.id,
@@ -142,6 +192,7 @@ function createPendingDownloadItems(items: PendingDownloadSource[]): DownloadIte
 const DownloadPage: React.FC = () => {
   const navigate = useNavigate();
   const cartItems = useCartStore((state) => state.items);
+  const removeCartItem = useCartStore((state) => state.removeItem);
   const clearCart = useCartStore((state) => state.clearCart);
   const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, cudaVersion, concurrentDownloads, defaultDownloadPath, downloadRenderInterval, yumDistribution, aptDistribution, apkDistribution } = useSettingsStore();
   const {
@@ -177,6 +228,26 @@ const DownloadPage: React.FC = () => {
   const { addHistory } = useHistoryStore();
 
   const [outputDir, setOutputDir] = useState(outputPath || defaultDownloadPath || '');
+  const osCartItems = useMemo(() => cartItems.filter(isOSCartItem), [cartItems]);
+  const hasOnlyOSPackages = cartItems.length > 0 && osCartItems.length === cartItems.length;
+  const osPackageManagers = useMemo(
+    () => Array.from(new Set(osCartItems.map((item) => item.type))),
+    [osCartItems]
+  );
+  const isDedicatedOSFlow =
+    hasOnlyOSPackages && osPackageManagers.length === 1;
+  const activeOSPackageManager = (isDedicatedOSFlow
+    ? osPackageManagers[0]
+    : null) as SupportedOSPackageManager | null;
+  const osPackages = useMemo(
+    () => osCartItems.map(toOSPackageInfo).filter(Boolean) as OSPackageInfo[],
+    [osCartItems]
+  );
+  const [osDistribution, setOSDistribution] = useState<OSDistribution | null>(null);
+  const [osProgress, setOSProgress] = useState<OSDownloadProgressData | null>(null);
+  const [osDownloading, setOSDownloading] = useState(false);
+  const [osResult, setOSResult] = useState<OSDownloadResultData | null>(null);
+  const [osDownloadError, setOSDownloadError] = useState<string | null>(null);
   // 의존성 확인 관련 상태
   const [isResolvingDeps, setIsResolvingDeps] = useState(false);
   const downloadCancelledRef = useRef(false);
@@ -206,6 +277,55 @@ const DownloadPage: React.FC = () => {
     }
 
   }, [cartItems, downloadItems.length, setItems, clearLogs]);
+
+  useEffect(() => {
+    if (!isDedicatedOSFlow || !activeOSPackageManager || !window.electronAPI?.os?.getDistribution) {
+      setOSDistribution(null);
+      return;
+    }
+
+    const distributionId = activeOSPackageManager === 'yum'
+      ? yumDistribution.id
+      : activeOSPackageManager === 'apt'
+      ? aptDistribution.id
+      : apkDistribution.id;
+
+    let active = true;
+
+    window.electronAPI.os.getDistribution(distributionId)
+      .then((distribution) => {
+        if (active) {
+          setOSDistribution((distribution as OSDistribution | undefined) || null);
+        }
+      })
+      .catch((error) => {
+        console.error('OS 배포판 정보를 불러오지 못했습니다:', error);
+        if (active) {
+          setOSDistribution(null);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    activeOSPackageManager,
+    isDedicatedOSFlow,
+    yumDistribution.id,
+    aptDistribution.id,
+    apkDistribution.id,
+  ]);
+
+  useEffect(() => {
+    if (!isDedicatedOSFlow || !window.electronAPI?.os?.download?.onProgress) {
+      setOSProgress(null);
+      return;
+    }
+
+    return window.electronAPI.os.download.onProgress((progress) => {
+      setOSProgress(progress as OSDownloadProgressData);
+    });
+  }, [isDedicatedOSFlow]);
 
   useEffect(() => {
     const includeDependenciesChanged =
@@ -939,6 +1059,89 @@ const DownloadPage: React.FC = () => {
     }
   };
 
+  const getActiveOSArchitecture = () => {
+    if (activeOSPackageManager === 'yum') return yumDistribution.architecture;
+    if (activeOSPackageManager === 'apt') return aptDistribution.architecture;
+    if (activeOSPackageManager === 'apk') return apkDistribution.architecture;
+    return defaultArchitecture;
+  };
+
+  const handleStartOSDownload = async (outputOptions: OSPackageOutputOptions) => {
+    if (!outputDir) {
+      message.warning('출력 폴더를 선택하세요');
+      return;
+    }
+
+    if (!activeOSPackageManager || !osDistribution) {
+      message.error('OS 배포판 정보를 아직 불러오지 못했습니다');
+      return;
+    }
+
+    if (osPackages.length !== osCartItems.length) {
+      message.error('장바구니의 OS 패키지 메타데이터가 부족합니다. 다시 검색 후 담아주세요.');
+      return;
+    }
+
+    const canProceed = await checkOutputPath();
+    if (!canProceed) {
+      return;
+    }
+
+    const osDownloadAPI = window.electronAPI?.os?.download as
+      | {
+          start: (options: unknown) => Promise<unknown>;
+        }
+      | undefined;
+
+    if (!osDownloadAPI?.start) {
+      message.error('OS 패키지 다운로드 API를 사용할 수 없습니다');
+      return;
+    }
+
+    setOSDownloadError(null);
+    setOSResult(null);
+    setOSDownloading(true);
+    setOSProgress({
+      phase: 'resolving',
+      currentPackage: '의존성 확인 준비',
+      currentIndex: 0,
+      totalPackages: osPackages.length,
+      bytesDownloaded: 0,
+      totalBytes: 0,
+      speed: 0,
+    });
+
+    try {
+      const result = await osDownloadAPI.start({
+        packages: osPackages,
+        outputDir,
+        distribution: osDistribution,
+        architecture: getActiveOSArchitecture(),
+        resolveDependencies: includeDependencies,
+        includeOptionalDeps: includeDependencies,
+        concurrency: concurrentDownloads,
+        outputOptions,
+      }) as OSDownloadResultData;
+
+      setOSResult(result);
+      setOSProgress({
+        phase: 'packaging',
+        currentPackage: '완료',
+        currentIndex: result.success.length,
+        totalPackages: result.success.length || osPackages.length,
+        bytesDownloaded: result.success.length,
+        totalBytes: result.success.length || osPackages.length,
+        speed: 0,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setOSDownloadError(errorMessage);
+      message.error('OS 패키지 다운로드 중 오류가 발생했습니다');
+    } finally {
+      setOSDownloading(false);
+    }
+  };
+
   // 다운로드 시작
   const handleStartDownload = async () => {
     const handleStartTime = Date.now();
@@ -1130,6 +1333,10 @@ const DownloadPage: React.FC = () => {
     reset();
     setDepsResolved(false);
     dependencyResolutionBypassedRef.current = false;
+    setOSProgress(null);
+    setOSResult(null);
+    setOSDownloadError(null);
+    setOSDownloading(false);
     navigate('/');
   };
 
@@ -1299,6 +1506,87 @@ const DownloadPage: React.FC = () => {
       hasFailures: failedCount > 0,
     };
   };
+
+  if (isDedicatedOSFlow) {
+    return (
+      <div>
+        <Title level={3}>OS 패키지 다운로드</Title>
+        <Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
+          {osDistribution
+            ? `${osDistribution.name}용 로컬 저장소 또는 압축 결과물을 생성합니다.`
+            : '배포판 정보를 불러오는 중입니다.'}
+        </Text>
+
+        <Card title="다운로드 경로" style={{ marginBottom: 24 }}>
+          <Text strong>출력 폴더</Text>
+          <Space.Compact style={{ width: '100%', marginTop: 8 }}>
+            <Input
+              value={outputDir}
+              onChange={(e) => setOutputDir(e.target.value)}
+              placeholder="다운로드 폴더 경로"
+              disabled={osDownloading}
+            />
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={handleSelectFolder}
+              disabled={osDownloading}
+            >
+              선택
+            </Button>
+          </Space.Compact>
+        </Card>
+
+        {osDownloadError && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 24 }}
+            message="OS 패키지 다운로드 실패"
+            description={osDownloadError}
+          />
+        )}
+
+        {osResult ? (
+          <OSDownloadResult
+            success={osResult.success}
+            failed={osResult.failed}
+            skipped={osResult.skipped}
+            outputPath={osResult.outputPath}
+            outputOptions={osResult.outputOptions}
+            packageManager={osResult.packageManager}
+            generatedOutputs={osResult.generatedOutputs}
+            onOpenFolder={handleOpenFolder}
+            onClose={handleComplete}
+          />
+        ) : osDownloading ? (
+          <OSDownloadProgress
+            progress={osProgress}
+            packageCount={osPackages.length}
+            outputDir={outputDir}
+          />
+        ) : (
+          <OSPackageCart
+            packages={osPackages}
+            distribution={osDistribution}
+            isDownloading={osDownloading}
+            onRemovePackage={(pkg) => {
+              const item = osCartItems.find(
+                (cartItem) =>
+                  cartItem.name === pkg.name &&
+                  cartItem.version === pkg.version &&
+                  cartItem.type === activeOSPackageManager
+              );
+              if (item) {
+                removeCartItem(item.id);
+              }
+            }}
+            onClearAll={clearCart}
+            onStartDownload={handleStartOSDownload}
+          />
+        )}
+      </div>
+    );
+  }
 
   // 빈 장바구니 상태
   if (cartItems.length === 0 && downloadItems.length === 0) {

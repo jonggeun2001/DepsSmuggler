@@ -17,6 +17,7 @@ interface OSDownloadResultProps {
   outputPath: string;
   outputOptions: OSPackageOutputOptions;
   packageManager: OSPackageManager;
+  generatedOutputs?: Array<{ type: 'archive' | 'repository'; path: string; label: string }>;
   onOpenFolder: () => void;
   onClose: () => void;
 }
@@ -28,6 +29,7 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
   outputPath,
   outputOptions,
   packageManager,
+  generatedOutputs = [],
   onOpenFolder,
   onClose,
 }) => {
@@ -104,6 +106,23 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
           <span className="summary-value">{formatSize(totalSize)}</span>
         </div>
       </div>
+
+      {generatedOutputs.length > 0 && (
+        <div className="result-section">
+          <h3 className="section-title">생성된 출력물</h3>
+          <ul className="file-list">
+            {generatedOutputs.map((item) => (
+              <li key={`${item.type}-${item.path}`}>
+                <span className="file-icon">{item.type === 'archive' ? '🗜️' : '🗂️'}</span>
+                <div className="generated-output">
+                  <strong>{item.label}</strong>
+                  <code>{item.path}</code>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* 포함된 파일 목록 */}
       <div className="result-section">
@@ -260,6 +279,18 @@ export const OSDownloadResult: React.FC<OSDownloadResultProps> = ({
         .summary-value {
           font-weight: 500;
           color: #1a1a2e;
+        }
+
+        .generated-output {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .generated-output code {
+          font-size: 12px;
+          color: #64748b;
+          word-break: break-all;
         }
 
         .summary-value.path {

@@ -118,10 +118,11 @@ depssmuggler/
 
 ### OS 패키지 다운로드
 
-1. Renderer가 `os:getAllDistributions`, `os:search`, `os:resolveDependencies` 호출
-2. `search-handlers.ts`가 `yum/apt/apk` resolver를 통해 검색/의존성 계산
-3. 현재 라우트된 GUI는 결과를 일반 장바구니/다운로드 흐름으로 넘기고, `DownloadPage.tsx`에서 `download:start`를 호출합니다.
-4. `os:download:start`와 OS 전용 진행률/출력 옵션 경로도 코드에는 남아 있지만, 현재 화면 기준 end-to-end 기본 경로는 아닙니다.
+1. `WizardPage.tsx`가 `os:search`로 `yum/apt/apk` 패키지를 찾고, 전체 `OSPackageInfo`를 장바구니 메타데이터로 유지합니다.
+2. OS 패키지 전용 장바구니만 담긴 상태에서 `WizardPage.tsx`와 `DownloadPage.tsx`가 동일 라우트(`/download`) 안에서 OS 전용 다운로드 화면으로 전환됩니다.
+3. `DownloadPage.tsx`가 `os:getDistribution`으로 선택된 배포판 전체 설정을 읽고 `archive | repository | both` 출력 옵션을 노출합니다.
+4. 실제 다운로드 시작은 `os:download:start` 하나로 통합되어, 메인 프로세스가 필요 시 의존성 해결과 패키징까지 수행합니다.
+5. 진행률은 `os:download:progress`로, 결과 출력물 경로는 `os:download:start` 반환값으로 렌더러에 전달됩니다.
 
 ## 상태 저장
 

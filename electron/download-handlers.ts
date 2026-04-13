@@ -28,12 +28,16 @@ import {
   getAptResolver,
   getApkResolver,
 } from '../src/core';
+import { OSArchivePackager } from '../src/core/downloaders/os-shared/archive-packager';
+import { OSRepoPackager } from '../src/core/downloaders/os-shared/repo-packager';
+import { OSScriptGenerator } from '../src/core/downloaders/os-shared/script-generator';
 import type {
   OSPackageInfo,
   OSDistribution,
   OSArchitecture,
   OSDownloadProgress,
   OSErrorAction,
+  OSPackageOutputOptions,
 } from '../src/core/downloaders/os-shared/types';
 import { dialog } from 'electron';
 
@@ -85,6 +89,187 @@ let downloadAbortController: AbortController | null = null;
 
 // mainWindow 참조를 저장할 변수
 let getMainWindow: () => BrowserWindow | null = () => null;
+
+interface OSDownloadStartOptions {
+  packages: OSPackageInfo[];
+  outputDir: string;
+  distribution: OSDistribution;
+  architecture: OSArchitecture;
+  resolveDependencies?: boolean;
+  includeOptionalDeps?: boolean;
+  verifyGPG?: boolean;
+  concurrency?: number;
+  outputOptions?: OSPackageOutputOptions;
+}
+
+interface OSGeneratedOutput {
+  type: 'archive' | 'repository';
+  path: string;
+  label: string;
+}
+
+interface OSDownloadFailure {
+  package: OSPackageInfo;
+  error: string;
+}
+
+interface OSDownloadStartResult {
+  success: OSPackageInfo[];
+  failed: OSDownloadFailure[];
+  skipped: OSPackageInfo[];
+  outputPath: string;
+  packageManager: OSDistribution['packageManager'];
+  outputOptions: OSPackageOutputOptions;
+  generatedOutputs: OSGeneratedOutput[];
+}
+
+const DEFAULT_OS_OUTPUT_OPTIONS: OSPackageOutputOptions = {
+  type: 'archive',
+  archiveFormat: 'zip',
+  generateScripts: true,
+  scriptTypes: ['dependency-order'],
+};
+
+function emitOSProgress(
+  mainWindow: BrowserWindow | null,
+  progress: OSDownloadProgress
+): void {
+  mainWindow?.webContents.send('os:download:progress', progress);
+}
+
+function createOSDownloadErrorHandler(
+  mainWindow: BrowserWindow | null
+): (error: { package?: OSPackageInfo; message: string }) => Promise<OSErrorAction> {
+  return async (error) => {
+    const pkgName = error.package?.name || '알 수 없는 패키지';
+    const result = await dialog.showMessageBox(mainWindow!, {
+      type: 'error',
+      title: '다운로드 오류',
+      message: `패키지 다운로드 중 오류가 발생했습니다.\n\n${pkgName}: ${error.message}`,
+      buttons: ['재시도', '건너뛰기', '취소'],
+      defaultId: 0,
+      cancelId: 2,
+    });
+
+    switch (result.response) {
+      case 0:
+        return 'retry';
+      case 1:
+        return 'skip';
+      default:
+        return 'cancel';
+    }
+  };
+}
+
+function getOSResolverForDistribution(
+  distribution: OSDistribution,
+  architecture: OSArchitecture,
+  includeOptionalDeps: boolean,
+  mainWindow: BrowserWindow | null
+) {
+  const onProgress = (message: string, current: number, total: number) => {
+    emitOSProgress(mainWindow, {
+      currentPackage: message,
+      currentIndex: current,
+      totalPackages: total,
+      bytesDownloaded: 0,
+      totalBytes: 0,
+      speed: 0,
+      phase: 'resolving',
+    });
+    mainWindow?.webContents.send('os:resolveDependencies:progress', {
+      message,
+      current,
+      total,
+    });
+  };
+
+  switch (distribution.packageManager) {
+    case 'yum':
+      return getYumResolver({
+        repositories: distribution.defaultRepos,
+        architecture,
+        includeOptional: includeOptionalDeps,
+        includeRecommends: includeOptionalDeps,
+        distribution,
+        onProgress,
+      });
+    case 'apt':
+      return getAptResolver({
+        repositories: distribution.defaultRepos,
+        architecture,
+        includeOptional: includeOptionalDeps,
+        includeRecommends: includeOptionalDeps,
+        distribution,
+        onProgress,
+      });
+    case 'apk':
+      return getApkResolver({
+        repositories: distribution.defaultRepos,
+        architecture,
+        includeOptional: includeOptionalDeps,
+        includeRecommends: includeOptionalDeps,
+        distribution,
+        onProgress,
+      });
+    default:
+      throw new Error(`Unsupported package manager: ${distribution.packageManager}`);
+  }
+}
+
+function getOSDownloaderForDistribution(
+  distribution: OSDistribution,
+  architecture: OSArchitecture,
+  outputDir: string,
+  concurrency: number,
+  mainWindow: BrowserWindow | null
+) {
+  const onError = createOSDownloadErrorHandler(mainWindow);
+  const onProgress = (progress: OSDownloadProgress) => {
+    emitOSProgress(mainWindow, progress);
+  };
+
+  const downloaderOptions = {
+    distribution,
+    architecture,
+    repositories: distribution.defaultRepos,
+    outputDir,
+    concurrency,
+    onProgress,
+    onError,
+  };
+
+  switch (distribution.packageManager) {
+    case 'yum':
+      return getYumDownloader(downloaderOptions);
+    case 'apt':
+      return getAptDownloader(downloaderOptions);
+    case 'apk':
+      return getApkDownloader(downloaderOptions);
+    default:
+      throw new Error(`Unsupported package manager: ${distribution.packageManager}`);
+  }
+}
+
+async function writeRepositoryScripts(
+  outputDir: string,
+  packages: OSPackageInfo[],
+  packageManager: OSDistribution['packageManager'],
+  scriptTypes: OSPackageOutputOptions['scriptTypes']
+): Promise<void> {
+  const scriptGenerator = new OSScriptGenerator();
+
+  if (scriptTypes.includes('dependency-order')) {
+    const scripts = scriptGenerator.generateDependencyOrderScript(
+      packages,
+      packageManager,
+      { packageDir: packageManager === 'yum' ? './Packages' : '.' }
+    );
+    await fse.writeFile(path.join(outputDir, 'install.sh'), scripts.bash);
+    await fse.writeFile(path.join(outputDir, 'install.ps1'), scripts.powershell);
+  }
+}
 
 /**
  * 다운로드 관련 IPC 핸들러 등록
@@ -673,16 +858,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
     'os:download:start',
     async (
       _event,
-      options: {
-        packages: OSPackageInfo[];
-        outputDir: string;
-        distribution: OSDistribution;
-        architecture: OSArchitecture;
-        resolveDependencies?: boolean;
-        includeOptionalDeps?: boolean;
-        verifyGPG?: boolean;
-        concurrency?: number;
-      }
+      options: OSDownloadStartOptions
     ) => {
       const {
         packages,
@@ -691,135 +867,146 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
         architecture,
         resolveDependencies,
         includeOptionalDeps,
-        verifyGPG,
         concurrency = 3,
+        outputOptions: rawOutputOptions,
       } = options;
 
       const mainWindow = getMainWindow();
+      const outputOptions: OSPackageOutputOptions = {
+        ...DEFAULT_OS_OUTPUT_OPTIONS,
+        ...rawOutputOptions,
+      };
 
       log.info(`Starting OS package download: ${packages.length} packages to ${outputDir}`);
 
-      // packageManager에 따라 적절한 downloader 선택
-      let downloader;
-      let downloaderOptions;
+      await fse.ensureDir(outputDir);
 
-      switch (distribution.packageManager) {
-        case 'yum':
-          downloaderOptions = {
-            distribution,
-            architecture,
-            repositories: distribution.defaultRepos,
-            outputDir,
-            concurrency,
-            onProgress: (progress: OSDownloadProgress) => {
-              mainWindow?.webContents.send('os:download:progress', progress);
-            },
-            onError: async (error: { package?: OSPackageInfo; message: string }): Promise<OSErrorAction> => {
-              const pkgName = error.package?.name || '알 수 없는 패키지';
-              const result = await dialog.showMessageBox(mainWindow!, {
-                type: 'error',
-                title: '다운로드 오류',
-                message: `패키지 다운로드 중 오류가 발생했습니다.\n\n${pkgName}: ${error.message}`,
-                buttons: ['재시도', '건너뛰기', '취소'],
-                defaultId: 0,
-                cancelId: 2,
-              });
-
-              switch (result.response) {
-                case 0:
-                  return 'retry';
-                case 1:
-                  return 'skip';
-                default:
-                  return 'cancel';
-              }
-            },
-          };
-          downloader = getYumDownloader(downloaderOptions);
-          break;
-
-        case 'apt':
-          downloaderOptions = {
-            distribution,
-            architecture,
-            repositories: distribution.defaultRepos,
-            outputDir,
-            concurrency,
-            onProgress: (progress: OSDownloadProgress) => {
-              mainWindow?.webContents.send('os:download:progress', progress);
-            },
-            onError: async (error: { package?: OSPackageInfo; message: string }): Promise<OSErrorAction> => {
-              const pkgName = error.package?.name || '알 수 없는 패키지';
-              const result = await dialog.showMessageBox(mainWindow!, {
-                type: 'error',
-                title: '다운로드 오류',
-                message: `패키지 다운로드 중 오류가 발생했습니다.\n\n${pkgName}: ${error.message}`,
-                buttons: ['재시도', '건너뛰기', '취소'],
-                defaultId: 0,
-                cancelId: 2,
-              });
-
-              switch (result.response) {
-                case 0:
-                  return 'retry';
-                case 1:
-                  return 'skip';
-                default:
-                  return 'cancel';
-              }
-            },
-          };
-          downloader = getAptDownloader(downloaderOptions);
-          break;
-
-        case 'apk':
-          downloaderOptions = {
-            distribution,
-            architecture,
-            repositories: distribution.defaultRepos,
-            outputDir,
-            concurrency,
-            onProgress: (progress: OSDownloadProgress) => {
-              mainWindow?.webContents.send('os:download:progress', progress);
-            },
-            onError: async (error: { package?: OSPackageInfo; message: string }): Promise<OSErrorAction> => {
-              const pkgName = error.package?.name || '알 수 없는 패키지';
-              const result = await dialog.showMessageBox(mainWindow!, {
-                type: 'error',
-                title: '다운로드 오류',
-                message: `패키지 다운로드 중 오류가 발생했습니다.\n\n${pkgName}: ${error.message}`,
-                buttons: ['재시도', '건너뛰기', '취소'],
-                defaultId: 0,
-                cancelId: 2,
-              });
-
-              switch (result.response) {
-                case 0:
-                  return 'retry';
-                case 1:
-                  return 'skip';
-                default:
-                  return 'cancel';
-              }
-            },
-          };
-          downloader = getApkDownloader(downloaderOptions);
-          break;
-
-        default:
-          throw new Error(`Unsupported package manager: ${distribution.packageManager}`);
+      let packagesToDownload = packages;
+      if (resolveDependencies) {
+        const resolver = getOSResolverForDistribution(
+          distribution,
+          architecture,
+          includeOptionalDeps ?? false,
+          mainWindow
+        );
+        const resolved = await resolver.resolveDependencies(packages);
+        packagesToDownload = resolved.packages;
       }
 
-      // 다운로드 실행
-      for (const pkg of packages) {
-        await downloader.downloadPackage(pkg);
-      }
+      const stagingDir = await fse.mkdtemp(path.join(outputDir, '.depssmuggler-os-'));
+      const downloader = getOSDownloaderForDistribution(
+        distribution,
+        architecture,
+        stagingDir,
+        concurrency,
+        mainWindow
+      );
+      const downloadedFiles = new Map<string, string>();
+      const successfulPackages: OSPackageInfo[] = [];
+      const failedPackages: OSDownloadFailure[] = [];
+      const skippedPackages: OSPackageInfo[] = [];
+      const generatedOutputs: OSGeneratedOutput[] = [];
 
-      return {
-        success: true,
-        downloaded: packages.length,
-        failed: 0,
-      };
+      try {
+        for (const [index, pkg] of packagesToDownload.entries()) {
+          emitOSProgress(mainWindow, {
+            currentPackage: pkg.name,
+            currentIndex: index + 1,
+            totalPackages: packagesToDownload.length,
+            bytesDownloaded: 0,
+            totalBytes: pkg.size,
+            speed: 0,
+            phase: 'downloading',
+          });
+
+          const result = await downloader.downloadPackage(pkg);
+          if (result.success && result.filePath) {
+            successfulPackages.push(pkg);
+            downloadedFiles.set(`${pkg.name}-${pkg.version}`, result.filePath);
+            continue;
+          }
+
+          failedPackages.push({
+            package: pkg,
+            error: result.error?.message || '다운로드 실패',
+          });
+        }
+
+        if (successfulPackages.length > 0) {
+          emitOSProgress(mainWindow, {
+            currentPackage: '결과 패키징',
+            currentIndex: successfulPackages.length,
+            totalPackages: successfulPackages.length,
+            bytesDownloaded: successfulPackages.length,
+            totalBytes: successfulPackages.length,
+            speed: 0,
+            phase: 'packaging',
+          });
+
+          if (outputOptions.type === 'archive' || outputOptions.type === 'both') {
+            const archivePackager = new OSArchivePackager();
+            const archivePath = await archivePackager.createArchive(
+              successfulPackages,
+              downloadedFiles,
+              {
+                format: outputOptions.archiveFormat || 'zip',
+                outputPath: path.join(outputDir, 'os-packages'),
+                includeScripts: outputOptions.generateScripts,
+                scriptTypes: outputOptions.scriptTypes,
+                packageManager: distribution.packageManager,
+                repoName: 'depssmuggler-local',
+              }
+            );
+            generatedOutputs.push({
+              type: 'archive',
+              path: archivePath,
+              label: `압축 파일 (${outputOptions.archiveFormat || 'zip'})`,
+            });
+          }
+
+          if (outputOptions.type === 'repository' || outputOptions.type === 'both') {
+            const repoPath = path.join(outputDir, 'repository');
+            const repoPackager = new OSRepoPackager();
+            await repoPackager.createLocalRepo(successfulPackages, downloadedFiles, {
+              packageManager: distribution.packageManager,
+              outputPath: repoPath,
+              repoName: 'depssmuggler-local',
+              includeSetupScript:
+                outputOptions.generateScripts &&
+                outputOptions.scriptTypes.includes('local-repo'),
+            });
+
+            if (outputOptions.generateScripts) {
+              await writeRepositoryScripts(
+                repoPath,
+                successfulPackages,
+                distribution.packageManager,
+                outputOptions.scriptTypes
+              );
+            }
+
+            generatedOutputs.push({
+              type: 'repository',
+              path: repoPath,
+              label: '로컬 저장소',
+            });
+          }
+        }
+
+        const result: OSDownloadStartResult = {
+          success: successfulPackages,
+          failed: failedPackages,
+          skipped: skippedPackages,
+          outputPath: outputDir,
+          packageManager: distribution.packageManager,
+          outputOptions,
+          generatedOutputs,
+        };
+
+        return result;
+      } finally {
+        await fse.remove(stagingDir);
+      }
     }
   );
 
