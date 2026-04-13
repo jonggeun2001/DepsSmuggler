@@ -257,8 +257,9 @@ ipcMain.handle('test-smtp-connection', async (_, config: {
   password?: string;
   from?: string;
 }) => {
+  let emailSender: EmailSender | null = null;
   try {
-    const emailSender = new EmailSender({
+    emailSender = new EmailSender({
       host: config.host,
       port: config.port,
       secure: config.port === 465,
@@ -271,19 +272,15 @@ ipcMain.handle('test-smtp-connection', async (_, config: {
       from: config.from,
     });
 
-    const success = await emailSender.testConnection();
-    emailSender.close();
-
-    if (!success) {
-      return { success: false, error: 'SMTP 연결 테스트 실패' };
-    }
-
+    await emailSender.testConnection();
     return { success: true };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    emailSender?.close();
   }
 });
 

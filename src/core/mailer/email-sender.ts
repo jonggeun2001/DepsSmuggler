@@ -78,7 +78,7 @@ export class EmailSender {
       return true;
     } catch (error) {
       logger.error('SMTP 연결 테스트 실패', { error });
-      return false;
+      throw error;
     }
   }
 

@@ -265,7 +265,7 @@ const SettingsPage: React.FC = () => {
         if (success) {
           message.success('SMTP 연결 테스트 성공');
         } else {
-          message.error('SMTP 연결 테스트 실패');
+          message.error(typeof result === 'boolean' ? 'SMTP 연결 테스트 실패' : result?.error || 'SMTP 연결 테스트 실패');
         }
       } else if (!window.electronAPI) {
         // 브라우저 개발 환경 시뮬레이션
@@ -278,7 +278,7 @@ const SettingsPage: React.FC = () => {
       }
     } catch (error) {
       setSmtpTestResult('failed');
-      message.error('SMTP 연결 테스트 실패');
+      message.error(error instanceof Error ? error.message : 'SMTP 연결 테스트 실패');
     } finally {
       setTestingSmtp(false);
     }

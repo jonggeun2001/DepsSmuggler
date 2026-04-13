@@ -79,12 +79,11 @@ describe('EmailSender', () => {
       });
     });
 
-    it('연결 테스트 실패 시 false를 반환해야 함', async () => {
+    it('연결 테스트 실패 시 원본 오류를 던져야 함', async () => {
       const mockTransporter = nodemailer.createTransport({} as nodemailer.TransportOptions);
       vi.mocked(mockTransporter.verify).mockRejectedValueOnce(new Error('Connection failed'));
 
-      const result = await sender.testConnection();
-      expect(result).toBe(false);
+      await expect(sender.testConnection()).rejects.toThrow('Connection failed');
     });
   });
 

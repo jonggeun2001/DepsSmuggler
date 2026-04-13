@@ -1074,8 +1074,8 @@ const DownloadPage: React.FC = () => {
     }
 
     if (deliveryMethod === 'email') {
-      if (!smtpHost || !smtpPort || !smtpTo) {
-        message.warning('이메일 전달을 사용하려면 설정에서 SMTP 서버와 수신자를 입력하세요');
+      if (!smtpHost || !smtpPort || !smtpTo || !(smtpFrom || smtpUser)) {
+        message.warning('이메일 전달을 사용하려면 설정에서 SMTP 서버, 수신자, 발신자 또는 로그인 사용자를 입력하세요');
         return;
       }
     }
