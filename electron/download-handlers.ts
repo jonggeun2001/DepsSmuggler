@@ -526,9 +526,27 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           if (deliveryMethod === 'email') {
             const smtpOptions = options.smtp;
             const emailOptions = options.email;
+            const effectiveFrom = emailOptions?.from || smtpOptions?.from || smtpOptions?.user;
 
             if (!smtpOptions?.host || !smtpOptions.port || !emailOptions?.to) {
               const errorMessage = '이메일 전달에 필요한 SMTP 또는 수신자 설정이 없습니다';
+              mainWindow?.webContents.send('download:all-complete', {
+                success: false,
+                outputPath: finalOutputPath,
+                artifactPaths: artifactPaths.length > 0 ? artifactPaths : [finalOutputPath],
+                deliveryMethod,
+                deliveryResult: {
+                  emailSent: false,
+                  splitApplied: false,
+                  error: errorMessage,
+                },
+                error: errorMessage,
+              });
+              return;
+            }
+
+            if (!effectiveFrom) {
+              const errorMessage = '이메일 전달에 필요한 발신자 설정이 없습니다. SMTP 발신자 또는 로그인 사용자를 설정하세요.';
               mainWindow?.webContents.send('download:all-complete', {
                 success: false,
                 outputPath: finalOutputPath,
@@ -596,7 +614,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                         pass: smtpOptions.password || '',
                       }
                     : undefined,
-                  from: emailOptions.from || smtpOptions.from,
+                  from: effectiveFrom,
                 },
                 maxAttachmentSizeBytes
               );

@@ -644,6 +644,71 @@ describe('registerDownloadHandlers', () => {
     });
   });
 
+  it('발신자 후보가 없으면 이메일 전달을 시작하지 않고 명시적으로 실패해야 함', async () => {
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = path.join(tempDir, 'missing-from-output');
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'tar.gz',
+          includeScripts: false,
+          concurrency: 1,
+          deliveryMethod: 'email',
+          email: {
+            to: 'offline@example.com',
+          },
+          fileSplit: {
+            enabled: false,
+            maxSizeMB: 10,
+          },
+          smtp: {
+            host: 'smtp.example.com',
+            port: 587,
+          },
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(initializeEmailSenderMock).not.toHaveBeenCalled();
+      expect(sendEmailMock).not.toHaveBeenCalled();
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: false,
+          outputPath: `${outputDir}.tar.gz`,
+          deliveryMethod: 'email',
+          deliveryResult: expect.objectContaining({
+            emailSent: false,
+            error: '이메일 전달에 필요한 발신자 설정이 없습니다. SMTP 발신자 또는 로그인 사용자를 설정하세요.',
+          }),
+        })
+      );
+    });
+  });
+
   it('첨부 제한 초과인데 파일 분할이 꺼져 있으면 메일 전달 실패로 처리해야 함', async () => {
     createArchiveFromDirectoryMock.mockImplementationOnce(async (_sourceDir: string, outputPath: string) => {
       await fs.ensureDir(path.dirname(outputPath));

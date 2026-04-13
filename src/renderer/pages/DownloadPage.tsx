@@ -506,6 +506,18 @@ const DownloadPage: React.FC = () => {
     const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
       if (!data.success) {
         setIsDownloading(false);
+        setIsPaused(false);
+
+        if (data.cancelled) {
+          setPackagingStatus('idle');
+          setPackagingProgress(0);
+          setCompletedOutputPath('');
+          setCompletedArtifactPaths([]);
+          setCompletedDeliveryResult(undefined);
+          setCompletedError('');
+          return;
+        }
+
         setPackagingStatus('failed');
         setPackagingProgress(0);
         setCompletedOutputPath(data.outputPath || '');
@@ -513,11 +525,9 @@ const DownloadPage: React.FC = () => {
         setCompletedDeliveryResult(data.deliveryResult);
         setCompletedError(data.error || data.deliveryResult?.error || '');
 
-        if (!data.cancelled) {
-          const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
-          scheduleLogBatch('error', '다운로드/패키징 실패', errorMessage);
-          message.error(errorMessage);
-        }
+        const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
+        scheduleLogBatch('error', '다운로드/패키징 실패', errorMessage);
+        message.error(errorMessage);
 
         return;
       }
