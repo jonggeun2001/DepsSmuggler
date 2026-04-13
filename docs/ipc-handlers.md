@@ -126,8 +126,8 @@ electron/
 |------|------|
 | `os:resolveDependencies` | OS 패키지 의존성 해결 |
 | `os:download:start` | OS 패키지 다운로드 시작 |
-| `os:cache:stats` | OS 캐시 통계 조회 |
-| `os:cache:clear` | OS 캐시 초기화 |
+| `os:cache:stats` | OS 캐시 통계 조회 placeholder (`{ size: 0, count: 0, path: '' }`) |
+| `os:cache:clear` | OS 캐시 초기화 placeholder (`{ success: true }`만 반환) |
 
 OS 이벤트:
 
@@ -135,6 +135,8 @@ OS 이벤트:
 |--------|------|
 | `os:resolveDependencies:progress` | OS 의존성 해결 진행률 |
 | `os:download:progress` | OS 다운로드 진행률 |
+
+참고: `os:cache:*` 채널은 현재 실제 캐시 백엔드에 연결되지 않은 no-op 성격의 placeholder 구현입니다.
 
 ## 버전 / 업데이트
 

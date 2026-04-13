@@ -112,15 +112,16 @@ depssmuggler/
 3. `DownloadPage.tsx`가 `download:start`를 호출
 4. `download-handlers.ts`가 core downloader와 packager를 실행
 5. 진행률 이벤트를 `download:*` 채널로 렌더러에 다시 전송
-6. 완료 시 아카이브 경로와 결과를 히스토리에 저장
+6. 완료 시 출력 디렉터리와 결과를 히스토리에 저장
+
+참고: renderer 설정은 `zip`/`tar.gz`를 노출하지만, 현재 `download-handlers.ts`에서 실제 아카이브 생성이 연결된 경로는 `zip`뿐입니다.
 
 ### OS 패키지 다운로드
 
 1. Renderer가 `os:getAllDistributions`, `os:search`, `os:resolveDependencies` 호출
 2. `search-handlers.ts`가 `yum/apt/apk` resolver를 통해 검색/의존성 계산
-3. `download-handlers.ts`가 `os:download:start`로 실제 패키지 다운로드 실행
-4. OS 전용 진행률은 `os:resolveDependencies:progress`, `os:download:progress`로 전송
-5. 결과는 압축 파일, 로컬 저장소 구조, 또는 둘 다로 패키징할 수 있습니다
+3. 현재 라우트된 GUI는 결과를 일반 장바구니/다운로드 흐름으로 넘기고, `DownloadPage.tsx`에서 `download:start`를 호출합니다.
+4. `os:download:start`와 OS 전용 진행률/출력 옵션 경로도 코드에는 남아 있지만, 현재 화면 기준 end-to-end 기본 경로는 아닙니다.
 
 ## 상태 저장
 

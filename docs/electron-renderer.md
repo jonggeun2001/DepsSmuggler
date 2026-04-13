@@ -110,7 +110,7 @@
 특징:
 
 - Electron 환경에서는 settings store가 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화됩니다.
-- 기본 다운로드 출력 형식은 현재 renderer 기준 `zip` 또는 `tar.gz`입니다.
+- settings UI는 `zip`/`tar.gz`를 노출하지만, 현재 main process에서 실제 아카이브 생성이 연결된 형식은 `zip`뿐입니다.
 - 현재 UI 히스토리의 source of truth는 Zustand persist 키 `depssmuggler-history`입니다.
 - `window.electronAPI.history.*`와 `~/.depssmuggler/history.json` 기반 파일 히스토리도 존재하지만, 현재 렌더러에서는 부분적으로만 연결되어 있습니다.
 
@@ -129,23 +129,25 @@
 1. `WizardPage`에서 `yum`, `apt`, `apk` 중 하나 선택
 2. 배포판과 아키텍처를 `os:getAllDistributions`, `os:search`로 조회
 3. 필요 시 `os:resolveDependencies`로 전용 트리 계산
-4. 전용 출력 옵션 컴포넌트에서 압축 / 저장소 / 둘 다 선택
-5. `os:download:start`로 패키지 다운로드
+4. `src/renderer/components/os/*`의 전용 출력 옵션 컴포넌트는 현재 라우트된 화면에서 사용되지 않습니다.
+5. 실제 다운로드는 현재 `DownloadPage`의 일반 `download:start` 경로가 기준이며, `os:download:start`는 별도 IPC로 남아 있습니다.
 
 ## 출력과 패키징
 
 ### 일반 패키지
 
 - `DownloadPage`는 설정 스토어의 `defaultOutputFormat`, `includeInstallScripts`를 사용합니다.
-- 현재 UI 기준 아카이브 형식은 `zip` 또는 `tar.gz`입니다.
+- 설정 UI에는 `zip`과 `tar.gz`가 보이지만, 현재 main process가 실제 아카이브를 생성하는 형식은 `zip`뿐입니다.
 
 ### OS 패키지
 
-`src/renderer/components/os/OSOutputOptions.tsx` 기준 옵션:
+`src/renderer/components/os/OSOutputOptions.tsx`에는 다음 옵션 정의가 남아 있습니다.
 
 - 출력 형식: `archive`, `repository`, `both`
 - 아카이브 형식: `zip`, `tar.gz`
 - 스크립트 타입: `dependency-order`, `local-repo`
+
+다만 이 컴포넌트들은 현재 라우트된 GUI에 연결되어 있지 않아, 저장소 출력이나 `both` 출력은 현재 화면 기준으로는 사용할 수 없습니다.
 
 ## 자동 업데이트
 
