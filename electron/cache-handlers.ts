@@ -14,38 +14,53 @@ import { getDockerDownloader } from '../src/core';
 
 const log = createScopedLogger('Cache');
 
+async function collectPackageCacheStats() {
+  const [pipStats, npmStats, mavenStats, condaStats] = await Promise.all([
+    Promise.resolve(pipCache.getCacheStats()),
+    Promise.resolve(npmCache.getNpmCacheStats()),
+    Promise.resolve(mavenCache.getMavenCacheStats()),
+    condaCache.getCacheStats(),
+  ]);
+
+  const totalSize = (pipStats.diskSize || 0) + (mavenStats.diskSize || 0) + (condaStats.totalSize || 0);
+  const pipEntryCount = Math.max(pipStats.memoryEntries || 0, pipStats.diskEntries || 0);
+  const mavenEntryCount = Math.max(mavenStats.memoryEntries || 0, mavenStats.diskEntries || 0);
+  const entryCount =
+    pipEntryCount +
+    (npmStats.entries || 0) +
+    mavenEntryCount +
+    (condaStats.entries?.length || 0);
+
+  return {
+    scope: 'package-metadata',
+    excludes: ['version caches', 'renderer localStorage'],
+    totalSize,
+    entryCount,
+    details: {
+      pip: pipStats,
+      npm: npmStats,
+      maven: mavenStats,
+      conda: condaStats,
+    },
+  };
+}
+
 /**
  * 캐시 관련 IPC 핸들러 등록
  */
 export function registerCacheHandlers(): void {
+  // 캐시 전체 크기 조회
+  ipcMain.handle('cache:get-size', async () => {
+    log.debug('Getting package cache size...');
+    const stats = await collectPackageCacheStats();
+    return stats.totalSize;
+  });
+
   // 캐시 통계 조회
   ipcMain.handle('cache:stats', async () => {
-    log.debug('Getting cache stats...');
+    log.debug('Getting package cache stats...');
     try {
-      const [pipStats, npmStats, mavenStats, condaStats] = await Promise.all([
-        Promise.resolve(pipCache.getCacheStats()),
-        Promise.resolve(npmCache.getNpmCacheStats()),
-        Promise.resolve(mavenCache.getMavenCacheStats()),
-        condaCache.getCacheStats(),
-      ]);
-
-      const totalSize = (pipStats.diskSize || 0) + (condaStats.totalSize || 0);
-      const entryCount =
-        (pipStats.memoryEntries || 0) +
-        (npmStats.entries || 0) +
-        (mavenStats.memoryEntries || 0) +
-        (condaStats.entries?.length || 0);
-
-      return {
-        totalSize,
-        entryCount,
-        details: {
-          pip: pipStats,
-          npm: npmStats,
-          maven: mavenStats,
-          conda: condaStats,
-        },
-      };
+      return await collectPackageCacheStats();
     } catch (error) {
       log.error('Failed to get cache stats:', error);
       throw error;
@@ -54,7 +69,7 @@ export function registerCacheHandlers(): void {
 
   // 캐시 전체 삭제
   ipcMain.handle('cache:clear', async () => {
-    log.info('Clearing all caches...');
+    log.info('Clearing package metadata caches...');
     try {
       await Promise.all([
         Promise.resolve(pipCache.clearAllCache()),
@@ -62,7 +77,7 @@ export function registerCacheHandlers(): void {
         Promise.all([mavenCache.clearMemoryCache(), mavenCache.clearDiskCache()]),
         condaCache.clearCache(),
       ]);
-      log.info('All caches cleared');
+      log.info('Package metadata caches cleared');
       return { success: true };
     } catch (error) {
       log.error('Failed to clear caches:', error);

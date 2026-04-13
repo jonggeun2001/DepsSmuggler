@@ -436,9 +436,36 @@ export function invalidatePom(
  */
 export interface MavenCacheStats {
   memoryEntries: number;
+  diskEntries: number;
   pendingRequests: number;
   oldestEntry: number | null;
   newestEntry: number | null;
+  diskSize: number;
+}
+
+function getDirectoryStatsSync(dirPath: string): { size: number; fileCount: number } {
+  if (!fs.existsSync(dirPath)) {
+    return { size: 0, fileCount: 0 };
+  }
+
+  const entries = fs.readdirSync(dirPath);
+  let totalSize = 0;
+  let fileCount = 0;
+
+  for (const entry of entries) {
+    const entryPath = path.join(dirPath, entry);
+    const stats = fs.statSync(entryPath);
+    if (stats.isDirectory()) {
+      const childStats = getDirectoryStatsSync(entryPath);
+      totalSize += childStats.size;
+      fileCount += childStats.fileCount;
+    } else {
+      totalSize += stats.size;
+      fileCount++;
+    }
+  }
+
+  return { size: totalSize, fileCount };
 }
 
 export function getMavenCacheStats(): MavenCacheStats {
@@ -454,11 +481,15 @@ export function getMavenCacheStats(): MavenCacheStats {
     }
   });
 
+  const diskStats = getDirectoryStatsSync(DEFAULT_CACHE_DIR);
+
   return {
     memoryEntries: memoryCache.size,
+    diskEntries: diskStats.fileCount,
     pendingRequests: pendingRequests.size,
     oldestEntry: oldest,
     newestEntry: newest,
+    diskSize: diskStats.size,
   };
 }
 

@@ -44,18 +44,6 @@ const electronAPI = {
       ipcRenderer.on('download:progress', handler);
       return () => ipcRenderer.removeListener('download:progress', handler);
     },
-    onComplete: (callback: (result: unknown) => void): () => void => {
-      const handler = (_event: Electron.IpcRendererEvent, result: unknown) =>
-        callback(result);
-      ipcRenderer.on('download:complete', handler);
-      return () => ipcRenderer.removeListener('download:complete', handler);
-    },
-    onError: (callback: (error: unknown) => void): () => void => {
-      const handler = (_event: Electron.IpcRendererEvent, error: unknown) =>
-        callback(error);
-      ipcRenderer.on('download:error', handler);
-      return () => ipcRenderer.removeListener('download:error', handler);
-    },
     // 의존성 해결 상태 이벤트
     onStatus: (callback: (status: { phase: string; message: string }) => void): () => void => {
       const handler = (_event: Electron.IpcRendererEvent, status: { phase: string; message: string }) =>
@@ -92,20 +80,12 @@ const electronAPI = {
     getPath: (): Promise<string> => ipcRenderer.invoke('config:getPath'),
   },
 
-  // 파일 시스템 관련 (향후 구현)
-  fs: {
-    selectDirectory: (): Promise<string | null> =>
-      ipcRenderer.invoke('fs:select-directory'),
-    selectFile: (filters?: unknown): Promise<string | null> =>
-      ipcRenderer.invoke('fs:select-file', filters),
-    readFile: (filePath: string): Promise<string> =>
-      ipcRenderer.invoke('fs:read-file', filePath),
-  },
-
-  // 캐시 관련
+  // 패키지 메타데이터 캐시 관련
   cache: {
     getSize: (): Promise<number> => ipcRenderer.invoke('cache:get-size'),
     getStats: (): Promise<{
+      scope: string;
+      excludes: string[];
       totalSize: number;
       entryCount: number;
       details: {
@@ -317,8 +297,6 @@ const electronAPI = {
   // 버전 정보 관련
   versions: {
     python: (): Promise<string[]> => ipcRenderer.invoke('versions:python'),
-    java: (): Promise<Array<{ version: string; lts: boolean }>> => ipcRenderer.invoke('versions:java'),
-    node: (): Promise<Array<{ version: string; lts: string | false }>> => ipcRenderer.invoke('versions:node'),
     cuda: (): Promise<string[]> => ipcRenderer.invoke('versions:cuda'),
     // 버전 사전 로딩 및 캐시 관리
     preload: (): Promise<{

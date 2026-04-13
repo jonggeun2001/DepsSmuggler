@@ -1,340 +1,208 @@
-# CLI (Command Line Interface)
+# CLI
 
 ## 개요
-- 목적: 스크립트 자동화 및 터미널 기반 사용
-- 위치: `src/cli/`
-- 라이브러리: Commander.js
 
----
+CLI 엔트리포인트는 `src/cli/index.ts`이며 Commander 기반으로 구성됩니다. 현재 CLI는 일반 패키지 작업과 OS 패키지 보조 명령을 함께 제공합니다.
 
-## 설치 및 실행
+## 실행
 
 ```bash
-# 글로벌 설치
-npm install -g depssmuggler
+# 로컬 개발 실행
+npm run cli -- --help
 
-# 또는 로컬에서 실행
-npx depssmuggler <명령어>
+# 빌드 후 직접 실행
+node dist/src/cli/index.js --help
 
-# 개발 모드
-npm run cli -- <명령어>
+# source checkout에서 글로벌 설치 후 실행
+npm run build
+npm install -g .
+depssmuggler --help
 ```
 
----
+## 명령 구조
 
-## 명령어 구조
-
-```
+```text
 depssmuggler
-├── download    패키지 다운로드
-├── search      패키지 검색
-├── config      설정 관리
-│   ├── get     설정값 조회
-│   ├── set     설정값 변경
-│   ├── list    모든 설정 표시
-│   └── reset   설정 초기화
-└── cache       캐시 관리
-    ├── size    캐시 크기 확인
-    ├── clear   캐시 삭제
-    └── list    캐시된 패키지 목록
+├── download
+├── search
+├── os
+│   ├── list-distros
+│   ├── search
+│   ├── download
+│   └── cache
+│       ├── stats
+│       └── clear
+├── config
+│   ├── get
+│   ├── set
+│   ├── list
+│   └── reset
+└── cache
+    ├── size
+    ├── clear
+    └── list
 ```
 
----
+## `download`
 
-## download 명령어
-
-패키지를 의존성과 함께 다운로드
+일반 패키지 다운로드 명령입니다. 현재 구현 기준으로 `pip`, `conda`, `maven`, `npm`, `docker` 타입을 처리합니다.
 
 ### 사용법
+
 ```bash
 depssmuggler download [옵션]
 ```
 
 ### 옵션
 
-| 옵션 | 단축 | 설명 | 기본값 |
-|------|------|------|--------|
-| `--type` | `-t` | 패키지 타입 (pip, conda, maven, yum, docker) | `pip` |
-| `--package` | `-p` | 패키지명 | - |
-| `--pkg-version` | `-V` | 패키지 버전 | `latest` |
-| `--arch` | `-a` | 아키텍처 (x86_64, arm64 등) | `x86_64` |
-| `--output` | `-o` | 출력 경로 | `./output` |
-| `--format` | `-f` | 출력 형식 (zip, tar.gz, mirror) | `zip` |
-| `--file` | - | 패키지 목록 파일 | - |
-| `--no-deps` | - | 의존성 해결을 건너뛰고 요청한 패키지만 다운로드 | `의존성 포함` |
-| `--concurrency` | - | 동시 다운로드 수 | `3` |
+| 옵션 | 설명 | 기본값 |
+|------|------|--------|
+| `-t, --type <type>` | 패키지 타입 (`pip`, `conda`, `maven`, `npm`, `docker`) | `pip` |
+| `-p, --package <name>` | 패키지명 | - |
+| `-V, --pkg-version <version>` | 패키지 버전 | `latest` |
+| `-a, --arch <arch>` | 아키텍처 | `x86_64` |
+| `-o, --output <path>` | 출력 경로 | `./output` |
+| `-f, --format <format>` | 아카이브 형식 (`zip`, `tar.gz`) | `zip` |
+| `--file <file>` | 줄 단위 패키지 목록 파일 (`requirements.txt`, Maven 좌표 목록 등) | - |
+| `--no-deps` | 의존성 해결 비활성화 | `false` |
+| `--concurrency <num>` | 동시 다운로드 수 | `3` |
 
 기본 동작은 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 의존성을 함께 해결해 다운로드하는 것입니다. `--no-deps`를 지정하면 원본 패키지 목록만 다운로드합니다. 라이브러리 패키지의 의존성 해결이 실패하면 명령은 오류로 종료됩니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
 
 ### 예시
 
 ```bash
-# Python 패키지 다운로드
 depssmuggler download -t pip -p requests -V 2.31.0
-
-# Maven 아티팩트 다운로드
 depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0
-
-# Docker 이미지 다운로드
-depssmuggler download -t docker -p nginx -V latest -a amd64
-
-# requirements.txt에서 다운로드
+depssmuggler download -t npm -p react -V 19.2.0
+depssmuggler download -t docker -p nginx -V latest
 depssmuggler download -t pip --file requirements.txt -o ./packages
-
-# tar.gz로 출력
+depssmuggler download -t maven --file ./maven-packages.txt
 depssmuggler download -t pip -p flask -f tar.gz
-
-# 미러 구조로 출력
-depssmuggler download -t pip -p numpy --format mirror
-
-# 의존성 없이 단일 패키지만
-depssmuggler download -t pip -p requests --no-deps
 ```
 
-### 구현 (`commands/download.ts`)
+참고: `--file`은 현재 XML `pom.xml`을 직접 파싱하지 않고, 줄 단위 텍스트 입력만 처리합니다. Maven은 각 줄에 `groupId:artifactId[:version]` 형식으로 적어야 합니다.
 
-```typescript
-interface DownloadOptions {
-  type: string;
-  package?: string;
-  pkgVersion: string;
-  arch: string;
-  output: string;
-  format: string;
-  file?: string;
-  deps: boolean;
-  concurrency: string;
-}
+### 현재 동작
 
-async function downloadCommand(options: DownloadOptions): Promise<void>;
-```
+- 다운로드 성공 시 아카이브 생성과 설치 스크립트 생성을 연달아 수행합니다.
+- 출력 형식은 현재 `zip` 또는 `tar.gz`만 지원합니다.
+- OS 패키지(`yum`, `apt`, `apk`)는 이 명령이 아니라 `os` 네임스페이스를 사용해야 합니다.
 
-기본적으로 `downloadCommand`는 라이브러리 패키지에 한해 공통 의존성 리졸버로 전이 의존성을 확장한 뒤 다운로드 큐를 구성합니다. `deps === false`일 때만 원본 패키지만 큐에 추가합니다. OS 패키지는 `download` 명령에서 의존성 자동 해결을 수행하지 않고 `os download` 명령으로 분리합니다.
+## `search`
 
-#### 헬퍼 함수
-
-| 함수 | 설명 |
-|------|------|
-| `parsePackageFile` | requirements.txt, pom.xml 등 파일 파싱 |
-| `formatBytes` | 바이트를 읽기 쉬운 형식으로 변환 |
-| `formatSpeed` | 다운로드 속도 포맷팅 |
-| `formatDuration` | 소요 시간 포맷팅 |
-
----
-
-## search 명령어
-
-패키지 저장소에서 검색
+일반 패키지 검색 명령입니다. 구현상 `pip`, `conda`, `maven`, `docker`만 직접 검색합니다.
 
 ### 사용법
+
 ```bash
-depssmuggler search <검색어> [옵션]
+depssmuggler search <query> [옵션]
 ```
 
 ### 옵션
 
-| 옵션 | 단축 | 설명 | 기본값 |
-|------|------|------|--------|
-| `--type` | `-t` | 패키지 타입 | `pip` |
-| `--limit` | `-l` | 결과 수 제한 | `20` |
+| 옵션 | 설명 | 기본값 |
+|------|------|--------|
+| `-t, --type <type>` | 패키지 타입 | `pip` |
+| `-l, --limit <num>` | 출력 건수 제한 | `20` |
 
 ### 예시
 
 ```bash
-# PyPI에서 검색
 depssmuggler search requests -t pip
-
-# Maven Central에서 검색
 depssmuggler search spring -t maven -l 10
-
-# Docker Hub에서 검색
 depssmuggler search nginx -t docker
 ```
 
-### 구현 (`commands/search.ts`)
+### 참고
 
-```typescript
-interface SearchOptions {
-  type: string;
-  limit: string;
-}
+- `yum`, `apt`, `apk`를 `search`로 호출하면 CLI는 `os search` 사용을 안내하고 종료합니다.
+- `npm`은 현재 일반 `search` 명령에 구현되어 있지 않습니다.
 
-async function searchCommand(query: string, options: SearchOptions): Promise<void>;
-```
+## `os`
 
----
+OS 패키지 전용 보조 명령입니다.
 
-## config 명령어
-
-앱 설정 관리
-
-### 서브 명령어
-
-#### config get
-설정값 조회
+### `os list-distros`
 
 ```bash
-# 특정 키 조회
-depssmuggler config get concurrentDownloads
+depssmuggler os list-distros
+depssmuggler os list-distros --type yum
+```
 
-# 모든 설정 조회 (키 없이)
+- 저장소 프리셋 기준 지원 배포판을 출력합니다.
+- `yum`, `apt`, `apk` 패키지 관리자별 필터링이 가능합니다.
+
+### `os search`
+
+```bash
+depssmuggler os search nginx --distro rocky-9
+depssmuggler os search bash --distro ubuntu-22.04 --arch amd64
+```
+
+- 배포판 ID와 아키텍처를 기준으로 저장소 메타데이터를 직접 조회합니다.
+- 배포판별 parser(`YumMetadataParser`, `AptMetadataParser`, `ApkMetadataParser`)를 사용합니다.
+
+### `os download`
+
+```bash
+depssmuggler os download httpd --distro rocky-9
+```
+
+현재 구현은 실제 다운로드를 수행하지 않고, 재구현 중이라는 안내와 함께 Electron GUI 사용을 권장합니다.
+
+### `os cache`
+
+```bash
+depssmuggler os cache stats
+depssmuggler os cache clear
+```
+
+현재 구현은 실제 캐시 조작 대신 GUI 사용을 안내합니다.
+
+## `config`
+
+설정 파일은 `~/.depssmuggler/settings.json`을 사용합니다.
+
+```bash
 depssmuggler config get
-```
-
-#### config set
-설정값 변경
-
-```bash
+depssmuggler config get concurrentDownloads
 depssmuggler config set concurrentDownloads 5
-depssmuggler config set cacheEnabled true
-depssmuggler config set downloadDir /path/to/downloads
-```
-
-#### config list
-모든 설정 표시
-
-```bash
 depssmuggler config list
-```
-
-#### config reset
-설정 초기화
-
-```bash
 depssmuggler config reset
 ```
 
-### 구현 (`commands/config.ts`)
+현재 CLI가 직접 다루는 핵심 항목:
 
-```typescript
-async function configGet(key?: string): Promise<void>;
-async function configSet(key: string, value: string): Promise<void>;
-async function configList(): Promise<void>;
-async function configReset(): Promise<void>;
-```
+- `concurrentDownloads`
+- `cacheEnabled`
+- `cachePath`
+- `maxCacheSize`
+- `logLevel`
 
----
+## `cache`
 
-## cache 명령어
-
-다운로드 캐시 관리
-
-### 서브 명령어
-
-#### cache size
-캐시 크기 확인
+일반 캐시 관리 명령입니다.
 
 ```bash
 depssmuggler cache size
-# 출력: 캐시 크기: 1.5 GB
-```
-
-#### cache clear
-캐시 삭제
-
-```bash
-# 확인 프롬프트와 함께
-depssmuggler cache clear
-
-# 확인 없이 삭제
 depssmuggler cache clear --force
-```
-
-#### cache list
-캐시된 패키지 목록
-
-```bash
 depssmuggler cache list
-# 출력:
-# pip/requests/2.31.0 - 150 KB
-# maven/spring-core/5.3.0 - 1.2 MB
-# ...
 ```
 
-### 구현 (`commands/cache.ts`)
+- `size`: 캐시 디렉터리 용량 출력
+- `clear`: 캐시 삭제, `--force` 없으면 확인 프롬프트 표시
+- `list`: 캐시 루트 엔트리를 표로 출력하고, 엔트리가 디렉터리이며 `manifest.json`이 있으면 메타데이터를 채웁니다.
 
-```typescript
-async function cacheSize(): Promise<void>;
-async function cacheClear(options: { force?: boolean }): Promise<void>;
-async function cacheList(): Promise<void>;
+## 현재 한계
 
-// 헬퍼
-async function getDirectorySize(dir: string): Promise<number>;
-function formatBytes(bytes: number): string;
-async function askConfirmation(message: string): Promise<boolean>;
-```
-
----
-
-## 출력 예시
-
-### 다운로드 진행 중
-```
-DepsSmuggler - 패키지 다운로드
-
-패키지 타입: pip
-패키지: requests v2.31.0
-
-의존성 해결 중...
-✔ requests@2.31.0
-  ├─ urllib3@2.0.7
-  ├─ certifi@2023.11.17
-  ├─ charset-normalizer@3.3.2
-  └─ idna@3.6
-
-다운로드 중...
-[████████████████░░░░] 80% | 4/5 패키지 | 1.2 MB/s | 남은 시간: 5초
-
-패키징 중...
-✔ zip 파일 생성 완료: ./output/requests-2.31.0.zip
-
-완료!
-- 총 패키지: 5개
-- 총 크기: 2.3 MB
-- 소요 시간: 15초
-```
-
-### 검색 결과
-```
-DepsSmuggler - 패키지 검색
-
-검색어: flask
-타입: pip
-결과: 20개
-
-┌──────────────────┬──────────┬────────────────────────────────────┐
-│ 패키지명         │ 버전     │ 설명                               │
-├──────────────────┼──────────┼────────────────────────────────────┤
-│ flask            │ 3.0.0    │ A simple framework for building... │
-│ flask-restful    │ 0.3.10   │ Simple framework for creating RE...│
-│ flask-sqlalchemy │ 3.1.1    │ SQLAlchemy support for Flask       │
-│ ...              │          │                                    │
-└──────────────────┴──────────┴────────────────────────────────────┘
-```
-
----
-
-## 종료 코드
-
-| 코드 | 의미 |
-|------|------|
-| 0 | 성공 |
-| 1 | 일반 오류 |
-| 2 | 잘못된 명령어/옵션 |
-
----
-
-## 환경 변수
-
-| 변수 | 설명 |
-|------|------|
-| `DEPSSMUGGLER_CONFIG_DIR` | 설정 파일 디렉토리 |
-| `DEPSSMUGGLER_CACHE_DIR` | 캐시 디렉토리 |
-| `DEPSSMUGGLER_LOG_LEVEL` | 로그 레벨 (debug, info, warn, error) |
-
----
+- CLI는 GUI보다 지원 범위가 좁습니다.
+- 일반 `search` 명령에는 `npm`이 아직 연결되어 있지 않습니다.
+- OS 패키지 CLI는 조회 중심이며 다운로드/캐시는 GUI 흐름이 기준입니다.
+- `cache list`는 현재 캐시 루트가 디렉터리 위주라는 가정을 두고 있어, `cache-manifest.json` 같은 일반 파일이 섞인 경우 실패할 수 있습니다.
 
 ## 관련 문서
+
+- [README](../README.md)
 - [아키텍처 개요](./architecture-overview.md)
-- [Downloaders 문서](./downloaders.md)
-- [Resolvers 문서](./resolvers.md)
+- [IPC 핸들러](./ipc-handlers.md)

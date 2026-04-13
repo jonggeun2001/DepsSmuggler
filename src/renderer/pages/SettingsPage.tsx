@@ -189,19 +189,19 @@ const SettingsPage: React.FC = () => {
   const [selectedAptDistroId, setSelectedAptDistroId] = useState<string>(aptDistribution?.id || 'ubuntu-22.04');
   const [selectedApkDistroId, setSelectedApkDistroId] = useState<string>(apkDistribution?.id || 'alpine-3.18');
 
-  // 캐시 정보 로드
+  // 패키지 캐시 정보 로드
   const loadCacheInfo = async () => {
     setLoadingCache(true);
     try {
       // Electron IPC 사용 (개발/프로덕션 모두)
       if (!window.electronAPI?.cache?.getStats) {
-        throw new Error('캐시 정보 API를 사용할 수 없습니다');
+        throw new Error('패키지 캐시 정보 API를 사용할 수 없습니다');
       }
       const stats = await window.electronAPI.cache.getStats();
       setCacheSize(stats.totalSize);
       setCacheCount(stats.entryCount);
     } catch (error) {
-      console.error('캐시 정보 로드 실패:', error);
+      console.error('패키지 캐시 정보 로드 실패:', error);
       // 에러 시 0으로 설정
       setCacheSize(0);
       setCacheCount(0);
@@ -210,21 +210,21 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  // 캐시 삭제
+  // 패키지 캐시 삭제
   const handleClearCache = async () => {
     setClearingCache(true);
     try {
       // Electron IPC 사용 (개발/프로덕션 모두)
       if (!window.electronAPI?.cache?.clear) {
-        throw new Error('캐시 삭제 API를 사용할 수 없습니다');
+        throw new Error('패키지 캐시 삭제 API를 사용할 수 없습니다');
       }
       await window.electronAPI.cache.clear();
       setCacheSize(0);
       setCacheCount(0);
-      message.success('캐시가 삭제되었습니다');
+      message.success('패키지 캐시가 삭제되었습니다');
     } catch (error) {
-      console.error('캐시 삭제 실패:', error);
-      message.error('캐시 삭제에 실패했습니다');
+      console.error('패키지 캐시 삭제 실패:', error);
+      message.error('패키지 캐시 삭제에 실패했습니다');
     } finally {
       setClearingCache(false);
     }
@@ -241,24 +241,37 @@ const SettingsPage: React.FC = () => {
     setTestingSmtp(true);
     setSmtpTestResult(null);
     try {
-      if (window.electronAPI?.testSmtpConnection) {
-        const result = await window.electronAPI.testSmtpConnection({
+      const smtpTester = (window.electronAPI as typeof window.electronAPI & {
+        testSmtpConnection?: (config: {
+          host: string;
+          port: number;
+          user?: string;
+          password?: string;
+        }) => Promise<boolean | { success?: boolean; error?: string }>;
+      } | undefined)?.testSmtpConnection;
+
+      if (smtpTester) {
+        const result = await smtpTester({
           host: values.smtpHost,
           port: values.smtpPort,
           user: values.smtpUser,
           password: values.smtpPassword,
         });
-        setSmtpTestResult(result ? 'success' : 'failed');
-        if (result) {
+        const success = typeof result === 'boolean' ? result : Boolean(result?.success);
+        setSmtpTestResult(success ? 'success' : 'failed');
+        if (success) {
           message.success('SMTP 연결 테스트 성공');
         } else {
           message.error('SMTP 연결 테스트 실패');
         }
-      } else {
-        // 개발 환경 시뮬레이션
+      } else if (!window.electronAPI) {
+        // 브라우저 개발 환경 시뮬레이션
         await new Promise(resolve => setTimeout(resolve, 1500));
         setSmtpTestResult('success');
         message.success('SMTP 연결 테스트 성공 (시뮬레이션)');
+      } else {
+        setSmtpTestResult('failed');
+        message.warning('현재 Electron 빌드에는 SMTP 연결 테스트 IPC가 연결되어 있지 않습니다');
       }
     } catch (error) {
       setSmtpTestResult('failed');
@@ -1457,9 +1470,9 @@ const SettingsPage: React.FC = () => {
         </Card>
         </div>
 
-        {/* 캐시 설정 */}
+        {/* 패키지 캐시 설정 */}
         <Card
-          title="캐시 설정"
+          title="패키지 캐시 설정"
           size="small"
           style={{ marginBottom: CARD_MARGIN }}
           styles={{ body: { padding: CARD_BODY_PADDING } }}
@@ -1468,7 +1481,7 @@ const SettingsPage: React.FC = () => {
             <Col span={8}>
               <Form.Item
                 name="enableCache"
-                label="캐시 사용"
+                label="패키지 캐시 사용"
                 valuePropName="checked"
                 style={{ marginBottom: 8 }}
               >
@@ -1478,7 +1491,7 @@ const SettingsPage: React.FC = () => {
             <Col span={16}>
               <Form.Item
                 name="cachePath"
-                label="캐시 경로"
+                label="패키지 캐시 경로"
                 style={{ marginBottom: 8 }}
               >
                 <Space.Compact style={{ width: '100%' }}>
@@ -1489,35 +1502,38 @@ const SettingsPage: React.FC = () => {
             </Col>
           </Row>
 
-          {/* 캐시 통계 (컴팩트) */}
+          {/* 패키지 캐시 통계 (컴팩트) */}
           <div style={{ padding: '8px 12px', background: '#f5f5f5', borderRadius: 4 }}>
             <Spin spinning={loadingCache}>
               <Row gutter={16} align="middle">
                 <Col span={8}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>크기: </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>디스크 크기: </Text>
                   <Text strong style={{ fontSize: 13 }}>{formatBytes(cacheSize)}</Text>
                 </Col>
                 <Col span={8}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>패키지: </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>캐시 항목: </Text>
                   <Text strong style={{ fontSize: 13 }}>{cacheCount}개</Text>
                 </Col>
                 <Col span={8} style={{ textAlign: 'right' }}>
                   <Space size={4}>
                     <Button size="small" onClick={loadCacheInfo} loading={loadingCache}>새로고침</Button>
                     <Popconfirm
-                      title="캐시 삭제"
-                      description="모든 캐시가 삭제됩니다"
+                      title="패키지 캐시 삭제"
+                      description="패키지 메타데이터 캐시만 삭제됩니다. 버전 목록 캐시는 유지됩니다"
                       onConfirm={handleClearCache}
                       okText="삭제"
                       cancelText="취소"
                       okButtonProps={{ danger: true }}
                     >
-                      <Button size="small" danger icon={<DeleteOutlined />} loading={clearingCache} disabled={cacheSize === 0} />
+                      <Button size="small" danger icon={<DeleteOutlined />} loading={clearingCache} disabled={cacheSize === 0 && cacheCount === 0} />
                     </Popconfirm>
                   </Space>
                 </Col>
               </Row>
             </Spin>
+            <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+              이 영역은 패키지 메타데이터 캐시만 집계합니다. 크기는 디스크 기준이며, 캐시 항목 수에는 메모리 기반 npm 캐시도 포함될 수 있습니다. Python 버전 목록은 localStorage, CUDA/Java/Node 버전 파일은 같은 cache 루트의 별도 `*-versions.json` 파일로 관리됩니다.
+            </Text>
           </div>
         </Card>
 

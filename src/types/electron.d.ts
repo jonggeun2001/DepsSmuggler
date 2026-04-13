@@ -33,8 +33,6 @@ export interface DownloadAPI {
     deleted?: boolean;
   }>;
   onProgress: (callback: (progress: unknown) => void) => () => void;
-  onComplete: (callback: (result: unknown) => void) => () => void;
-  onError: (callback: (error: unknown) => void) => () => void;
   onStatus?: (callback: (status: DownloadStatusData) => void) => () => void;
   onDepsResolved?: (callback: (data: DepsResolvedData) => void) => () => void;
   onAllComplete?: (callback: (data: AllCompleteData) => void) => () => void;
@@ -47,15 +45,11 @@ export interface ConfigAPI {
   getPath: () => Promise<string>;
 }
 
-export interface FileSystemAPI {
-  selectDirectory: () => Promise<string | null>;
-  selectFile: (filters?: unknown) => Promise<string | null>;
-  readFile: (filePath: string) => Promise<string>;
-}
-
 export interface CacheAPI {
   getSize: () => Promise<number>;
   getStats: () => Promise<{
+    scope: string;
+    excludes: string[];
     totalSize: number;
     entryCount: number;
     details: {
@@ -71,6 +65,7 @@ export interface CacheAPI {
 export interface SearchOptions {
   channel?: string;
   registry?: string;
+  indexUrl?: string;
 }
 
 export interface SearchAPI {
@@ -177,8 +172,6 @@ export interface MavenAPI {
 
 export interface VersionsAPI {
   python: () => Promise<string[]>;
-  java: () => Promise<Array<{ version: string; lts: boolean }>>;
-  node: () => Promise<Array<{ version: string; lts: string | false }>>;
   cuda: () => Promise<string[]>;
   preload: () => Promise<{
     success: boolean;
@@ -237,10 +230,8 @@ export interface ElectronAPI {
   selectDirectory: () => Promise<string | null>;
   saveFile: (defaultPath: string) => Promise<string | null>;
   openFolder: (folderPath: string) => Promise<void>;
-  testSmtpConnection: (config: unknown) => Promise<{ success: boolean; error?: string }>;
   download: DownloadAPI;
   config: ConfigAPI;
-  fs: FileSystemAPI;
   cache: CacheAPI;
   search: SearchAPI;
   dependency?: DependencyAPI;
