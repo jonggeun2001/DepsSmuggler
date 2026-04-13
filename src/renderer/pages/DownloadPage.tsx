@@ -314,23 +314,11 @@ const DownloadPage: React.FC = () => {
       (snapshot): snapshot is OSCartContextSnapshot => snapshot !== null
     );
 
-    if (presentSnapshots.length === 0) {
-      return {
-        distributionId: packageManager === 'yum'
-          ? yumDistribution.id
-          : packageManager === 'apt'
-          ? aptDistribution.id
-          : apkDistribution.id,
-        architecture: packageManager === 'yum'
-          ? yumDistribution.architecture
-          : packageManager === 'apt'
-          ? aptDistribution.architecture
-          : apkDistribution.architecture,
-        packageManager,
-      };
+    if (presentSnapshots.length !== osCartItems.length) {
+      return null;
     }
 
-    if (presentSnapshots.length !== osCartItems.length) {
+    if (presentSnapshots.length === 0) {
       return null;
     }
 
@@ -1706,6 +1694,12 @@ const DownloadPage: React.FC = () => {
   // 전체 다운로드 속도 (이동 평균 기반)
   const totalSpeed = calculateOverallSpeed();
   const isOSPackaging = osProgress?.phase === 'packaging';
+  const requiresOSCartReselection =
+    hasOnlyOSPackages &&
+    osCartItems.length > 0 &&
+    osCartContext === null &&
+    !osDownloading &&
+    osResult === null;
 
   // 크기 포맷팅 함수
   const formatBytes = (bytes: number) => {
@@ -1837,6 +1831,28 @@ const DownloadPage: React.FC = () => {
           />
         )}
       </div>
+    );
+  }
+
+  if (requiresOSCartReselection) {
+    return (
+      <Card>
+        <Alert
+          type="warning"
+          showIcon
+          message="기존 OS 장바구니는 다시 선택이 필요합니다"
+          description="이 장바구니 항목에는 배포판/아키텍처 스냅샷이 없어 전용 OS 다운로드를 안전하게 재개할 수 없습니다. Wizard에서 같은 배포판과 아키텍처로 패키지를 다시 담아 주세요."
+          style={{ marginBottom: 16 }}
+        />
+        <Space>
+          <Button type="primary" onClick={() => navigate('/wizard')}>
+            Wizard로 이동
+          </Button>
+          <Button onClick={clearCart}>
+            장바구니 비우기
+          </Button>
+        </Space>
+      </Card>
     );
   }
 

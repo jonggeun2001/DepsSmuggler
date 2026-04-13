@@ -1138,14 +1138,14 @@ const WizardPage: React.FC = () => {
       .filter((snapshot): snapshot is OSCartContextSnapshot => snapshot !== null)
       .map((snapshot) => `${snapshot.packageManager}:${snapshot.distributionId}:${snapshot.architecture}`)
   );
-  const hasMixedOSSnapshots =
-    osCartSnapshotKeys.size > 1 ||
-    (osCartSnapshotKeys.size > 0 && osCartSnapshots.some((snapshot) => snapshot === null));
+  const hasInvalidOSSnapshots =
+    osCartSnapshots.some((snapshot) => snapshot === null) ||
+    osCartSnapshotKeys.size > 1;
   const canOpenDedicatedOSDownload =
     osCartItemCount > 0 &&
     osCartItemCount === cartItems.length &&
     osCartManagers.size === 1 &&
-    !hasMixedOSSnapshots;
+    !hasInvalidOSSnapshots;
 
   // 현재 표시할 단계 인덱스 계산 (환경확인 단계 제거됨)
   // 모든 패키지 타입: 0(카테고리) -> 1(패키지타입) -> 2(검색) -> 3(버전)
