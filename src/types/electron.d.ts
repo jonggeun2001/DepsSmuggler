@@ -73,6 +73,7 @@ export interface CacheAPI {
 export interface SearchOptions {
   channel?: string;
   registry?: string;
+  indexUrl?: string;
 }
 
 export interface SearchAPI {
@@ -231,7 +232,7 @@ export interface ElectronAPI {
   selectDirectory: () => Promise<string | null>;
   saveFile: (defaultPath: string) => Promise<string | null>;
   openFolder: (folderPath: string) => Promise<void>;
-  testSmtpConnection: (config: unknown) => Promise<{ success: boolean; error?: string }>;
+  testSmtpConnection?: (config: unknown) => Promise<{ success: boolean; error?: string }>;
   download: DownloadAPI;
   config: ConfigAPI;
   fs: FileSystemAPI;
