@@ -457,6 +457,101 @@ describe('registerDownloadHandlers', () => {
     });
   });
 
+  it('부분 성공 다운로드에서는 실제 성공한 패키지만 메일 메타데이터와 스크립트에 반영해야 함', async () => {
+    downloadFileMock
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('network failed'));
+
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = path.join(tempDir, 'partial-email-output');
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+          {
+            id: 'pip-urllib3-2.1.0',
+            type: 'pip',
+            name: 'urllib3',
+            version: '2.1.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'tar.gz',
+          includeScripts: true,
+          concurrency: 1,
+          deliveryMethod: 'email',
+          email: {
+            to: 'offline@example.com',
+          },
+          fileSplit: {
+            enabled: false,
+            maxSizeMB: 10,
+          },
+          smtp: {
+            host: 'smtp.example.com',
+            port: 587,
+            user: 'sender@example.com',
+            password: 'secret',
+          },
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(generateInstallScriptsMock).toHaveBeenCalledWith(
+        outputDir,
+        [
+          expect.objectContaining({
+            id: 'pip-requests-2.28.0',
+            name: 'requests',
+          }),
+        ]
+      );
+      expect(createArchiveFromDirectoryMock).toHaveBeenCalledWith(
+        outputDir,
+        `${outputDir}.tar.gz`,
+        [
+          expect.objectContaining({
+            name: 'requests',
+            version: '2.28.0',
+          }),
+        ],
+        expect.any(Object)
+      );
+      expect(sendEmailMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subject: 'DepsSmuggler 패키지 전달 (1개 패키지)',
+          body: expect.stringContaining('다운로드 실패한 1개 패키지는 이번 전달에서 제외되었습니다.'),
+          packages: [
+            expect.objectContaining({
+              name: 'requests',
+              version: '2.28.0',
+            }),
+          ],
+        })
+      );
+    });
+  });
+
   it('첨부 제한 초과이고 파일 분할이 켜져 있으면 splitFile 결과를 첨부와 완료 이벤트에 반영해야 함', async () => {
     createArchiveFromDirectoryMock.mockImplementationOnce(async (_sourceDir: string, outputPath: string) => {
       await fs.ensureDir(path.dirname(outputPath));

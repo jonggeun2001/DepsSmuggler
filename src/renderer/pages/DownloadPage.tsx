@@ -206,6 +206,7 @@ const DownloadPage: React.FC = () => {
   const [completedOutputPath, setCompletedOutputPath] = useState('');
   const [completedArtifactPaths, setCompletedArtifactPaths] = useState<string[]>([]);
   const [completedDeliveryResult, setCompletedDeliveryResult] = useState<HistoryDeliveryResult | undefined>();
+  const [completedError, setCompletedError] = useState('');
   // 의존성 확인 관련 상태
   const [isResolvingDeps, setIsResolvingDeps] = useState(false);
   const downloadCancelledRef = useRef(false);
@@ -499,6 +500,7 @@ const DownloadPage: React.FC = () => {
         setCompletedOutputPath(data.outputPath || '');
         setCompletedArtifactPaths(data.artifactPaths || []);
         setCompletedDeliveryResult(data.deliveryResult);
+        setCompletedError(data.error || data.deliveryResult?.error || '');
 
         if (!data.cancelled) {
           const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
@@ -525,6 +527,7 @@ const DownloadPage: React.FC = () => {
       setCompletedOutputPath(data.outputPath);
       setCompletedArtifactPaths(data.artifactPaths || [data.outputPath]);
       setCompletedDeliveryResult(data.deliveryResult);
+      setCompletedError('');
       const completionMessage = data.deliveryMethod === 'email'
         ? '다운로드, 패키징 및 이메일 전달이 완료되었습니다'
         : '다운로드 및 패키징이 완료되었습니다';
@@ -1072,6 +1075,7 @@ const DownloadPage: React.FC = () => {
     setCompletedOutputPath('');
     setCompletedArtifactPaths([]);
     setCompletedDeliveryResult(undefined);
+    setCompletedError('');
 
     addLog('info', '다운로드 시작', `총 ${downloadItems.length}개 패키지`);
 
@@ -1268,6 +1272,7 @@ const DownloadPage: React.FC = () => {
     setCompletedOutputPath('');
     setCompletedArtifactPaths([]);
     setCompletedDeliveryResult(undefined);
+    setCompletedError('');
     setDeliveryMethod('local');
     navigate('/');
   };
@@ -1399,7 +1404,10 @@ const DownloadPage: React.FC = () => {
   const allCompleted =
     downloadItems.length > 0 &&
     downloadItems.every((item) => ['completed', 'skipped'].includes(item.status));
-  const hasAnyCompleted = completedCount > 0;
+  const hasRecoverableArtifacts =
+    Boolean(completedOutputPath) ||
+    completedArtifactPaths.length > 0 ||
+    Boolean(completedDeliveryResult?.error);
 
   // 전체 다운로드 속도 (이동 평균 기반)
   const totalSpeed = calculateOverallSpeed();
@@ -1577,6 +1585,167 @@ const DownloadPage: React.FC = () => {
         </Card>
 
         {/* 로그 */}
+        <Card
+          size="small"
+          title={
+            <Space>
+              <span>로그</span>
+              <Tag>{logs.length}개</Tag>
+            </Space>
+          }
+          style={{ marginTop: 24 }}
+          styles={{ body: { padding: 0 } }}
+        >
+          <div
+            style={{
+              height: 200,
+              overflow: 'auto',
+              backgroundColor: '#1a1a1a',
+              padding: '8px 12px',
+              fontFamily: 'monospace',
+              fontSize: 12,
+            }}
+          >
+            {logs.length === 0 ? (
+              <Text type="secondary" style={{ color: '#666' }}>로그가 없습니다</Text>
+            ) : (
+              logs.map((log, index) => (
+                <div key={index} style={{ marginBottom: 4, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ flexShrink: 0 }}>{logIcons[log.level]}</span>
+                  <Text style={{ color: '#888', flexShrink: 0, minWidth: 70 }}>
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </Text>
+                  <Text style={{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warn' ? '#faad14' : '#d9d9d9' }}>
+                    {log.message}
+                    {log.details && <span style={{ color: '#888' }}> - {log.details}</span>}
+                  </Text>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (packagingStatus === 'failed' && hasRecoverableArtifacts) {
+    return (
+      <div>
+        <Result
+          status="error"
+          title={completedArtifactPaths.length > 0 ? '전달 실패' : '다운로드 실패'}
+          subTitle={
+            completedArtifactPaths.length > 0
+              ? '로컬 산출물은 생성되었습니다. 경로를 확인해 수동 전달을 진행할 수 있습니다.'
+              : '패키징 또는 전달 중 오류가 발생했습니다.'
+          }
+          extra={[
+            <Button
+              type="primary"
+              key="open"
+              icon={<FolderOpenOutlined />}
+              onClick={handleOpenFolder}
+            >
+              다운로드 폴더 열기
+            </Button>,
+            <Button key="done" icon={<ReloadOutlined />} onClick={handleComplete}>
+              새 다운로드
+            </Button>,
+          ]}
+        />
+
+        <Card title="실패 결과" style={{ marginTop: 24 }}>
+          <Alert
+            type="error"
+            showIcon
+            message="전달 실패 상세"
+            description={completedError || completedDeliveryResult?.error || '상세 오류를 확인할 수 없습니다.'}
+            style={{ marginBottom: 16 }}
+          />
+
+          <Row gutter={24}>
+            <Col span={6}>
+              <Statistic
+                title="완료"
+                value={completedCount}
+                suffix="개"
+                valueStyle={{ color: '#52c41a' }}
+                prefix={<CheckCircleOutlined />}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="실패"
+                value={failedCount}
+                suffix="개"
+                valueStyle={{ color: '#ff4d4f' }}
+                prefix={<CloseCircleOutlined />}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="건너뜀"
+                value={skippedCount}
+                suffix="개"
+                valueStyle={{ color: skippedCount > 0 ? '#faad14' : undefined }}
+                prefix={<ForwardOutlined />}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="출력 형식"
+                value={outputFormat.toUpperCase()}
+                prefix={<FileZipOutlined />}
+              />
+            </Col>
+          </Row>
+
+          <Divider />
+
+          <div>
+            <Text strong>대표 경로:</Text>
+            <Paragraph copyable style={{ marginTop: 8 }}>
+              {completedOutputPath || outputDir}
+            </Paragraph>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Text strong>전달 방식:</Text>
+            <Paragraph style={{ marginTop: 8 }}>
+              {deliveryMethod === 'email' ? '이메일 전달' : '로컬 저장'}
+            </Paragraph>
+          </div>
+
+          {completedArtifactPaths.length > 0 && (
+            <>
+              <Divider />
+              <div>
+                <Text strong>복구 가능한 산출물:</Text>
+                <div style={{ marginTop: 8 }}>
+                  {completedArtifactPaths.map((artifactPath) => (
+                    <Paragraph key={artifactPath} copyable style={{ marginBottom: 4 }}>
+                      {artifactPath}
+                    </Paragraph>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </Card>
+
+        <Card title="다운로드된 패키지" style={{ marginTop: 24 }}>
+          <Table
+            dataSource={downloadItems}
+            columns={columns}
+            rowKey="id"
+            pagination={false}
+            size="small"
+            scroll={{ y: 300 }}
+          />
+        </Card>
+
         <Card
           size="small"
           title={

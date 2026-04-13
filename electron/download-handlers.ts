@@ -451,13 +451,18 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
           let finalOutputPath = outputDir;
           let artifactPaths: string[] = [];
           const deliveryMethod = options.deliveryMethod || 'local';
-          const packageInfos: PackageInfo[] = allPackages.map((pkg) => ({
+          const successfulPackageIds = new Set(
+            results.filter((result) => result.success).map((result) => result.id)
+          );
+          const deliveredPackages = allPackages.filter((pkg) => successfulPackageIds.has(pkg.id));
+          const packageInfos: PackageInfo[] = deliveredPackages.map((pkg) => ({
             type: pkg.type as PackageInfo['type'],
             name: pkg.name,
             version: pkg.version,
             arch: pkg.architecture as PackageInfo['arch'],
             metadata: pkg.metadata,
           }));
+          const failedDownloadCount = results.filter((result) => !result.success).length;
           let deliveryResult:
             | {
                 emailSent: boolean;
@@ -471,7 +476,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
 
           // 설치 스크립트 생성 (의존성 포함)
           if (includeScripts) {
-            generateInstallScripts(outputDir, allPackages);
+            generateInstallScripts(outputDir, deliveredPackages);
           }
 
           if (!isSupportedOutputFormat) {
@@ -599,9 +604,16 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
               const emailSendResult = await emailSender.sendEmail({
                 to: emailOptions.to,
                 subject: emailOptions.subject || `DepsSmuggler 패키지 전달 (${packageInfos.length}개 패키지)`,
-                body: splitApplied
-                  ? '첨부 용량 제한에 맞춰 파일을 분할해 전달했습니다.'
-                  : '다운로드된 패키지 아카이브를 전달합니다.',
+                body: [
+                  splitApplied
+                    ? '첨부 용량 제한에 맞춰 파일을 분할해 전달했습니다.'
+                    : '다운로드된 패키지 아카이브를 전달합니다.',
+                  failedDownloadCount > 0
+                    ? `다운로드 실패한 ${failedDownloadCount}개 패키지는 이번 전달에서 제외되었습니다.`
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join('\n'),
                 attachments,
                 packages: packageInfos,
               });
