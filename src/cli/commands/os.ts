@@ -163,14 +163,23 @@ export async function searchCommand(
     const config = getConfigManager().getConfig();
     const cacheDirectory = path.join(config.cachePath, 'os-packages');
     const limit = parseInt(options.limit, 10);
-    const finalResults = await searchOSPackages({
+    const groupedResults = await searchOSPackages({
       distribution: distro,
       architecture: arch,
       query,
-      limit,
       cacheDirectory,
       cacheEnabled: config.cacheEnabled,
     });
+    const finalResults = groupedResults
+      .flatMap((result) =>
+        result.versions.map((pkg) => ({
+          name: pkg.name,
+          version: pkg.version,
+          repoName: pkg.repository.name,
+          summary: pkg.summary,
+        }))
+      )
+      .slice(0, Number.isFinite(limit) && limit > 0 ? limit : groupedResults.length);
 
     if (finalResults.length === 0) {
       console.log(chalk.yellow('검색 결과가 없습니다.'));
@@ -181,15 +190,14 @@ export async function searchCommand(
     console.log(chalk.gray('─'.repeat(80)));
 
     for (const result of finalResults) {
-      const versionStr = String(result.latest.version || 'unknown');
-      const repoName = result.latest.repository.name;
+      const versionStr = String(result.version || 'unknown');
       console.log(
-        `${chalk.bold(result.name.padEnd(30))} ${chalk.blue(versionStr.padEnd(20))} ${chalk.gray(repoName)}`
+        `${chalk.bold(result.name.padEnd(30))} ${chalk.blue(versionStr.padEnd(20))} ${chalk.gray(result.repoName)}`
       );
-      if (result.latest.summary) {
+      if (result.summary) {
         console.log(
           chalk.gray(
-            `  ${result.latest.summary.slice(0, 70)}${result.latest.summary.length > 70 ? '...' : ''}`
+            `  ${result.summary.slice(0, 70)}${result.summary.length > 70 ? '...' : ''}`
           )
         );
       }

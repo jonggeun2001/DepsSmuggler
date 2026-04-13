@@ -9,6 +9,7 @@ import { ApkDependencyResolver } from '../../resolver/apk-resolver';
 import { YumDependencyResolver } from '../../resolver/yum-resolver';
 import { OSArchivePackager } from './archive-packager';
 import { OSCacheManager } from './cache-manager';
+import { getDownloadedFileKey } from './package-file-utils';
 import { OSRepoPackager } from './repo-packager';
 import { OSScriptGenerator } from './script-generator';
 import type { BaseOSDownloader, BaseDownloaderOptions } from './base-downloader';
@@ -143,15 +144,11 @@ function createDownloader(
   }
 }
 
-function createPackageKey(pkg: OSPackageInfo): string {
-  return `${pkg.name}-${pkg.version}-${pkg.release ?? ''}-${pkg.architecture}`;
-}
-
 function dedupePackages(packages: OSPackageInfo[]): OSPackageInfo[] {
   const unique = new Map<string, OSPackageInfo>();
 
   for (const pkg of packages) {
-    unique.set(createPackageKey(pkg), pkg);
+    unique.set(getDownloadedFileKey(pkg), pkg);
   }
 
   return Array.from(unique.values());

@@ -15,6 +15,7 @@ import type {
   OSErrorAction,
 } from './types';
 import { GPGVerifier, type VerificationResult } from './gpg-verifier';
+import { getDownloadedFileKey } from './package-file-utils';
 
 /**
  * 다운로드 결과
@@ -245,7 +246,7 @@ export abstract class BaseOSDownloader {
       if (result.success) {
         success.push(pkg);
         if (result.filePath) {
-          downloadedFiles.set(`${pkg.name}-${pkg.version}`, result.filePath);
+          downloadedFiles.set(getDownloadedFileKey(pkg), result.filePath);
         }
       } else {
         failed.push({ package: pkg, error: result.error! });

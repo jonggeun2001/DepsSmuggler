@@ -9,6 +9,7 @@ import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
 import type { OSPackageInfo, OSPackageManager } from './types';
+import { getDownloadedFileKey, getPackageFilename } from './package-file-utils';
 import { OSScriptGenerator } from './script-generator';
 import { getWriteOptions } from '../../shared/path-utils';
 
@@ -120,7 +121,7 @@ export class OSRepoPackager {
     }
 
     for (const pkg of packages) {
-      const key = `${pkg.name}-${pkg.version}`;
+      const key = getDownloadedFileKey(pkg);
       const sourcePath = downloadedFiles.get(key);
 
       if (sourcePath && fs.existsSync(sourcePath)) {
@@ -184,11 +185,12 @@ export class OSRepoPackager {
     lines.push(`<metadata xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.duke.edu/metadata/rpm" packages="${packages.length}">`);
 
     for (const pkg of packages) {
-      const filename = `${pkg.name}-${pkg.version}.${pkg.architecture}.rpm`;
+      const filename = getPackageFilename(pkg, 'yum');
+      const release = this.escapeXml(pkg.release || '1');
       lines.push(`  <package type="rpm">`);
       lines.push(`    <name>${this.escapeXml(pkg.name)}</name>`);
       lines.push(`    <arch>${pkg.architecture}</arch>`);
-      lines.push(`    <version epoch="0" ver="${this.escapeXml(pkg.version)}" rel="1"/>`);
+      lines.push(`    <version epoch="0" ver="${this.escapeXml(pkg.version)}" rel="${release}"/>`);
       lines.push(`    <checksum type="${pkg.checksum?.type || 'sha256'}" pkgid="YES">${pkg.checksum?.value || ''}</checksum>`);
       lines.push(`    <summary>${this.escapeXml(pkg.description?.substring(0, 100) || pkg.name)}</summary>`);
       lines.push(`    <description>${this.escapeXml(pkg.description || '')}</description>`);
@@ -199,7 +201,7 @@ export class OSRepoPackager {
       lines.push(`    <location href="Packages/${filename}"/>`);
       lines.push(`    <format>`);
       lines.push(`      <rpm:provides>`);
-      lines.push(`        <rpm:entry name="${this.escapeXml(pkg.name)}" flags="EQ" epoch="0" ver="${this.escapeXml(pkg.version)}" rel="1"/>`);
+      lines.push(`        <rpm:entry name="${this.escapeXml(pkg.name)}" flags="EQ" epoch="0" ver="${this.escapeXml(pkg.version)}" rel="${release}"/>`);
       lines.push(`      </rpm:provides>`);
 
       if (pkg.dependencies.length > 0) {
@@ -231,8 +233,9 @@ export class OSRepoPackager {
     lines.push(`<filelists xmlns="http://linux.duke.edu/metadata/filelists" packages="${packages.length}">`);
 
     for (const pkg of packages) {
+      const release = this.escapeXml(pkg.release || '1');
       lines.push(`  <package pkgid="${pkg.checksum?.value || ''}" name="${this.escapeXml(pkg.name)}" arch="${pkg.architecture}">`);
-      lines.push(`    <version epoch="0" ver="${this.escapeXml(pkg.version)}" rel="1"/>`);
+      lines.push(`    <version epoch="0" ver="${this.escapeXml(pkg.version)}" rel="${release}"/>`);
       lines.push(`  </package>`);
     }
 
@@ -249,8 +252,9 @@ export class OSRepoPackager {
     lines.push(`<otherdata xmlns="http://linux.duke.edu/metadata/other" packages="${packages.length}">`);
 
     for (const pkg of packages) {
+      const release = this.escapeXml(pkg.release || '1');
       lines.push(`  <package pkgid="${pkg.checksum?.value || ''}" name="${this.escapeXml(pkg.name)}" arch="${pkg.architecture}">`);
-      lines.push(`    <version epoch="0" ver="${this.escapeXml(pkg.version)}" rel="1"/>`);
+      lines.push(`    <version epoch="0" ver="${this.escapeXml(pkg.version)}" rel="${release}"/>`);
       lines.push(`  </package>`);
     }
 

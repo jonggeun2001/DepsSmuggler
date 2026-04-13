@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OSDistribution, OSPackageInfo } from './types';
+import { getDownloadedFileKey } from './package-file-utils';
 import {
   clearOSPackageCache,
   downloadOSPackages,
@@ -140,10 +141,10 @@ describe('OS CLI backend', () => {
       success: [httpd, apr, aprUtilOld, aprUtilNew],
       failed: [],
       downloadedFiles: new Map([
-        ['httpd-2.4.57', path.join(tempDir, 'httpd.rpm')],
-        ['apr-1.7.0', path.join(tempDir, 'apr.rpm')],
-        ['apr-util-1.6.1', path.join(tempDir, 'apr-util-1.6.1.rpm')],
-        ['apr-util-1.7.0', path.join(tempDir, 'apr-util-1.7.0.rpm')],
+        [getDownloadedFileKey(httpd), path.join(tempDir, 'httpd.rpm')],
+        [getDownloadedFileKey(apr), path.join(tempDir, 'apr.rpm')],
+        [getDownloadedFileKey(aprUtilOld), path.join(tempDir, 'apr-util-1.6.1.rpm')],
+        [getDownloadedFileKey(aprUtilNew), path.join(tempDir, 'apr-util-1.7.0.rpm')],
       ]),
     });
     createArchive.mockResolvedValue(path.join(tempDir, 'bundle.zip'));
