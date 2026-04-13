@@ -474,6 +474,18 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
             | undefined;
           const isSupportedOutputFormat = outputFormat === 'zip' || outputFormat === 'tar.gz';
 
+          if (successfulPackageIds.size === 0) {
+            const errorMessage = '다운로드에 성공한 패키지가 없습니다.';
+            mainWindow?.webContents.send('download:all-complete', {
+              success: false,
+              outputPath: outputDir,
+              deliveryMethod,
+              error: errorMessage,
+              results,
+            });
+            return;
+          }
+
           // 설치 스크립트 생성 (의존성 포함)
           if (includeScripts) {
             generateInstallScripts(outputDir, deliveredPackages);

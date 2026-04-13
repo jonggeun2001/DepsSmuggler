@@ -59,7 +59,7 @@ import type {
   HistorySettings,
   HistoryStatus,
 } from '../../types';
-import type { DependencyAPI } from '../../types/electron';
+import type { AllCompleteData, DependencyAPI } from '../../types/electron';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -502,6 +502,78 @@ const DownloadPage: React.FC = () => {
       }
     });
 
+    const persistHistoryEntry = (data: AllCompleteData, forcedStatus?: HistoryStatus) => {
+      const finalItems = useDownloadStore.getState().items;
+
+      const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
+        type: item.type,
+        name: item.name,
+        version: item.version,
+        arch: item.arch,
+        languageVersion: item.languageVersion,
+        metadata: item.metadata,
+      }));
+
+      const historySettings = historySettingsSnapshotRef.current ?? {
+        outputFormat,
+        includeScripts: includeInstallScripts,
+        includeDependencies,
+        deliveryMethod,
+        fileSplitEnabled: enableFileSplit,
+        maxFileSizeMB: maxFileSize,
+      };
+
+      const resultMap = new Map((data.results || []).map((result) => [result.id, result.success]));
+      let completedCount = 0;
+      let failedCount = 0;
+
+      finalItems.forEach((item) => {
+        const result = resultMap.get(item.id);
+        if (typeof result === 'boolean') {
+          if (result) {
+            completedCount += 1;
+          } else {
+            failedCount += 1;
+          }
+          return;
+        }
+
+        if (item.status === 'completed') {
+          completedCount += 1;
+        } else if (item.status === 'failed') {
+          failedCount += 1;
+        }
+      });
+
+      const totalCount = finalItems.length || data.results?.length || 0;
+      let historyStatus = forcedStatus || 'success';
+
+      if (!forcedStatus) {
+        if (failedCount === totalCount && totalCount > 0) {
+          historyStatus = 'failed';
+        } else if (failedCount > 0) {
+          historyStatus = 'partial';
+        }
+      }
+
+      const totalSize = finalItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
+
+      addHistory(
+        historyPackages,
+        historySettings,
+        data.outputPath,
+        totalSize,
+        historyStatus,
+        completedCount,
+        failedCount,
+        {
+          artifactPaths: data.artifactPaths,
+          deliveryMethod: data.deliveryMethod || historySettings.deliveryMethod,
+          deliveryResult: data.deliveryResult,
+        }
+      );
+    };
+
     // 전체 다운로드 완료 리스너
     const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
       if (!data.success) {
@@ -528,6 +600,7 @@ const DownloadPage: React.FC = () => {
         const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
         scheduleLogBatch('error', '다운로드/패키징 실패', errorMessage);
         message.error(errorMessage);
+        persistHistoryEntry(data, 'failed');
 
         return;
       }
@@ -554,62 +627,12 @@ const DownloadPage: React.FC = () => {
         : '다운로드 및 패키징이 완료되었습니다';
       scheduleLogBatch('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
       message.success(completionMessage);
-
-      // 히스토리 저장
-      const finalItems = useDownloadStore.getState().items;
-
-      // 패키지 정보 변환 (다운로드 시작 시 저장된 스냅샷 사용)
-      const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
-        type: item.type,
-        name: item.name,
-        version: item.version,
-        arch: item.arch,
-        languageVersion: item.languageVersion,
-        metadata: item.metadata,
-      }));
-
-      // 설정 정보
-      const historySettings = historySettingsSnapshotRef.current ?? {
-        outputFormat,
-        includeScripts: includeInstallScripts,
-        includeDependencies,
-        deliveryMethod,
-        fileSplitEnabled: enableFileSplit,
-        maxFileSizeMB: maxFileSize,
-      };
-
-      // 상태 계산
-      const completedCount = finalItems.filter((i) => i.status === 'completed').length;
-      const failedCount = finalItems.filter((i) => i.status === 'failed').length;
-      const totalCount = finalItems.length;
-
-      let historyStatus: HistoryStatus = 'success';
-      if (failedCount === totalCount) {
-        historyStatus = 'failed';
-      } else if (failedCount > 0) {
-        historyStatus = 'partial';
-      }
-
-      // 총 크기 계산
-      const totalSize = finalItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
-
-      // 히스토리 저장
-      addHistory(
-        historyPackages,
-        historySettings,
-        data.outputPath,
-        totalSize,
-        historyStatus,
-        completedCount,
-        failedCount,
-        {
-          artifactPaths: data.artifactPaths || [data.outputPath],
-          deliveryMethod: data.deliveryMethod || historySettings.deliveryMethod,
-          deliveryResult: data.deliveryResult,
-        }
-      );
+      persistHistoryEntry(data);
 
       // 실패 없이 모두 완료되면 장바구니 자동 비우기
+      const finalItems = useDownloadStore.getState().items;
+      const failedCount = (data.results || []).filter((result) => !result.success).length
+        || finalItems.filter((item) => item.status === 'failed').length;
       if (failedCount === 0) {
         clearCart();
       }
