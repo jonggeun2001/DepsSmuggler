@@ -127,7 +127,9 @@ depssmuggler/
 - 설정: `~/.depssmuggler/settings.json`
 - 히스토리: `~/.depssmuggler/history.json`
 - 캐시/로그: `~/.depssmuggler/cache`, `~/.depssmuggler/logs`
-- Renderer 상태: Zustand + persist, Electron 환경에서는 IPC를 통해 파일 저장과 동기화
+- Renderer 상태: Zustand + persist 기반입니다.
+- 설정 상태는 Electron 환경에서 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화됩니다.
+- 장바구니/히스토리 상태는 현재 persist 저장소가 source of truth이며, `history.json` 기반 IPC는 부분 연결 상태입니다.
 
 ## 업데이트 및 버전 프리로드
 

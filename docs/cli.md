@@ -63,7 +63,7 @@ depssmuggler download [옵션]
 | `-a, --arch <arch>` | 아키텍처 | `x86_64` |
 | `-o, --output <path>` | 출력 경로 | `./output` |
 | `-f, --format <format>` | 아카이브 형식 (`zip`, `tar.gz`) | `zip` |
-| `--file <file>` | 입력 파일 (`requirements.txt`, `pom.xml` 등) | - |
+| `--file <file>` | 줄 단위 패키지 목록 파일 (`requirements.txt`, Maven 좌표 목록 등) | - |
 | `--no-deps` | 의존성 해결 비활성화 | `false` |
 | `--concurrency <num>` | 동시 다운로드 수 | `3` |
 
@@ -75,8 +75,11 @@ depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0
 depssmuggler download -t npm -p react -V 19.2.0
 depssmuggler download -t docker -p nginx -V latest
 depssmuggler download -t pip --file requirements.txt -o ./packages
+depssmuggler download -t maven --file ./maven-packages.txt
 depssmuggler download -t pip -p flask -f tar.gz
 ```
+
+참고: `--file`은 현재 XML `pom.xml`을 직접 파싱하지 않고, 줄 단위 텍스트 입력만 처리합니다. Maven은 각 줄에 `groupId:artifactId[:version]` 형식으로 적어야 합니다.
 
 ### 현재 동작
 
