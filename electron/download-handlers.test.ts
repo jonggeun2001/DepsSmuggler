@@ -686,6 +686,10 @@ describe('registerDownloadHandlers', () => {
       }
     );
 
+    await waitForExpectation(() => {
+      expect(downloadFileMock).toHaveBeenCalled();
+    });
+
     await downloadCancelHandler({});
     resolveDownload();
 
