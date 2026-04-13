@@ -1030,8 +1030,8 @@ const DownloadPage: React.FC = () => {
     }
 
     if (deliveryMethod === 'email') {
-      if (!smtpHost || !smtpPort || !smtpFrom || !smtpTo) {
-        message.warning('이메일 전달을 사용하려면 설정에서 SMTP 서버, 발신자, 수신자를 입력하세요');
+      if (!smtpHost || !smtpPort || !smtpTo) {
+        message.warning('이메일 전달을 사용하려면 설정에서 SMTP 서버와 수신자를 입력하세요');
         return;
       }
     }
@@ -1121,7 +1121,7 @@ const DownloadPage: React.FC = () => {
         email: deliveryMethod === 'email'
           ? {
               to: smtpTo,
-              from: smtpFrom,
+              from: smtpFrom || smtpUser,
             }
           : undefined,
         fileSplit: {
@@ -1134,7 +1134,7 @@ const DownloadPage: React.FC = () => {
               port: smtpPort,
               user: smtpUser,
               password: smtpPassword,
-              from: smtpFrom,
+              from: smtpFrom || smtpUser,
             }
           : undefined,
       };
@@ -1238,7 +1238,7 @@ const DownloadPage: React.FC = () => {
         email: deliveryMethod === 'email'
           ? {
               to: smtpTo,
-              from: smtpFrom,
+              from: smtpFrom || smtpUser,
             }
           : undefined,
         fileSplit: {
@@ -1251,7 +1251,7 @@ const DownloadPage: React.FC = () => {
               port: smtpPort,
               user: smtpUser,
               password: smtpPassword,
-              from: smtpFrom,
+              from: smtpFrom || smtpUser,
             }
           : undefined,
       };
@@ -1466,13 +1466,17 @@ const DownloadPage: React.FC = () => {
   }
 
   // 완료 화면
-  if (packagingStatus === 'completed' && allCompleted) {
+  if (packagingStatus === 'completed') {
     return (
       <div>
         <Result
-          status="success"
-          title="다운로드 완료"
-          subTitle={`${completedCount}개 패키지가 성공적으로 다운로드되었습니다`}
+          status={failedCount > 0 ? 'warning' : 'success'}
+          title={failedCount > 0 ? '부분 완료' : '다운로드 완료'}
+          subTitle={
+            failedCount > 0
+              ? `${completedCount}개 패키지가 완료되었고 ${failedCount}개는 실패했습니다. 생성된 산출물을 확인하세요.`
+              : `${completedCount}개 패키지가 성공적으로 다운로드되었습니다`
+          }
           extra={[
             <Button
               type="primary"

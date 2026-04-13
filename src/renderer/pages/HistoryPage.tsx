@@ -33,7 +33,7 @@ import { useHistoryStore, DownloadHistory, HistoryStatus } from '../stores/histo
 import { useCartStore, PackageType } from '../stores/cart-store';
 import { useSettingsStore } from '../stores/settings-store';
 
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
 
 // 패키지 타입별 색상
 const typeColors: Record<PackageType, string> = {
@@ -74,6 +74,20 @@ const formatDate = (isoString: string): string => {
     minute: '2-digit',
   }).format(date);
 };
+
+const getArtifactPaths = (history: DownloadHistory): string[] =>
+  history.artifactPaths && history.artifactPaths.length > 0
+    ? history.artifactPaths
+    : [history.outputPath];
+
+const getPrimaryArtifactPath = (history: DownloadHistory): string =>
+  getArtifactPaths(history)[0] || history.outputPath;
+
+const getDeliveryMethod = (history: DownloadHistory): 'local' | 'email' =>
+  history.deliveryMethod || history.settings.deliveryMethod || 'local';
+
+const getDeliveryLabel = (history: DownloadHistory): string =>
+  getDeliveryMethod(history) === 'email' ? '이메일' : '로컬';
 
 const HistoryPage: React.FC = () => {
   const navigate = useNavigate();
@@ -271,6 +285,52 @@ const HistoryPage: React.FC = () => {
       render: (format: string) => <Tag>{format.toUpperCase()}</Tag>,
     },
     {
+      title: '전달',
+      key: 'delivery',
+      width: 180,
+      render: (_, record) => (
+        <Space direction="vertical" size={2}>
+          <Tag color={getDeliveryMethod(record) === 'email' ? 'blue' : 'default'}>
+            {getDeliveryLabel(record)}
+          </Tag>
+          {getDeliveryMethod(record) === 'email' && (
+            <Text
+              type={record.deliveryResult?.emailSent ? 'secondary' : record.deliveryResult?.error ? 'danger' : undefined}
+              style={{ fontSize: 12 }}
+            >
+              {record.deliveryResult?.emailSent
+                ? `${record.deliveryResult.emailsSent || 1}건 발송${record.deliveryResult.splitApplied ? ' · 분할 전달' : ''}`
+                : record.deliveryResult?.error || '결과 정보 없음'}
+            </Text>
+          )}
+        </Space>
+      ),
+    },
+    {
+      title: '산출물',
+      key: 'artifacts',
+      width: 280,
+      render: (_, record) => {
+        const artifactPaths = getArtifactPaths(record);
+        const primaryArtifactPath = artifactPaths[0];
+
+        return (
+          <Space direction="vertical" size={2} style={{ width: '100%' }}>
+            <Tooltip title={primaryArtifactPath}>
+              <Text ellipsis style={{ maxWidth: 240 }}>
+                {primaryArtifactPath}
+              </Text>
+            </Tooltip>
+            {artifactPaths.length > 1 && (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                +{artifactPaths.length - 1}개 추가 산출물
+              </Text>
+            )}
+          </Space>
+        );
+      },
+    },
+    {
       title: '작업',
       key: 'actions',
       width: 200,
@@ -287,7 +347,7 @@ const HistoryPage: React.FC = () => {
             <Button
               type="text"
               icon={<FolderOpenOutlined />}
-              onClick={() => handleOpenFolder(record.outputPath)}
+              onClick={() => handleOpenFolder(getPrimaryArtifactPath(record))}
             />
           </Tooltip>
           <Tooltip title="재다운로드">
@@ -446,16 +506,30 @@ const HistoryPage: React.FC = () => {
             <Descriptions.Item label="출력 형식">
               {selectedHistory.settings.outputFormat.toUpperCase()}
             </Descriptions.Item>
+            <Descriptions.Item label="전달 방식">
+              <Tag color={getDeliveryMethod(selectedHistory) === 'email' ? 'blue' : 'default'}>
+                {getDeliveryLabel(selectedHistory)}
+              </Tag>
+            </Descriptions.Item>
             <Descriptions.Item label="설치 스크립트">
               {selectedHistory.settings.includeScripts ? '포함' : '미포함'}
             </Descriptions.Item>
             <Descriptions.Item label="의존성 포함">
               {selectedHistory.settings.includeDependencies ? '예' : '아니오'}
             </Descriptions.Item>
-            <Descriptions.Item label="출력 경로" span={2}>
+            <Descriptions.Item label="대표 경로" span={2}>
               <Text copyable style={{ wordBreak: 'break-all' }}>
-                {selectedHistory.outputPath}
+                {getPrimaryArtifactPath(selectedHistory)}
               </Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="산출물 경로" span={2}>
+              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                {getArtifactPaths(selectedHistory).map((artifactPath) => (
+                  <Paragraph key={artifactPath} copyable style={{ marginBottom: 0, wordBreak: 'break-all' }}>
+                    {artifactPath}
+                  </Paragraph>
+                ))}
+              </Space>
             </Descriptions.Item>
             <Descriptions.Item label="패키지 목록" span={2}>
               <Space wrap size={[4, 8]}>
@@ -475,6 +549,20 @@ const HistoryPage: React.FC = () => {
             {selectedHistory.failedCount !== undefined && (
               <Descriptions.Item label="다운로드 실패">
                 {selectedHistory.failedCount}개
+              </Descriptions.Item>
+            )}
+            {getDeliveryMethod(selectedHistory) === 'email' && (
+              <Descriptions.Item label="메일 전달 결과" span={2}>
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <Text type={selectedHistory.deliveryResult?.emailSent ? undefined : selectedHistory.deliveryResult?.error ? 'danger' : undefined}>
+                    {selectedHistory.deliveryResult?.emailSent
+                      ? `성공 (${selectedHistory.deliveryResult.emailsSent || 1}건 발송, ${selectedHistory.deliveryResult.attachmentsSent ?? getArtifactPaths(selectedHistory).length}개 첨부)`
+                      : selectedHistory.deliveryResult?.error || '결과 정보 없음'}
+                  </Text>
+                  {selectedHistory.deliveryResult?.splitApplied && (
+                    <Text type="secondary">첨부 제한을 넘겨 분할 파일로 전달했습니다.</Text>
+                  )}
+                </Space>
               </Descriptions.Item>
             )}
           </Descriptions>
