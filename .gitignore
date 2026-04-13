@@ -46,7 +46,10 @@ coverage/
 # .depssmuggler/
 
 # Development tool configs
+.agent/
 .claude/
+CLAUDE.md
+AGENTS.md
 .cursor/
 .serena/
 .taskmaster/
