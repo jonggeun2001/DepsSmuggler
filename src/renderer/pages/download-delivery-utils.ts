@@ -21,7 +21,6 @@ export interface HistoryRestoreSettings {
   includeDependencies: boolean;
   enableFileSplit?: boolean;
   maxFileSize?: number;
-  smtpTo?: string;
 }
 
 interface EmailDeliveryValidationInput {
@@ -61,7 +60,6 @@ export function buildHistoryRestoreSettings(settings: HistorySettings): HistoryR
     ...(typeof settings.maxFileSizeMB === 'number'
       ? { maxFileSize: settings.maxFileSizeMB }
       : {}),
-    ...(settings.deliveryMethod === 'email' && settings.smtpTo ? { smtpTo: settings.smtpTo } : {}),
   };
 }
 

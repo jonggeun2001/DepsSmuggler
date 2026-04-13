@@ -357,9 +357,14 @@ const DownloadPage: React.FC = () => {
   const [completedDeliveryResult, setCompletedDeliveryResult] = useState<HistoryDeliveryResult | undefined>();
   const [completedError, setCompletedError] = useState('');
   const historyDownloadState = (
-    location.state as { deliveryMethod?: 'local' | 'email'; osOutputOptions?: OSPackageOutputOptions } | null
+    location.state as {
+      deliveryMethod?: 'local' | 'email';
+      emailRecipient?: string;
+      osOutputOptions?: OSPackageOutputOptions;
+    } | null
   );
   const historyOSOutputOptions = historyDownloadState?.osOutputOptions;
+  const effectiveSmtpTo = historyDownloadState?.emailRecipient || smtpTo;
   const osCartItems = useMemo(() => cartItems.filter(isOSCartItem), [cartItems]);
   const hasOnlyOSPackages = cartItems.length > 0 && osCartItems.length === cartItems.length;
   const osPackageManagers = useMemo(
@@ -434,6 +439,7 @@ const DownloadPage: React.FC = () => {
   // 히스토리 저장용 장바구니 데이터 (다운로드 시작 시 스냅샷)
   const cartSnapshotRef = useRef<typeof cartItems>([]);
   const historySettingsSnapshotRef = useRef<HistorySettings | null>(null);
+  const historyTrackedItemIdsRef = useRef<Set<string> | null>(null);
   // 배치 업데이트용 pending 상태 저장
   const pendingUpdatesRef = useRef<Map<string, Partial<DownloadItem>>>(new Map());
   const pendingLogsRef = useRef<Array<{ level: 'info' | 'warn' | 'error' | 'success'; message: string; details?: string }>>([]);
@@ -763,6 +769,10 @@ const DownloadPage: React.FC = () => {
 
     const persistHistoryEntry = (data: AllCompleteData, forcedStatus?: HistoryStatus) => {
       const finalItems = useDownloadStore.getState().items;
+      const trackedItemIds = historyTrackedItemIdsRef.current;
+      const relevantItems = trackedItemIds && trackedItemIds.size > 0
+        ? finalItems.filter((item) => trackedItemIds.has(item.id))
+        : finalItems;
 
       const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
         type: item.type,
@@ -778,7 +788,7 @@ const DownloadPage: React.FC = () => {
         includeScripts: includeInstallScripts,
         includeDependencies,
         deliveryMethod,
-        smtpTo,
+        smtpTo: effectiveSmtpTo,
         fileSplitEnabled: enableFileSplit,
         maxFileSizeMB: maxFileSize,
       });
@@ -787,7 +797,7 @@ const DownloadPage: React.FC = () => {
       let completedCount = 0;
       let failedCount = 0;
 
-      finalItems.forEach((item) => {
+      relevantItems.forEach((item) => {
         const result = resultMap.get(item.id);
         if (typeof result === 'boolean') {
           if (result) {
@@ -805,7 +815,7 @@ const DownloadPage: React.FC = () => {
         }
       });
 
-      const totalCount = finalItems.length || data.results?.length || 0;
+      const totalCount = relevantItems.length || data.results?.length || 0;
       let historyStatus = forcedStatus || 'success';
 
       if (!forcedStatus) {
@@ -816,7 +826,7 @@ const DownloadPage: React.FC = () => {
         }
       }
 
-      const totalSize = finalItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
+      const totalSize = relevantItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
 
       addHistory(
         historyPackages,
@@ -1519,7 +1529,7 @@ const DownloadPage: React.FC = () => {
       deliveryMethod,
       smtpHost,
       smtpPort,
-      smtpTo,
+      smtpTo: effectiveSmtpTo,
       smtpFrom,
       smtpUser,
     });
@@ -1557,12 +1567,13 @@ const DownloadPage: React.FC = () => {
     window.electronAPI?.log?.('info', `[TIMING] Proceeding with download at ${Date.now() - handleStartTime}ms`);
     // 히스토리 저장용 장바구니 스냅샷 저장
     cartSnapshotRef.current = [...cartItems];
+    historyTrackedItemIdsRef.current = new Set(downloadItems.map((item) => item.id));
     historySettingsSnapshotRef.current = buildHistorySettings({
       outputFormat,
       includeScripts: includeInstallScripts,
       includeDependencies,
       deliveryMethod,
-      smtpTo,
+      smtpTo: effectiveSmtpTo,
       fileSplitEnabled: enableFileSplit,
       maxFileSizeMB: maxFileSize,
     });
@@ -1614,7 +1625,7 @@ const DownloadPage: React.FC = () => {
         deliveryMethod,
         email: deliveryMethod === 'email'
           ? {
-              to: smtpTo,
+              to: effectiveSmtpTo,
               from: smtpFrom || smtpUser,
             }
           : undefined,
@@ -1706,7 +1717,7 @@ const DownloadPage: React.FC = () => {
       deliveryMethod,
       smtpHost,
       smtpPort,
-      smtpTo,
+      smtpTo: effectiveSmtpTo,
       smtpFrom,
       smtpUser,
     });
@@ -1715,6 +1726,32 @@ const DownloadPage: React.FC = () => {
       message.warning(emailDeliveryValidationError);
       return;
     }
+
+    cartSnapshotRef.current = [{
+      id: item.id,
+      type: item.type as CartItem['type'],
+      name: item.name,
+      version: item.version,
+      arch: item.arch as CartItem['arch'],
+      metadata: item.metadata,
+      addedAt: Date.now(),
+      downloadUrl: item.downloadUrl,
+      repository: item.repository as CartItem['repository'],
+      location: item.location,
+      indexUrl: item.indexUrl,
+      extras: item.extras,
+      classifier: item.classifier,
+    }];
+    historyTrackedItemIdsRef.current = new Set([item.id]);
+    historySettingsSnapshotRef.current = buildHistorySettings({
+      outputFormat,
+      includeScripts: includeInstallScripts,
+      includeDependencies: false,
+      deliveryMethod,
+      smtpTo: effectiveSmtpTo,
+      fileSplitEnabled: enableFileSplit,
+      maxFileSizeMB: maxFileSize,
+    });
 
     // 상태를 pending → downloading으로 변경
     retryItem(item.id);
@@ -1745,7 +1782,7 @@ const DownloadPage: React.FC = () => {
         deliveryMethod,
         email: deliveryMethod === 'email'
           ? {
-              to: smtpTo,
+              to: effectiveSmtpTo,
               from: smtpFrom || smtpUser,
             }
           : undefined,
@@ -1782,6 +1819,7 @@ const DownloadPage: React.FC = () => {
     setCompletedDeliveryResult(undefined);
     setCompletedError('');
     setDeliveryMethod('local');
+    historyTrackedItemIdsRef.current = null;
     setOSProgress(null);
     setOSResult(null);
     setOSDownloadError(null);
@@ -2477,8 +2515,8 @@ const DownloadPage: React.FC = () => {
               style={{ marginTop: 12 }}
               message="설정 화면의 SMTP 발신자/수신자와 파일 분할 값을 사용합니다."
               description={
-                smtpTo
-                  ? `현재 수신자: ${smtpTo}`
+                effectiveSmtpTo
+                  ? `현재 수신자: ${effectiveSmtpTo}`
                   : '수신자가 비어 있습니다. 설정 화면에서 SMTP 수신자를 먼저 입력하세요.'
               }
             />

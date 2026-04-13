@@ -25,7 +25,7 @@ describe('download-delivery-utils', () => {
     });
   });
 
-  it('히스토리 재다운로드 시 저장된 수신자를 설정으로 복원해야 함', () => {
+  it('히스토리 재다운로드 시 전역 설정에는 수신자를 복원하지 않아야 함', () => {
     const updates = buildHistoryRestoreSettings({
       outputFormat: 'zip',
       includeScripts: false,
@@ -42,8 +42,8 @@ describe('download-delivery-utils', () => {
       includeDependencies: false,
       enableFileSplit: true,
       maxFileSize: 10,
-      smtpTo: 'restore@example.com',
     });
+    expect(updates).not.toHaveProperty('smtpTo');
   });
 
   it('이메일 전달은 시작 전에 SMTP 수신자 누락을 차단해야 함', () => {

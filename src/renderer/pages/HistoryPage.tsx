@@ -160,6 +160,7 @@ const HistoryPage: React.FC = () => {
         navigate('/download', {
           state: {
             deliveryMethod: getDeliveryMethod(history),
+            emailRecipient: getHistoryRecipient(history),
             osOutputOptions: history.settings.osOutputOptions,
           },
         });

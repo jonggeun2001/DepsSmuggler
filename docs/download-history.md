@@ -196,7 +196,7 @@ history: {
 2. 확인 모달 표시
 3. 패키지들을 장바구니에 추가 (`cartStore.addItem`)
 4. 설정 복원 (`settingsStore.updateSettings`)
-   이메일 전달 히스토리면 저장된 `smtpTo`도 함께 복원
+   이메일 수신자(`smtpTo`)는 전역 설정을 바꾸지 않고 재다운로드 세션 상태로만 전달
 5. 다운로드 페이지로 이동
 
 ---
