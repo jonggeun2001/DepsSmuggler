@@ -16,16 +16,17 @@
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `createArchive` | options: ArchiveOptions | Promise<PackagingResult> | 압축 파일 생성 |
-| `getArchiveInfo` | archivePath: string | Promise<ArchiveInfo> | 압축 파일 정보 조회 |
+| `createArchive` | files, outputPath, packages, options | Promise<string> | 파일 목록을 `packages/` 아래로 묶어 압축 |
+| `createArchiveFromDirectory` | sourceDir, outputPath, packages, options | Promise<string> | 준비된 디렉터리 구조를 유지한 채 압축 |
+| `getArchiveInfo` | archivePath: string | Promise<{ format, size, fileCount }> | 압축 파일 정보 조회 |
 | `verifyArchive` | archivePath: string | Promise<boolean> | 압축 파일 무결성 검증 |
 
 ### 내부 메서드
 
 | 메서드 | 설명 |
 |--------|------|
-| `createZip` | ZIP 파일 생성 |
-| `createTarGz` | tar.gz 파일 생성 |
+| `createZipFromDirectory` / `createZipFromFileEntries` | ZIP 파일 생성 |
+| `createTarGzFromDirectory` / `createTarGzFromFileEntries` | tar.gz 파일 생성 |
 | `createManifest` | manifest.json 생성 |
 | `createReadme` | README.txt 생성 |
 
@@ -38,20 +39,19 @@ const ArchiveFormat = {
 } as const;
 
 interface ArchiveOptions {
-  sourceDir: string;           // 소스 디렉토리
-  outputPath: string;          // 출력 파일 경로
   format: ArchiveFormat;       // 압축 형식
-  packages: PackageInfo[];     // 포함된 패키지 목록
+  compressionLevel?: number;   // 압축 레벨 (0-9)
   includeReadme?: boolean;     // README 포함 여부
   includeManifest?: boolean;   // manifest.json 포함 여부
   onProgress?: (progress: ArchiveProgress) => void;
 }
 
 interface ArchiveProgress {
-  phase: 'preparing' | 'compressing' | 'finalizing';
-  current: number;
-  total: number;
-  currentFile?: string;
+  processedFiles: number;
+  totalFiles: number;
+  processedBytes: number;
+  totalBytes: number;
+  percentage: number;
 }
 
 interface PackageManifest {
@@ -68,15 +68,21 @@ interface PackageManifest {
 import { getArchivePackager } from './core/packager/archive-packager';
 
 const packager = getArchivePackager();
-const result = await packager.createArchive({
-  sourceDir: '/tmp/downloads',
-  outputPath: '/tmp/output/packages.zip',
-  format: 'zip',
-  packages: downloadedPackages,
-  includeReadme: true,
-  includeManifest: true
-});
+const result = await packager.createArchiveFromDirectory(
+  '/tmp/downloads',
+  '/tmp/output/packages.zip',
+  downloadedPackages,
+  {
+    format: 'zip',
+    includeReadme: true,
+    includeManifest: true,
+  }
+);
 ```
+
+GUI 다운로드 경로에서는 `electron/download-handlers.ts`가 `createArchiveFromDirectory(...)`를 사용합니다. 그래서 `outputDir` 아래에 만들어 둔 `packages/`, `install.sh`, `install.ps1` 같은 파일이 그대로 아카이브에 포함되고, 최종 완료 이벤트는 실제 `.zip` 또는 `.tar.gz` 파일 경로를 반환합니다.
+
+현재 구현은 다운로드 산출물을 별도 staging 디렉터리로 한 번 더 복사하지 않고, 원본 디렉터리/파일 엔트리를 아카이브 스트림에 직접 추가한 뒤 `manifest.json`, `README.txt`만 추가 entry로 주입합니다.
 
 ### 기술적 주의사항
 

@@ -43,7 +43,7 @@ interface DownloadPackage {
 ```typescript
 interface DownloadOptions {
   outputDir: string;                       // 출력 디렉토리
-  outputFormat: 'zip' | 'tar.gz' | 'mirror'; // 출력 형식
+  outputFormat: 'zip' | 'tar.gz';         // GUI/IPC 출력 형식
   includeScripts: boolean;                 // 설치 스크립트 포함 여부
   targetOS?: TargetOS;                     // 타겟 OS
   architecture?: Architecture;             // 아키텍처

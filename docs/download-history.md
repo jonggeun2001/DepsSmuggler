@@ -17,7 +17,7 @@
 | 자동 저장 | 다운로드 완료 시 히스토리 자동 저장 |
 | 재다운로드 | 이전 다운로드 설정을 복원하여 재다운로드 |
 | 파일 동기화 | Zustand persist + 파일 기반 동기화 |
-| 폴더 열기 | 다운로드 경로를 Finder/Explorer로 열기 |
+| 폴더 열기 | 출력 경로가 폴더면 열고, 파일이면 Finder/Explorer에서 해당 산출물을 표시 |
 | 상태 필터링 | 성공/부분 성공/실패 상태별 필터 |
 | 통계 표시 | 전체/성공/실패 건수 및 총 용량 |
 
@@ -46,7 +46,7 @@ interface HistoryPackageItem {
 
 ```typescript
 interface HistorySettings {
-  outputFormat: 'zip' | 'tar.gz' | 'mirror';
+  outputFormat: 'zip' | 'tar.gz';
   includeScripts: boolean;
   includeDependencies: boolean;
 }
@@ -62,7 +62,7 @@ interface DownloadHistory {
   timestamp: string;           // ISO 8601 형식
   packages: HistoryPackageItem[];
   settings: HistorySettings;
-  outputPath: string;          // 출력 파일/폴더 경로
+  outputPath: string;          // 실제 산출물 경로 (예: /path/to/output.zip)
   totalSize: number;           // 바이트 단위
   status: 'success' | 'partial' | 'failed';
   downloadedCount?: number;    // 성공한 파일 수
@@ -89,7 +89,7 @@ interface HistoryState {
 
 | 액션 | 파라미터 | 설명 |
 |------|----------|------|
-| `addHistory` | packages, settings, outputPath, totalSize, status, downloadedCount?, failedCount? | 히스토리 추가 (100개 초과 시 오래된 것 삭제) |
+| `addHistory` | packages, settings, outputPath, totalSize, status, downloadedCount?, failedCount? | 히스토리 추가 (시작 시점 설정 스냅샷과 실제 산출물 경로 저장, 100개 초과 시 오래된 것 삭제) |
 | `getHistory` | id | ID로 특정 히스토리 조회 |
 | `getHistories` | - | 전체 히스토리 조회 |
 | `deleteHistory` | id | 특정 히스토리 삭제 |
@@ -191,7 +191,7 @@ history: {
 
 ### DownloadPage에서 자동 저장
 
-다운로드 완료 시 (`download:all-complete` 이벤트) 자동으로 히스토리 저장:
+다운로드 완료 시 (`download:all-complete` 이벤트) 자동으로 히스토리 저장합니다. 아카이브 출력(`zip`, `tar.gz`)에서는 이벤트의 `outputPath`가 실제 생성된 압축 파일 경로를 담고, 그 값이 그대로 히스토리에 저장됩니다.
 
 ```typescript
 // DownloadPage.tsx 내 download:all-complete 핸들러

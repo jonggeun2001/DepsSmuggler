@@ -1,8 +1,6 @@
 import archiver from 'archiver';
-import * as tar from 'tar';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import * as zlib from 'zlib';
 import { PackageInfo } from '../../types';
 import logger from '../../utils/logger';
 import { resolvePath, toUnixPath } from '../shared/path-utils';
@@ -47,102 +45,62 @@ export class ArchivePackager {
     packages: PackageInfo[],
     options: ArchiveOptions
   ): Promise<string> {
-    const {
-      format,
-      compressionLevel = 6,
-      includeManifest = true,
-      includeReadme = true,
-      onProgress,
-    } = options;
+    const fileEntries = files.map((file) => ({
+      sourcePath: file,
+      archivePath: path.posix.join('packages', path.basename(file)),
+    }));
 
-    // 출력 디렉토리 생성
+    return this.createArchiveFromFileEntries(fileEntries, outputPath, packages, options);
+  }
+
+  /**
+   * 준비된 디렉터리를 그대로 보존하면서 압축 파일 생성
+   */
+  async createArchiveFromDirectory(
+    sourceDir: string,
+    outputPath: string,
+    packages: PackageInfo[],
+    options: ArchiveOptions
+  ): Promise<string> {
+    const sourceFiles = await this.collectFiles(sourceDir);
+    const { totalBytes, totalFiles } = await this.reportPreparationProgress(sourceFiles, options.onProgress);
+    const metadataEntries = this.buildMetadataEntries(
+      packages,
+      totalBytes,
+      totalFiles,
+      options.includeManifest,
+      options.includeReadme
+    );
+
     await fs.ensureDir(path.dirname(outputPath));
 
-    // 총 파일 크기 계산
-    let totalBytes = 0;
-    for (const file of files) {
-      const stat = await fs.stat(file);
-      totalBytes += stat.size;
+    if (options.format === 'zip') {
+      await this.createZipFromDirectory(sourceDir, outputPath, options.compressionLevel ?? 6, metadataEntries);
+    } else {
+      await this.createTarGzFromDirectory(sourceDir, outputPath, options.compressionLevel ?? 6, metadataEntries);
     }
 
-    // 임시 디렉토리 생성
-    const tempDir = path.join(path.dirname(outputPath), `.temp-${Date.now()}`);
-    await fs.ensureDir(tempDir);
-    const packagesDir = path.join(tempDir, 'packages');
-    await fs.ensureDir(packagesDir);
+    logger.info('압축 파일 생성 완료', {
+      outputPath,
+      format: options.format,
+      fileCount: totalFiles,
+      totalBytes,
+    });
 
-    try {
-      // 파일 복사
-      let processedBytes = 0;
-      let processedFiles = 0;
-
-      for (const file of files) {
-        const destPath = path.join(packagesDir, path.basename(file));
-        await fs.copy(file, destPath);
-
-        const stat = await fs.stat(file);
-        processedBytes += stat.size;
-        processedFiles++;
-
-        if (onProgress) {
-          onProgress({
-            processedFiles,
-            totalFiles: files.length,
-            processedBytes,
-            totalBytes,
-            percentage: (processedBytes / totalBytes) * 100,
-          });
-        }
-      }
-
-      // 매니페스트 생성
-      if (includeManifest) {
-        const manifest = this.createManifest(packages, totalBytes, files.length);
-        await fs.writeJson(
-          path.join(tempDir, 'manifest.json'),
-          manifest,
-          { spaces: 2 }
-        );
-      }
-
-      // README 생성
-      if (includeReadme) {
-        const readme = this.createReadme(packages);
-        await fs.writeFile(path.join(tempDir, 'README.txt'), readme, 'utf-8');
-      }
-
-      // 압축 실행
-      if (format === 'zip') {
-        await this.createZip(tempDir, outputPath, compressionLevel);
-      } else {
-        await this.createTarGz(tempDir, outputPath, compressionLevel);
-      }
-
-      logger.info('압축 파일 생성 완료', {
-        outputPath,
-        format,
-        fileCount: files.length,
-        totalBytes,
-      });
-
-      return outputPath;
-    } finally {
-      // 임시 디렉토리 삭제
-      await fs.remove(tempDir);
-    }
+    return outputPath;
   }
 
   /**
    * ZIP 압축 파일 생성
    * ZIP 표준에서는 경로 구분자로 forward slash(/)만 허용
    */
-  private async createZip(
+  private async createZipFromDirectory(
     sourceDir: string,
     outputPath: string,
-    compressionLevel: number
+    compressionLevel: number,
+    metadataEntries: Array<{ name: string; content: string }>
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      // 경로 정규화
       const normalizedSourceDir = resolvePath(sourceDir);
       const normalizedOutputPath = resolvePath(outputPath);
 
@@ -152,11 +110,14 @@ export class ArchivePackager {
       });
 
       output.on('close', () => resolve());
+      output.on('error', (err) => reject(err));
       archive.on('error', (err) => reject(err));
 
       archive.pipe(output);
-      // archiver는 내부적으로 경로를 처리하지만, 명시적으로 정규화된 경로 사용
       archive.directory(normalizedSourceDir, false);
+      for (const entry of metadataEntries) {
+        archive.append(entry.content, { name: entry.name });
+      }
       archive.finalize();
     });
   }
@@ -164,21 +125,196 @@ export class ArchivePackager {
   /**
    * TAR.GZ 압축 파일 생성
    */
-  private async createTarGz(
+  private async createTarGzFromDirectory(
     sourceDir: string,
     outputPath: string,
-    compressionLevel: number
+    compressionLevel: number,
+    metadataEntries: Array<{ name: string; content: string }>
   ): Promise<void> {
-    const files = await fs.readdir(sourceDir);
+    return new Promise((resolve, reject) => {
+      const normalizedSourceDir = resolvePath(sourceDir);
+      const normalizedOutputPath = resolvePath(outputPath);
 
-    await tar.create(
-      {
-        gzip: { level: compressionLevel },
-        file: outputPath,
-        cwd: sourceDir,
-      },
-      files
+      const output = fs.createWriteStream(normalizedOutputPath);
+      const archive = archiver('tar', {
+        gzip: true,
+        gzipOptions: { level: compressionLevel },
+      });
+
+      output.on('close', () => resolve());
+      output.on('error', (err) => reject(err));
+      archive.on('error', (err) => reject(err));
+
+      archive.pipe(output);
+      archive.directory(normalizedSourceDir, false);
+      for (const entry of metadataEntries) {
+        archive.append(entry.content, { name: entry.name });
+      }
+      archive.finalize();
+    });
+  }
+
+  private async collectFiles(sourceDir: string): Promise<string[]> {
+    const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+    const files: string[] = [];
+
+    for (const entry of entries) {
+      const fullPath = path.join(sourceDir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...await this.collectFiles(fullPath));
+      } else {
+        files.push(fullPath);
+      }
+    }
+
+    return files;
+  }
+
+  private async createArchiveFromFileEntries(
+    files: Array<{ sourcePath: string; archivePath: string }>,
+    outputPath: string,
+    packages: PackageInfo[],
+    options: ArchiveOptions
+  ): Promise<string> {
+    const { totalBytes, totalFiles } = await this.reportPreparationProgress(
+      files.map((file) => file.sourcePath),
+      options.onProgress
     );
+    const metadataEntries = this.buildMetadataEntries(
+      packages,
+      totalBytes,
+      totalFiles,
+      options.includeManifest,
+      options.includeReadme
+    );
+
+    await fs.ensureDir(path.dirname(outputPath));
+
+    if (options.format === 'zip') {
+      await this.createZipFromFileEntries(files, outputPath, options.compressionLevel ?? 6, metadataEntries);
+    } else {
+      await this.createTarGzFromFileEntries(files, outputPath, options.compressionLevel ?? 6, metadataEntries);
+    }
+
+    logger.info('압축 파일 생성 완료', {
+      outputPath,
+      format: options.format,
+      fileCount: totalFiles,
+      totalBytes,
+    });
+
+    return outputPath;
+  }
+
+  private async reportPreparationProgress(
+    files: string[],
+    onProgress?: (progress: ArchiveProgress) => void
+  ): Promise<{ totalBytes: number; totalFiles: number }> {
+    let totalBytes = 0;
+    const sizes: number[] = [];
+
+    for (const file of files) {
+      const stat = await fs.stat(file);
+      sizes.push(stat.size);
+      totalBytes += stat.size;
+    }
+
+    if (onProgress && files.length > 0) {
+      let processedBytes = 0;
+      files.forEach((_, index) => {
+        processedBytes += sizes[index];
+        onProgress({
+          processedFiles: index + 1,
+          totalFiles: files.length,
+          processedBytes,
+          totalBytes,
+          percentage: totalBytes === 0 ? 100 : (processedBytes / totalBytes) * 100,
+        });
+      });
+    }
+
+    return { totalBytes, totalFiles: files.length };
+  }
+
+  private buildMetadataEntries(
+    packages: PackageInfo[],
+    totalBytes: number,
+    fileCount: number,
+    includeManifest = true,
+    includeReadme = true
+  ): Array<{ name: string; content: string }> {
+    const metadataEntries: Array<{ name: string; content: string }> = [];
+
+    if (includeManifest) {
+      metadataEntries.push({
+        name: 'manifest.json',
+        content: JSON.stringify(this.createManifest(packages, totalBytes, fileCount), null, 2),
+      });
+    }
+
+    if (includeReadme) {
+      metadataEntries.push({
+        name: 'README.txt',
+        content: this.createReadme(packages),
+      });
+    }
+
+    return metadataEntries;
+  }
+
+  private async createZipFromFileEntries(
+    files: Array<{ sourcePath: string; archivePath: string }>,
+    outputPath: string,
+    compressionLevel: number,
+    metadataEntries: Array<{ name: string; content: string }>
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const output = fs.createWriteStream(resolvePath(outputPath));
+      const archive = archiver('zip', {
+        zlib: { level: compressionLevel },
+      });
+
+      output.on('close', () => resolve());
+      output.on('error', (err) => reject(err));
+      archive.on('error', (err) => reject(err));
+
+      archive.pipe(output);
+      for (const file of files) {
+        archive.file(resolvePath(file.sourcePath), { name: toUnixPath(file.archivePath) });
+      }
+      for (const entry of metadataEntries) {
+        archive.append(entry.content, { name: entry.name });
+      }
+      archive.finalize();
+    });
+  }
+
+  private async createTarGzFromFileEntries(
+    files: Array<{ sourcePath: string; archivePath: string }>,
+    outputPath: string,
+    compressionLevel: number,
+    metadataEntries: Array<{ name: string; content: string }>
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const output = fs.createWriteStream(resolvePath(outputPath));
+      const archive = archiver('tar', {
+        gzip: true,
+        gzipOptions: { level: compressionLevel },
+      });
+
+      output.on('close', () => resolve());
+      output.on('error', (err) => reject(err));
+      archive.on('error', (err) => reject(err));
+
+      archive.pipe(output);
+      for (const file of files) {
+        archive.file(resolvePath(file.sourcePath), { name: toUnixPath(file.archivePath) });
+      }
+      for (const entry of metadataEntries) {
+        archive.append(entry.content, { name: entry.name });
+      }
+      archive.finalize();
+    });
   }
 
   /**

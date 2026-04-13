@@ -64,9 +64,21 @@ const electronAPI = {
       return () => ipcRenderer.removeListener('download:deps-resolved', handler);
     },
     // 전체 다운로드 완료 이벤트
-    onAllComplete: (callback: (data: { success: boolean; outputPath: string }) => void): () => void => {
+    onAllComplete: (callback: (data: {
+      success: boolean;
+      outputPath: string;
+      cancelled?: boolean;
+      error?: string;
+      results?: Array<{ id: string; success: boolean; error?: string }>;
+    }) => void): () => void => {
       const handler = (_event: Electron.IpcRendererEvent, data: unknown) =>
-        callback(data as { success: boolean; outputPath: string });
+        callback(data as {
+          success: boolean;
+          outputPath: string;
+          cancelled?: boolean;
+          error?: string;
+          results?: Array<{ id: string; success: boolean; error?: string }>;
+        });
       ipcRenderer.on('download:all-complete', handler);
       return () => ipcRenderer.removeListener('download:all-complete', handler);
     },

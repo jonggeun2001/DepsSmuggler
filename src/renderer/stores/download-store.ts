@@ -53,7 +53,7 @@ interface DownloadState {
   isDownloading: boolean;
   isPaused: boolean;
   outputPath: string;
-  outputFormat: 'zip' | 'tar.gz' | 'mirror';
+  outputFormat: 'zip' | 'tar.gz';
   packagingStatus: PackagingStatus;
   packagingProgress: number;
   logs: LogEntry[];
@@ -69,7 +69,7 @@ interface DownloadState {
   setIsDownloading: (isDownloading: boolean) => void;
   setIsPaused: (isPaused: boolean) => void;
   setOutputPath: (path: string) => void;
-  setOutputFormat: (format: 'zip' | 'tar.gz' | 'mirror') => void;
+  setOutputFormat: (format: 'zip' | 'tar.gz') => void;
   setPackagingStatus: (status: PackagingStatus) => void;
   setPackagingProgress: (progress: number) => void;
   addLog: (level: LogEntry['level'], message: string, details?: string) => void;

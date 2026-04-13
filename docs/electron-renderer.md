@@ -109,7 +109,7 @@
 
 특징:
 
-- Electron 환경에서는 settings store가 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화됩니다.
+- Electron 환경에서는 settings store가 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화되며, 레거시 `defaultOutputFormat/defaultArchiveType` 조합은 로드 시 `zip | tar.gz`로 정규화됩니다.
 - settings UI는 `zip`/`tar.gz`를 노출하지만, 현재 main process에서 실제 아카이브 생성이 연결된 형식은 `zip`뿐입니다.
 - 설정 화면의 캐시 위젯은 현재 `cache:*` IPC 기준 패키지 메타데이터 캐시만 집계/삭제합니다.
 - 현재 UI 히스토리의 source of truth는 Zustand persist 키 `depssmuggler-history`입니다.
@@ -138,7 +138,7 @@
 ### 일반 패키지
 
 - `DownloadPage`는 설정 스토어의 `defaultOutputFormat`, `includeInstallScripts`를 사용합니다.
-- 설정 UI에는 `zip`과 `tar.gz`가 보이지만, 현재 main process가 실제 아카이브를 생성하는 형식은 `zip`뿐입니다.
+- 설정 UI와 main process 모두 `zip`과 `tar.gz`를 실제 아카이브 출력 형식으로 사용합니다.
 
 ### OS 패키지
 
