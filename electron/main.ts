@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as https from 'https';
+import * as fse from 'fs-extra';
 import axios from 'axios';
 
 // SSL 인증서 검증 비활성화 (기업 프록시/방화벽 환경 지원)
@@ -236,8 +237,16 @@ ipcMain.handle('select-directory', async () => {
 });
 
 // 폴더 열기 (Finder/Explorer)
-ipcMain.handle('open-folder', async (_, folderPath: string) => {
-  await shell.openPath(folderPath);
+ipcMain.handle('open-folder', async (_, targetPath: string) => {
+  if (await fse.pathExists(targetPath)) {
+    const stat = await fse.stat(targetPath);
+    if (stat.isFile()) {
+      shell.showItemInFolder(targetPath);
+      return;
+    }
+  }
+
+  await shell.openPath(targetPath);
 });
 
 // 파일 저장 다이얼로그
