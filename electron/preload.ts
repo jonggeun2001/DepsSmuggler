@@ -18,10 +18,48 @@ const electronAPI = {
     ipcRenderer.invoke('save-file', defaultPath),
   openFolder: (folderPath: string): Promise<void> =>
     ipcRenderer.invoke('open-folder', folderPath),
+  testSmtpConnection: (config: {
+    host: string;
+    port: number;
+    user?: string;
+    password?: string;
+    from?: string;
+  }): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('test-smtp-connection', config),
 
   // 다운로드 관련
   download: {
-    start: (data: { packages: unknown[]; options: unknown }): Promise<void> =>
+    start: (data: {
+      packages: unknown[];
+      options: {
+        outputDir: string;
+        outputFormat: 'zip' | 'tar.gz';
+        includeScripts: boolean;
+        targetOS?: string;
+        architecture?: string;
+        includeDependencies?: boolean;
+        pythonVersion?: string;
+        concurrency?: number;
+        deliveryMethod?: 'local' | 'email';
+        email?: {
+          to: string;
+          from?: string;
+          subject?: string;
+        };
+        fileSplit?: {
+          enabled: boolean;
+          maxSizeMB: number;
+        };
+        smtp?: {
+          host: string;
+          port: number;
+          user?: string;
+          password?: string;
+          from?: string;
+          secure?: boolean;
+        };
+      };
+    }): Promise<void> =>
       ipcRenderer.invoke('download:start', data),
     pause: (): Promise<void> => ipcRenderer.invoke('download:pause'),
     resume: (): Promise<void> => ipcRenderer.invoke('download:resume'),
@@ -67,6 +105,15 @@ const electronAPI = {
     onAllComplete: (callback: (data: {
       success: boolean;
       outputPath: string;
+      artifactPaths?: string[];
+      deliveryMethod?: 'local' | 'email';
+      deliveryResult?: {
+        emailSent: boolean;
+        emailsSent?: number;
+        attachmentsSent?: number;
+        splitApplied?: boolean;
+        error?: string;
+      };
       cancelled?: boolean;
       error?: string;
       results?: Array<{ id: string; success: boolean; error?: string }>;
@@ -75,6 +122,15 @@ const electronAPI = {
         callback(data as {
           success: boolean;
           outputPath: string;
+          artifactPaths?: string[];
+          deliveryMethod?: 'local' | 'email';
+          deliveryResult?: {
+            emailSent: boolean;
+            emailsSent?: number;
+            attachmentsSent?: number;
+            splitApplied?: boolean;
+            error?: string;
+          };
           cancelled?: boolean;
           error?: string;
           results?: Array<{ id: string; success: boolean; error?: string }>;

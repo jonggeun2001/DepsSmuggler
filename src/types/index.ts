@@ -312,8 +312,24 @@ export interface HistorySettings {
   includeScripts: boolean;
   /** 의존성 포함 여부 */
   includeDependencies: boolean;
+  /** 전달 방식 */
+  deliveryMethod: DeliveryMethod;
+  /** 이메일 전달 재실행용 수신자 */
+  smtpTo?: string;
+  /** 파일 분할 활성화 여부 */
+  fileSplitEnabled?: boolean;
+  /** 파일 분할 기준 크기 (MB) */
+  maxFileSizeMB?: number;
   /** OS 전용 출력 옵션 */
   osOutputOptions?: OSPackageOutputOptions;
+}
+
+export interface HistoryDeliveryResult {
+  emailSent: boolean;
+  emailsSent?: number;
+  attachmentsSent?: number;
+  splitApplied?: boolean;
+  error?: string;
 }
 
 /** 다운로드 히스토리 상태 */
@@ -331,6 +347,12 @@ export interface DownloadHistory {
   settings: HistorySettings;
   /** 출력 파일/폴더 경로 */
   outputPath: string;
+  /** 실제 산출물 경로 목록 */
+  artifactPaths?: string[];
+  /** 전달 방식 */
+  deliveryMethod?: DeliveryMethod;
+  /** 전달 결과 */
+  deliveryResult?: HistoryDeliveryResult;
   /** 총 다운로드 크기 (바이트) */
   totalSize: number;
   /** 다운로드 상태 */

@@ -1,13 +1,13 @@
 import React from 'react';
-import type { OSDownloadProgress } from '../../../core/downloaders/os-shared/types';
+import type { OSDownloadProgress as OSDownloadProgressData } from '../../../core/downloaders/os-shared/types';
 
 interface OSDownloadProgressProps {
-  progress: OSDownloadProgress | null;
+  progress: OSDownloadProgressData | null;
   packageCount: number;
   outputDir: string;
 }
 
-const phaseLabels: Record<OSDownloadProgress['phase'], string> = {
+const phaseLabels: Record<OSDownloadProgressData['phase'], string> = {
   resolving: '의존성 확인',
   downloading: '다운로드',
   verifying: '검증',

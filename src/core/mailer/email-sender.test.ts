@@ -79,12 +79,11 @@ describe('EmailSender', () => {
       });
     });
 
-    it('연결 테스트 실패 시 false를 반환해야 함', async () => {
+    it('연결 테스트 실패 시 원본 오류를 던져야 함', async () => {
       const mockTransporter = nodemailer.createTransport({} as nodemailer.TransportOptions);
       vi.mocked(mockTransporter.verify).mockRejectedValueOnce(new Error('Connection failed'));
 
-      const result = await sender.testConnection();
-      expect(result).toBe(false);
+      await expect(sender.testConnection()).rejects.toThrow('Connection failed');
     });
   });
 
@@ -101,6 +100,8 @@ describe('EmailSender', () => {
       expect(result.success).toBe(true);
       expect(result.messageId).toBe('test-message-id');
       expect(result.emailsSent).toBe(1);
+      expect(result.attachmentsSent).toBe(0);
+      expect(result.splitApplied).toBe(false);
     });
 
     it('여러 수신자에게 이메일을 발송해야 함', async () => {
@@ -113,6 +114,7 @@ describe('EmailSender', () => {
       const result = await sender.sendEmail(options);
 
       expect(result.success).toBe(true);
+      expect(result.attachmentsSent).toBe(0);
       expect(result.emailsSent).toBe(1);
     });
 
@@ -126,6 +128,7 @@ describe('EmailSender', () => {
       const result = await sender.sendEmail(options);
 
       expect(result.success).toBe(true);
+      expect(result.attachmentsSent).toBe(0);
     });
 
     it('첨부파일과 함께 이메일을 발송해야 함', async () => {
@@ -143,6 +146,7 @@ describe('EmailSender', () => {
       const result = await sender.sendEmail(options);
 
       expect(result.success).toBe(true);
+      expect(result.attachmentsSent).toBe(1);
     });
 
     it('패키지 정보와 함께 이메일을 발송해야 함', async () => {
@@ -214,6 +218,35 @@ describe('EmailSender', () => {
 
       expect(result.success).toBe(true);
       expect(result.emailsSent).toBeGreaterThan(1);
+      expect(result.attachmentsSent).toBe(2);
+    });
+
+    it('분할 발송 중 일부 파트가 실패해도 누적 발송 메타데이터를 반환해야 함', async () => {
+      sender.setMaxAttachmentSize(1024); // 1KB
+
+      const file1 = path.join(tempDir, 'part1.txt');
+      const file2 = path.join(tempDir, 'part2.txt');
+      await fs.writeFile(file1, 'a'.repeat(600));
+      await fs.writeFile(file2, 'b'.repeat(600));
+
+      const mockTransporter = nodemailer.createTransport({} as nodemailer.TransportOptions);
+      vi.mocked(mockTransporter.sendMail)
+        .mockResolvedValueOnce({ messageId: 'split-part-1' } as never)
+        .mockRejectedValueOnce(new Error('split send failed'));
+
+      const options: EmailOptions = {
+        to: 'recipient@example.com',
+        subject: 'Large Files',
+        body: 'Please see attachments.',
+        attachments: [file1, file2],
+      };
+
+      const result = await sender.sendEmail(options);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('split send failed');
+      expect(result.emailsSent).toBe(1);
+      expect(result.attachmentsSent).toBe(1);
     });
   });
 
@@ -473,6 +506,26 @@ describe('발신자 주소', () => {
 
     const result = await sender.sendEmail(options);
     expect(result.success).toBe(true);
+
+    sender.close();
+  });
+
+  it('auth 없이도 from 주소로 발송 설정을 구성할 수 있어야 함', async () => {
+    const sender = new EmailSender({
+      host: 'smtp.example.com',
+      port: 25,
+      secure: false,
+      from: 'sender@example.com',
+    });
+
+    const result = await sender.sendEmail({
+      to: 'recipient@example.com',
+      subject: 'No Auth',
+      body: 'Test',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.attachmentsSent).toBe(0);
 
     sender.close();
   });

@@ -120,6 +120,7 @@ describe('FileSplitter', () => {
       expect(result.parts.length).toBe(1);
       expect(result.metadata.partCount).toBe(1);
       expect(result.metadata.originalFileName).toBe('small.txt');
+      expect(result.metadataPath).toBeUndefined();
     });
 
     it('큰 파일을 여러 파트로 분할해야 함', async () => {
@@ -134,6 +135,7 @@ describe('FileSplitter', () => {
       expect(result.parts.length).toBe(3);
       expect(result.metadata.partCount).toBe(3);
       expect(result.metadata.checksum).toBeDefined();
+      expect(result.metadataPath).toBe(path.join(tempDir, 'large.bin.meta.json'));
     });
 
     it('진행률 콜백이 호출되어야 함', async () => {
@@ -171,6 +173,7 @@ describe('FileSplitter', () => {
       });
 
       expect(result.mergeScripts).toBeDefined();
+      expect(result.metadataPath).toBe(path.join(tempDir, 'script-test.bin.meta.json'));
       if (result.mergeScripts) {
         expect(result.mergeScripts.bash).toBeDefined();
         expect(result.mergeScripts.powershell).toBeDefined();

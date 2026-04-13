@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
   DownloadHistory,
+  HistoryDeliveryResult,
   HistoryPackageItem,
   HistorySettings,
   HistoryStatus,
@@ -27,7 +28,12 @@ interface HistoryState {
     totalSize: number,
     status: HistoryStatus,
     downloadedCount?: number,
-    failedCount?: number
+    failedCount?: number,
+    options?: {
+      artifactPaths?: string[];
+      deliveryMethod?: 'local' | 'email';
+      deliveryResult?: HistoryDeliveryResult;
+    }
   ) => string;
 
   // ID로 히스토리 조회
@@ -55,7 +61,8 @@ export const useHistoryStore = create<HistoryState>()(
         totalSize,
         status,
         downloadedCount,
-        failedCount
+        failedCount,
+        options
       ) => {
         const id = generateId();
         const newHistory: DownloadHistory = {
@@ -64,6 +71,9 @@ export const useHistoryStore = create<HistoryState>()(
           packages,
           settings,
           outputPath,
+          artifactPaths: options?.artifactPaths,
+          deliveryMethod: options?.deliveryMethod ?? settings.deliveryMethod,
+          deliveryResult: options?.deliveryResult,
           totalSize,
           status,
           downloadedCount,

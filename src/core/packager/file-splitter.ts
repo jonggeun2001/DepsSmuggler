@@ -26,6 +26,7 @@ export interface SplitProgress {
 export interface SplitResult {
   parts: string[];
   metadata: SplitMetadata;
+  metadataPath?: string;
   mergeScripts?: {
     bash?: string;
     powershell?: string;
@@ -104,6 +105,7 @@ export class FileSplitter {
           checksum,
           createdAt: new Date().toISOString(),
         },
+        metadataPath: undefined,
       };
     }
 
@@ -203,6 +205,7 @@ export class FileSplitter {
         const result: SplitResult = {
           parts,
           metadata,
+          metadataPath,
         };
 
         // 병합 스크립트 생성

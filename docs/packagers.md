@@ -224,40 +224,35 @@ const scripts = await generator.generateAllScripts({
 
 ```typescript
 interface SplitOptions {
-  inputPath: string;           // 원본 파일 경로
-  outputDir: string;           // 분할 파일 출력 디렉토리
-  chunkSize?: number;          // 분할 크기 (바이트)
+  maxSizeMB?: number;          // 분할 기준 크기 (MB)
   onProgress?: (progress: SplitProgress) => void;
+  generateMergeScripts?: boolean;
 }
 
 interface SplitProgress {
-  current: number;             // 현재 파트 번호
-  total: number;               // 총 파트 수
-  bytesWritten: number;        // 기록된 바이트
+  currentPart: number;         // 현재 파트 번호
+  totalParts: number;          // 총 파트 수
+  processedBytes: number;      // 처리된 바이트
   totalBytes: number;          // 총 바이트
+  percentage: number;
 }
 
 interface SplitResult {
-  success: boolean;
   parts: string[];             // 분할된 파일 경로 목록
   metadata: SplitMetadata;
-  metadataPath: string;
-  mergeScriptBash: string;     // Bash 병합 스크립트 경로
-  mergeScriptPowerShell: string; // PowerShell 병합 스크립트 경로
+  metadataPath?: string;       // 생성된 메타데이터 JSON 경로
+  mergeScripts?: {
+    bash?: string;             // Bash 병합 스크립트 경로
+    powershell?: string;       // PowerShell 병합 스크립트 경로
+  };
 }
 
 interface SplitMetadata {
-  originalName: string;
+  originalFileName: string;
   originalSize: number;
   checksum: string;
-  chunkSize: number;
   partCount: number;
-  parts: Array<{
-    index: number;
-    filename: string;
-    size: number;
-    checksum: string;
-  }>;
+  partSize: number;
   createdAt: string;
 }
 ```
@@ -269,7 +264,7 @@ split/
 ├── packages.zip.part.001
 ├── packages.zip.part.002
 ├── packages.zip.part.003
-├── packages.zip.metadata.json
+├── packages.zip.meta.json
 ├── merge.sh
 └── merge.ps1
 ```
@@ -281,19 +276,19 @@ import { getFileSplitter } from './core/packager/file-splitter';
 const splitter = getFileSplitter();
 
 // 분할
-const result = await splitter.splitFile({
-  inputPath: '/tmp/large-file.zip',
-  outputDir: '/tmp/split',
-  chunkSize: 10 * 1024 * 1024, // 10MB
-  onProgress: (p) => console.log(`Part ${p.current}/${p.total}`)
+const result = await splitter.splitFile('/tmp/large-file.zip', {
+  maxSizeMB: 10,
+  onProgress: (p) => console.log(`Part ${p.currentPart}/${p.totalParts}`)
 });
 
 // 병합
 const joinedPath = await splitter.joinFiles(
-  result.metadataPath,
+  result.metadataPath!,
   '/tmp/restored-file.zip'
 );
 ```
+
+현재 일반 다운로드 이메일 전달 플로우는 첨부 크기 초과 시 `splitFile()`을 호출해 생성된 파트, 메타데이터 JSON, 병합 스크립트를 그대로 메일 첨부 대상으로 사용합니다.
 
 ---
 

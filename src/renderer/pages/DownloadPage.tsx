@@ -54,8 +54,13 @@ import {
 } from '../stores/download-store';
 import { useSettingsStore } from '../stores/settings-store';
 import { useHistoryStore } from '../stores/history-store';
-import type { HistoryPackageItem, HistorySettings, HistoryStatus } from '../../types';
-import type { DependencyAPI } from '../../types/electron';
+import type {
+  HistoryDeliveryResult,
+  HistoryPackageItem,
+  HistorySettings,
+  HistoryStatus,
+} from '../../types';
+import type { AllCompleteData, DependencyAPI } from '../../types/electron';
 import type {
   OSPackageInfo,
   OSPackageOutputOptions,
@@ -64,6 +69,10 @@ import type {
   OSDownloadProgress as OSDownloadProgressData,
   PackageDependency,
 } from '../../core/downloaders/os-shared/types';
+import {
+  buildHistorySettings,
+  getEmailDeliveryValidationError,
+} from './download-delivery-utils';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -185,14 +194,40 @@ function toOSPackageInfo(item: CartItem): OSPackageInfo | null {
     return null;
   }
 
+  const architectureMap: Partial<Record<NonNullable<CartItem['arch']>, OSPackageInfo['architecture']>> = {
+    x86_64: 'x86_64',
+    amd64: 'amd64',
+    arm64: 'arm64',
+    aarch64: 'aarch64',
+    i386: 'i386',
+    i686: 'i686',
+    noarch: 'noarch',
+    all: 'all',
+    'arm/v7': 'armv7',
+    '386': 'i386',
+  };
+  const architecture = architectureMap[item.arch];
+  if (!architecture) {
+    return null;
+  }
+
+  const repository: OSPackageInfo['repository'] = {
+    id: item.repository.baseUrl,
+    name: item.repository.name || item.repository.baseUrl,
+    baseUrl: item.repository.baseUrl,
+    enabled: true,
+    gpgCheck: true,
+    isOfficial: false,
+  };
+
   return {
     name: item.name,
     version: item.version,
-    architecture: item.arch,
+    architecture,
     size: 0,
     checksum: { type: 'sha256', value: '' },
     location: item.location,
-    repository: item.repository,
+    repository,
     dependencies: [],
     description: typeof item.metadata?.description === 'string' ? item.metadata.description : undefined,
     summary: typeof item.metadata?.description === 'string' ? item.metadata.description : undefined,
@@ -262,7 +297,27 @@ const DownloadPage: React.FC = () => {
   const cartItems = useCartStore((state) => state.items);
   const removeCartItem = useCartStore((state) => state.removeItem);
   const clearCart = useCartStore((state) => state.clearCart);
-  const { defaultTargetOS, defaultArchitecture, includeDependencies, languageVersions, cudaVersion, concurrentDownloads, defaultDownloadPath, downloadRenderInterval, yumDistribution, aptDistribution, apkDistribution } = useSettingsStore();
+  const {
+    defaultTargetOS,
+    defaultArchitecture,
+    includeDependencies,
+    languageVersions,
+    cudaVersion,
+    concurrentDownloads,
+    defaultDownloadPath,
+    downloadRenderInterval,
+    yumDistribution,
+    aptDistribution,
+    apkDistribution,
+    enableFileSplit,
+    maxFileSize,
+    smtpHost,
+    smtpPort,
+    smtpUser,
+    smtpPassword,
+    smtpFrom,
+    smtpTo,
+  } = useSettingsStore();
   const {
     items: downloadItems,
     isDownloading,
@@ -296,7 +351,20 @@ const DownloadPage: React.FC = () => {
   const { addHistory } = useHistoryStore();
 
   const [outputDir, setOutputDir] = useState(outputPath || defaultDownloadPath || '');
-  const historyOSOutputOptions = (location.state as { osOutputOptions?: OSPackageOutputOptions } | null)?.osOutputOptions;
+  const [deliveryMethod, setDeliveryMethod] = useState<'local' | 'email'>('local');
+  const [completedOutputPath, setCompletedOutputPath] = useState('');
+  const [completedArtifactPaths, setCompletedArtifactPaths] = useState<string[]>([]);
+  const [completedDeliveryResult, setCompletedDeliveryResult] = useState<HistoryDeliveryResult | undefined>();
+  const [completedError, setCompletedError] = useState('');
+  const historyDownloadState = (
+    location.state as {
+      deliveryMethod?: 'local' | 'email';
+      emailRecipient?: string;
+      osOutputOptions?: OSPackageOutputOptions;
+    } | null
+  );
+  const historyOSOutputOptions = historyDownloadState?.osOutputOptions;
+  const effectiveSmtpTo = historyDownloadState?.emailRecipient || smtpTo;
   const osCartItems = useMemo(() => cartItems.filter(isOSCartItem), [cartItems]);
   const hasOnlyOSPackages = cartItems.length > 0 && osCartItems.length === cartItems.length;
   const osPackageManagers = useMemo(
@@ -371,6 +439,7 @@ const DownloadPage: React.FC = () => {
   // 히스토리 저장용 장바구니 데이터 (다운로드 시작 시 스냅샷)
   const cartSnapshotRef = useRef<typeof cartItems>([]);
   const historySettingsSnapshotRef = useRef<HistorySettings | null>(null);
+  const historyTrackedItemIdsRef = useRef<Set<string> | null>(null);
   // 배치 업데이트용 pending 상태 저장
   const pendingUpdatesRef = useRef<Map<string, Partial<DownloadItem>>>(new Map());
   const pendingLogsRef = useRef<Array<{ level: 'info' | 'warn' | 'error' | 'success'; message: string; details?: string }>>([]);
@@ -390,6 +459,14 @@ const DownloadPage: React.FC = () => {
     }
 
   }, [cartItems, downloadItems.length, setItems, clearLogs]);
+
+  useEffect(() => {
+    const restoredDeliveryMethod = historyDownloadState?.deliveryMethod;
+
+    if (restoredDeliveryMethod) {
+      setDeliveryMethod(restoredDeliveryMethod);
+    }
+  }, [historyDownloadState]);
 
   useEffect(() => {
     if (osCartContext) {
@@ -690,18 +767,110 @@ const DownloadPage: React.FC = () => {
       }
     });
 
+    const persistHistoryEntry = (data: AllCompleteData, forcedStatus?: HistoryStatus) => {
+      const finalItems = useDownloadStore.getState().items;
+      const trackedItemIds = historyTrackedItemIdsRef.current;
+      const relevantItems = trackedItemIds && trackedItemIds.size > 0
+        ? finalItems.filter((item) => trackedItemIds.has(item.id))
+        : finalItems;
+
+      const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
+        type: item.type,
+        name: item.name,
+        version: item.version,
+        arch: item.arch,
+        languageVersion: item.languageVersion,
+        metadata: item.metadata,
+      }));
+
+      const historySettings = historySettingsSnapshotRef.current ?? buildHistorySettings({
+        outputFormat,
+        includeScripts: includeInstallScripts,
+        includeDependencies,
+        deliveryMethod,
+        smtpTo: effectiveSmtpTo,
+        fileSplitEnabled: enableFileSplit,
+        maxFileSizeMB: maxFileSize,
+      });
+
+      const resultMap = new Map((data.results || []).map((result) => [result.id, result.success]));
+      let completedCount = 0;
+      let failedCount = 0;
+
+      relevantItems.forEach((item) => {
+        const result = resultMap.get(item.id);
+        if (typeof result === 'boolean') {
+          if (result) {
+            completedCount += 1;
+          } else {
+            failedCount += 1;
+          }
+          return;
+        }
+
+        if (item.status === 'completed') {
+          completedCount += 1;
+        } else if (item.status === 'failed') {
+          failedCount += 1;
+        }
+      });
+
+      const totalCount = relevantItems.length || data.results?.length || 0;
+      let historyStatus = forcedStatus || 'success';
+
+      if (!forcedStatus) {
+        if (failedCount === totalCount && totalCount > 0) {
+          historyStatus = 'failed';
+        } else if (failedCount > 0) {
+          historyStatus = 'partial';
+        }
+      }
+
+      const totalSize = relevantItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
+
+      addHistory(
+        historyPackages,
+        historySettings,
+        data.outputPath,
+        totalSize,
+        historyStatus,
+        completedCount,
+        failedCount,
+        {
+          artifactPaths: data.artifactPaths,
+          deliveryMethod: data.deliveryMethod || historySettings.deliveryMethod,
+          deliveryResult: data.deliveryResult,
+        }
+      );
+    };
+
     // 전체 다운로드 완료 리스너
     const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
       if (!data.success) {
         setIsDownloading(false);
+        setIsPaused(false);
+
+        if (data.cancelled) {
+          setPackagingStatus('idle');
+          setPackagingProgress(0);
+          setCompletedOutputPath('');
+          setCompletedArtifactPaths([]);
+          setCompletedDeliveryResult(undefined);
+          setCompletedError('');
+          return;
+        }
+
         setPackagingStatus('failed');
         setPackagingProgress(0);
+        setCompletedOutputPath(data.outputPath || '');
+        setCompletedArtifactPaths(data.artifactPaths || []);
+        setCompletedDeliveryResult(data.deliveryResult);
+        setCompletedError(data.error || data.deliveryResult?.error || '');
 
-        if (!data.cancelled) {
-          const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
-          scheduleLogBatch('error', '다운로드/패키징 실패', errorMessage);
-          message.error(errorMessage);
-        }
+        const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
+        scheduleLogBatch('error', '다운로드/패키징 실패', errorMessage);
+        message.error(errorMessage);
+        persistHistoryEntry(data, 'failed');
 
         return;
       }
@@ -719,56 +888,21 @@ const DownloadPage: React.FC = () => {
       setIsDownloading(false);
       setPackagingStatus('completed');
       setPackagingProgress(100);
+      setCompletedOutputPath(data.outputPath);
+      setCompletedArtifactPaths(data.artifactPaths || [data.outputPath]);
+      setCompletedDeliveryResult(data.deliveryResult);
+      setCompletedError('');
+      const completionMessage = data.deliveryMethod === 'email'
+        ? '다운로드, 패키징 및 이메일 전달이 완료되었습니다'
+        : '다운로드 및 패키징이 완료되었습니다';
       scheduleLogBatch('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
-      message.success('다운로드 및 패키징이 완료되었습니다');
-
-      // 히스토리 저장
-      const finalItems = useDownloadStore.getState().items;
-
-      // 패키지 정보 변환 (다운로드 시작 시 저장된 스냅샷 사용)
-      const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
-        type: item.type,
-        name: item.name,
-        version: item.version,
-        arch: item.arch,
-        languageVersion: item.languageVersion,
-        metadata: item.metadata,
-      }));
-
-      // 설정 정보
-      const historySettings = historySettingsSnapshotRef.current ?? {
-        outputFormat,
-        includeScripts: includeInstallScripts,
-        includeDependencies,
-      };
-
-      // 상태 계산
-      const completedCount = finalItems.filter((i) => i.status === 'completed').length;
-      const failedCount = finalItems.filter((i) => i.status === 'failed').length;
-      const totalCount = finalItems.length;
-
-      let historyStatus: HistoryStatus = 'success';
-      if (failedCount === totalCount) {
-        historyStatus = 'failed';
-      } else if (failedCount > 0) {
-        historyStatus = 'partial';
-      }
-
-      // 총 크기 계산
-      const totalSize = finalItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
-
-      // 히스토리 저장
-      addHistory(
-        historyPackages,
-        historySettings,
-        data.outputPath,
-        totalSize,
-        historyStatus,
-        completedCount,
-        failedCount
-      );
+      message.success(completionMessage);
+      persistHistoryEntry(data);
 
       // 실패 없이 모두 완료되면 장바구니 자동 비우기
+      const finalItems = useDownloadStore.getState().items;
+      const failedCount = (data.results || []).filter((result) => !result.success).length
+        || finalItems.filter((item) => item.status === 'failed').length;
       if (failedCount === 0) {
         clearCart();
       }
@@ -788,7 +922,24 @@ const DownloadPage: React.FC = () => {
       pendingLogsRef.current = [];
     };
     // downloadItems 대신 downloadItemsRef를 사용하므로 dependency에서 제거
-  }, [updateItem, updateItemsBatch, addLog, addLogsBatch, setItems, setIsDownloading, setPackagingStatus, setPackagingProgress, addHistory, clearCart]);
+  }, [
+    updateItem,
+    updateItemsBatch,
+    addLog,
+    addLogsBatch,
+    setItems,
+    setIsDownloading,
+    setPackagingStatus,
+    setPackagingProgress,
+    addHistory,
+    clearCart,
+    outputFormat,
+    includeInstallScripts,
+    includeDependencies,
+    deliveryMethod,
+    enableFileSplit,
+    maxFileSize,
+  ]);
 
   // downloadItems 변경 시 ref 동기화 (IPC 이벤트 핸들러에서 최신 상태 참조용)
   // updateItem 호출 후에도 ref가 최신 상태를 유지하도록 함
@@ -1205,12 +1356,13 @@ const DownloadPage: React.FC = () => {
         : item.metadata,
     }));
 
-    const historySettings: HistorySettings = {
+    const historySettings = buildHistorySettings({
       outputFormat: result.outputOptions.archiveFormat || 'zip',
       includeScripts: result.outputOptions.generateScripts,
       includeDependencies,
+      deliveryMethod: 'local',
       osOutputOptions: result.outputOptions,
-    };
+    });
 
     const failedCount = result.failed.length + result.unresolved.length;
     const downloadedCount = result.success.length;
@@ -1373,6 +1525,20 @@ const DownloadPage: React.FC = () => {
       return;
     }
 
+    const emailDeliveryValidationError = getEmailDeliveryValidationError({
+      deliveryMethod,
+      smtpHost,
+      smtpPort,
+      smtpTo: effectiveSmtpTo,
+      smtpFrom,
+      smtpUser,
+    });
+
+    if (emailDeliveryValidationError) {
+      message.warning(emailDeliveryValidationError);
+      return;
+    }
+
     if (includeDependencies && !depsResolved) {
       message.warning('먼저 의존성 확인을 진행하세요');
       return;
@@ -1401,11 +1567,20 @@ const DownloadPage: React.FC = () => {
     window.electronAPI?.log?.('info', `[TIMING] Proceeding with download at ${Date.now() - handleStartTime}ms`);
     // 히스토리 저장용 장바구니 스냅샷 저장
     cartSnapshotRef.current = [...cartItems];
-    historySettingsSnapshotRef.current = {
+    historyTrackedItemIdsRef.current = new Set(downloadItems.map((item) => item.id));
+    historySettingsSnapshotRef.current = buildHistorySettings({
       outputFormat,
       includeScripts: includeInstallScripts,
       includeDependencies,
-    };
+      deliveryMethod,
+      smtpTo: effectiveSmtpTo,
+      fileSplitEnabled: enableFileSplit,
+      maxFileSizeMB: maxFileSize,
+    });
+    setCompletedOutputPath('');
+    setCompletedArtifactPaths([]);
+    setCompletedDeliveryResult(undefined);
+    setCompletedError('');
 
     addLog('info', '다운로드 시작', `총 ${downloadItems.length}개 패키지`);
 
@@ -1447,6 +1622,26 @@ const DownloadPage: React.FC = () => {
         includeDependencies,
         pythonVersion: languageVersions.python,
         concurrency: concurrentDownloads,
+        deliveryMethod,
+        email: deliveryMethod === 'email'
+          ? {
+              to: effectiveSmtpTo,
+              from: smtpFrom || smtpUser,
+            }
+          : undefined,
+        fileSplit: {
+          enabled: enableFileSplit,
+          maxSizeMB: maxFileSize,
+        },
+        smtp: deliveryMethod === 'email'
+          ? {
+              host: smtpHost,
+              port: smtpPort,
+              user: smtpUser,
+              password: smtpPassword,
+              from: smtpFrom || smtpUser,
+            }
+          : undefined,
       };
 
       window.electronAPI?.log?.('info', `[TIMING] Calling download.start IPC at ${Date.now() - handleStartTime}ms`);
@@ -1518,6 +1713,46 @@ const DownloadPage: React.FC = () => {
       return;
     }
 
+    const emailDeliveryValidationError = getEmailDeliveryValidationError({
+      deliveryMethod,
+      smtpHost,
+      smtpPort,
+      smtpTo: effectiveSmtpTo,
+      smtpFrom,
+      smtpUser,
+    });
+
+    if (emailDeliveryValidationError) {
+      message.warning(emailDeliveryValidationError);
+      return;
+    }
+
+    cartSnapshotRef.current = [{
+      id: item.id,
+      type: item.type as CartItem['type'],
+      name: item.name,
+      version: item.version,
+      arch: item.arch as CartItem['arch'],
+      metadata: item.metadata,
+      addedAt: Date.now(),
+      downloadUrl: item.downloadUrl,
+      repository: item.repository as CartItem['repository'],
+      location: item.location,
+      indexUrl: item.indexUrl,
+      extras: item.extras,
+      classifier: item.classifier,
+    }];
+    historyTrackedItemIdsRef.current = new Set([item.id]);
+    historySettingsSnapshotRef.current = buildHistorySettings({
+      outputFormat,
+      includeScripts: includeInstallScripts,
+      includeDependencies: false,
+      deliveryMethod,
+      smtpTo: effectiveSmtpTo,
+      fileSplitEnabled: enableFileSplit,
+      maxFileSizeMB: maxFileSize,
+    });
+
     // 상태를 pending → downloading으로 변경
     retryItem(item.id);
     updateItem(item.id, { status: 'downloading', progress: 0 });
@@ -1544,6 +1779,26 @@ const DownloadPage: React.FC = () => {
         includeDependencies: false, // 재시도 시 의존성 해결 불필요
         pythonVersion: languageVersions.python,
         concurrency: 1, // 단일 패키지이므로 1
+        deliveryMethod,
+        email: deliveryMethod === 'email'
+          ? {
+              to: effectiveSmtpTo,
+              from: smtpFrom || smtpUser,
+            }
+          : undefined,
+        fileSplit: {
+          enabled: enableFileSplit,
+          maxSizeMB: maxFileSize,
+        },
+        smtp: deliveryMethod === 'email'
+          ? {
+              host: smtpHost,
+              port: smtpPort,
+              user: smtpUser,
+              password: smtpPassword,
+              from: smtpFrom || smtpUser,
+            }
+          : undefined,
       };
 
       await window.electronAPI.download.start({ packages, options });
@@ -1559,6 +1814,12 @@ const DownloadPage: React.FC = () => {
     reset();
     setDepsResolved(false);
     dependencyResolutionBypassedRef.current = false;
+    setCompletedOutputPath('');
+    setCompletedArtifactPaths([]);
+    setCompletedDeliveryResult(undefined);
+    setCompletedError('');
+    setDeliveryMethod('local');
+    historyTrackedItemIdsRef.current = null;
     setOSProgress(null);
     setOSResult(null);
     setOSDownloadError(null);
@@ -1568,12 +1829,13 @@ const DownloadPage: React.FC = () => {
 
   // 다운로드 폴더 열기 (Finder/Explorer)
   const handleOpenFolder = async () => {
+    const targetPath = completedOutputPath || outputDir;
     if (window.electronAPI?.openFolder) {
-      await window.electronAPI.openFolder(outputDir);
+      await window.electronAPI.openFolder(targetPath);
     } else {
-      message.info(`폴더 열기: ${outputDir}`);
+      message.info(`폴더 열기: ${targetPath}`);
     }
-    addLog('info', `다운로드 폴더 열기: ${outputDir}`);
+    addLog('info', `다운로드 폴더 열기: ${targetPath}`);
   };
 
   // 테이블 컬럼
@@ -1692,7 +1954,10 @@ const DownloadPage: React.FC = () => {
   const allCompleted =
     downloadItems.length > 0 &&
     downloadItems.every((item) => ['completed', 'skipped'].includes(item.status));
-  const hasAnyCompleted = completedCount > 0;
+  const hasRecoverableArtifacts =
+    Boolean(completedOutputPath) ||
+    completedArtifactPaths.length > 0 ||
+    Boolean(completedDeliveryResult?.error);
 
   // 전체 다운로드 속도 (이동 평균 기반)
   const totalSpeed = calculateOverallSpeed();
@@ -1878,13 +2143,17 @@ const DownloadPage: React.FC = () => {
   }
 
   // 완료 화면
-  if (packagingStatus === 'completed' && allCompleted) {
+  if (packagingStatus === 'completed') {
     return (
       <div>
         <Result
-          status="success"
-          title="다운로드 완료"
-          subTitle={`${completedCount}개 패키지가 성공적으로 다운로드되었습니다`}
+          status={failedCount > 0 ? 'warning' : 'success'}
+          title={failedCount > 0 ? '부분 완료' : '다운로드 완료'}
+          subTitle={
+            failedCount > 0
+              ? `${completedCount}개 패키지가 완료되었고 ${failedCount}개는 실패했습니다. 생성된 산출물을 확인하세요.`
+              : `${completedCount}개 패키지가 성공적으로 다운로드되었습니다`
+          }
           extra={[
             <Button
               type="primary"
@@ -1943,9 +2212,45 @@ const DownloadPage: React.FC = () => {
           <div>
             <Text strong>다운로드 경로:</Text>
             <Paragraph copyable style={{ marginTop: 8 }}>
-              {outputDir}
+              {completedOutputPath || outputDir}
             </Paragraph>
           </div>
+
+          <Divider />
+
+          <div>
+            <Text strong>전달 방식:</Text>
+            <Paragraph style={{ marginTop: 8 }}>
+              {deliveryMethod === 'email' ? '이메일 전달' : '로컬 저장'}
+            </Paragraph>
+          </div>
+
+          {completedArtifactPaths.length > 0 && (
+            <div>
+              <Text strong>실제 산출물:</Text>
+              <div style={{ marginTop: 8 }}>
+                {completedArtifactPaths.map((artifactPath) => (
+                  <Paragraph key={artifactPath} copyable style={{ marginBottom: 4 }}>
+                    {artifactPath}
+                  </Paragraph>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {completedDeliveryResult?.emailSent && (
+            <Alert
+              type="success"
+              showIcon
+              style={{ marginTop: 16 }}
+              message={`이메일 전달 완료 (${completedDeliveryResult.emailsSent || 1}건)`}
+              description={
+                completedDeliveryResult.splitApplied
+                  ? '첨부 제한을 넘겨 분할 파일로 전달했습니다.'
+                  : '아카이브 파일을 그대로 첨부해 전달했습니다.'
+              }
+            />
+          )}
         </Card>
 
         {/* 다운로드된 패키지 목록 */}
@@ -1961,6 +2266,167 @@ const DownloadPage: React.FC = () => {
         </Card>
 
         {/* 로그 */}
+        <Card
+          size="small"
+          title={
+            <Space>
+              <span>로그</span>
+              <Tag>{logs.length}개</Tag>
+            </Space>
+          }
+          style={{ marginTop: 24 }}
+          styles={{ body: { padding: 0 } }}
+        >
+          <div
+            style={{
+              height: 200,
+              overflow: 'auto',
+              backgroundColor: '#1a1a1a',
+              padding: '8px 12px',
+              fontFamily: 'monospace',
+              fontSize: 12,
+            }}
+          >
+            {logs.length === 0 ? (
+              <Text type="secondary" style={{ color: '#666' }}>로그가 없습니다</Text>
+            ) : (
+              logs.map((log, index) => (
+                <div key={index} style={{ marginBottom: 4, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ flexShrink: 0 }}>{logIcons[log.level]}</span>
+                  <Text style={{ color: '#888', flexShrink: 0, minWidth: 70 }}>
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </Text>
+                  <Text style={{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warn' ? '#faad14' : '#d9d9d9' }}>
+                    {log.message}
+                    {log.details && <span style={{ color: '#888' }}> - {log.details}</span>}
+                  </Text>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (packagingStatus === 'failed' && hasRecoverableArtifacts) {
+    return (
+      <div>
+        <Result
+          status="error"
+          title={completedArtifactPaths.length > 0 ? '전달 실패' : '다운로드 실패'}
+          subTitle={
+            completedArtifactPaths.length > 0
+              ? '로컬 산출물은 생성되었습니다. 경로를 확인해 수동 전달을 진행할 수 있습니다.'
+              : '패키징 또는 전달 중 오류가 발생했습니다.'
+          }
+          extra={[
+            <Button
+              type="primary"
+              key="open"
+              icon={<FolderOpenOutlined />}
+              onClick={handleOpenFolder}
+            >
+              다운로드 폴더 열기
+            </Button>,
+            <Button key="done" icon={<ReloadOutlined />} onClick={handleComplete}>
+              새 다운로드
+            </Button>,
+          ]}
+        />
+
+        <Card title="실패 결과" style={{ marginTop: 24 }}>
+          <Alert
+            type="error"
+            showIcon
+            message="전달 실패 상세"
+            description={completedError || completedDeliveryResult?.error || '상세 오류를 확인할 수 없습니다.'}
+            style={{ marginBottom: 16 }}
+          />
+
+          <Row gutter={24}>
+            <Col span={6}>
+              <Statistic
+                title="완료"
+                value={completedCount}
+                suffix="개"
+                valueStyle={{ color: '#52c41a' }}
+                prefix={<CheckCircleOutlined />}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="실패"
+                value={failedCount}
+                suffix="개"
+                valueStyle={{ color: '#ff4d4f' }}
+                prefix={<CloseCircleOutlined />}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="건너뜀"
+                value={skippedCount}
+                suffix="개"
+                valueStyle={{ color: skippedCount > 0 ? '#faad14' : undefined }}
+                prefix={<ForwardOutlined />}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="출력 형식"
+                value={outputFormat.toUpperCase()}
+                prefix={<FileZipOutlined />}
+              />
+            </Col>
+          </Row>
+
+          <Divider />
+
+          <div>
+            <Text strong>대표 경로:</Text>
+            <Paragraph copyable style={{ marginTop: 8 }}>
+              {completedOutputPath || outputDir}
+            </Paragraph>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Text strong>전달 방식:</Text>
+            <Paragraph style={{ marginTop: 8 }}>
+              {deliveryMethod === 'email' ? '이메일 전달' : '로컬 저장'}
+            </Paragraph>
+          </div>
+
+          {completedArtifactPaths.length > 0 && (
+            <>
+              <Divider />
+              <div>
+                <Text strong>복구 가능한 산출물:</Text>
+                <div style={{ marginTop: 8 }}>
+                  {completedArtifactPaths.map((artifactPath) => (
+                    <Paragraph key={artifactPath} copyable style={{ marginBottom: 4 }}>
+                      {artifactPath}
+                    </Paragraph>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </Card>
+
+        <Card title="다운로드된 패키지" style={{ marginTop: 24 }}>
+          <Table
+            dataSource={downloadItems}
+            columns={columns}
+            rowKey="id"
+            pagination={false}
+            size="small"
+            scroll={{ y: 300 }}
+          />
+        </Card>
+
         <Card
           size="small"
           title={
@@ -2027,6 +2493,34 @@ const DownloadPage: React.FC = () => {
               선택
             </Button>
           </Space.Compact>
+        </div>
+
+        <div>
+          <Text strong>전달 방식</Text>
+          <Radio.Group
+            value={deliveryMethod}
+            onChange={(event) => setDeliveryMethod(event.target.value)}
+            disabled={isDownloading}
+            style={{ display: 'block', marginTop: 8 }}
+          >
+            <Space direction="vertical">
+              <Radio value="local">로컬 저장만</Radio>
+              <Radio value="email">이메일로 전달</Radio>
+            </Space>
+          </Radio.Group>
+          {deliveryMethod === 'email' && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginTop: 12 }}
+              message="설정 화면의 SMTP 발신자/수신자와 파일 분할 값을 사용합니다."
+              description={
+                effectiveSmtpTo
+                  ? `현재 수신자: ${effectiveSmtpTo}`
+                  : '수신자가 비어 있습니다. 설정 화면에서 SMTP 수신자를 먼저 입력하세요.'
+              }
+            />
+          )}
         </div>
 
       </Card>
@@ -2309,7 +2803,7 @@ const DownloadPage: React.FC = () => {
               </Button>
             </>
           )}
-          {(allCompleted || packagingStatus === 'completed') && (
+          {allCompleted && (
             <Button
               type="primary"
               icon={<CheckCircleOutlined />}

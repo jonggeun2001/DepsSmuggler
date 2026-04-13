@@ -72,6 +72,7 @@
 - `selectDirectory`
 - `saveFile`
 - `openFolder`
+- `testSmtpConnection`
 
 ### 일반 패키지
 
@@ -137,8 +138,10 @@
 
 ### 일반 패키지
 
-- `DownloadPage`는 설정 스토어의 `defaultOutputFormat`, `includeInstallScripts`를 사용합니다.
+- `DownloadPage`는 설정 스토어의 `defaultOutputFormat`, `includeInstallScripts`, `enableFileSplit`, SMTP 설정을 사용합니다.
+- 다운로드 시작 시 전달 방식 `local | email`을 선택할 수 있고, `email` 선택 시 설정 화면의 SMTP 발신자/수신자와 파일 분할 기준을 함께 전달합니다.
 - 설정 UI와 main process 모두 `zip`과 `tar.gz`를 실제 아카이브 출력 형식으로 사용합니다.
+- 이메일 전달을 선택하면 main process가 패키징 직후 SMTP 발송까지 수행하며, 첨부 크기 초과 시 `FileSplitter`를 사용해 실제 산출물을 분할합니다.
 
 ### OS 패키지
 
