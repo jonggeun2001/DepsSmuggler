@@ -110,6 +110,7 @@ export class ArchivePackager {
       });
 
       output.on('close', () => resolve());
+      output.on('error', (err) => reject(err));
       archive.on('error', (err) => reject(err));
 
       archive.pipe(output);
@@ -141,6 +142,7 @@ export class ArchivePackager {
       });
 
       output.on('close', () => resolve());
+      output.on('error', (err) => reject(err));
       archive.on('error', (err) => reject(err));
 
       archive.pipe(output);
@@ -273,6 +275,7 @@ export class ArchivePackager {
       });
 
       output.on('close', () => resolve());
+      output.on('error', (err) => reject(err));
       archive.on('error', (err) => reject(err));
 
       archive.pipe(output);
@@ -300,6 +303,7 @@ export class ArchivePackager {
       });
 
       output.on('close', () => resolve());
+      output.on('error', (err) => reject(err));
       archive.on('error', (err) => reject(err));
 
       archive.pipe(output);
