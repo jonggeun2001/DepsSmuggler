@@ -626,6 +626,84 @@ describe('registerDownloadHandlers', () => {
     });
   });
 
+  it('다운로드 완료 직후 취소되면 패키징과 메일 전달 없이 cancelled 완료 이벤트로 끝나야 함', async () => {
+    let resolveDownload!: () => void;
+    downloadFileMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDownload = resolve;
+        })
+    );
+
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+    const downloadCancelHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:cancel'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+    expect(downloadCancelHandler).toBeTypeOf('function');
+
+    const outputDir = path.join(tempDir, 'cancelled-before-packaging-output');
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'tar.gz',
+          includeScripts: false,
+          concurrency: 1,
+          deliveryMethod: 'email',
+          email: {
+            to: 'offline@example.com',
+          },
+          fileSplit: {
+            enabled: false,
+            maxSizeMB: 10,
+          },
+          smtp: {
+            host: 'smtp.example.com',
+            port: 587,
+            user: 'sender@example.com',
+          },
+        },
+      }
+    );
+
+    await downloadCancelHandler({});
+    resolveDownload();
+
+    await waitForExpectation(() => {
+      expect(createArchiveFromDirectoryMock).not.toHaveBeenCalled();
+      expect(initializeEmailSenderMock).not.toHaveBeenCalled();
+      expect(sendEmailMock).not.toHaveBeenCalled();
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: false,
+          cancelled: true,
+          outputPath: outputDir,
+        })
+      );
+    });
+  });
+
   it('첨부 제한 초과이고 파일 분할이 켜져 있으면 splitFile 결과를 첨부와 완료 이벤트에 반영해야 함', async () => {
     createArchiveFromDirectoryMock.mockImplementationOnce(async (_sourceDir: string, outputPath: string) => {
       await fs.ensureDir(path.dirname(outputPath));

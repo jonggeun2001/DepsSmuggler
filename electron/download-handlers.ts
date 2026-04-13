@@ -446,6 +446,28 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
       Promise.all(downloadPromises).then(async (downloadResults) => {
         // 취소된 항목 제외하고 결과 수집
         const results = downloadResults.filter(r => r.error !== 'cancelled');
+        const emitCancelledCompletion = (
+          currentOutputPath: string,
+          currentArtifactPaths?: string[]
+        ): void => {
+          mainWindow?.webContents.send('download:all-complete', {
+            success: false,
+            cancelled: true,
+            outputPath: currentOutputPath,
+            artifactPaths: currentArtifactPaths,
+          });
+        };
+        const shouldStopForCancellation = (
+          currentOutputPath: string,
+          currentArtifactPaths?: string[]
+        ): boolean => {
+          if (!downloadCancelled) {
+            return false;
+          }
+
+          emitCancelledCompletion(currentOutputPath, currentArtifactPaths);
+          return true;
+        };
 
         if (!downloadCancelled) {
           let finalOutputPath = outputDir;
@@ -500,6 +522,10 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
             return;
           }
 
+          if (shouldStopForCancellation(finalOutputPath, artifactPaths)) {
+            return;
+          }
+
           if (isSupportedOutputFormat) {
             try {
               const archivePath = `${outputDir}.${outputFormat === 'zip' ? 'zip' : 'tar.gz'}`;
@@ -533,6 +559,10 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
               });
               return;
             }
+          }
+
+          if (shouldStopForCancellation(finalOutputPath, artifactPaths)) {
+            return;
           }
 
           if (deliveryMethod === 'email') {
@@ -584,6 +614,10 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
             });
 
             try {
+              if (shouldStopForCancellation(finalOutputPath, artifactPaths)) {
+                return;
+              }
+
               const archiveStat = await fse.stat(finalOutputPath);
 
               if (archiveStat.size > maxAttachmentSizeBytes) {
@@ -613,6 +647,10 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                 artifactPaths = attachments;
                 finalOutputPath = attachments[0] || finalOutputPath;
                 splitApplied = true;
+              }
+
+              if (shouldStopForCancellation(finalOutputPath, attachments)) {
+                return;
               }
 
               const emailSender = initializeEmailSender(
@@ -647,6 +685,10 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                 attachments,
                 packages: packageInfos,
               });
+
+              if (shouldStopForCancellation(finalOutputPath, attachments)) {
+                return;
+              }
 
               if (!emailSendResult.success) {
                 const errorMessage = emailSendResult.error || '이메일 전달에 실패했습니다';
@@ -690,6 +732,10 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
               });
               return;
             }
+          }
+
+          if (shouldStopForCancellation(finalOutputPath, artifactPaths.length > 0 ? artifactPaths : [finalOutputPath])) {
+            return;
           }
 
           // 전체 완료 이벤트 전송
