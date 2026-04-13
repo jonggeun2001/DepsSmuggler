@@ -1507,11 +1507,11 @@ const SettingsPage: React.FC = () => {
             <Spin spinning={loadingCache}>
               <Row gutter={16} align="middle">
                 <Col span={8}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>크기: </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>디스크 크기: </Text>
                   <Text strong style={{ fontSize: 13 }}>{formatBytes(cacheSize)}</Text>
                 </Col>
                 <Col span={8}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>패키지: </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>캐시 항목: </Text>
                   <Text strong style={{ fontSize: 13 }}>{cacheCount}개</Text>
                 </Col>
                 <Col span={8} style={{ textAlign: 'right' }}>
@@ -1525,14 +1525,14 @@ const SettingsPage: React.FC = () => {
                       cancelText="취소"
                       okButtonProps={{ danger: true }}
                     >
-                      <Button size="small" danger icon={<DeleteOutlined />} loading={clearingCache} disabled={cacheSize === 0} />
+                      <Button size="small" danger icon={<DeleteOutlined />} loading={clearingCache} disabled={cacheSize === 0 && cacheCount === 0} />
                     </Popconfirm>
                   </Space>
                 </Col>
               </Row>
             </Spin>
             <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
-              이 영역은 패키지 메타데이터 캐시만 집계합니다. Python 버전 목록은 localStorage, CUDA/Java/Node 버전 파일은 같은 cache 루트의 별도 `*-versions.json` 파일로 관리됩니다.
+              이 영역은 패키지 메타데이터 캐시만 집계합니다. 크기는 디스크 기준이며, 캐시 항목 수에는 메모리 기반 npm 캐시도 포함될 수 있습니다. Python 버전 목록은 localStorage, CUDA/Java/Node 버전 파일은 같은 cache 루트의 별도 `*-versions.json` 파일로 관리됩니다.
             </Text>
           </div>
         </Card>
