@@ -507,6 +507,59 @@ describe('registerDownloadHandlers', () => {
     expect(createArchiveFromDirectoryMock).not.toHaveBeenCalled();
   });
 
+  it('설치 스크립트 생성 실패도 results를 포함한 실패 완료 이벤트로 내려보내야 함', async () => {
+    generateInstallScriptsMock.mockImplementationOnce(() => {
+      throw new Error('script generation failed');
+    });
+
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = '/tmp/depssmuggler-gui-output-script-failure';
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'zip',
+          includeScripts: true,
+          concurrency: 1,
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: false,
+          outputPath: outputDir,
+          error: 'script generation failed',
+          results: [expect.objectContaining({ id: 'pip-requests-2.28.0', success: true })],
+        })
+      );
+    });
+    expect(createArchiveFromDirectoryMock).not.toHaveBeenCalled();
+  });
+
   it('email 전달 선택 시 패키징 뒤 메일을 발송하고 완료 이벤트에 전달 메타데이터를 담아야 함', async () => {
     registerDownloadHandlers(() => ({
       webContents: {
@@ -1137,11 +1190,11 @@ describe('registerDownloadHandlers', () => {
         generatedOutputs: expect.arrayContaining([
           expect.objectContaining({
             type: 'archive',
-            path: `${osOutputDir}/os-packages.zip`,
+            path: path.join(osOutputDir, 'os-packages.zip'),
           }),
           expect.objectContaining({
             type: 'repository',
-            path: `${osOutputDir}/repository`,
+            path: path.join(osOutputDir, 'repository'),
           }),
         ]),
         warnings: [],

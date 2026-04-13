@@ -749,7 +749,19 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
 
           // 설치 스크립트 생성 (의존성 포함)
           if (includeScripts) {
-            generateInstallScripts(outputDir, deliveredPackages);
+            try {
+              generateInstallScripts(outputDir, deliveredPackages);
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              log.error('Failed to generate install scripts:', error);
+              mainWindow?.webContents.send('download:all-complete', {
+                success: false,
+                outputPath: outputDir,
+                error: errorMessage,
+                results,
+              });
+              return;
+            }
           }
 
           if (!isSupportedOutputFormat) {
