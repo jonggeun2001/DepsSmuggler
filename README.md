@@ -1,175 +1,153 @@
 # DepsSmuggler (의존성 밀수꾼)
 
-폐쇄망 환경을 위한 패키지 의존성 다운로드 및 전달 애플리케이션
+폐쇄망 환경으로 옮겨야 하는 라이브러리, OS 패키지, 컨테이너 이미지를 의존성까지 포함해 수집하는 Electron 기반 데스크톱 앱과 CLI입니다.
 
-인터넷이 차단된 폐쇄망 환경에서 라이브러리, OS 패키지, 컨테이너 이미지를 **의존성 포함**하여 설치할 수 있도록 패키지를 다운로드하고 전달하는 도구입니다.
+## 현재 상태
 
----
+- GUI: `pip`, `conda`, `maven`, `npm`, `yum`, `apt`, `apk`, `docker` 흐름을 제공합니다.
+- CLI: 일반 패키지용 `download`, `search`, `config`, `cache`와 OS 패키지용 `os` 네임스페이스를 제공합니다.
+- 자동 업데이트, 다운로드 히스토리, 설정 저장, 파일 분할, SMTP 설정 UI가 포함되어 있습니다.
+- 설정/로그/캐시는 모두 사용자 홈 디렉터리의 `~/.depssmuggler/` 아래에 저장됩니다.
+
+## 지원 범위
+
+| 영역 | GUI | CLI | 비고 |
+|------|-----|-----|------|
+| Python `pip` | 지원 | 지원 | PyPI 검색/버전 조회/다운로드 |
+| Python `conda` | 지원 | 지원 | 채널 선택 지원 |
+| Java `maven` | 지원 | 지원 | 네이티브 classifier 확인 지원 |
+| Node.js `npm` | 지원 | 미지원 | 현재 CLI `search`/`download`에는 없음 |
+| OS `yum` | 지원 | 부분 지원 | CLI는 `os list-distros`, `os search`만 실사용 가능 |
+| OS `apt` | 지원 | 부분 지원 | CLI `os download`는 재구현 중 안내만 출력 |
+| OS `apk` | 지원 | 부분 지원 | GUI 기준 기능이 더 완전함 |
+| Container `docker` | 지원 | 지원 | GUI는 Docker Hub 외 레지스트리 선택 UI 포함 |
 
 ## 주요 기능
 
-- **의존성 자동 해결**: 전이적 의존성까지 자동으로 탐색 및 다운로드
-- **다양한 패키지 지원**: Python(pip/conda), Java(Maven), RHEL/CentOS(yum), Docker 이미지
-- **유연한 출력 형식**: ZIP/tar.gz 압축, 오프라인 미러 구조, 설치 스크립트
-- **GUI & CLI**: Electron 기반 데스크톱 앱 + 명령줄 도구
-
----
-
-## 지원 패키지 관리자
-
-| 타입 | 패키지 관리자 | 저장소 |
-|------|---------------|--------|
-| Python | pip | PyPI |
-| Python | conda | Anaconda |
-| Java | Maven | Maven Central |
-| OS | yum/rpm | CentOS/RHEL |
-| Container | docker | Docker Hub |
-
----
+- 의존성 해결: 패키지 타입별 resolver로 전이 의존성을 계산하고 트리를 시각화합니다.
+- 위자드 UI: 검색, 버전 선택, 장바구니, 다운로드, 히스토리, 설정을 한 흐름으로 제공합니다.
+- 출력물 생성: 일반 다운로드는 `zip` 또는 `tar.gz` 아카이브와 설치 스크립트를 생성합니다.
+- OS 패키지 전용 출력: GUI에서는 압축 파일, 로컬 저장소 구조, 둘 다 생성하는 옵션을 제공합니다.
+- 운영 보조 기능: 캐시 관리, 다운로드 히스토리, SMTP 설정, 자동 업데이트 알림을 포함합니다.
 
 ## 설치
 
 ```bash
-# 의존성 설치
 npm install
-
-# 개발 모드 실행 (GUI)
-npm run dev
-
-# CLI 글로벌 설치
-npm install -g .
 ```
-
----
-
-## 사용법
-
-### GUI 앱
-
-```bash
-npm run dev
-```
-
-1. 패키지 타입 선택 (pip, maven, conda, yum, docker)
-2. 패키지 검색 및 선택
-3. 버전/아키텍처 선택
-4. 장바구니에 추가
-5. 다운로드 실행
-6. 출력 형식 선택 후 저장
-
-### CLI
-
-```bash
-# 패키지 검색
-depssmuggler search requests -t pip
-
-# 패키지 다운로드 (의존성 포함)
-depssmuggler download -t pip -p requests -V 2.31.0 -o ./output
-
-# Maven 아티팩트 다운로드
-depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0
-
-# Docker 이미지 다운로드
-depssmuggler download -t docker -p nginx -V latest
-
-# requirements.txt에서 일괄 다운로드
-depssmuggler download -t pip --file requirements.txt
-
-# 미러 구조로 출력
-depssmuggler download -t pip -p flask --format mirror
-```
-
-#### CLI 명령어
-
-| 명령어 | 설명 |
-|--------|------|
-| `download` | 패키지 다운로드 (의존성 포함) |
-| `search` | 패키지 검색 |
-| `config` | 설정 관리 (get/set/list/reset) |
-| `cache` | 캐시 관리 (size/clear/list) |
-
----
-
-## 출력 형식
-
-| 형식 | 설명 | 용도 |
-|------|------|------|
-| `zip` | 단일 ZIP 압축 파일 | 메일 첨부, USB 전달 |
-| `tar.gz` | tar.gz 압축 파일 | Linux 환경 |
-| `mirror` | 오프라인 미러 구조 | 로컬 저장소로 바로 사용 |
-
-미러 구조 예시:
-```
-mirror/
-├── pip/simple/           # pip install --find-links
-├── maven/repository/     # Maven 로컬 저장소
-├── yum/packages/         # yum localinstall
-└── docker/               # docker load
-```
-
----
-
-## 프로젝트 구조
-
-```
-depssmuggler/
-├── electron/           # Electron 메인 프로세스
-├── src/
-│   ├── renderer/       # React UI
-│   ├── core/           # 핵심 로직
-│   │   ├── downloaders/  # 패키지별 다운로더
-│   │   ├── resolver/     # 의존성 해결
-│   │   └── packager/     # 출력물 패키징
-│   ├── cli/            # CLI 도구
-│   └── types/          # TypeScript 타입
-└── docs/               # 문서
-```
-
----
 
 ## 개발 명령어
 
 ```bash
-# 개발 모드 (GUI)
+# GUI 개발 서버
 npm run dev
+
+# CLI 실행
+npm run cli -- --help
 
 # 빌드
 npm run build
 
-# 패키징 (Windows)
+# 패키징
 npm run package:win
-
-# 패키징 (macOS)
 npm run package:mac
+npm run package:linux
+
+# 검증
+npm run test
+INTEGRATION_TEST=true npm run test
+npm run test:coverage
+npm run test:e2e
+npm run lint
+npx tsc --noEmit
 ```
 
----
+## 사용 예시
+
+### GUI
+
+```bash
+npm run dev
+```
+
+주요 화면:
+
+1. `홈`에서 패키지 매니저를 선택합니다.
+2. `패키지 검색` 위자드에서 패키지명, 버전, 아키텍처, 대상 배포판을 선택합니다.
+3. `장바구니`에서 여러 패키지를 조합하거나 텍스트 입력 결과를 정리합니다.
+4. `다운로드`에서 의존성 해결 결과를 검토하고 아카이브를 생성합니다.
+5. `히스토리`와 `설정`에서 재다운로드, SMTP, 캐시, 파일 분할, 업데이트 설정을 관리합니다.
+
+### CLI
+
+```bash
+# 일반 패키지 검색
+depssmuggler search requests -t pip
+depssmuggler search spring -t maven
+depssmuggler search nginx -t docker
+
+# 일반 패키지 다운로드
+depssmuggler download -t pip -p requests -V 2.31.0 -o ./output
+depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0
+depssmuggler download -t docker -p nginx -V latest
+
+# 파일 입력 기반 다운로드
+depssmuggler download -t pip --file requirements.txt
+
+# OS 패키지 지원 배포판/검색
+depssmuggler os list-distros
+depssmuggler os search nginx --distro rocky-9
+```
+
+현재 CLI의 `os download`, `os cache stats`, `os cache clear`는 재구현 중이며 Electron GUI 사용을 안내합니다.
+
+## 저장 위치
+
+```text
+~/.depssmuggler/
+├── settings.json
+├── history.json
+├── cache/
+└── logs/
+```
+
+## 프로젝트 구조
+
+```text
+depssmuggler/
+├── electron/         # Electron main/preload/IPC/updater
+├── src/
+│   ├── renderer/     # React + Zustand UI
+│   ├── cli/          # Commander 기반 CLI
+│   ├── core/         # downloaders, resolver, packager, mailer, shared
+│   ├── types/        # 공용 타입
+│   └── utils/        # 로깅/마스킹 등
+├── docs/             # 현재 문서와 설계/분석 문서
+└── .github/workflows/
+```
 
 ## 문서
 
-자세한 내용은 `docs/` 디렉토리를 참조하세요:
-
+- [문서 상태와 source of truth](docs/documentation-status.md)
 - [아키텍처 개요](docs/architecture-overview.md)
+- [Electron / Renderer](docs/electron-renderer.md)
+- [IPC 핸들러](docs/ipc-handlers.md)
+- [CLI](docs/cli.md)
+- [테스트](docs/testing.md)
 - [Downloaders](docs/downloaders.md)
 - [Resolvers](docs/resolvers.md)
-- [Packagers](docs/packagers.md)
-- [Electron/Renderer](docs/electron-renderer.md)
-- [CLI](docs/cli.md)
-
----
 
 ## 기술 스택
 
 | 구분 | 기술 |
 |------|------|
-| 프레임워크 | Electron |
-| 언어 | TypeScript |
-| UI | React + Zustand |
-| 빌드 | Vite |
-| 대상 OS | Windows, macOS |
-
----
+| Desktop | Electron |
+| UI | React 19, Ant Design, Zustand, React Router |
+| Language | TypeScript |
+| Build | Vite, TypeScript Compiler, electron-builder |
+| Test | Vitest, Playwright |
+| Target OS | Windows, macOS, Linux |
 
 ## 라이선스
 
-MIT License
+MIT

@@ -1,290 +1,156 @@
 # DepsSmuggler 아키텍처 개요
 
 ## 개요
-- 목적: 폐쇄망 환경을 위한 패키지 의존성 다운로드 및 전달 애플리케이션
-- 프레임워크: Electron + TypeScript
-- 대상 OS: Windows, macOS
 
----
+DepsSmuggler는 Electron 메인 프로세스, React 렌더러, TypeScript core 모듈, Commander 기반 CLI가 하나의 저장소에 공존하는 구조입니다. 현재 코드베이스의 source of truth는 `electron/`, `src/renderer/`, `src/cli/`, `src/core/`입니다.
 
-## 프로젝트 구조
+## 최상위 구조
 
-```
+```text
 depssmuggler/
-├── electron/               # Electron 메인 프로세스
-│   ├── main.ts            # 메인 프로세스 진입점 (핸들러 등록)
-│   ├── preload.ts         # 프리로드 스크립트 (IPC 브릿지)
-│   ├── cache-handlers.ts  # 캐시 관련 IPC 핸들러
-│   ├── config-handlers.ts # 설정 관련 IPC 핸들러
-│   ├── download-handlers.ts # 다운로드 관련 IPC 핸들러
-│   ├── history-handlers.ts  # 히스토리 관련 IPC 핸들러
-│   ├── search-handlers.ts   # 검색/의존성 해결 IPC 핸들러
-│   └── os-package-handlers.ts # OS 패키지 관련 IPC 핸들러
+├── electron/
+│   ├── main.ts
+│   ├── preload.ts
+│   ├── cache-handlers.ts
+│   ├── config-handlers.ts
+│   ├── download-handlers.ts
+│   ├── history-handlers.ts
+│   ├── search-handlers.ts
+│   ├── updater.ts
+│   ├── version-handlers.ts
+│   └── utils/logger.ts
 ├── src/
-│   ├── renderer/          # React 기반 UI (렌더러 프로세스)
-│   │   ├── App.tsx        # 메인 앱 컴포넌트
-│   │   ├── pages/         # 페이지 컴포넌트
-│   │   ├── components/    # 재사용 컴포넌트
-│   │   ├── layouts/       # 레이아웃 컴포넌트
-│   │   └── stores/        # Zustand 상태 관리
-│   ├── core/              # 핵심 비즈니스 로직
-│   │   ├── index.ts       # Core 모듈 통합 내보내기
-│   │   ├── shared/        # 공통 유틸리티 모듈
-│   │   │   ├── types.ts           # 공통 타입 정의
-│   │   │   ├── cache-utils.ts     # 캐시 공통 유틸리티
-│   │   │   ├── dependency-resolver.ts # 의존성 해결
-│   │   │   ├── pypi-utils.ts      # PyPI 유틸리티
-│   │   │   ├── file-utils.ts      # 파일 다운로드/압축
-│   │   │   ├── path-utils.ts      # 크로스 플랫폼 경로 처리
-│   │   │   └── script-utils.ts    # 스크립트 생성
-│   │   ├── downloaders/   # 패키지 관리자별 다운로더
-│   │   │   ├── factory.ts # 다운로더 팩토리 (레지스트리)
-│   │   │   └── os/        # OS 패키지 다운로더 (yum, apt, apk)
-│   │   ├── resolver/      # 의존성 해결기
-│   │   ├── packager/      # 출력물 패키징
-│   │   ├── mailer/        # 메일 발송
-│   │   ├── config.ts      # 설정 관리
-│   │   ├── cacheManager.ts    # 캐시 관리
-│   │   └── downloadManager.ts # 다운로드 관리
-│   ├── cli/               # CLI 인터페이스
-│   │   ├── index.ts       # CLI 진입점
-│   │   └── commands/      # CLI 명령어
-│   ├── types/             # TypeScript 타입 정의
-│   └── utils/             # 유틸리티 함수
-│       ├── logger.ts      # 로깅 유틸리티
-│       └── mask.ts        # 민감 정보 마스킹
-└── scripts/               # 설치 스크립트 템플릿
+│   ├── renderer/
+│   │   ├── App.tsx
+│   │   ├── layouts/MainLayout.tsx
+│   │   ├── pages/
+│   │   ├── components/
+│   │   ├── components/os/
+│   │   └── stores/
+│   ├── cli/
+│   │   ├── index.ts
+│   │   └── commands/
+│   ├── core/
+│   │   ├── downloaders/
+│   │   ├── downloaders/os-shared/
+│   │   ├── resolver/
+│   │   ├── packager/
+│   │   ├── mailer/
+│   │   ├── shared/
+│   │   ├── config.ts
+│   │   ├── download-manager.ts
+│   │   └── cache-manager.ts
+│   ├── types/
+│   └── utils/
+├── docs/
+└── .github/workflows/
 ```
 
----
+## 계층별 역할
 
-## 계층 구조
+### 1. Renderer (`src/renderer`)
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    UI Layer (Renderer)                   │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────────┐│
-│  │HomePage │ │WizardPage│ │CartPage│ │DownloadPage    ││
-│  └─────────┘ └─────────┘ └─────────┘ └─────────────────┘│
-│                         ↓                                │
-│  ┌──────────────────────────────────────────────────────┐│
-│  │              Zustand Stores                          ││
-│  │  (cartStore, downloadStore, settingsStore)           ││
-│  └──────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────┘
-                          ↓ IPC
-┌─────────────────────────────────────────────────────────┐
-│                 Electron Main Process                    │
-│  ┌──────────────────────────────────────────────────────┐│
-│  │           IPC Handlers (모듈화됨)                    ││
-│  │  ┌────────────┐ ┌─────────────┐ ┌─────────────────┐ ││
-│  │  │cache-hdlr  │ │config-hdlr  │ │download-hdlr    │ ││
-│  │  └────────────┘ └─────────────┘ └─────────────────┘ ││
-│  │  ┌────────────┐ ┌─────────────┐ ┌─────────────────┐ ││
-│  │  │history-hdlr│ │search-hdlr  │ │os-package-hdlr  │ ││
-│  │  └────────────┘ └─────────────┘ └─────────────────┘ ││
-│  └──────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                    Core Layer                            │
-│  ┌────────────┐  ┌──────────┐  ┌──────────────────────┐ │
-│  │Downloaders │  │Resolvers │  │    DownloadManager   │ │
-│  │ (pip,maven │  │(pip,maven│  │  (큐 관리, 동시성)   │ │
-│  │  conda,yum,│  │ conda,yum│  └──────────────────────┘ │
-│  │  docker)   │  │  )       │                           │
-│  └────────────┘  └──────────┘                           │
-│                          ↓                               │
-│  ┌──────────────────────────────────────────────────────┐│
-│  │                   CacheManager                       ││
-│  │            (캐시 저장/조회, LRU 정리)                ││
-│  └──────────────────────────────────────────────────────┘│
-│                          ↓                               │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │                    Packagers                        │ │
-│  │  ┌────────────────┐ ┌────────────────────────────┐ │ │
-│  │  │ArchivePackager │ │ ScriptGenerator            │ │ │
-│  │  └────────────────┘ └────────────────────────────┘ │ │
-│  └────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                   External APIs                          │
-│  PyPI, Maven Central, Anaconda, Docker Hub, YUM Repos   │
-└─────────────────────────────────────────────────────────┘
-```
+- React Router 기준 경로는 `/`, `/wizard`, `/cart`, `/download`, `/history`, `/settings`입니다.
+- `MainLayout.tsx`가 좌측 네비게이션과 공통 레이아웃을 담당합니다.
+- `HomePage.tsx`와 `WizardPage.tsx`는 패키지 타입 선택과 검색 진입을 담당합니다.
+- `CartPage.tsx`는 장바구니와 텍스트 입력 기반 패키지 추가를 담당합니다.
+- `DownloadPage.tsx`는 의존성 해결 결과, 진행률, 완료 결과를 렌더링합니다.
+- `HistoryPage.tsx`와 `SettingsPage.tsx`는 각각 다운로드 이력과 앱 설정을 관리합니다.
+- `components/os/`는 OS 패키지 전용 검색, 출력 옵션, 결과 렌더링을 분리합니다.
+- `UpdateNotification.tsx`는 Electron auto updater 상태를 UI로 노출합니다.
 
----
+### 2. Preload (`electron/preload.ts`)
 
-## 핵심 모듈
+- `window.electronAPI` 하나로 렌더러에 안전한 IPC 인터페이스를 제공합니다.
+- 주요 그룹:
+  - `download`, `search`, `dependency`
+  - `config`, `cache`, `history`
+  - `os`, `docker.cache`, `maven`
+  - `updater`, `versions`
+  - 공통 다이얼로그/앱 정보 API
 
-### 1. Downloaders (`src/core/downloaders/`)
-패키지 관리자별 다운로드 구현체
+### 3. Main Process (`electron`)
 
-| 모듈 | 설명 | 위치 |
-|------|------|------|
-| PipDownloader | PyPI 패키지 다운로드 | `pip.ts` |
-| MavenDownloader | Maven Central 아티팩트 다운로드 | `maven.ts` |
-| CondaDownloader | Anaconda 패키지 다운로드 | `conda.ts` |
-| YumDownloader | YUM/RPM 패키지 다운로드 | `yum.ts` |
-| DockerDownloader | Docker 이미지 다운로드 | `docker.ts` |
-| NpmDownloader | npm 패키지 다운로드 | `npm.ts` |
+- `main.ts`가 BrowserWindow 생성, 개발 서버 대기, 기본 다이얼로그 IPC, 버전 프리로드, updater 초기화를 담당합니다.
+- `config-handlers.ts`, `cache-handlers.ts`, `history-handlers.ts`, `search-handlers.ts`, `download-handlers.ts`, `version-handlers.ts`, `updater.ts`가 기능별 IPC를 등록합니다.
+- SSL 검증은 기본적으로 완화되며 `DEPSSMUGGLER_STRICT_SSL=true`일 때만 엄격 모드로 전환됩니다.
 
-### 1-1. OS 패키지 다운로더 (`src/core/downloaders/os/`)
+### 4. Core (`src/core`)
 
-Linux OS 패키지 다운로드 통합 모듈 (상세: [OS 패키지 다운로더 문서](./os-package-downloader.md))
+- `downloaders/`: 패키지 타입별 검색/다운로드 구현
+- `downloaders/os-shared/`: YUM/APT/APK 공용 저장소, 캐시, 스크립트, 아카이브, 로컬 저장소 패키징
+- `resolver/`: 타입별 의존성 계산
+- `packager/`: 일반 패키지용 아카이브/스크립트/분할 처리
+- `mailer/`: SMTP 발송
+- `shared/`: HTTP, 캐시, 버전 비교, 플랫폼 매핑, 버전 프리로드, 마스킹 등 공통 유틸리티
 
-| 모듈 | 설명 | 위치 |
-|------|------|------|
-| OSPackageDownloader | 통합 다운로더 | `downloader.ts` |
-| BaseOSDownloader | 기본 다운로더 추상 클래스 | `base-downloader.ts` |
-| BaseOSDependencyResolver | 기본 의존성 해결기 추상 클래스 | `base-resolver.ts` |
-| YumDownloader | YUM/RPM 다운로더 | `yum/downloader.ts` |
-| AptDownloader | APT/DEB 다운로더 | `apt/downloader.ts` |
-| ApkDownloader | APK 다운로더 | `apk/downloader.ts` |
-| OSCacheManager | OS 패키지 캐시 관리 | `utils/cache-manager.ts` |
-| GPGVerifier | GPG 서명 검증 | `utils/gpg-verifier.ts` |
-| OSScriptGenerator | 설치 스크립트 생성 | `utils/script-generator.ts` |
+### 5. CLI (`src/cli`)
 
-### 2. Resolvers (`src/core/resolver/`)
-의존성 트리 해결
+- `index.ts`가 `download`, `search`, `config`, `cache`, `os` 명령을 등록합니다.
+- 일반 패키지 CLI는 현재 `pip`, `conda`, `maven`, `docker` 검색과 `pip`, `conda`, `maven`, `yum`, `docker` 다운로드에 초점이 맞춰져 있습니다.
+- OS CLI는 `list-distros`, `search`는 실동작하고, `download`, `cache`는 GUI 사용 안내를 출력합니다.
 
-| 모듈 | 설명 | 위치 |
-|------|------|------|
-| PipResolver | Python 의존성 해결 | `pipResolver.ts` |
-| MavenResolver | Maven 의존성 해결 | `mavenResolver.ts` |
-| CondaResolver | Conda 의존성 해결 | `condaResolver.ts` |
-| YumResolver | YUM 의존성 해결 | `yumResolver.ts` |
+## 주요 도메인 모듈
 
-### 3. Packagers (`src/core/packager/`)
-출력물 패키징
+| 영역 | 현재 구현 위치 | 비고 |
+|------|----------------|------|
+| 일반 다운로드 | `src/core/downloaders/*.ts` | `pip`, `conda`, `maven`, `npm`, `docker`, `yum`, `apt`, `apk` |
+| OS 공용 기능 | `src/core/downloaders/os-shared/*` | 저장소 프리셋, GPG, 로컬 repo 패키징 |
+| 의존성 해결 | `src/core/resolver/*.ts` | `pip`, `conda`, `maven`, `npm`, `yum`, `apt`, `apk` |
+| 공통 의존성 유틸 | `src/core/shared/dependency-resolver.ts` | 타입별 resolver orchestration |
+| 일반 패키징 | `src/core/packager/*` | archive, script, file splitter |
+| 설정 | `src/core/config.ts` | `~/.depssmuggler/settings.json` |
+| 캐시 | `src/core/cache-manager.ts`, `src/core/shared/*-cache.ts` | 타입별 캐시 분리 |
+| 메일 | `src/core/mailer/email-sender.ts` | SMTP 테스트/발송 |
 
-| 모듈 | 설명 | 위치 |
-|------|------|------|
-| ArchivePackager | zip/tar.gz 압축 | `archivePackager.ts` |
-| ScriptGenerator | 설치 스크립트 생성 | `scriptGenerator.ts` |
-| FileSplitter | 대용량 파일 분할 | `fileSplitter.ts` |
+## 런타임 데이터 흐름
 
-### 4. Core Services
+### 일반 패키지 다운로드
 
-| 모듈 | 설명 | 위치 |
-|------|------|------|
-| DownloadManager | 다운로드 큐 및 동시성 관리 | `downloadManager.ts` |
-| CacheManager | 다운로드 캐시 관리 | `cacheManager.ts` |
-| ConfigManager | 앱 설정 관리 | `config.ts` |
-| EmailSender | SMTP 메일 발송 | `mailer/emailSender.ts` |
+1. Renderer가 `window.electronAPI.search.*` 또는 `dependency.resolve` 호출
+2. `search-handlers.ts`가 downloader/resolver를 호출
+3. `DownloadPage.tsx`가 `download:start`를 호출
+4. `download-handlers.ts`가 core downloader와 packager를 실행
+5. 진행률 이벤트를 `download:*` 채널로 렌더러에 다시 전송
+6. 완료 시 아카이브 경로와 결과를 히스토리에 저장
 
----
+### OS 패키지 다운로드
 
-## 데이터 흐름
+1. Renderer가 `os:getAllDistributions`, `os:search`, `os:resolveDependencies` 호출
+2. `search-handlers.ts`가 `yum/apt/apk` resolver를 통해 검색/의존성 계산
+3. `download-handlers.ts`가 `os:download:start`로 실제 패키지 다운로드 실행
+4. OS 전용 진행률은 `os:resolveDependencies:progress`, `os:download:progress`로 전송
+5. 결과는 압축 파일, 로컬 저장소 구조, 또는 둘 다로 패키징할 수 있습니다
 
-### 패키지 검색 및 다운로드
+## 상태 저장
 
-```
-1. 사용자 입력 (UI)
-       ↓
-2. IPC 요청 (search:packages)
-       ↓
-3. Downloader.searchPackages()
-       ↓
-4. 패키지 선택 → 장바구니 추가
-       ↓
-5. Resolver.resolveDependencies()
-       ↓
-6. DownloadManager.startDownload()
-       ↓
-7. CacheManager (캐시 확인)
-       ↓
-8. Downloader.downloadPackage()
-       ↓
-9. Packager (압축/미러/스크립트)
-       ↓
-10. 파일 저장 또는 메일 발송
-```
+- 설정: `~/.depssmuggler/settings.json`
+- 히스토리: `~/.depssmuggler/history.json`
+- 캐시/로그: `~/.depssmuggler/cache`, `~/.depssmuggler/logs`
+- Renderer 상태: Zustand + persist, Electron 환경에서는 IPC를 통해 파일 저장과 동기화
 
----
+## 업데이트 및 버전 프리로드
 
-## 다운로더 팩토리 패턴
+- 자동 업데이트는 `electron/updater.ts`와 `src/renderer/components/UpdateNotification.tsx`가 담당합니다.
+- 버전 프리로드는 `electron/version-handlers.ts`와 `src/core/shared/version-preloader.ts`가 담당합니다.
+- 현재 IPC 기반 버전 로딩은 Python/CUDA에 집중되어 있고 Java/Node 선택지는 렌더러의 정적 옵션을 사용합니다.
 
-다운로더 인스턴스는 중앙 레지스트리에서 관리 (기존 개별 싱글톤 패턴 → 레지스트리 패턴):
-
-```typescript
-// 다운로더 팩토리 사용 예시
-import { getDownloader, initializeDownloaders } from './downloaders/factory';
-
-// 초기화 (앱 시작 시 1회)
-initializeDownloaders();
-
-// 다운로더 사용
-const pipDownloader = getDownloader('pip');
-const results = await pipDownloader.searchPackages('requests');
-```
-
-### DownloaderRegistry
-
-- **인스턴스 캐싱**: 생성된 다운로더 인스턴스 재사용
-- **지연 초기화**: 필요할 때만 다운로더 생성
-- **테스트 지원**: `setOverride()`로 모킹된 인스턴스 주입 가능
-
-```typescript
-// 테스트에서 모킹
-import { setTestDownloader, clearAllTestDownloaders } from './downloaders/factory';
-
-setTestDownloader('pip', mockPipDownloader);
-// ... 테스트 수행 ...
-clearAllTestDownloaders();
-```
-
-> 상세: [Downloader Factory 문서](./downloader-factory.md)
-
----
-
-## 테스트
-
-Vitest 기반 테스트 환경으로 단위 테스트와 통합 테스트를 구분하여 운영합니다.
-
-### 테스트 분류
-
-| 분류 | 파일 패턴 | 환경 변수 | 설명 |
-|------|----------|----------|------|
-| 단위 테스트 | `*.test.ts` | - | 네트워크 없이 로직 테스트 |
-| 통합 테스트 | `*.integration.test.ts` | `INTEGRATION_TEST=true` | 실제 API 호출 포함 |
-
-### 테스트 실행
+## 개발/검증 기준
 
 ```bash
-# 단위 테스트만 실행
+npm run dev
+npm run build
 npm run test
-
-# 통합 테스트 포함 실행
 INTEGRATION_TEST=true npm run test
-
-# 커버리지 포함 테스트
-npm run test:coverage
-
-# 특정 파일 테스트
-npx vitest run src/core/downloaders/pip.test.ts
+npm run test:e2e
+npm run lint
+npx tsc --noEmit
 ```
 
-### GitHub Actions CI
-
-- 모든 OS (Ubuntu, Windows, macOS)에서 단위 테스트 + 통합 테스트 실행
-- 커버리지 측정 시 통합 테스트 포함
-
-자세한 내용은 [테스트 문서](./testing.md) 참조
-
----
-
 ## 관련 문서
-- [Downloaders 문서](./downloaders.md)
-- [Downloader Factory 문서](./downloader-factory.md)
-- [IPC 핸들러 문서](./ipc-handlers.md)
-- [Resolver 문서](./resolvers.md)
-- [Packagers 문서](./packagers.md)
-- [Shared Utilities 문서](./shared-utilities.md)
-- [Electron & Renderer 문서](./electron-renderer.md)
-- [CLI 문서](./cli.md)
-- [OS 패키지 다운로더 문서](./os-package-downloader.md)
-- [OS 패키지 설계 문서](./os-package-downloader-design.md)
-- [API 마이그레이션 (HTTP→IPC)](./api-migration-ipc.md)
-- [테스트 구조](./testing.md)
+
+- [문서 상태와 source of truth](./documentation-status.md)
+- [Electron / Renderer](./electron-renderer.md)
+- [IPC 핸들러](./ipc-handlers.md)
+- [CLI](./cli.md)
+- [테스트](./testing.md)
