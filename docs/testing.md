@@ -7,6 +7,10 @@
 ## 로컬 검증 명령
 
 ```bash
+# 표준 worktree 검증 진입점
+bash scripts/ensure_verify_worktree.sh "$PWD"
+bash scripts/verify-worktree.sh
+
 # 단위 테스트
 npm run test
 
@@ -20,6 +24,8 @@ npm run test:coverage
 npm run lint
 npx tsc --noEmit
 ```
+
+`scripts/verify-worktree.sh`는 현재 저장소의 `scripts.test` 계약을 그대로 호출하는 얇은 래퍼이며, worktree에서 공통 검증 진입점으로 사용합니다. 현재 자동 생성 범위는 `test`만 포함하고 `lint`/`typecheck`는 별도 명령으로 유지합니다.
 
 ## 테스트 종류
 
