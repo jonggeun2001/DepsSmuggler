@@ -81,7 +81,7 @@ describe('searchCommand', () => {
 
     await searchCommand('react', { type: 'npm', limit: '1' });
 
-    expect(searchPackages).toHaveBeenCalledWith('react');
+    expect(searchPackages).toHaveBeenCalledWith('react', 1);
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain("'react' 검색 중...");
@@ -100,6 +100,14 @@ describe('searchCommand', () => {
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain('✓ 0개 결과 찾음');
     expect(output).toContain('검색 결과가 없습니다');
+  });
+
+  it('npm 검색 limit이 잘못되면 기본값 20으로 보정한다', async () => {
+    searchPackages.mockResolvedValue([]);
+
+    await searchCommand('react', { type: 'npm', limit: 'invalid' });
+
+    expect(searchPackages).toHaveBeenCalledWith('react', 20);
   });
 
   it('npm 검색 실패 시 기존 에러 처리와 동일하게 종료한다', async () => {
