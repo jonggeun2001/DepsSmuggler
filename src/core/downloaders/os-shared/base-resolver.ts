@@ -10,9 +10,9 @@ import type {
   OSDistribution,
   OSArchitecture,
   DependencyResolutionResult,
-  CacheManager,
   VersionOperator,
 } from './types';
+import type { OSCacheManager } from './cache-manager';
 import { OSDependencyTree } from './dependency-tree';
 import { isArchitectureCompatible } from './repositories';
 import logger from '../../../utils/logger';
@@ -28,7 +28,7 @@ export interface DependencyResolverOptions {
   /** 대상 아키텍처 */
   architecture: OSArchitecture;
   /** 캐시 관리자 (선택) */
-  cacheManager?: CacheManager;
+  cacheManager?: OSCacheManager;
   /** 선택적 의존성 포함 여부 */
   includeOptional: boolean;
   /** 권장 의존성 포함 여부 */

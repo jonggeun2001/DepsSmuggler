@@ -796,11 +796,9 @@ depssmuggler os download <packages...> --distro <distro-id> [options]
 - `--distro <id>`: 배포판 ID (필수)
 - `--arch <arch>`: 아키텍처 (기본: x86_64)
 - `--output <path>`: 출력 경로 (기본: ./os-packages)
-- `--format <type>`: 출력 형식 (archive | repository | both, 기본: both)
-- `--archive-format <type>`: 아카이브 형식 (zip | tar.gz, 기본: tar.gz)
+- `--format <type>`: 출력 형식 (archive | repository | both, 기본: archive)
+- `--archive-format <type>`: 아카이브 형식 (zip | tar.gz, 기본: zip)
 - `--no-deps`: 의존성 미포함
-- `--include-optional`: 선택적 의존성 포함
-- `--no-verify`: GPG 검증 생략
 - `--concurrency <n>`: 동시 다운로드 수 (기본: 3)
 - `--scripts`: 설치 스크립트 포함
 
@@ -824,6 +822,8 @@ depssmuggler os cache stats
 # 캐시 삭제
 depssmuggler os cache clear
 ```
+
+`os cache`는 OS 메타데이터 캐시(`~/.depssmuggler/cache/os-packages`)만 대상으로 동작합니다.
 
 ---
 

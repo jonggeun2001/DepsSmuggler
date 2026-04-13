@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import archiver from 'archiver';
 import type { OSPackageInfo, OSPackageManager, ArchiveFormat } from './types';
+import { getDownloadedFileKey, getPackageFilename } from './package-file-utils';
 import { OSScriptGenerator, type GeneratedScripts } from './script-generator';
 
 /**
@@ -145,7 +146,7 @@ export class OSArchivePackager {
     downloadedFiles: Map<string, string>
   ): void {
     for (const pkg of packages) {
-      const key = `${pkg.name}-${pkg.version}`;
+      const key = getDownloadedFileKey(pkg);
       const filePath = downloadedFiles.get(key);
 
       if (filePath && fs.existsSync(filePath)) {
@@ -211,7 +212,7 @@ export class OSArchivePackager {
         version: pkg.version,
         architecture: pkg.architecture,
         size: pkg.size,
-        filename: this.getPackageFilename(pkg, options.packageManager),
+        filename: getPackageFilename(pkg, options.packageManager),
       })),
     };
 
@@ -276,23 +277,6 @@ ${packages.map((pkg) => `- ${pkg.name} ${pkg.version} (${pkg.architecture})`).jo
 `;
 
     archive.append(readme, { name: 'README.txt' });
-  }
-
-  /**
-   * 패키지 파일명 생성
-   */
-  private getPackageFilename(pkg: OSPackageInfo, pm: OSPackageManager): string {
-    switch (pm) {
-      case 'yum':
-        return `${pkg.name}-${pkg.version}.${pkg.architecture}.rpm`;
-      case 'apt':
-        const arch = pkg.architecture === 'x86_64' ? 'amd64' : pkg.architecture;
-        return `${pkg.name}_${pkg.version}_${arch}.deb`;
-      case 'apk':
-        return `${pkg.name}-${pkg.version}.apk`;
-      default:
-        return `${pkg.name}-${pkg.version}`;
-    }
   }
 
   /**
