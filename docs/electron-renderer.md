@@ -2,7 +2,12 @@
 
 ## 개요
 
-데스크톱 앱은 Electron main process와 React renderer가 `window.electronAPI` IPC 브리지로 통신하는 구조입니다. 현재 개발 환경과 프로덕션 환경 모두 렌더러의 데이터 접근은 IPC가 기준입니다.
+데스크톱 앱은 Electron main process와 React renderer가 `window.electronAPI` IPC 브리지로 통신하는 구조입니다. 핵심 다운로드/설정/검색 흐름은 IPC 기준이지만, 일부 검색과 버전 조회에는 `/api/...` 직접 호출이나 HTTP 폴백이 남아 있는 혼합 모델입니다.
+
+현재 확인된 예시는 다음과 같습니다.
+
+- `src/renderer/pages/CartPage.tsx`는 일부 최신 버전 조회를 `/api/pypi`, `/api/maven`, `/api/npm`으로 직접 호출합니다.
+- `src/renderer/pages/WizardPage.tsx`는 npm 검색, Docker 검색/태그 조회에서 IPC 우선 후 HTTP 폴백을 유지합니다.
 
 ## 현재 화면 구조
 
