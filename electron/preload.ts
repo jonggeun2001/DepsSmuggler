@@ -319,8 +319,6 @@ const electronAPI = {
   // 버전 정보 관련
   versions: {
     python: (): Promise<string[]> => ipcRenderer.invoke('versions:python'),
-    java: (): Promise<Array<{ version: string; lts: boolean }>> => ipcRenderer.invoke('versions:java'),
-    node: (): Promise<Array<{ version: string; lts: string | false }>> => ipcRenderer.invoke('versions:node'),
     cuda: (): Promise<string[]> => ipcRenderer.invoke('versions:cuda'),
     // 버전 사전 로딩 및 캐시 관리
     preload: (): Promise<{

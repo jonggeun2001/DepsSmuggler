@@ -1519,7 +1519,7 @@ const SettingsPage: React.FC = () => {
               </Row>
             </Spin>
             <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
-              이 영역은 패키지 메타데이터 캐시만 집계합니다. Python/CUDA 버전 목록 캐시는 별도 경로로 관리됩니다.
+              이 영역은 패키지 메타데이터 캐시만 집계합니다. Python 버전 목록은 localStorage, CUDA/Java/Node 버전 파일은 같은 cache 루트의 별도 `*-versions.json` 파일로 관리됩니다.
             </Text>
           </div>
         </Card>

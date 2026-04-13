@@ -173,8 +173,6 @@ export interface MavenAPI {
 
 export interface VersionsAPI {
   python: () => Promise<string[]>;
-  java: () => Promise<Array<{ version: string; lts: boolean }>>;
-  node: () => Promise<Array<{ version: string; lts: string | false }>>;
   cuda: () => Promise<string[]>;
   preload: () => Promise<{
     success: boolean;
