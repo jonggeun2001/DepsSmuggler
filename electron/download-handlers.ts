@@ -757,6 +757,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
               success: false,
               outputPath: outputDir,
               error: `지원하지 않는 출력 형식입니다: ${String(outputFormat)}`,
+              results,
             });
             return;
           }
@@ -795,6 +796,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                 success: false,
                 outputPath: outputDir,
                 error: errorMessage,
+                results,
               });
               return;
             }
@@ -822,6 +824,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                   error: errorMessage,
                 },
                 error: errorMessage,
+                results,
               });
               return;
             }
@@ -839,6 +842,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                   error: errorMessage,
                 },
                 error: errorMessage,
+                results,
               });
               return;
             }
@@ -873,6 +877,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                       error: errorMessage,
                     },
                     error: errorMessage,
+                    results,
                   });
                   return;
                 }
@@ -940,6 +945,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                     error: errorMessage,
                   },
                   error: errorMessage,
+                  results,
                 });
                 return;
               }
@@ -964,6 +970,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                   error: errorMessage,
                 },
                 error: errorMessage,
+                results,
               });
               return;
             }

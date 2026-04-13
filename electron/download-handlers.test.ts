@@ -441,11 +441,15 @@ describe('registerDownloadHandlers', () => {
     );
 
     await waitForExpectation(() => {
-      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
-        success: false,
-        outputPath: outputDir,
-        error: 'archive failed',
-      });
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: false,
+          outputPath: outputDir,
+          error: 'archive failed',
+          results: [expect.objectContaining({ id: 'pip-requests-2.28.0', success: true })],
+        })
+      );
     });
     expect(webContentsSend).not.toHaveBeenCalledWith('download:all-complete', {
       success: true,
@@ -490,11 +494,15 @@ describe('registerDownloadHandlers', () => {
     );
 
     await waitForExpectation(() => {
-      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
-        success: false,
-        outputPath: outputDir,
-        error: '지원하지 않는 출력 형식입니다: archive',
-      });
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: false,
+          outputPath: outputDir,
+          error: '지원하지 않는 출력 형식입니다: archive',
+          results: [expect.objectContaining({ id: 'pip-requests-2.28.0', success: true })],
+        })
+      );
     });
     expect(createArchiveFromDirectoryMock).not.toHaveBeenCalled();
   });
@@ -1104,7 +1112,7 @@ describe('registerDownloadHandlers', () => {
       expect.any(Map),
       expect.objectContaining({
         packageManager: 'yum',
-        outputPath: `${osOutputDir}/repository`,
+        outputPath: path.join(osOutputDir, 'repository'),
       })
     );
     expect(webContentsSend).toHaveBeenCalledWith(

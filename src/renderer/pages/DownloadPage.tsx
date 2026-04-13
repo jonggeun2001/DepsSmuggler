@@ -190,14 +190,40 @@ function toOSPackageInfo(item: CartItem): OSPackageInfo | null {
     return null;
   }
 
+  const architectureMap: Partial<Record<NonNullable<CartItem['arch']>, OSPackageInfo['architecture']>> = {
+    x86_64: 'x86_64',
+    amd64: 'amd64',
+    arm64: 'arm64',
+    aarch64: 'aarch64',
+    i386: 'i386',
+    i686: 'i686',
+    noarch: 'noarch',
+    all: 'all',
+    'arm/v7': 'armv7',
+    '386': 'i386',
+  };
+  const architecture = architectureMap[item.arch];
+  if (!architecture) {
+    return null;
+  }
+
+  const repository: OSPackageInfo['repository'] = {
+    id: item.repository.baseUrl,
+    name: item.repository.name || item.repository.baseUrl,
+    baseUrl: item.repository.baseUrl,
+    enabled: true,
+    gpgCheck: true,
+    isOfficial: false,
+  };
+
   return {
     name: item.name,
     version: item.version,
-    architecture: item.arch,
+    architecture,
     size: 0,
     checksum: { type: 'sha256', value: '' },
     location: item.location,
-    repository: item.repository,
+    repository,
     dependencies: [],
     description: typeof item.metadata?.description === 'string' ? item.metadata.description : undefined,
     summary: typeof item.metadata?.description === 'string' ? item.metadata.description : undefined,
@@ -1319,6 +1345,7 @@ const DownloadPage: React.FC = () => {
       outputFormat: result.outputOptions.archiveFormat || 'zip',
       includeScripts: result.outputOptions.generateScripts,
       includeDependencies,
+      deliveryMethod: 'local',
       osOutputOptions: result.outputOptions,
     };
 
@@ -2711,7 +2738,7 @@ const DownloadPage: React.FC = () => {
               </Button>
             </>
           )}
-          {(allCompleted || packagingStatus === 'completed') && (
+          {allCompleted && (
             <Button
               type="primary"
               icon={<CheckCircleOutlined />}
