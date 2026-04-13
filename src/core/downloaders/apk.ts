@@ -65,6 +65,9 @@ export class ApkMetadataParser {
         return { data, status: response.status };
       } catch (error) {
         lastError = error as Error;
+        if (this.abortSignal?.aborted || (lastError as { name?: string }).name === 'AbortError') {
+          throw lastError;
+        }
         if (attempt < this.maxRetries) {
           await new Promise((resolve) => setTimeout(resolve, this.retryDelay * attempt));
         }
