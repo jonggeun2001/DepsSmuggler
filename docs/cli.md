@@ -91,7 +91,7 @@ depssmuggler download -t pip -p flask -f tar.gz
 
 ## `search`
 
-일반 패키지 검색 명령입니다. 구현상 `pip`, `conda`, `maven`, `docker`만 직접 검색합니다.
+일반 패키지 검색 명령입니다. 구현상 `pip`, `conda`, `maven`, `npm`, `docker`를 직접 검색합니다.
 
 ### 사용법
 
@@ -111,13 +111,13 @@ depssmuggler search <query> [옵션]
 ```bash
 depssmuggler search requests -t pip
 depssmuggler search spring -t maven -l 10
+depssmuggler search react -t npm
 depssmuggler search nginx -t docker
 ```
 
 ### 참고
 
 - `yum`, `apt`, `apk`를 `search`로 호출하면 CLI는 `os search` 사용을 안내하고 종료합니다.
-- `npm`은 현재 일반 `search` 명령에 구현되어 있지 않습니다.
 
 ## `os`
 
@@ -197,7 +197,6 @@ depssmuggler cache list
 ## 현재 한계
 
 - CLI는 GUI보다 지원 범위가 좁습니다.
-- 일반 `search` 명령에는 `npm`이 아직 연결되어 있지 않습니다.
 - OS 패키지 CLI는 조회 중심이며 다운로드/캐시는 GUI 흐름이 기준입니다.
 - `cache list`는 현재 캐시 루트가 디렉터리 위주라는 가정을 두고 있어, `cache-manifest.json` 같은 일반 파일이 섞인 경우 실패할 수 있습니다.
 

@@ -4,6 +4,7 @@ import { PackageType } from '../../types';
 import { getPipDownloader } from '../../core/downloaders/pip';
 import { getCondaDownloader } from '../../core/downloaders/conda';
 import { getMavenDownloader } from '../../core/downloaders/maven';
+import { getNpmDownloader } from '../../core/downloaders/npm';
 import { getDockerDownloader } from '../../core/downloaders/docker';
 
 // 검색 옵션
@@ -47,6 +48,16 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
         const mavenDownloader = getMavenDownloader();
         const mavenResults = await mavenDownloader.searchPackages(query);
         results = mavenResults.map((pkg) => ({
+          name: pkg.name,
+          version: pkg.version,
+          description: pkg.metadata?.description as string,
+        }));
+        break;
+
+      case 'npm':
+        const npmDownloader = getNpmDownloader();
+        const npmResults = await npmDownloader.searchPackages(query);
+        results = npmResults.map((pkg) => ({
           name: pkg.name,
           version: pkg.version,
           description: pkg.metadata?.description as string,
