@@ -15,6 +15,13 @@ export interface DepsResolvedData {
 export interface AllCompleteData {
   success: boolean;
   outputPath: string;
+  cancelled?: boolean;
+  error?: string;
+  results?: Array<{
+    id: string;
+    success: boolean;
+    error?: string;
+  }>;
 }
 
 export interface DownloadAPI {

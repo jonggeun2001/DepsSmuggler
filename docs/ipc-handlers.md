@@ -120,7 +120,7 @@ electron/
 | `download:status` | 전체 단계 상태 |
 | `download:progress` | 개별 패키지 진행률 |
 | `download:deps-resolved` | 다운로드 전 의존성 해결 결과 |
-| `download:all-complete` | 전체 다운로드 완료 |
+| `download:all-complete` | 전체 다운로드 완료. `outputPath`는 실제 산출물 경로를 담음 (`.zip`, `.tar.gz`, 또는 취소 시 작업 디렉터리) |
 
 참고: `dependency:resolve`의 `options.includeDependencies`가 `false`이면 메인 프로세스는 원본 패키지 목록만 반환합니다.
 

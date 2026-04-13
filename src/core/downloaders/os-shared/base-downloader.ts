@@ -15,6 +15,7 @@ import type {
   OSErrorAction,
 } from './types';
 import { GPGVerifier, type VerificationResult } from './gpg-verifier';
+import { getDownloadedFileKey } from './package-file-utils';
 
 /**
  * 다운로드 결과
@@ -32,6 +33,12 @@ export interface DownloadResult {
   cancelled?: boolean;
   /** 검증 결과 */
   verification?: VerificationResult;
+}
+
+export interface DownloadPackagesResult {
+  success: OSPackageInfo[];
+  failed: Array<{ package: OSPackageInfo; error: Error }>;
+  downloadedFiles: Map<string, string>;
 }
 
 /**
@@ -264,12 +271,10 @@ export abstract class BaseOSDownloader {
    */
   async downloadPackages(
     packages: OSPackageInfo[]
-  ): Promise<{
-    success: OSPackageInfo[];
-    failed: Array<{ package: OSPackageInfo; error: Error }>;
-  }> {
+  ): Promise<DownloadPackagesResult> {
     const success: OSPackageInfo[] = [];
     const failed: Array<{ package: OSPackageInfo; error: Error }> = [];
+    const downloadedFiles = new Map<string, string>();
 
     // 간단한 병렬 처리 (concurrency 제한)
     const queue = [...packages];
@@ -283,6 +288,9 @@ export abstract class BaseOSDownloader {
 
       if (result.success) {
         success.push(pkg);
+        if (result.filePath) {
+          downloadedFiles.set(getDownloadedFileKey(pkg), result.filePath);
+        }
       } else {
         failed.push({ package: pkg, error: result.error! });
       }
@@ -318,6 +326,6 @@ export abstract class BaseOSDownloader {
       }
     }
 
-    return { success, failed };
+    return { success, failed, downloadedFiles };
   }
 }

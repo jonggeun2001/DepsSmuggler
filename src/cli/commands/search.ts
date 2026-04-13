@@ -4,6 +4,7 @@ import { PackageType } from '../../types';
 import { getPipDownloader } from '../../core/downloaders/pip';
 import { getCondaDownloader } from '../../core/downloaders/conda';
 import { getMavenDownloader } from '../../core/downloaders/maven';
+import { getNpmDownloader } from '../../core/downloaders/npm';
 import { getDockerDownloader } from '../../core/downloaders/docker';
 
 // 검색 옵션
@@ -20,6 +21,8 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
 
   try {
     let results: Array<{ name: string; version: string; description?: string }> = [];
+    const parsedLimit = Number.parseInt(options.limit, 10);
+    const limit = Number.isNaN(parsedLimit) || parsedLimit <= 0 ? 20 : parsedLimit;
 
     // 타입별 다운로더 호출
     switch (options.type) {
@@ -53,6 +56,16 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
         }));
         break;
 
+      case 'npm':
+        const npmDownloader = getNpmDownloader();
+        const npmResults = await npmDownloader.searchPackages(query, limit);
+        results = npmResults.map((pkg) => ({
+          name: pkg.name,
+          version: pkg.version,
+          description: pkg.metadata?.description as string,
+        }));
+        break;
+
       case 'yum':
       case 'apt':
       case 'apk':
@@ -76,7 +89,6 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
     }
 
     // 결과 제한
-    const limit = parseInt(options.limit, 10);
     if (results.length > limit) {
       results = results.slice(0, limit);
     }

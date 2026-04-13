@@ -5,6 +5,7 @@
 
 import type { OSPackageInfo, PackageDependency, Repository, OSPackageSearchResult } from '../downloaders/os-shared/types';
 import { BaseOSDependencyResolver, type DependencyResolverOptions } from '../downloaders/os-shared/base-resolver';
+import { OSCacheManager } from '../downloaders/os-shared/cache-manager';
 import { AptMetadataParser } from '../downloaders/apt';
 import { isArchitectureCompatible } from '../downloaders/os-shared/repositories';
 import { searchPackagesCommon, createResolverFactory } from './os-resolver-utils';
@@ -49,9 +50,21 @@ export class AptDependencyResolver extends BaseOSDependencyResolver {
 
           const key = `${repo.id}-${component}`;
           this.parsers.set(key, parser);
+          const cacheKey = OSCacheManager.createKey(
+            'apt',
+            {
+              ...repo,
+              baseUrl: `${repo.baseUrl.replace(/\/$/, '')}/${component}`,
+            },
+            this.options.architecture,
+            'packages'
+          );
+          let packages = await this.options.cacheManager?.get<OSPackageInfo[]>(cacheKey);
 
-          // Packages.gz 파싱
-          const packages = await parser.parsePackages();
+          if (!packages) {
+            packages = await parser.parsePackages();
+            await this.options.cacheManager?.set(cacheKey, packages);
+          }
 
           // 아키텍처 필터링
           const compatiblePackages = packages.filter((pkg) =>

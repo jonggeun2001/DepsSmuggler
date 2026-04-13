@@ -1,23 +1,36 @@
+import * as fse from 'fs-extra';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerDownloadHandlers } from './download-handlers';
 import type { OSPackageInfo, OSDistribution } from '../src/core/downloaders/os-shared/types';
 
 const {
   ipcHandle,
+  webContentsSend,
+  showOpenDialog,
   showMessageBox,
-  windowSend,
+  getPyPIDownloadUrlMock,
+  downloadFileMock,
+  generateInstallScriptsMock,
+  createArchiveFromDirectoryMock,
   yumDownloadPackage,
   yumResolveDependencies,
   archiveCreateArchive,
   repoCreateLocalRepo,
+  generateDependencyOrderScriptMock,
 } = vi.hoisted(() => ({
   ipcHandle: vi.fn(),
+  webContentsSend: vi.fn(),
+  showOpenDialog: vi.fn(),
   showMessageBox: vi.fn(),
-  windowSend: vi.fn(),
+  getPyPIDownloadUrlMock: vi.fn(),
+  downloadFileMock: vi.fn(),
+  generateInstallScriptsMock: vi.fn(),
+  createArchiveFromDirectoryMock: vi.fn(),
   yumDownloadPackage: vi.fn(),
   yumResolveDependencies: vi.fn(),
   archiveCreateArchive: vi.fn(),
   repoCreateLocalRepo: vi.fn(),
+  generateDependencyOrderScriptMock: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -25,6 +38,7 @@ vi.mock('electron', () => ({
     handle: ipcHandle,
   },
   dialog: {
+    showOpenDialog,
     showMessageBox,
   },
   BrowserWindow: class {},
@@ -37,6 +51,12 @@ vi.mock('./utils/logger', () => ({
     warn: vi.fn(),
     error: vi.fn(),
   })),
+}));
+
+vi.mock('../src/core/shared', () => ({
+  getPyPIDownloadUrl: getPyPIDownloadUrlMock,
+  downloadFile: downloadFileMock,
+  generateInstallScripts: generateInstallScriptsMock,
 }));
 
 vi.mock('../src/core', () => ({
@@ -56,6 +76,12 @@ vi.mock('../src/core', () => ({
   getApkResolver: vi.fn(),
 }));
 
+vi.mock('../src/core/packager/archive-packager', () => ({
+  getArchivePackager: vi.fn(() => ({
+    createArchiveFromDirectory: createArchiveFromDirectoryMock,
+  })),
+}));
+
 vi.mock('../src/core/downloaders/os-shared/archive-packager', () => ({
   OSArchivePackager: vi.fn(() => ({
     createArchive: archiveCreateArchive,
@@ -67,6 +93,29 @@ vi.mock('../src/core/downloaders/os-shared/repo-packager', () => ({
     createLocalRepo: repoCreateLocalRepo,
   })),
 }));
+
+vi.mock('../src/core/downloaders/os-shared/script-generator', () => ({
+  OSScriptGenerator: vi.fn(() => ({
+    generateDependencyOrderScript: generateDependencyOrderScriptMock,
+  })),
+}));
+
+const waitForExpectation = async (assertion: () => void, timeoutMs = 2000): Promise<void> => {
+  const startTime = Date.now();
+  let lastError: unknown;
+
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
+  throw lastError;
+};
 
 describe('registerDownloadHandlers', () => {
   const distribution: OSDistribution = {
@@ -106,8 +155,31 @@ describe('registerDownloadHandlers', () => {
     location: 'Packages/glibc-2.34.rpm',
   };
 
-  beforeEach(() => {
+  const osOutputDir = '/tmp/depssmuggler-os-downloads';
+
+  beforeEach(async () => {
     vi.clearAllMocks();
+
+    await fse.remove(osOutputDir);
+
+    showOpenDialog.mockResolvedValue({
+      canceled: true,
+      filePaths: [],
+    });
+    showMessageBox.mockResolvedValue({
+      response: 1,
+    });
+
+    getPyPIDownloadUrlMock.mockResolvedValue({
+      url: 'https://example.com/requests-2.28.0.whl',
+      filename: 'requests-2.28.0.whl',
+    });
+    downloadFileMock.mockResolvedValue(undefined);
+    generateInstallScriptsMock.mockResolvedValue(undefined);
+    createArchiveFromDirectoryMock.mockImplementation(
+      async (_sourceDir: string, outputPath: string) => outputPath
+    );
+
     yumDownloadPackage.mockResolvedValueOnce({
       success: true,
       filePath: '/tmp/bash-5.1.8.rpm',
@@ -122,23 +194,247 @@ describe('registerDownloadHandlers', () => {
       conflicts: [],
       warnings: [],
     });
-    archiveCreateArchive.mockResolvedValue('/downloads/os-packages.zip');
-    repoCreateLocalRepo.mockResolvedValue({
-      repoPath: '/downloads/repository',
-      packageCount: 2,
-      totalSize: 4321,
-      metadataFiles: ['/downloads/repository/repodata/repomd.xml'],
+    archiveCreateArchive.mockResolvedValue(`${osOutputDir}/os-packages.zip`);
+    repoCreateLocalRepo.mockImplementation(
+      async (
+        _packages: OSPackageInfo[],
+        _downloadedFiles: Map<string, string>,
+        options: { outputPath: string }
+      ) => {
+        await fse.ensureDir(options.outputPath);
+        return {
+          repoPath: options.outputPath,
+          packageCount: 2,
+          totalSize: 4321,
+          metadataFiles: [`${options.outputPath}/repodata/repomd.xml`],
+        };
+      }
+    );
+    generateDependencyOrderScriptMock.mockReturnValue({
+      bash: '#!/bin/bash\necho install\n',
+      powershell: 'Write-Host "install"\n',
     });
   });
 
-  it('os:download:start에서 OS 전용 출력 옵션을 적용해 패키징 결과를 반환한다', async () => {
-    const mockWindow = {
+  it('tar.gz 선택 시 공통 아카이브 패키저를 사용하고 실제 산출물 경로를 완료 이벤트에 담아야 함', async () => {
+    registerDownloadHandlers(() => ({
       webContents: {
-        send: windowSend,
+        send: webContentsSend,
       },
-    };
+    }) as never);
 
-    registerDownloadHandlers(() => mockWindow as never);
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = '/tmp/depssmuggler-gui-output';
+    const expectedArchivePath = `${outputDir}.tar.gz`;
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'tar.gz',
+          includeScripts: true,
+          concurrency: 1,
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(createArchiveFromDirectoryMock).toHaveBeenCalledWith(
+        outputDir,
+        expectedArchivePath,
+        [
+          expect.objectContaining({
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          }),
+        ],
+        expect.objectContaining({
+          format: 'tar.gz',
+        })
+      );
+    });
+
+    await waitForExpectation(() => {
+      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
+        success: true,
+        outputPath: expectedArchivePath,
+        results: [
+          {
+            id: 'pip-requests-2.28.0',
+            success: true,
+          },
+        ],
+      });
+    });
+  });
+
+  it('zip 선택 시에도 완료 이벤트가 디렉터리가 아닌 실제 아카이브 파일 경로를 반영해야 함', async () => {
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = '/tmp/depssmuggler-gui-output-zip';
+    const expectedArchivePath = `${outputDir}.zip`;
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'zip',
+          includeScripts: false,
+          concurrency: 1,
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
+        success: true,
+        outputPath: expectedArchivePath,
+        results: [
+          {
+            id: 'pip-requests-2.28.0',
+            success: true,
+          },
+        ],
+      });
+    });
+  });
+
+  it('아카이브 생성이 실패하면 성공 완료 이벤트 대신 실패 이벤트를 보내야 함', async () => {
+    createArchiveFromDirectoryMock.mockRejectedValueOnce(new Error('archive failed'));
+
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = '/tmp/depssmuggler-gui-output-failure';
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'tar.gz',
+          includeScripts: false,
+          concurrency: 1,
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
+        success: false,
+        outputPath: outputDir,
+        error: 'archive failed',
+      });
+    });
+    expect(webContentsSend).not.toHaveBeenCalledWith('download:all-complete', {
+      success: true,
+      outputPath: `${outputDir}.tar.gz`,
+      results: expect.any(Array),
+    });
+  });
+
+  it('지원하지 않는 출력 형식은 조용히 성공시키지 말고 실패로 처리해야 함', async () => {
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+
+    const outputDir = '/tmp/depssmuggler-gui-output-legacy';
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'archive',
+          includeScripts: false,
+          concurrency: 1,
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(webContentsSend).toHaveBeenCalledWith('download:all-complete', {
+        success: false,
+        outputPath: outputDir,
+        error: '지원하지 않는 출력 형식입니다: archive',
+      });
+    });
+    expect(createArchiveFromDirectoryMock).not.toHaveBeenCalled();
+  });
+
+  it('os:download:start에서 OS 전용 출력 옵션을 적용해 패키징 결과를 반환한다', async () => {
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
 
     const osDownloadHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'os:download:start'
@@ -150,7 +446,7 @@ describe('registerDownloadHandlers', () => {
       {},
       {
         packages: [rootPackage],
-        outputDir: '/downloads',
+        outputDir: osOutputDir,
         distribution,
         architecture: 'x86_64',
         resolveDependencies: true,
@@ -181,10 +477,10 @@ describe('registerDownloadHandlers', () => {
       expect.any(Map),
       expect.objectContaining({
         packageManager: 'yum',
-        outputPath: '/downloads/repository',
+        outputPath: `${osOutputDir}/repository`,
       })
     );
-    expect(windowSend).toHaveBeenCalledWith(
+    expect(webContentsSend).toHaveBeenCalledWith(
       'os:download:progress',
       expect.objectContaining({
         phase: 'packaging',
@@ -195,7 +491,7 @@ describe('registerDownloadHandlers', () => {
         success: [rootPackage, dependencyPackage],
         failed: [],
         skipped: [],
-        outputPath: '/downloads',
+        outputPath: osOutputDir,
         packageManager: 'yum',
         outputOptions: {
           type: 'both',
@@ -206,11 +502,11 @@ describe('registerDownloadHandlers', () => {
         generatedOutputs: expect.arrayContaining([
           expect.objectContaining({
             type: 'archive',
-            path: '/downloads/os-packages.zip',
+            path: `${osOutputDir}/os-packages.zip`,
           }),
           expect.objectContaining({
             type: 'repository',
-            path: '/downloads/repository',
+            path: `${osOutputDir}/repository`,
           }),
         ]),
         warnings: [],
@@ -222,11 +518,11 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('os:download:start에서 해결되지 않은 의존성이 있으면 다운로드를 시작하지 않고 결과에 포함한다', async () => {
-    const mockWindow = {
+    registerDownloadHandlers(() => ({
       webContents: {
-        send: windowSend,
+        send: webContentsSend,
       },
-    };
+    }) as never);
 
     yumResolveDependencies.mockResolvedValueOnce({
       packages: [rootPackage],
@@ -234,8 +530,6 @@ describe('registerDownloadHandlers', () => {
       conflicts: [{ package: 'glibc', versions: [dependencyPackage] }],
       warnings: ['1 dependencies could not be resolved'],
     });
-
-    registerDownloadHandlers(() => mockWindow as never);
 
     const osDownloadHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'os:download:start'
@@ -245,7 +539,7 @@ describe('registerDownloadHandlers', () => {
       {},
       {
         packages: [rootPackage],
-        outputDir: '/downloads',
+        outputDir: osOutputDir,
         distribution,
         architecture: 'x86_64',
         resolveDependencies: true,
@@ -270,11 +564,11 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('os:download:start에서 건너뛴 패키지를 failed 대신 skipped로 집계한다', async () => {
-    const mockWindow = {
+    registerDownloadHandlers(() => ({
       webContents: {
-        send: windowSend,
+        send: webContentsSend,
       },
-    };
+    }) as never);
 
     yumDownloadPackage.mockReset();
     yumDownloadPackage.mockResolvedValueOnce({
@@ -282,8 +576,6 @@ describe('registerDownloadHandlers', () => {
       error: new Error('사용자 건너뜀'),
       skipped: true,
     });
-
-    registerDownloadHandlers(() => mockWindow as never);
 
     const osDownloadHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'os:download:start'
@@ -293,7 +585,7 @@ describe('registerDownloadHandlers', () => {
       {},
       {
         packages: [rootPackage],
-        outputDir: '/downloads',
+        outputDir: osOutputDir,
         distribution,
         architecture: 'x86_64',
         resolveDependencies: false,
@@ -314,15 +606,13 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('os:download:start에서 취소되면 최종 성공 산출물 없이 cancelled 결과를 반환한다', async () => {
-    const mockWindow = {
+    registerDownloadHandlers(() => ({
       webContents: {
-        send: windowSend,
+        send: webContentsSend,
       },
-    };
+    }) as never);
 
     yumDownloadPackage.mockReset();
-
-    registerDownloadHandlers(() => mockWindow as never);
 
     const osDownloadHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'os:download:start'
@@ -344,7 +634,7 @@ describe('registerDownloadHandlers', () => {
       {},
       {
         packages: [rootPackage, dependencyPackage],
-        outputDir: '/downloads',
+        outputDir: osOutputDir,
         distribution,
         architecture: 'x86_64',
         resolveDependencies: false,

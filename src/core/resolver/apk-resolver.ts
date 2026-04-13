@@ -5,6 +5,7 @@
 
 import type { OSPackageInfo, PackageDependency, Repository, OSPackageSearchResult } from '../downloaders/os-shared/types';
 import { BaseOSDependencyResolver, type DependencyResolverOptions } from '../downloaders/os-shared/base-resolver';
+import { OSCacheManager } from '../downloaders/os-shared/cache-manager';
 import { ApkMetadataParser } from '../downloaders/apk';
 import { isArchitectureCompatible } from '../downloaders/os-shared/repositories';
 import { searchPackagesCommon, createResolverFactory } from './os-resolver-utils';
@@ -40,9 +41,18 @@ export class ApkDependencyResolver extends BaseOSDependencyResolver {
           this.options.abortSignal
         );
         this.parsers.set(repo.id, parser);
+        const cacheKey = OSCacheManager.createKey(
+          'apk',
+          repo,
+          this.options.architecture,
+          'apkindex'
+        );
+        let packages = await this.options.cacheManager?.get<OSPackageInfo[]>(cacheKey);
 
-        // APKINDEX 파싱
-        const packages = await parser.parseIndex();
+        if (!packages) {
+          packages = await parser.parseIndex();
+          await this.options.cacheManager?.set(cacheKey, packages);
+        }
 
         // 아키텍처 필터링
         const compatiblePackages = packages.filter((pkg) =>

@@ -12,7 +12,6 @@ import {
   DownloadOptions as SharedDownloadOptions,
   getPyPIDownloadUrl,
   downloadFile,
-  createZipArchive,
   generateInstallScripts,
   Architecture,
 } from '../src/core/shared';
@@ -31,6 +30,8 @@ import {
 import { OSArchivePackager } from '../src/core/downloaders/os-shared/archive-packager';
 import { OSRepoPackager } from '../src/core/downloaders/os-shared/repo-packager';
 import { OSScriptGenerator } from '../src/core/downloaders/os-shared/script-generator';
+import { getArchivePackager } from '../src/core/packager/archive-packager';
+import type { PackageInfo } from '../src/types';
 import type {
   OSPackageInfo,
   OSDistribution,
@@ -668,26 +669,68 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
         const results = downloadResults.filter(r => r.error !== 'cancelled');
 
         if (!downloadCancelled) {
+          let finalOutputPath = outputDir;
+          const isSupportedOutputFormat = outputFormat === 'zip' || outputFormat === 'tar.gz';
+
           // 설치 스크립트 생성 (의존성 포함)
           if (includeScripts) {
             generateInstallScripts(outputDir, allPackages);
           }
 
-          // ZIP 압축 (outputFormat이 zip인 경우)
-          if (outputFormat === 'zip') {
+          if (!isSupportedOutputFormat) {
+            mainWindow?.webContents.send('download:all-complete', {
+              success: false,
+              outputPath: outputDir,
+              error: `지원하지 않는 출력 형식입니다: ${String(outputFormat)}`,
+            });
+            return;
+          }
+
+          if (isSupportedOutputFormat) {
             try {
-              const zipPath = `${outputDir}.zip`;
-              await createZipArchive(outputDir, zipPath);
-              log.info(`Created ZIP archive: ${zipPath}`);
+              const archivePath = `${outputDir}.${outputFormat === 'zip' ? 'zip' : 'tar.gz'}`;
+              const archivePackager = getArchivePackager();
+              const packageInfos: PackageInfo[] = allPackages.map((pkg) => ({
+                type: pkg.type as PackageInfo['type'],
+                name: pkg.name,
+                version: pkg.version,
+                arch: pkg.architecture as PackageInfo['arch'],
+                metadata: pkg.metadata,
+              }));
+
+              mainWindow?.webContents.send('download:status', {
+                phase: 'packaging',
+                message: `${outputFormat.toUpperCase()} 패키징 중...`,
+              });
+
+              finalOutputPath = await archivePackager.createArchiveFromDirectory(
+                outputDir,
+                archivePath,
+                packageInfos,
+                {
+                  format: outputFormat,
+                  includeManifest: true,
+                  includeReadme: true,
+                }
+              );
+
+              log.info(`Created ${outputFormat} archive: ${finalOutputPath}`);
             } catch (error) {
-              log.error('Failed to create ZIP archive:', error);
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              log.error(`Failed to create ${outputFormat} archive:`, error);
+              mainWindow?.webContents.send('download:all-complete', {
+                success: false,
+                outputPath: outputDir,
+                error: errorMessage,
+              });
+              return;
             }
           }
 
           // 전체 완료 이벤트 전송
           mainWindow?.webContents.send('download:all-complete', {
             success: true,
-            outputPath: outputDir,
+            outputPath: finalOutputPath,
             results,
           });
         } else {
@@ -702,6 +745,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
         log.error('Download failed:', error);
         mainWindow?.webContents.send('download:all-complete', {
           success: false,
+          outputPath: outputDir,
           error: error instanceof Error ? error.message : String(error),
         });
       });

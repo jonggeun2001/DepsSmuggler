@@ -62,6 +62,29 @@ const DEFAULT_CONFIG: OSCacheConfig = {
   directory: path.join(homedir(), '.depssmuggler', 'cache', 'os-packages'),
 };
 
+const VALID_ARCHITECTURES = new Set([
+  'x86_64',
+  'amd64',
+  'aarch64',
+  'arm64',
+  'i686',
+  'i386',
+  'x86',
+  'armv7l',
+  'armhf',
+  'armv7',
+  'noarch',
+  'all',
+]);
+
+const VALID_DATA_TYPES = new Set([
+  'repomd',
+  'primary',
+  'packages',
+  'apkindex',
+  'release',
+]);
+
 /**
  * OS 캐시 관리자
  */
@@ -276,8 +299,62 @@ export class OSCacheManager {
    * 캐시 키를 파일명으로 변환
    */
   private keyToFilename(key: string): string {
-    // 안전한 파일명으로 변환
-    return key.replace(/[^a-zA-Z0-9_-]/g, '_') + '.json';
+    return Buffer.from(key, 'utf8').toString('base64url') + '.json';
+  }
+
+  /**
+   * 파일명에서 캐시 키 복원
+   */
+  private filenameToKey(filename: string): string | null {
+    const encoded = filename.replace(/\.json$/, '');
+
+    if (this.isLegacyFilename(encoded)) {
+      return null;
+    }
+
+    try {
+      const decoded = Buffer.from(encoded, 'base64url').toString('utf8');
+      return this.isValidCacheKey(decoded) ? decoded : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 이전 lossy 파일명 형식 감지
+   */
+  private isLegacyFilename(filename: string): boolean {
+    const parts = filename.split('_');
+    if (parts.length < 4) {
+      return false;
+    }
+
+    const packageManager = parts[0];
+    const architecture = parts[parts.length - 2];
+    const dataType = parts[parts.length - 1];
+
+    return (
+      (packageManager === 'yum' || packageManager === 'apt' || packageManager === 'apk') &&
+      VALID_ARCHITECTURES.has(architecture) &&
+      VALID_DATA_TYPES.has(dataType)
+    );
+  }
+
+  /**
+   * base64url 캐시 키 구조 검증
+   */
+  private isValidCacheKey(key: string): boolean {
+    const parts = key.split(':');
+    if (parts.length !== 4) {
+      return false;
+    }
+
+    return (
+      (parts[0] === 'yum' || parts[0] === 'apt' || parts[0] === 'apk') &&
+      parts[1].length > 0 &&
+      VALID_ARCHITECTURES.has(parts[2]) &&
+      VALID_DATA_TYPES.has(parts[3])
+    );
   }
 
   /**
@@ -376,8 +453,12 @@ export class OSCacheManager {
             continue;
           }
 
-          // 키 복원
-          const key = file.replace('.json', '').replace(/_/g, ':');
+          const key = this.filenameToKey(file);
+          if (!key) {
+            fs.unlinkSync(filePath);
+            continue;
+          }
+
           this.memoryCache.set(key, entry);
         } catch {
           // 파싱 실패한 파일 삭제

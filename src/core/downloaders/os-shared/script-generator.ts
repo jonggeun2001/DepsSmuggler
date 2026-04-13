@@ -4,6 +4,7 @@
  */
 
 import type { OSPackageInfo, OSPackageManager, ScriptType } from './types';
+import { getPackageFilename } from './package-file-utils';
 import { stripLeadingDotSlash, toUnixPath } from '../../shared/path-utils';
 
 /**
@@ -133,7 +134,7 @@ export class OSScriptGenerator {
     // 각 패키지 설치
     const installCmd = this.getInstallCommand(pm);
     packages.forEach((pkg, index) => {
-      const filename = this.getPackageFilename(pkg, pm);
+      const filename = getPackageFilename(pkg, pm);
       const num = index + 1;
       const total = packages.length;
 
@@ -467,20 +468,4 @@ export class OSScriptGenerator {
     }
   }
 
-  /**
-   * 패키지 파일명 생성
-   */
-  private getPackageFilename(pkg: OSPackageInfo, pm: OSPackageManager): string {
-    switch (pm) {
-      case 'yum':
-        return `${pkg.name}-${pkg.version}.${pkg.architecture}.rpm`;
-      case 'apt':
-        const arch = pkg.architecture === 'x86_64' ? 'amd64' : pkg.architecture;
-        return `${pkg.name}_${pkg.version}_${arch}.deb`;
-      case 'apk':
-        return `${pkg.name}-${pkg.version}.apk`;
-      default:
-        return `${pkg.name}-${pkg.version}`;
-    }
-  }
 }

@@ -88,7 +88,7 @@ depssmuggler/
 
 - `index.ts`가 `download`, `search`, `config`, `cache`, `os` 명령을 등록합니다.
 - 일반 패키지 CLI는 현재 `pip`, `conda`, `maven`, `docker` 검색과 `pip`, `conda`, `maven`, `npm`, `docker` 다운로드에 초점이 맞춰져 있습니다.
-- OS CLI는 `list-distros`, `search`는 실동작하고, `download`, `cache`는 GUI 사용 안내를 출력합니다.
+- OS CLI는 `list-distros`, `search`, `download`, `cache`를 자체 backend(`downloaders/os-shared/cli-backend.ts`)로 실행합니다.
 
 ## 주요 도메인 모듈
 

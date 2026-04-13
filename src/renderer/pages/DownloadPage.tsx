@@ -301,6 +301,7 @@ const DownloadPage: React.FC = () => {
   const downloadItemsRef = useRef<DownloadItem[]>([]);
   // 히스토리 저장용 장바구니 데이터 (다운로드 시작 시 스냅샷)
   const cartSnapshotRef = useRef<typeof cartItems>([]);
+  const historySettingsSnapshotRef = useRef<HistorySettings | null>(null);
   // 배치 업데이트용 pending 상태 저장
   const pendingUpdatesRef = useRef<Map<string, Partial<DownloadItem>>>(new Map());
   const pendingLogsRef = useRef<Array<{ level: 'info' | 'warn' | 'error' | 'success'; message: string; details?: string }>>([]);
@@ -625,6 +626,20 @@ const DownloadPage: React.FC = () => {
 
     // 전체 다운로드 완료 리스너
     const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
+      if (!data.success) {
+        setIsDownloading(false);
+        setPackagingStatus('failed');
+        setPackagingProgress(0);
+
+        if (!data.cancelled) {
+          const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
+          scheduleLogBatch('error', '다운로드/패키징 실패', errorMessage);
+          message.error(errorMessage);
+        }
+
+        return;
+      }
+
       // 전체 완료 시 pending/downloading 상태인 아이템만 completed로 변경
       // (failed, skipped 등 다른 상태는 보존)
       // Zustand 스토어에서 직접 최신 상태를 가져옴 (이벤트 처리 타이밍 문제 해결)
@@ -643,7 +658,6 @@ const DownloadPage: React.FC = () => {
 
       // 히스토리 저장
       const finalItems = useDownloadStore.getState().items;
-      const settings = useSettingsStore.getState();
 
       // 패키지 정보 변환 (다운로드 시작 시 저장된 스냅샷 사용)
       const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
@@ -656,10 +670,10 @@ const DownloadPage: React.FC = () => {
       }));
 
       // 설정 정보
-      const historySettings: HistorySettings = {
-        outputFormat: settings.defaultOutputFormat,
-        includeScripts: settings.includeInstallScripts,
-        includeDependencies: settings.includeDependencies,
+      const historySettings = historySettingsSnapshotRef.current ?? {
+        outputFormat,
+        includeScripts: includeInstallScripts,
+        includeDependencies,
       };
 
       // 상태 계산
@@ -1318,6 +1332,11 @@ const DownloadPage: React.FC = () => {
     window.electronAPI?.log?.('info', `[TIMING] Proceeding with download at ${Date.now() - handleStartTime}ms`);
     // 히스토리 저장용 장바구니 스냅샷 저장
     cartSnapshotRef.current = [...cartItems];
+    historySettingsSnapshotRef.current = {
+      outputFormat,
+      includeScripts: includeInstallScripts,
+      includeDependencies,
+    };
 
     addLog('info', '다운로드 시작', `총 ${downloadItems.length}개 패키지`);
 
