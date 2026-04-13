@@ -21,6 +21,14 @@ interface DownloadOptions {
   concurrency: string;
 }
 
+interface PreparedPackagesResult {
+  packages: PackageInfo[];
+  dependencyResolutionApplied: boolean;
+  warning?: string;
+}
+
+const CLI_DEPENDENCY_SUPPORTED_TYPES = new Set<PackageType>(['pip', 'conda', 'maven', 'npm']);
+
 function toDownloadPackage(pkg: PackageInfo): DownloadPackage {
   return {
     id: `${pkg.type}-${pkg.name}-${pkg.version}`,
@@ -72,9 +80,21 @@ function toPackageInfo(pkg: DownloadPackage): PackageInfo {
 async function preparePackagesForDownload(
   packages: PackageInfo[],
   options: Pick<DownloadOptions, 'arch' | 'deps'>
-): Promise<PackageInfo[]> {
+): Promise<PreparedPackagesResult> {
   if (!options.deps) {
-    return packages;
+    return {
+      packages,
+      dependencyResolutionApplied: false,
+    };
+  }
+
+  const hasUnsupportedType = packages.some((pkg) => !CLI_DEPENDENCY_SUPPORTED_TYPES.has(pkg.type));
+  if (hasUnsupportedType) {
+    return {
+      packages,
+      dependencyResolutionApplied: false,
+      warning: '이 타입은 `download` 명령에서 의존성 자동 해결을 지원하지 않습니다. OS 패키지는 `depssmuggler os download`를 사용하세요.',
+    };
   }
 
   const resolved = await resolveAllDependencies(packages.map(toDownloadPackage), {
@@ -82,7 +102,10 @@ async function preparePackagesForDownload(
     includeDependencies: true,
   });
 
-  return resolved.allPackages.map(toPackageInfo);
+  return {
+    packages: resolved.allPackages.map(toPackageInfo),
+    dependencyResolutionApplied: true,
+  };
 }
 
 /**
@@ -117,12 +140,17 @@ export async function downloadCommand(options: DownloadOptions): Promise<void> {
     console.log(chalk.green(`✓ ${packages.length}개 패키지 준비 완료`));
 
     const requestedCount = packages.length;
-    packages = await preparePackagesForDownload(packages, {
+    const prepared = await preparePackagesForDownload(packages, {
       arch: options.arch,
       deps: options.deps,
     });
+    packages = prepared.packages;
 
-    if (options.deps) {
+    if (prepared.warning) {
+      console.log(chalk.yellow(`⚠ ${prepared.warning}`));
+    }
+
+    if (prepared.dependencyResolutionApplied) {
       console.log(chalk.green(`✓ 의존성 해결 완료: ${requestedCount}개 → ${packages.length}개 패키지`));
     }
 

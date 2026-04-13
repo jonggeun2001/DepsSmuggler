@@ -179,4 +179,27 @@ describe('downloadCommand', () => {
       },
     ]);
   });
+
+  it('yum 타입은 의존성 자동 해결을 시도하지 않고 원본 패키지만 큐에 추가한다', async () => {
+    await downloadCommand({
+      type: 'yum',
+      package: 'httpd',
+      pkgVersion: '2.4.0',
+      arch: 'x86_64',
+      output: './output',
+      format: 'zip',
+      deps: true,
+      concurrency: '3',
+    });
+
+    expect(resolveAllDependencies).not.toHaveBeenCalled();
+    expect(addToQueue).toHaveBeenCalledWith([
+      {
+        type: 'yum',
+        name: 'httpd',
+        version: '2.4.0',
+        arch: 'x86_64',
+      },
+    ]);
+  });
 });
