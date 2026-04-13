@@ -172,14 +172,31 @@ export class EmailSender {
         attachments: mailAttachments,
       };
 
-      const info = await this.transporter!.sendMail(mailOptions);
-      messageIds.push(info.messageId);
-      emailsSent++;
-      attachmentsSent += mailAttachments?.length || 0;
+      try {
+        const info = await this.transporter!.sendMail(mailOptions);
+        messageIds.push(info.messageId);
+        emailsSent++;
+        attachmentsSent += mailAttachments?.length || 0;
 
-      logger.info(`분할 이메일 발송 (${i + 1}/${groups.length})`, {
-        messageId: info.messageId,
-      });
+        logger.info(`분할 이메일 발송 (${i + 1}/${groups.length})`, {
+          messageId: info.messageId,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`분할 이메일 발송 실패 (${i + 1}/${groups.length})`, {
+          error: errorMessage,
+          emailsSent,
+          attachmentsSent,
+        });
+        return {
+          success: false,
+          messageId: messageIds.join(', '),
+          error: errorMessage,
+          emailsSent,
+          attachmentsSent,
+          splitApplied: false,
+        };
+      }
     }
 
     return {

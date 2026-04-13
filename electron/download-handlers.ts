@@ -686,10 +686,6 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
                 packages: packageInfos,
               });
 
-              if (shouldStopForCancellation(finalOutputPath, attachments)) {
-                return;
-              }
-
               if (!emailSendResult.success) {
                 const errorMessage = emailSendResult.error || '이메일 전달에 실패했습니다';
                 mainWindow?.webContents.send('download:all-complete', {
@@ -734,7 +730,7 @@ export function registerDownloadHandlers(windowGetter: () => BrowserWindow | nul
             }
           }
 
-          if (shouldStopForCancellation(finalOutputPath, artifactPaths.length > 0 ? artifactPaths : [finalOutputPath])) {
+          if (!deliveryResult?.emailSent && shouldStopForCancellation(finalOutputPath, artifactPaths.length > 0 ? artifactPaths : [finalOutputPath])) {
             return;
           }
 

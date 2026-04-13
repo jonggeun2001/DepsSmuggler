@@ -220,6 +220,34 @@ describe('EmailSender', () => {
       expect(result.emailsSent).toBeGreaterThan(1);
       expect(result.attachmentsSent).toBe(2);
     });
+
+    it('분할 발송 중 일부 파트가 실패해도 누적 발송 메타데이터를 반환해야 함', async () => {
+      sender.setMaxAttachmentSize(1024); // 1KB
+
+      const file1 = path.join(tempDir, 'part1.txt');
+      const file2 = path.join(tempDir, 'part2.txt');
+      await fs.writeFile(file1, 'a'.repeat(600));
+      await fs.writeFile(file2, 'b'.repeat(600));
+
+      const mockTransporter = nodemailer.createTransport({} as nodemailer.TransportOptions);
+      vi.mocked(mockTransporter.sendMail)
+        .mockResolvedValueOnce({ messageId: 'split-part-1' } as never)
+        .mockRejectedValueOnce(new Error('split send failed'));
+
+      const options: EmailOptions = {
+        to: 'recipient@example.com',
+        subject: 'Large Files',
+        body: 'Please see attachments.',
+        attachments: [file1, file2],
+      };
+
+      const result = await sender.sendEmail(options);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('split send failed');
+      expect(result.emailsSent).toBe(1);
+      expect(result.attachmentsSent).toBe(1);
+    });
   });
 
   describe('updateConfig', () => {
