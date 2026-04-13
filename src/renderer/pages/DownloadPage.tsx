@@ -143,8 +143,36 @@ interface OSDownloadResultData {
   cancelled: boolean;
 }
 
+interface OSCartContextSnapshot {
+  distributionId: string;
+  architecture: string;
+  packageManager: SupportedOSPackageManager;
+}
+
 function isOSCartItem(item: CartItem): item is CartItem & { type: SupportedOSPackageManager } {
   return OS_PACKAGE_TYPES.has(item.type);
+}
+
+function getOSCartContextSnapshot(item: CartItem): OSCartContextSnapshot | null {
+  const raw = item.metadata?.osContext;
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const { distributionId, architecture, packageManager } = raw as Partial<OSCartContextSnapshot>;
+  if (
+    typeof distributionId !== 'string' ||
+    typeof architecture !== 'string' ||
+    (packageManager !== 'yum' && packageManager !== 'apt' && packageManager !== 'apk')
+  ) {
+    return null;
+  }
+
+  return {
+    distributionId,
+    architecture,
+    packageManager,
+  };
 }
 
 function toOSPackageInfo(item: CartItem): OSPackageInfo | null {
@@ -275,10 +303,61 @@ const DownloadPage: React.FC = () => {
     () => Array.from(new Set(osCartItems.map((item) => item.type))),
     [osCartItems]
   );
-  const isDedicatedOSFlow = hasOnlyOSPackages && osPackageManagers.length === 1;
-  const activeOSPackageManager = (isDedicatedOSFlow
-    ? osPackageManagers[0]
-    : null) as SupportedOSPackageManager | null;
+  const osCartContext = useMemo<OSCartContextSnapshot | null>(() => {
+    if (!hasOnlyOSPackages || osPackageManagers.length !== 1) {
+      return null;
+    }
+
+    const packageManager = osPackageManagers[0] as SupportedOSPackageManager;
+    const snapshots = osCartItems.map(getOSCartContextSnapshot);
+    const presentSnapshots = snapshots.filter(
+      (snapshot): snapshot is OSCartContextSnapshot => snapshot !== null
+    );
+
+    if (presentSnapshots.length === 0) {
+      return {
+        distributionId: packageManager === 'yum'
+          ? yumDistribution.id
+          : packageManager === 'apt'
+          ? aptDistribution.id
+          : apkDistribution.id,
+        architecture: packageManager === 'yum'
+          ? yumDistribution.architecture
+          : packageManager === 'apt'
+          ? aptDistribution.architecture
+          : apkDistribution.architecture,
+        packageManager,
+      };
+    }
+
+    if (presentSnapshots.length !== osCartItems.length) {
+      return null;
+    }
+
+    const [firstSnapshot] = presentSnapshots;
+    const hasMixedSnapshots = presentSnapshots.some(
+      (snapshot) =>
+        snapshot.packageManager !== firstSnapshot.packageManager ||
+        snapshot.distributionId !== firstSnapshot.distributionId ||
+        snapshot.architecture !== firstSnapshot.architecture
+    );
+
+    return hasMixedSnapshots ? null : firstSnapshot;
+  }, [
+    apkDistribution.architecture,
+    apkDistribution.id,
+    aptDistribution.architecture,
+    aptDistribution.id,
+    hasOnlyOSPackages,
+    osCartItems,
+    osPackageManagers,
+    yumDistribution.architecture,
+    yumDistribution.id,
+  ]);
+  const [persistedOSContext, setPersistedOSContext] = useState<OSCartContextSnapshot | null>(null);
+  const effectiveOSContext = osCartContext ?? persistedOSContext;
+  const isDedicatedOSFlow = hasOnlyOSPackages && osCartContext !== null;
+  const activeOSPackageManager = effectiveOSContext?.packageManager ?? null;
   const osPackages = useMemo(
     () => osCartItems.map(toOSPackageInfo).filter(Boolean) as OSPackageInfo[],
     [osCartItems]
@@ -288,7 +367,6 @@ const DownloadPage: React.FC = () => {
   const [osDownloading, setOSDownloading] = useState(false);
   const [osResult, setOSResult] = useState<OSDownloadResultData | null>(null);
   const [osDownloadError, setOSDownloadError] = useState<string | null>(null);
-  const resolvedOSPackageManager = (activeOSPackageManager ?? osResult?.packageManager ?? null) as SupportedOSPackageManager | null;
   const shouldRenderDedicatedOSFlow =
     isDedicatedOSFlow || osDownloading || osResult !== null;
   // 의존성 확인 관련 상태
@@ -323,20 +401,20 @@ const DownloadPage: React.FC = () => {
   }, [cartItems, downloadItems.length, setItems, clearLogs]);
 
   useEffect(() => {
-    if (!shouldRenderDedicatedOSFlow || !resolvedOSPackageManager || !window.electronAPI?.os?.getDistribution) {
+    if (osCartContext) {
+      setPersistedOSContext(osCartContext);
+    }
+  }, [osCartContext]);
+
+  useEffect(() => {
+    if (!shouldRenderDedicatedOSFlow || !effectiveOSContext || !window.electronAPI?.os?.getDistribution) {
       setOSDistribution(null);
       return;
     }
 
-    const distributionId = resolvedOSPackageManager === 'yum'
-      ? yumDistribution.id
-      : resolvedOSPackageManager === 'apt'
-      ? aptDistribution.id
-      : apkDistribution.id;
-
     let active = true;
 
-    window.electronAPI.os.getDistribution(distributionId)
+    window.electronAPI.os.getDistribution(effectiveOSContext.distributionId)
       .then((distribution) => {
         if (active) {
           setOSDistribution((distribution as OSDistribution | undefined) || null);
@@ -353,11 +431,8 @@ const DownloadPage: React.FC = () => {
       active = false;
     };
   }, [
-    resolvedOSPackageManager,
+    effectiveOSContext,
     shouldRenderDedicatedOSFlow,
-    yumDistribution.id,
-    aptDistribution.id,
-    apkDistribution.id,
   ]);
 
   useEffect(() => {
@@ -1116,13 +1191,6 @@ const DownloadPage: React.FC = () => {
     }
   };
 
-  const getActiveOSArchitecture = () => {
-    if (activeOSPackageManager === 'yum') return yumDistribution.architecture;
-    if (activeOSPackageManager === 'apt') return aptDistribution.architecture;
-    if (activeOSPackageManager === 'apk') return apkDistribution.architecture;
-    return defaultArchitecture;
-  };
-
   const addOSDownloadHistory = (result: OSDownloadResultData) => {
     if (cartSnapshotRef.current.length === 0) {
       return;
@@ -1134,7 +1202,16 @@ const DownloadPage: React.FC = () => {
       version: item.version,
       arch: item.arch,
       languageVersion: item.languageVersion,
-      metadata: item.metadata,
+      metadata: isOSCartItem(item) && effectiveOSContext
+        ? {
+            ...item.metadata,
+            osContext: {
+              distributionId: effectiveOSContext.distributionId,
+              architecture: effectiveOSContext.architecture,
+              packageManager: effectiveOSContext.packageManager,
+            },
+          }
+        : item.metadata,
     }));
 
     const historySettings: HistorySettings = {
@@ -1171,7 +1248,7 @@ const DownloadPage: React.FC = () => {
       return;
     }
 
-    if (!activeOSPackageManager || !osDistribution) {
+    if (!activeOSPackageManager || !osDistribution || !effectiveOSContext) {
       message.error('OS 배포판 정보를 아직 불러오지 못했습니다');
       return;
     }
@@ -1194,6 +1271,7 @@ const DownloadPage: React.FC = () => {
     }
 
     cartSnapshotRef.current = [...osCartItems];
+    setPersistedOSContext(effectiveOSContext);
     setOSDownloadError(null);
     setOSResult(null);
     setOSDownloading(true);
@@ -1212,7 +1290,7 @@ const DownloadPage: React.FC = () => {
         packages: osPackages,
         outputDir,
         distribution: osDistribution,
-        architecture: getActiveOSArchitecture(),
+        architecture: effectiveOSContext.architecture,
         resolveDependencies: includeDependencies,
         includeOptionalDeps: includeDependencies,
         concurrency: concurrentDownloads,
