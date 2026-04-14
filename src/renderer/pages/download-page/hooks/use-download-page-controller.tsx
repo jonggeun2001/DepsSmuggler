@@ -1260,6 +1260,57 @@ export function useDownloadPageController() {
       return;
     }
 
+    const previousRetryState = {
+      sessionCounter: downloadSessionIdRef.current,
+      activeSession: activeDownloadSessionRef.current,
+      cartSnapshot: cartSnapshotRef.current,
+      historyTrackedItemIds: historyTrackedItemIdsRef.current,
+      historySettings: historySettingsSnapshotRef.current,
+      downloadCancelled: downloadCancelledRef.current,
+      downloadPaused: downloadPausedRef.current,
+      cancelledCompletionRetained: cancelledCompletionRetainedRef.current,
+      lastSpeedCalc: lastSpeedCalcRef.current,
+      speedHistory: [...speedHistoryRef.current],
+      startTime,
+      isDownloading,
+      isPaused,
+      packagingStatus,
+      packagingProgress,
+      completedOutputPath,
+      completedArtifactPaths: [...completedArtifactPaths],
+      completedDeliveryResult,
+      completedError,
+      itemState: {
+        status: item.status,
+        progress: item.progress,
+        downloadedBytes: item.downloadedBytes,
+        totalBytes: item.totalBytes,
+        speed: item.speed,
+        error: item.error,
+      },
+    };
+    const restorePreviousRetryState = () => {
+      downloadSessionIdRef.current = previousRetryState.sessionCounter;
+      activeDownloadSessionRef.current = previousRetryState.activeSession;
+      cartSnapshotRef.current = previousRetryState.cartSnapshot;
+      historyTrackedItemIdsRef.current = previousRetryState.historyTrackedItemIds;
+      historySettingsSnapshotRef.current = previousRetryState.historySettings;
+      downloadCancelledRef.current = previousRetryState.downloadCancelled;
+      downloadPausedRef.current = previousRetryState.downloadPaused;
+      cancelledCompletionRetainedRef.current = previousRetryState.cancelledCompletionRetained;
+      lastSpeedCalcRef.current = previousRetryState.lastSpeedCalc;
+      speedHistoryRef.current = [...previousRetryState.speedHistory];
+      setStartTime(previousRetryState.startTime);
+      setIsDownloading(previousRetryState.isDownloading);
+      setIsPaused(previousRetryState.isPaused);
+      setPackagingStatus(previousRetryState.packagingStatus);
+      setPackagingProgress(previousRetryState.packagingProgress);
+      setCompletedOutputPath(previousRetryState.completedOutputPath);
+      setCompletedArtifactPaths([...previousRetryState.completedArtifactPaths]);
+      setCompletedDeliveryResult(previousRetryState.completedDeliveryResult);
+      setCompletedError(previousRetryState.completedError);
+    };
+
     const sessionSnapshot = createDownloadSessionSnapshot(
       [{
         id: item.id,
@@ -1345,11 +1396,23 @@ export function useDownloadPageController() {
       });
       addLog('info', `재시도 완료: ${item.name}`);
     } catch (error) {
+      restorePreviousRetryState();
       addLog('error', `재시도 실패: ${item.name}`, String(error));
-      updateItem(item.id, { status: 'failed', error: String(error) });
+      updateItem(item.id, {
+        status: 'failed',
+        progress: previousRetryState.itemState.progress,
+        downloadedBytes: previousRetryState.itemState.downloadedBytes,
+        totalBytes: previousRetryState.itemState.totalBytes,
+        speed: previousRetryState.itemState.speed,
+        error: String(error),
+      });
     }
   }, [
     addLog,
+    completedArtifactPaths,
+    completedDeliveryResult,
+    completedError,
+    completedOutputPath,
     createDownloadSessionSnapshot,
     defaultArchitecture,
     defaultTargetOS,
@@ -1357,16 +1420,26 @@ export function useDownloadPageController() {
     effectiveSmtpTo,
     enableFileSplit,
     includeInstallScripts,
+    isDownloading,
+    isPaused,
     languageVersions.python,
     maxFileSize,
     outputDir,
     outputFormat,
+    packagingProgress,
+    packagingStatus,
     retryItem,
+    setIsDownloading,
+    setIsPaused,
+    setPackagingProgress,
+    setPackagingStatus,
+    setStartTime,
     smtpFrom,
     smtpHost,
     smtpPassword,
     smtpPort,
     smtpUser,
+    startTime,
     updateItem,
   ]);
 

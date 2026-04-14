@@ -7,6 +7,7 @@ interface MockDownloadScenario {
   stepDelayMs?: number;
   completeDelayMs?: number;
   cancelledCompletionDelayMs?: number;
+  startErrorMessage?: string;
   failMessage?: string;
   failAttemptsByPackageId?: Record<string, number[]>;
   emitLateSuccessAfterCancel?: boolean;
@@ -607,6 +608,11 @@ export async function setupMockElectronApp(
             completionDelay,
             emitLateSuccessAfterCancel: scenario.emitLateSuccessAfterCancel === true,
           };
+
+          if (scenario.startErrorMessage) {
+            activeDownload = null;
+            throw new Error(scenario.startErrorMessage);
+          }
 
           scheduleDownloadStep(currentSequence, stepDelay, () => {
             emit(downloadStatusListeners, {
