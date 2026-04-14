@@ -107,7 +107,7 @@ export interface RendererDataClient {
   history: HistoryPersistenceClient;
 }
 
-const HISTORY_STORAGE_KEY = 'depssmuggler-download-history';
+const HISTORY_STORAGE_KEY = 'depssmuggler-history';
 const MAX_BROWSER_HISTORIES = 100;
 
 function compareVersionsDescending(left: string, right: string): number {
