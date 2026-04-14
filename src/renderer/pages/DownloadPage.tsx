@@ -62,6 +62,7 @@ function DownloadPage() {
         downloadItems={controller.downloadItems}
         logs={controller.logs}
         onRetry={controller.executeRetryDownload}
+        onRestartDownload={controller.handleStartDownload}
         onOpenFolder={controller.handleOpenFolder}
         onComplete={controller.handleComplete}
       />

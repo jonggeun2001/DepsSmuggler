@@ -1,6 +1,7 @@
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  DownloadOutlined,
   FileZipOutlined,
   FolderOpenOutlined,
   ForwardOutlined,
@@ -29,6 +30,7 @@ interface DownloadOutcomeViewProps {
   downloadItems: DownloadItem[];
   logs: LogEntry[];
   onRetry: (item: DownloadItem) => void;
+  onRestartDownload: () => Promise<void> | void;
   onOpenFolder: () => Promise<void> | void;
   onComplete: () => void;
 }
@@ -48,11 +50,40 @@ export function DownloadOutcomeView({
   downloadItems,
   logs,
   onRetry,
+  onRestartDownload,
   onOpenFolder,
   onComplete,
 }: DownloadOutcomeViewProps) {
   const isCompleted = variant === 'completed';
   const hasCancelledDelivery = !isCompleted && Boolean(completedDeliveryResult?.emailSent);
+  const resultActions = [
+    <Button
+      key="open"
+      icon={<FolderOpenOutlined />}
+      onClick={onOpenFolder}
+    >
+      다운로드 폴더 열기
+    </Button>,
+  ];
+
+  if (!isCompleted) {
+    resultActions.unshift(
+      <Button
+        type="primary"
+        key="restart"
+        icon={<DownloadOutlined />}
+        onClick={onRestartDownload}
+      >
+        다운로드 시작
+      </Button>
+    );
+  }
+
+  resultActions.push(
+    <Button key="done" icon={<ReloadOutlined />} onClick={onComplete}>
+      새 다운로드
+    </Button>
+  );
 
   return (
     <div>
@@ -86,19 +117,7 @@ export function DownloadOutcomeView({
             ? '로컬 산출물은 생성되었습니다. 경로를 확인해 수동 전달을 진행할 수 있습니다.'
             : '패키징 또는 전달 중 오류가 발생했습니다.'
         }
-        extra={[
-          <Button
-            type="primary"
-            key="open"
-            icon={<FolderOpenOutlined />}
-            onClick={onOpenFolder}
-          >
-            다운로드 폴더 열기
-          </Button>,
-          <Button key="done" icon={<ReloadOutlined />} onClick={onComplete}>
-            새 다운로드
-          </Button>,
-        ]}
+        extra={resultActions}
       />
 
       <Card
