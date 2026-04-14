@@ -527,7 +527,13 @@ export function createDownloadOrchestrator(
     let splitApplied = false;
     const getCurrentArtifacts = () =>
       attachments.length > 0 ? attachments : artifactPaths.length > 0 ? artifactPaths : [finalOutputPath];
-    const getCancelledOutcome = () => {
+    const getCancelledOutcome = (deliveryResult?: {
+      emailSent: boolean;
+      emailsSent?: number;
+      attachmentsSent?: number;
+      splitApplied?: boolean;
+      error?: string;
+    }) => {
       if (!isCancelled()) {
         return null;
       }
@@ -539,6 +545,9 @@ export function createDownloadOrchestrator(
           cancelled: true,
           outputPath: finalOutputPath,
           artifactPaths: getCurrentArtifacts(),
+          deliveryMethod,
+          deliveryResult,
+          results,
         },
       };
     };
@@ -634,6 +643,17 @@ export function createDownloadOrchestrator(
         attachments: getCurrentArtifacts(),
         packages: packageInfos,
       });
+
+      const cancelledAfterSend = getCancelledOutcome({
+        emailSent: emailSendResult.success,
+        emailsSent: emailSendResult.emailsSent,
+        attachmentsSent: emailSendResult.attachmentsSent,
+        splitApplied: emailSendResult.splitApplied ?? splitApplied,
+        error: emailSendResult.success ? undefined : emailSendResult.error,
+      });
+      if (cancelledAfterSend) {
+        return cancelledAfterSend;
+      }
 
       if (!emailSendResult.success) {
         const errorMessage = emailSendResult.error || '이메일 전달에 실패했습니다';

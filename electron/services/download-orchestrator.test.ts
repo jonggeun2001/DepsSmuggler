@@ -202,6 +202,115 @@ describe('createDownloadOrchestrator', () => {
     );
   });
 
+  it('이메일 전송 중 취소되면 성공 대신 cancelled 완료 이벤트를 만든다', async () => {
+    const { createDownloadOrchestrator } = await import('./download-orchestrator');
+
+    const router = {
+      downloadPackage: vi.fn().mockResolvedValue({
+        id: 'pip-requests-2.28.0',
+        success: true,
+      }),
+    };
+    const progressEmitter = {
+      emitDownloadStatus: vi.fn(),
+      emitAllComplete: vi.fn(),
+      clearAllPackageProgress: vi.fn(),
+    };
+    const sendEmailDeferred = createDeferred<{
+      success: boolean;
+      emailsSent: number;
+      attachmentsSent: number;
+      splitApplied: boolean;
+    }>();
+    let backgroundTask!: Promise<void>;
+
+    const orchestrator = createDownloadOrchestrator({
+      getMainWindow: () => null,
+      ensureDir: vi.fn().mockResolvedValue(undefined),
+      stat: vi.fn().mockResolvedValue({ size: 1024 } as never),
+      scheduleTask: (task: () => Promise<void>) => {
+        backgroundTask = task();
+      },
+      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createPackageRouter: () => router,
+      createProgressEmitter: () => progressEmitter as never,
+      archivePackager: {
+        createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.tar.gz'),
+      } as never,
+      generateInstallScripts: vi.fn(),
+      initializeEmailSender: vi.fn(() => ({
+        sendEmail: vi.fn().mockImplementation(() => sendEmailDeferred.promise),
+      })) as never,
+    });
+
+    const result = await orchestrator.startDownload({
+      sessionId: 303,
+      packages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+        },
+      ],
+      options: {
+        outputDir: '/tmp/out',
+        outputFormat: 'tar.gz',
+        includeScripts: false,
+        concurrency: 1,
+        deliveryMethod: 'email',
+        email: {
+          to: 'offline@example.com',
+        },
+        fileSplit: {
+          enabled: false,
+          maxSizeMB: 10,
+        },
+        smtp: {
+          host: 'smtp.example.com',
+          port: 587,
+          user: 'sender@example.com',
+        },
+      },
+    });
+
+    expect(result).toEqual({ success: true, started: true });
+
+    await vi.waitFor(() => {
+      expect(progressEmitter.emitDownloadStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 303,
+          message: '이메일 전달 준비 중...',
+        })
+      );
+    });
+
+    await orchestrator.cancelDownload();
+    sendEmailDeferred.resolve({
+      success: true,
+      emailsSent: 1,
+      attachmentsSent: 1,
+      splitApplied: false,
+    });
+    await backgroundTask;
+
+    expect(progressEmitter.emitAllComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 303,
+        success: false,
+        cancelled: true,
+        outputPath: '/tmp/out.tar.gz',
+        artifactPaths: ['/tmp/out.tar.gz'],
+      })
+    );
+    expect(progressEmitter.emitAllComplete).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 303,
+        success: true,
+      })
+    );
+  });
+
   it('새 세션이 시작돼도 이전 취소 세션은 취소 상태를 유지한다', async () => {
     const { createDownloadOrchestrator } = await import('./download-orchestrator');
 
