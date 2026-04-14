@@ -6,6 +6,7 @@ interface MockDownloadScenario {
   mode?: 'success' | 'slow' | 'fail-once';
   stepDelayMs?: number;
   completeDelayMs?: number;
+  cancelledCompletionDelayMs?: number;
   failMessage?: string;
   failAttemptsByPackageId?: Record<string, number[]>;
   emitLateSuccessAfterCancel?: boolean;
@@ -25,6 +26,18 @@ interface MockElectronAppOptions {
   cartItems?: CartItem[];
   histories?: DownloadHistory[];
   checkPathDelayMs?: number;
+  checkPathResponses?: Array<{
+    exists?: boolean;
+    files?: string[];
+    fileCount?: number;
+    totalSize?: number;
+  }>;
+  checkPathResult?: {
+    exists?: boolean;
+    files?: string[];
+    fileCount?: number;
+    totalSize?: number;
+  };
   downloadDelayMs?: number;
   downloadScenario?: MockDownloadScenario;
   cacheStats?: {
@@ -163,6 +176,20 @@ export async function setupMockElectronApp(
         conda: seed.cacheStats?.details?.conda || {},
       },
     };
+    let checkPathState = {
+      exists: Boolean(seed.checkPathResult?.exists),
+      files: Array.isArray(seed.checkPathResult?.files) ? [...seed.checkPathResult.files] : [],
+      fileCount: Number(seed.checkPathResult?.fileCount || seed.checkPathResult?.files?.length || 0),
+      totalSize: Number(seed.checkPathResult?.totalSize || 0),
+    };
+    let checkPathResponses = Array.isArray(seed.checkPathResponses)
+      ? seed.checkPathResponses.map((entry) => ({
+          exists: Boolean(entry.exists),
+          files: Array.isArray(entry.files) ? [...entry.files] : [],
+          fileCount: Number(entry.fileCount || entry.files?.length || 0),
+          totalSize: Number(entry.totalSize || 0),
+        }))
+      : [];
 
     const persistRuntime = () => {
       sessionStorage.setItem(RUNTIME_KEY, JSON.stringify(state.runtime));
@@ -247,6 +274,7 @@ export async function setupMockElectronApp(
             error?: string;
           }
         | undefined;
+      cancelledCompletionDelay: number;
       completionDelay: number;
       emitLateSuccessAfterCancel: boolean;
     } | null = null;
@@ -447,27 +475,36 @@ export async function setupMockElectronApp(
           }
 
           if (activeDownload) {
-            const cancelledDeliveryResult =
-              activeDownload.cancelledCompletionDeliveryResult
-              ?? (activeDownload.cancelledCompletionRetainsDelivery
-                ? activeDownload.deliveryResult
-                : undefined);
-            emit(downloadAllCompleteListeners, {
-              sessionId: activeDownload.sessionId,
-              success: false,
-              cancelled: true,
-              outputPath: cancelledDeliveryResult || activeDownload.cancelledCompletionRetainsDelivery
-                ? activeDownload.outputPath
-                : activeDownload.outputDir,
-              artifactPaths: cancelledDeliveryResult || activeDownload.cancelledCompletionRetainsDelivery
-                ? [activeDownload.artifactPath]
-                : [],
-              deliveryMethod: activeDownload.deliveryMethod,
-              deliveryResult: cancelledDeliveryResult,
-              results: (cancelledDeliveryResult || activeDownload.cancelledCompletionRetainsDelivery)
-                ? activeDownload.results
-                : undefined,
-            });
+            const cancelledDownloadState = activeDownload;
+            const emitCancelledCompletion = () => {
+              const cancelledDeliveryResult =
+                cancelledDownloadState.cancelledCompletionDeliveryResult
+                ?? (cancelledDownloadState.cancelledCompletionRetainsDelivery
+                  ? cancelledDownloadState.deliveryResult
+                  : undefined);
+              emit(downloadAllCompleteListeners, {
+                sessionId: cancelledDownloadState.sessionId,
+                success: false,
+                cancelled: true,
+                outputPath: cancelledDeliveryResult || cancelledDownloadState.cancelledCompletionRetainsDelivery
+                  ? cancelledDownloadState.outputPath
+                  : cancelledDownloadState.outputDir,
+                artifactPaths: cancelledDeliveryResult || cancelledDownloadState.cancelledCompletionRetainsDelivery
+                  ? [cancelledDownloadState.artifactPath]
+                  : [],
+                deliveryMethod: cancelledDownloadState.deliveryMethod,
+                deliveryResult: cancelledDeliveryResult,
+                results: (cancelledDeliveryResult || cancelledDownloadState.cancelledCompletionRetainsDelivery)
+                  ? cancelledDownloadState.results
+                  : undefined,
+              });
+            };
+
+            if (cancelledDownloadState.cancelledCompletionDelay > 0) {
+              scheduleDetachedDownloadStep(cancelledDownloadState.cancelledCompletionDelay, emitCancelledCompletion);
+            } else {
+              emitCancelledCompletion();
+            }
             activeDownload = null;
           }
 
@@ -478,9 +515,24 @@ export async function setupMockElectronApp(
             await new Promise((resolve) => window.setTimeout(resolve, seed.checkPathDelayMs));
           }
 
-          return { exists: false, files: [], fileCount: 0, totalSize: 0 };
+          if (checkPathResponses.length > 0) {
+            const nextResponse = checkPathResponses.shift();
+            if (nextResponse) {
+              checkPathState = nextResponse;
+            }
+          }
+
+          return clone(checkPathState);
         },
-        clearPath: async () => ({ success: true, deleted: true }),
+        clearPath: async () => {
+          checkPathState = {
+            exists: false,
+            files: [],
+            fileCount: 0,
+            totalSize: 0,
+          };
+          return { success: true, deleted: true };
+        },
         start: async (payload: { sessionId?: number; packages: Array<Record<string, unknown>>; options: Record<string, unknown> }) => {
           state.runtime.downloadCalls.push(clone(payload));
           (payload.packages || []).forEach((pkg) => {
@@ -551,6 +603,7 @@ export async function setupMockElectronApp(
             cancelledCompletionRetainsDelivery:
               scenario.cancelledCompletionRetainsDelivery === true,
             cancelledCompletionDeliveryResult: scenario.cancelledCompletionDeliveryResult,
+            cancelledCompletionDelay: scenario.cancelledCompletionDelayMs ?? 0,
             completionDelay,
             emitLateSuccessAfterCancel: scenario.emitLateSuccessAfterCancel === true,
           };

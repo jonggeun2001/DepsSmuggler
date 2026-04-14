@@ -1047,6 +1047,32 @@ export function useDownloadPageController() {
     setIsPaused(false);
     cancelledCompletionRetainedRef.current = false;
     setStartTime(Date.now());
+    const previousSessionState = {
+      sessionCounter: downloadSessionIdRef.current,
+      activeSession: activeDownloadSessionRef.current,
+      cartSnapshot: cartSnapshotRef.current,
+      historyTrackedItemIds: historyTrackedItemIdsRef.current,
+      historySettings: historySettingsSnapshotRef.current,
+      downloadCancelled: downloadCancelledRef.current,
+      downloadPaused: downloadPausedRef.current,
+      cancelledCompletionRetained: cancelledCompletionRetainedRef.current,
+      lastSpeedCalc: lastSpeedCalcRef.current,
+      speedHistory: [...speedHistoryRef.current],
+      startTime,
+    };
+    const restorePreviousSessionState = () => {
+      downloadSessionIdRef.current = previousSessionState.sessionCounter;
+      activeDownloadSessionRef.current = previousSessionState.activeSession;
+      cartSnapshotRef.current = previousSessionState.cartSnapshot;
+      historyTrackedItemIdsRef.current = previousSessionState.historyTrackedItemIds;
+      historySettingsSnapshotRef.current = previousSessionState.historySettings;
+      downloadCancelledRef.current = previousSessionState.downloadCancelled;
+      downloadPausedRef.current = previousSessionState.downloadPaused;
+      cancelledCompletionRetainedRef.current = previousSessionState.cancelledCompletionRetained;
+      lastSpeedCalcRef.current = previousSessionState.lastSpeedCalc;
+      speedHistoryRef.current = [...previousSessionState.speedHistory];
+      setStartTime(previousSessionState.startTime);
+    };
     const sessionSnapshot = createDownloadSessionSnapshot(
       [...cartItems],
       new Set(downloadItems.map((item) => item.id)),
@@ -1067,7 +1093,9 @@ export function useDownloadPageController() {
 
     const canProceed = await checkOutputPath();
     if (!canProceed) {
+      restorePreviousSessionState();
       setIsDownloading(false);
+      setIsPaused(previousSessionState.downloadPaused);
       return;
     }
     setCompletedOutputPath('');
@@ -1078,8 +1106,10 @@ export function useDownloadPageController() {
     addLog('info', '다운로드 시작', `총 ${downloadItems.length}개 패키지`);
 
     if (!window.electronAPI?.download?.start) {
+      restorePreviousSessionState();
       addLog('error', '다운로드 API를 사용할 수 없습니다');
       setIsDownloading(false);
+      setIsPaused(previousSessionState.downloadPaused);
       return;
     }
 
@@ -1125,8 +1155,10 @@ export function useDownloadPageController() {
         options,
       });
     } catch (error) {
+      restorePreviousSessionState();
       addLog('error', '다운로드 시작 실패', String(error));
       setIsDownloading(false);
+      setIsPaused(previousSessionState.downloadPaused);
     }
   }, [
     addLog,
@@ -1147,6 +1179,7 @@ export function useDownloadPageController() {
     maxFileSize,
     outputDir,
     outputFormat,
+    startTime,
     setIsDownloading,
     setIsPaused,
     setStartTime,
