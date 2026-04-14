@@ -87,6 +87,37 @@ describe('version-service', () => {
     expect(result.selectedVersion).toBe('5.3.0');
   });
 
+  it('pip 커스텀 인덱스 + HTTP fallback에서는 usedIndexUrl을 기록하지 않는다', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        releases: {
+          '2.32.0': [{}],
+          '2.31.0': [{}],
+        },
+      }),
+    });
+    const service = createVersionService({ fetchImpl });
+
+    const result = await service.loadVersionDetails(
+      {
+        ...baseContext,
+        packageType: 'pip',
+        useCustomIndex: true,
+        customIndexUrl: 'https://download.pytorch.org/whl/cu124',
+      },
+      {
+        name: 'requests',
+        version: '2.31.0',
+      }
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith('/api/pypi/pypi/requests/json');
+    expect(result.usedIndexUrl).toBeUndefined();
+    expect(result.versions).toEqual(['2.32.0', '2.31.0']);
+    expect(result.selectedVersion).toBe('2.32.0');
+  });
+
   it('docker는 태그 fallback에서 latest를 우선 선택한다', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,

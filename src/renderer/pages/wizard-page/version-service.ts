@@ -162,9 +162,11 @@ export function createVersionService({
 
       const versionOptions = buildVersionOptions(context);
       let versions: string[];
+      const electronVersionLookup = electronAPI?.search?.versions;
+      const usedElectronVersionLookup = Boolean(electronVersionLookup);
 
-      if (electronAPI?.search?.versions) {
-        const response = await electronAPI.search.versions(
+      if (electronVersionLookup) {
+        const response = await electronVersionLookup(
           context.packageType,
           record.name,
           versionOptions
@@ -191,7 +193,9 @@ export function createVersionService({
         versions,
         selectedVersion,
         usedIndexUrl:
-          context.packageType === 'pip' && versionOptions?.indexUrl
+          usedElectronVersionLookup &&
+          context.packageType === 'pip' &&
+          versionOptions?.indexUrl
             ? versionOptions.indexUrl
             : undefined,
         ...mavenDetails,
