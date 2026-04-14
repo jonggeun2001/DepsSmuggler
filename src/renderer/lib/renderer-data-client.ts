@@ -59,6 +59,7 @@ interface RendererDataClientElectronAPI {
 export interface RendererDataClientDependencies {
   electronAPI?: RendererDataClientElectronAPI;
   fetchImpl?: typeof fetch;
+  storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 }
 
 export interface HistoryPersistenceClient {
@@ -105,6 +106,9 @@ export interface RendererDataClient {
   ) => Promise<string[]>;
   history: HistoryPersistenceClient;
 }
+
+const HISTORY_STORAGE_KEY = 'depssmuggler-download-history';
+const MAX_BROWSER_HISTORIES = 100;
 
 function compareVersionsDescending(left: string, right: string): number {
   const leftParts = left.split('.').map(Number);
@@ -261,36 +265,103 @@ async function getVersionsViaHttp(
 
 let defaultRendererDataClient: RendererDataClient | null = null;
 
+function getHistoryStorage(
+  storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
+  if (storage) {
+    return storage;
+  }
+
+  if (typeof localStorage !== 'undefined') {
+    return localStorage;
+  }
+
+  return null;
+}
+
+function readStoredHistories(
+  storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null
+): DownloadHistory[] {
+  if (!storage) {
+    return [];
+  }
+
+  try {
+    const rawValue = storage.getItem(HISTORY_STORAGE_KEY);
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsed = JSON.parse(rawValue);
+    return Array.isArray(parsed) ? parsed as DownloadHistory[] : [];
+  } catch (error) {
+    console.error('브라우저 히스토리 로드 실패:', error);
+    return [];
+  }
+}
+
+function writeStoredHistories(
+  storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null,
+  histories: DownloadHistory[]
+): { success: boolean } {
+  if (!storage) {
+    return { success: false };
+  }
+
+  try {
+    storage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(histories.slice(0, MAX_BROWSER_HISTORIES)));
+    return { success: true };
+  } catch (error) {
+    console.error('브라우저 히스토리 저장 실패:', error);
+    return { success: false };
+  }
+}
+
 export function createRendererDataClient({
   electronAPI,
   fetchImpl = typeof fetch === 'function' ? fetch : undefined,
+  storage,
 }: RendererDataClientDependencies = {}): RendererDataClient {
-  const history: HistoryPersistenceClient = {
-    load: async () => {
-      if (!electronAPI?.history?.load) {
-        return [];
+  const electronHistory = electronAPI?.history;
+  const hasElectronHistoryClient =
+    Boolean(electronHistory?.load)
+    && Boolean(electronHistory?.add)
+    && Boolean(electronHistory?.delete)
+    && Boolean(electronHistory?.clear);
+  const historyStorage = getHistoryStorage(storage);
+  const history: HistoryPersistenceClient = hasElectronHistoryClient
+    ? {
+        load: async () => (await electronHistory!.load!()) as DownloadHistory[],
+        add: async (entry) => electronHistory!.add!(entry),
+        delete: async (id) => electronHistory!.delete!(id),
+        clear: async () => electronHistory!.clear!(),
       }
-      return (await electronAPI.history.load()) as DownloadHistory[];
-    },
-    add: async (entry) => {
-      if (!electronAPI?.history?.add) {
-        return { success: false };
-      }
-      return electronAPI.history.add(entry);
-    },
-    delete: async (id) => {
-      if (!electronAPI?.history?.delete) {
-        return { success: false };
-      }
-      return electronAPI.history.delete(id);
-    },
-    clear: async () => {
-      if (!electronAPI?.history?.clear) {
-        return { success: false };
-      }
-      return electronAPI.history.clear();
-    },
-  };
+    : {
+        load: async () => readStoredHistories(historyStorage),
+        add: async (entry) => {
+          const updatedHistories = [entry, ...readStoredHistories(historyStorage)];
+          return writeStoredHistories(historyStorage, updatedHistories);
+        },
+        delete: async (id) => {
+          const updatedHistories = readStoredHistories(historyStorage).filter(
+            (historyEntry) => historyEntry.id !== id
+          );
+          return writeStoredHistories(historyStorage, updatedHistories);
+        },
+        clear: async () => {
+          if (!historyStorage) {
+            return { success: false };
+          }
+
+          try {
+            historyStorage.removeItem(HISTORY_STORAGE_KEY);
+            return { success: true };
+          } catch (error) {
+            console.error('브라우저 히스토리 삭제 실패:', error);
+            return { success: false };
+          }
+        },
+      };
 
   return {
     async searchPackages(type, query, options) {

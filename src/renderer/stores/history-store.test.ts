@@ -128,4 +128,43 @@ describe('history-store', () => {
 
     expect(store.getState().histories).toEqual([existingHistory]);
   });
+
+  it('hydrate보다 늦게 적용된 mutation state를 stale load가 덮어쓰지 않는다', async () => {
+    let resolveLoad: ((value: DownloadHistory[]) => void) | null = null;
+    const client = {
+      load: vi.fn().mockImplementation(
+        () => new Promise<DownloadHistory[]>((resolve) => {
+          resolveLoad = resolve;
+        })
+      ),
+      add: vi.fn().mockResolvedValue({ success: true }),
+      delete: vi.fn().mockResolvedValue({ success: true }),
+      clear: vi.fn().mockResolvedValue({ success: true }),
+    };
+    const store = createHistoryStore({ client, autoHydrate: false });
+
+    const hydratePromise = store.getState().hydrate();
+    const addedId = await store.getState().addHistory(
+      [],
+      {
+        outputFormat: 'zip',
+        includeScripts: true,
+        includeDependencies: true,
+        deliveryMethod: 'local',
+      },
+      '/tmp/output.zip',
+      512,
+      'success'
+    );
+
+    resolveLoad?.([]);
+    await hydratePromise;
+
+    expect(store.getState().histories).toEqual([
+      expect.objectContaining({
+        id: addedId,
+        outputPath: '/tmp/output.zip',
+      }),
+    ]);
+  });
 });

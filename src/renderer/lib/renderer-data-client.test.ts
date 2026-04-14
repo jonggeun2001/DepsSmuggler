@@ -87,4 +87,40 @@ describe('renderer-data-client', () => {
     expect(loaded).toEqual(histories);
     expect(electronAPI.history.load).toHaveBeenCalledTimes(1);
   });
+
+  it('Electron history가 없으면 localStorage fallback을 사용한다', async () => {
+    const storedValues = new Map<string, string>();
+    const storage = {
+      getItem: vi.fn((key: string) => storedValues.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        storedValues.set(key, value);
+      }),
+      removeItem: vi.fn((key: string) => {
+        storedValues.delete(key);
+      }),
+    };
+    const client = createRendererDataClient({ storage });
+    const historyEntry: DownloadHistory = {
+      id: 'history-1',
+      timestamp: '2026-04-14T00:00:00.000Z',
+      packages: [],
+      settings: {
+        outputFormat: 'zip',
+        includeScripts: true,
+        includeDependencies: true,
+        deliveryMethod: 'local',
+      },
+      outputPath: '/tmp/output.zip',
+      totalSize: 1234,
+      status: 'success',
+    };
+
+    expect(await client.history.add(historyEntry)).toEqual({ success: true });
+    expect(await client.history.load()).toEqual([historyEntry]);
+    expect(await client.history.delete(historyEntry.id)).toEqual({ success: true });
+    expect(await client.history.load()).toEqual([]);
+    expect(await client.history.add(historyEntry)).toEqual({ success: true });
+    expect(await client.history.clear()).toEqual({ success: true });
+    expect(await client.history.load()).toEqual([]);
+  });
 });

@@ -64,6 +64,9 @@ export function createHistoryStore({
   client = getRendererDataClient().history,
   autoHydrate = true,
 }: CreateHistoryStoreOptions = {}) {
+  let mutationVersion = 0;
+  let hydrateRequestVersion = 0;
+
   const store = create<HistoryState>()((set, get) => ({
     histories: [],
     initialized: false,
@@ -74,14 +77,29 @@ export function createHistoryStore({
         return;
       }
 
+      const requestVersion = ++hydrateRequestVersion;
+      const mutationVersionAtStart = mutationVersion;
       set({ loading: true });
 
       try {
         const histories = await client.load();
-        set({
-          histories: Array.isArray(histories) ? histories : [],
-          initialized: true,
-          loading: false,
+        set((state) => {
+          if (
+            requestVersion !== hydrateRequestVersion
+            || mutationVersionAtStart !== mutationVersion
+          ) {
+            return {
+              histories: state.histories,
+              initialized: true,
+              loading: false,
+            };
+          }
+
+          return {
+            histories: Array.isArray(histories) ? histories : [],
+            initialized: true,
+            loading: false,
+          };
         });
       } catch (error) {
         logHistoryPersistenceError('hydrate', error);
@@ -120,6 +138,7 @@ export function createHistoryStore({
 
       const persistenceResult = await client.add(newHistory);
       ensureHistoryWriteSucceeded('add', persistenceResult);
+      mutationVersion += 1;
 
       set((state) => {
         const updatedHistories = [newHistory, ...state.histories];
@@ -139,6 +158,7 @@ export function createHistoryStore({
     deleteHistory: async (id) => {
       const persistenceResult = await client.delete(id);
       ensureHistoryWriteSucceeded('delete', persistenceResult);
+      mutationVersion += 1;
 
       set((state) => ({
         histories: state.histories.filter((history) => history.id !== id),
@@ -148,6 +168,7 @@ export function createHistoryStore({
     clearAll: async () => {
       const persistenceResult = await client.clear();
       ensureHistoryWriteSucceeded('clear', persistenceResult);
+      mutationVersion += 1;
 
       set({ histories: [] });
     },
