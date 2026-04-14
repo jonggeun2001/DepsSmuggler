@@ -90,6 +90,13 @@ module.exports = {
       },
     },
     {
+      // CLI 출력은 사용자 인터페이스의 일부
+      files: ['src/cli/**/*.ts'],
+      rules: {
+        'no-console': 'off',
+      },
+    },
+    {
       // Electron main process
       files: ['electron/**/*.ts'],
       env: {

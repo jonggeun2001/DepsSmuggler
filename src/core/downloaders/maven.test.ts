@@ -428,13 +428,22 @@ describe('maven downloader utilities', () => {
         // (1.0,2.0] - 1.0 초과, 2.0 이하
         // [1.0,) - 1.0 이상
         // (,2.0] - 2.0 이하
-        const match = range.match(/^([\[\(])([^,]*),([^\]\)]*)([\]\)])$/);
-        if (!match) return null;
+        const start = range[0];
+        const end = range[range.length - 1];
+        const separatorIndex = range.indexOf(',');
+
+        if (!start || !end || separatorIndex === -1) {
+          return null;
+        }
+
+        if (!['[', '('].includes(start) || ![']', ')'].includes(end)) {
+          return null;
+        }
 
         return {
-          min: match[2] || undefined,
-          max: match[3] || undefined,
-          inclusive: [match[1] === '[', match[4] === ']'],
+          min: range.slice(1, separatorIndex) || undefined,
+          max: range.slice(separatorIndex + 1, -1) || undefined,
+          inclusive: [start === '[', end === ']'],
         };
       };
 

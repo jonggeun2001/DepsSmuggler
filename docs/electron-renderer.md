@@ -7,7 +7,7 @@
 현재 확인된 예시는 다음과 같습니다.
 
 - `src/renderer/pages/CartPage.tsx`는 일부 최신 버전 조회를 `/api/pypi`, `/api/maven`, `/api/npm`으로 직접 호출합니다.
-- `src/renderer/pages/WizardPage.tsx`는 npm 검색, Docker 검색/태그 조회에서 IPC 우선 후 HTTP 폴백을 유지합니다.
+- `src/renderer/pages/WizardPage.tsx`는 화면 조합과 store/router wiring에 집중하고, 검색/버전조회 로직은 `src/renderer/pages/wizard-page/*` 모듈로 분리되었습니다.
 
 ## 현재 화면 구조
 
@@ -23,6 +23,8 @@
 | `/settings` | `SettingsPage` | 설정, SMTP, 패키지 캐시, 업데이트 |
 
 공통 레이아웃은 `src/renderer/layouts/MainLayout.tsx`가 담당하고, 자동 업데이트 UI는 `src/renderer/components/UpdateNotification.tsx`가 전역으로 렌더링됩니다.
+
+`DownloadPage.tsx` 자체는 현재 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `src/renderer/pages/download-page/hooks/*`, `components/*`, `utils.ts`, `view-state.ts`로 분리되어 있습니다.
 
 ## 패키지 매니저 노출 범위
 
@@ -41,6 +43,23 @@
 - `ecr`
 - `quay.io`
 - `custom`
+
+## WizardPage 검색 모듈 경계
+
+`/wizard` 경로의 검색 관련 책임은 다음처럼 분리됩니다.
+
+- `src/renderer/pages/WizardPage.tsx`
+  - 스텝 UI 조합, settings/cart store 연결, 검색 훅 바인딩
+- `src/renderer/pages/wizard-page/query-params.ts`
+  - `type` query param 해석 및 소비
+- `src/renderer/pages/wizard-page/os-context.ts`
+  - `yum/apt/apk` 배포판/아키텍처 계산과 `osContext` snapshot 처리
+- `src/renderer/pages/wizard-page/search-service.ts`
+  - package type별 검색 전략, Electron IPC 우선, HTTP fallback
+- `src/renderer/pages/wizard-page/version-service.ts`
+  - 버전 조회 전략, Docker tag 조회, Maven classifier 부가 조회
+- `src/renderer/pages/wizard-page/useWizardSearchFlow.ts`
+  - 검색 입력/제안/선택/버전조회 오케스트레이션
 
 ## Electron main process
 
@@ -129,10 +148,11 @@
 ### OS 패키지 흐름
 
 1. `WizardPage`에서 `yum`, `apt`, `apk` 중 하나 선택
-2. 배포판과 아키텍처를 `os:getAllDistributions`, `os:search`로 조회
-3. 필요 시 `os:resolveDependencies`로 전용 트리 계산
-4. `src/renderer/components/os/*`의 전용 출력 옵션 컴포넌트는 현재 라우트된 화면에서 사용되지 않습니다.
-5. 실제 다운로드는 현재 `DownloadPage`의 일반 `download:start` 경로가 기준이며, `os:download:start`는 별도 IPC로 남아 있습니다.
+2. 배포판과 아키텍처는 settings store와 `wizard-page/os-context.ts` helper를 통해 선택/적용됩니다.
+3. 검색은 `wizard-page/search-service.ts`가 `os:search` IPC를 통해 수행합니다.
+4. 필요 시 `os:resolveDependencies`로 전용 트리 계산
+5. OS 패키지만 담긴 장바구니는 `/download`에서 전용 OS 다운로드 화면으로 전환되며, `src/renderer/components/os/*`의 출력 옵션/진행률/결과 컴포넌트를 사용합니다.
+6. 실제 다운로드는 `os:download:start` IPC로 실행되고, 일반 패키지 경로 `download:start`와 분리되어 유지됩니다.
 
 ## 출력과 패키징
 
@@ -151,7 +171,7 @@
 - 아카이브 형식: `zip`, `tar.gz`
 - 스크립트 타입: `dependency-order`, `local-repo`
 
-다만 이 컴포넌트들은 현재 라우트된 GUI에 연결되어 있지 않아, 저장소 출력이나 `both` 출력은 현재 화면 기준으로는 사용할 수 없습니다.
+이 옵션들은 현재 `/download`의 OS 전용 흐름에 연결되어 있으며, 저장소 출력이나 `both` 출력도 전용 UI에서 선택할 수 있습니다.
 
 ## 자동 업데이트
 

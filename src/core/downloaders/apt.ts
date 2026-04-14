@@ -391,9 +391,10 @@ export class AptMetadataParser {
           return pkg.name === query;
         case 'partial':
           return pkg.name.includes(query);
-        case 'wildcard':
+        case 'wildcard': {
           const regex = new RegExp('^' + query.replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
           return regex.test(pkg.name);
+        }
         default:
           return false;
       }

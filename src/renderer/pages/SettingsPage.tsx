@@ -1260,6 +1260,7 @@ const SettingsPage: React.FC = () => {
               <List.Item
                 actions={[
                   <Button
+                    key={`remove-${item.url}`}
                     type="link"
                     danger
                     size="small"

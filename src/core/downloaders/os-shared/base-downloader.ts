@@ -226,7 +226,7 @@ export abstract class BaseOSDownloader {
     let lastTime = Date.now();
     let currentSpeed = 0;
 
-    while (true) {
+    for (;;) {
       if (this.options.abortSignal?.aborted) {
         throw this.createAbortError();
       }

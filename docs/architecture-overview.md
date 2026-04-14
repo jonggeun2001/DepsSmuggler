@@ -55,7 +55,7 @@ depssmuggler/
 - `MainLayout.tsx`가 좌측 네비게이션과 공통 레이아웃을 담당합니다.
 - `HomePage.tsx`와 `WizardPage.tsx`는 패키지 타입 선택과 검색 진입을 담당합니다.
 - `CartPage.tsx`는 장바구니와 텍스트 입력 기반 패키지 추가를 담당합니다.
-- `DownloadPage.tsx`는 의존성 해결 결과, 진행률, 완료 결과를 렌더링합니다.
+- `DownloadPage.tsx`는 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `pages/download-page/` 아래 hook/component/util로 분리되어 있습니다.
 - `HistoryPage.tsx`와 `SettingsPage.tsx`는 각각 다운로드 이력과 앱 설정을 관리합니다.
 - `components/os/`는 OS 패키지 전용 검색, 출력 옵션, 결과 렌더링을 분리합니다.
 - `UpdateNotification.tsx`는 Electron auto updater 상태를 UI로 노출합니다.
@@ -111,18 +111,18 @@ depssmuggler/
 
 1. Renderer가 `window.electronAPI.search.*` 또는 `dependency.resolve` 호출
 2. `search-handlers.ts`가 `electron/services/search-orchestrator.ts`와 관련 service에 위임
-3. `DownloadPage.tsx`가 `download:start`를 호출
+3. `DownloadPage.tsx`의 `use-download-page-controller.tsx`가 `download:start`를 호출
 4. `download-handlers.ts`가 `electron/services/download-orchestrator.ts`를 호출하고, 서비스가 package router/progress emitter/packager를 조합해 실행
 5. 진행률 이벤트를 `download:*` 채널로 렌더러에 다시 전송
 6. 완료 시 출력 디렉터리와 결과를 히스토리에 저장
 
-참고: `zip`과 `tar.gz` 패키징은 동일 orchestration service를 통해 처리되고, preload/renderer contract는 그대로 유지됩니다.
+참고: `zip`과 `tar.gz` 패키징은 동일 orchestration service를 통해 처리되고, 전달 방식은 `local | email`이며 preload/renderer contract는 그대로 유지됩니다.
 
 ### OS 패키지 다운로드
 
 1. `WizardPage.tsx`가 `os:search`로 `yum/apt/apk` 패키지를 찾고, 전체 `OSPackageInfo`를 장바구니 메타데이터로 유지합니다.
-2. OS 패키지 전용 장바구니만 담긴 상태에서 `WizardPage.tsx`와 `DownloadPage.tsx`가 동일 라우트(`/download`) 안에서 OS 전용 다운로드 화면으로 전환됩니다.
-3. `DownloadPage.tsx`가 `os:getDistribution`으로 선택된 배포판 전체 설정을 읽고 `archive | repository | both` 출력 옵션을 노출합니다. `repository`/`both`에서는 로컬 저장소 설정 스크립트가 기본 포함됩니다.
+2. OS 패키지 전용 장바구니만 담긴 상태에서 `DownloadPage.tsx`는 `pages/download-page/hooks/use-os-download-flow.ts`를 통해 동일 라우트(`/download`) 안에서 OS 전용 다운로드 화면으로 전환합니다.
+3. OS 전용 흐름은 `os:getDistribution`으로 선택된 배포판 전체 설정을 읽고 `archive | repository | both` 출력 옵션을 노출합니다. `repository`/`both`에서는 로컬 저장소 설정 스크립트가 기본 포함됩니다.
 4. 실제 다운로드 시작은 `os:download:start` 하나로 통합되어, `electron/services/os-download-orchestrator.ts`가 필요 시 의존성 해결과 패키징까지 수행합니다. 미해결 의존성은 이 단계에서 즉시 중단되고, resolving 단계 취소도 오류보다 우선해 중단 결과를 반환합니다.
 5. 진행률은 `os:download:progress`로, 취소는 `os:download:cancel`로 처리됩니다. 취소 요청은 현재 OS 패키지 전송의 `fetch`에도 abort 신호를 전달합니다.
 6. 결과 출력물 경로와 `generatedOutputs`, `warnings`, `conflicts`, `cancelled` 상태는 `os:download:start` 반환값으로 렌더러에 전달됩니다. 취소로 최종 산출물이 생성되지 않은 경우에는 임시 다운로드를 성공으로 승격하지 않고, routed OS 결과 화면에서 중단 상태와 실제 생성물만 안내합니다.

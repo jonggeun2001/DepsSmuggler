@@ -45,7 +45,7 @@
 - GUI 지원 범위가 README보다 넓었습니다. 실제 UI는 `npm`, `apt`, `apk`, 다운로드 히스토리, 설정, 자동 업데이트를 포함합니다.
 - CLI 문서는 일부 영역이 실제 구현보다 넓거나 좁게 적혀 있었습니다. 현재는 `os download/cache`가 CLI backend 기준으로 동작하며, 남은 차이는 주로 `npm` 일반 CLI 쪽입니다.
 - IPC 문서는 존재하지 않는 `os-package-handlers.ts`를 기준으로 설명하고 있었습니다.
-- Electron/Renderer 문서는 오래된 경로명과 채널 구성을 일부 포함하고 있었습니다.
+- Electron/Renderer 문서는 오래된 경로명과 채널 구성을 일부 포함하고 있었고, 2026-04-14 기준으로 `WizardPage` 검색 흐름의 모듈 분리(`src/renderer/pages/wizard-page/*`)까지 반영했습니다.
 - 테스트 문서는 고정된 테스트 개수와 오래된 파일명을 기준으로 설명하고 있었습니다.
 
 ## 유지보수 원칙

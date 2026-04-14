@@ -1,5 +1,5 @@
 import { autoUpdater, UpdateInfo, ProgressInfo } from 'electron-updater';
-import { BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { createScopedLogger } from './utils/logger';
 
 const log = createScopedLogger('Updater');
@@ -208,7 +208,7 @@ export function registerDevModeHandlers() {
  */
 export async function checkForUpdatesOnStartup() {
   // 개발 모드에서는 체크하지 않음
-  if (process.env.NODE_ENV === 'development' || !require('electron').app.isPackaged) {
+  if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
     log.info('Skipping update check in development mode');
     return;
   }
