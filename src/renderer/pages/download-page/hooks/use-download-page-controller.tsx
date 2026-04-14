@@ -1255,6 +1255,20 @@ export function useDownloadPageController() {
       })
     );
 
+    downloadCancelledRef.current = false;
+    downloadPausedRef.current = false;
+    cancelledCompletionRetainedRef.current = false;
+    lastSpeedCalcRef.current = { time: 0, bytes: 0 };
+    speedHistoryRef.current = [];
+    setIsDownloading(true);
+    setIsPaused(false);
+    setPackagingStatus('idle');
+    setPackagingProgress(0);
+    setCompletedOutputPath('');
+    setCompletedArtifactPaths([]);
+    setCompletedDeliveryResult(undefined);
+    setCompletedError('');
+
     retryItem(item.id);
     updateItem(item.id, { status: 'downloading', progress: 0 });
 

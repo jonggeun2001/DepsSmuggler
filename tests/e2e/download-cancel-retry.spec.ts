@@ -293,3 +293,71 @@ test('이메일 전달 실패와 취소가 겹치면 산출물과 오류를 유�
     })
   );
 });
+
+test('취소 후 전달 실패 화면에서도 실패 항목 재시도가 새 세션으로 완료된다', async ({ page }) => {
+  await setupMockElectronApp(page, {
+    config: {
+      includeDependencies: false,
+      defaultDownloadPath: '/tmp/depssmuggler-e2e',
+      defaultOutputFormat: 'zip',
+      downloadRenderInterval: 0,
+      smtpHost: 'smtp.example.com',
+      smtpPort: 587,
+      smtpUser: 'sender@example.com',
+      smtpFrom: 'sender@example.com',
+      smtpTo: 'offline@example.com',
+    },
+    cartItems: retryCartItems,
+    downloadScenario: {
+      startScenarios: [
+        {
+          stepDelayMs: 50,
+          completeDelayMs: 1200,
+          failAttemptsByPackageId: {
+            'cart-pip-requests': [1],
+          },
+          cancelledCompletionDeliveryResult: {
+            emailSent: false,
+            splitApplied: false,
+            error: 'SMTP timeout',
+          },
+        },
+        {
+          mode: 'success',
+          stepDelayMs: 50,
+        },
+      ],
+    },
+  });
+
+  await openDownloadPage(page, ['requests', 'urllib3']);
+  await page.getByRole('radio', { name: '이메일로 전달' }).click();
+  await page.getByRole('button', { name: '다운로드 시작' }).click();
+  await expect(page.getByRole('button', { name: '취소' })).toBeVisible();
+  await page.getByRole('button', { name: '취소' }).click();
+  await expect(page.getByRole('dialog', { name: '다운로드 취소' })).toBeVisible();
+  await page.getByRole('button', { name: '취소' }).last().click();
+
+  const failedRow = page.locator('tr', { hasText: 'requests' });
+  const completedRow = page.locator('tr', { hasText: 'urllib3' });
+  await expect(page.getByText('전달 실패', { exact: true })).toBeVisible();
+  await expect(failedRow.getByText('실패')).toBeVisible();
+  await expect(completedRow.getByText('완료', { exact: true })).toBeVisible();
+
+  await failedRow.getByRole('button', { name: '재시도' }).click();
+
+  await expect(page.getByText('다운로드 완료', { exact: true })).toBeVisible();
+  await expect(failedRow.getByText('완료', { exact: true })).toBeVisible();
+  await expect(completedRow.getByText('완료', { exact: true })).toBeVisible();
+
+  const mockState = await readMockElectronAppState(page);
+  expect(mockState.runtime.downloadCalls).toHaveLength(2);
+  expect(mockState.runtime.downloadCalls[0]?.sessionId).toBe(1);
+  expect(mockState.runtime.downloadCalls[1]?.sessionId).toBe(2);
+  expect(mockState.runtime.downloadCalls[1]?.packages).toEqual([
+    expect.objectContaining({
+      id: 'cart-pip-requests',
+      name: 'requests',
+    }),
+  ]);
+});
