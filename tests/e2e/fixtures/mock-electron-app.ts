@@ -7,6 +7,7 @@ interface MockDownloadScenario {
   stepDelayMs?: number;
   completeDelayMs?: number;
   failMessage?: string;
+  failAttemptsByPackageId?: Record<string, number[]>;
 }
 
 interface MockElectronAppOptions {
@@ -388,10 +389,18 @@ export async function setupMockElectronApp(
           const completionDelay =
             scenario.completeDelayMs ?? (scenarioMode === 'slow' ? stepDelay * 20 : stepDelay * 3);
           const failMessage = scenario.failMessage || 'mock download failed';
+          const explicitFailurePlan = scenario.failAttemptsByPackageId || {};
+          const hasExplicitFailurePlan = Object.keys(explicitFailurePlan).length > 0;
           const packageFailures = packages.map((pkg) => {
             const packageId = String(pkg.id || '');
             const attempts = state.runtime.attemptsByPackageId[packageId] || 1;
-            return scenarioMode === 'fail-once' && attempts === 1;
+            const failAttempts = explicitFailurePlan[packageId] || [];
+
+            if (failAttempts.includes(attempts)) {
+              return true;
+            }
+
+            return scenarioMode === 'fail-once' && !hasExplicitFailurePlan && attempts === 1;
           });
           activeDownload = {
             outputPath: artifactPath,
@@ -407,7 +416,7 @@ export async function setupMockElectronApp(
             packages.forEach((pkg) => {
               const packageId = String(pkg.id || '');
               const packageIndex = packages.findIndex((candidate) => String(candidate.id || '') === packageId);
-              const shouldFail = packageFailures[packageIndex];
+              const shouldFail = packageFailures[packageIndex] || false;
 
               if (shouldFail) {
                 emit(downloadProgressListeners, {
