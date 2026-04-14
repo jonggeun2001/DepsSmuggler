@@ -545,8 +545,7 @@ export async function setupMockElectronApp(
               emit(downloadAllCompleteListeners, {
                 sessionId,
                 success: false,
-                outputPath: artifactPath,
-                artifactPaths: [artifactPath],
+                outputPath: outputDir,
                 deliveryMethod,
                 error: failMessage,
                 results: downloadResults,

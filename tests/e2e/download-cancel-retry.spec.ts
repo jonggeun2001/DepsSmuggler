@@ -174,14 +174,14 @@ test('취소 직후 새 다운로드를 시작해도 이전 세션의 늦은 완
   const pendingState = await readMockElectronAppState(page);
   expect(pendingState.runtime.downloadCalls).toHaveLength(1);
   await expect(page.getByText('다운로드 완료', { exact: true })).toHaveCount(0);
-  await expect(page.getByText('전달 실패', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('다운로드 실패', { exact: true })).toHaveCount(0);
 
   const failedRow = page.locator('tr', { hasText: 'requests' });
-  await expect(page.getByText('전달 실패', { exact: true })).toBeVisible();
+  await expect(page.getByText('다운로드 실패', { exact: true })).toBeVisible();
   await expect(failedRow.getByText('실패')).toBeVisible();
 
   await page.waitForTimeout(1500);
-  await expect(page.getByText('전달 실패', { exact: true })).toBeVisible();
+  await expect(page.getByText('다운로드 실패', { exact: true })).toBeVisible();
   await expect(page.getByText('다운로드 완료', { exact: true })).toHaveCount(0);
   await expect(failedRow.getByText('실패')).toBeVisible();
 
