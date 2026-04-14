@@ -158,6 +158,24 @@ export function hasMatchingCartSnapshot(snapshot: CartItem[], currentItems: Cart
   return snapshot.every((item, index) => currentItems[index]?.id === item.id);
 }
 
+export function hasMatchingActiveCartSnapshot({
+  snapshot,
+  currentItems,
+  expectedSessionId,
+  activeSessionId,
+}: {
+  snapshot: CartItem[];
+  currentItems: CartItem[];
+  expectedSessionId: number | null;
+  activeSessionId: number | null;
+}): boolean {
+  return (
+    expectedSessionId !== null
+    && expectedSessionId === activeSessionId
+    && hasMatchingCartSnapshot(snapshot, currentItems)
+  );
+}
+
 export function formatBytes(bytes: number): string {
   if (!bytes || bytes === 0) return '-';
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;

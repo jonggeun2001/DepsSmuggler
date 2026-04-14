@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createPendingDownloadItems,
+  hasMatchingActiveCartSnapshot,
   hasMatchingCartSnapshot,
   getPackageGroupStatus,
   getPackageDependencies,
@@ -93,6 +94,31 @@ describe('download-page/utils', () => {
     expect(hasMatchingCartSnapshot(snapshot, [...snapshot])).toBe(true);
     expect(hasMatchingCartSnapshot(snapshot, [snapshot[0]])).toBe(false);
     expect(hasMatchingCartSnapshot(snapshot, [snapshot[1], snapshot[0]])).toBe(false);
+  });
+
+  it('활성 다운로드 세션이 바뀌면 같은 cart snapshot이어도 false를 반환한다', () => {
+    const snapshot = [
+      { id: 'a', name: 'a', version: '1.0.0', type: 'pip', addedAt: 1 },
+      { id: 'b', name: 'b', version: '1.0.0', type: 'npm', addedAt: 2 },
+    ];
+
+    expect(
+      hasMatchingActiveCartSnapshot({
+        snapshot,
+        currentItems: [...snapshot],
+        expectedSessionId: 3,
+        activeSessionId: 3,
+      })
+    ).toBe(true);
+
+    expect(
+      hasMatchingActiveCartSnapshot({
+        snapshot,
+        currentItems: [...snapshot],
+        expectedSessionId: 3,
+        activeSessionId: 4,
+      })
+    ).toBe(false);
   });
 
   it('히스토리 저장이 성공하면 장바구니를 비운다', async () => {
