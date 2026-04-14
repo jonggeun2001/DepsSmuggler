@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 
 const createDeferred = <T>() => {
@@ -67,7 +68,7 @@ describe('createDownloadOrchestrator', () => {
     });
 
     expect(result).toEqual({ success: true, started: true });
-    expect(ensureDir).toHaveBeenCalledWith('/tmp/out/packages');
+    expect(ensureDir).toHaveBeenCalledWith(path.join('/tmp/out', 'packages'));
     expect(generateInstallScripts).toHaveBeenCalledWith('/tmp/out', [
       expect.objectContaining({
         id: 'pip-requests-2.28.0',
