@@ -72,7 +72,7 @@ describe('OS dependency resolvers', () => {
     };
     vi.spyOn(AptMetadataParser.prototype, 'parsePackages').mockResolvedValue([
       createPackage('libc6', '2.35', 'amd64'),
-      createPackage('mail-transport-agent', '1.0', 'amd64', ['mail-transport-agent']),
+      createPackage('postfix', '3.7.0', 'amd64', ['mail-transport-agent']),
       createPackage('libc6', '2.35', 'i386'),
     ]);
     const resolver = new AptDependencyResolver({
@@ -94,7 +94,7 @@ describe('OS dependency resolvers', () => {
     const byArchSuffix = await (resolver as any).findPackagesForDependency({ name: 'libc6:amd64' });
 
     expect(byProvides).toHaveLength(1);
-    expect(byProvides[0].name).toBe('mail-transport-agent');
+    expect(byProvides[0].name).toBe('postfix');
     expect(byArchSuffix).toHaveLength(1);
     expect(byArchSuffix[0].architecture).toBe('amd64');
   });
