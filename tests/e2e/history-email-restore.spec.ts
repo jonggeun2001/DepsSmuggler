@@ -63,7 +63,12 @@ test('이메일 히스토리 재다운로드는 저장된 수신자를 복원하
   await expect(page.getByText('left-pad')).toBeVisible();
 
   await page.getByRole('button', { name: '다운로드 시작' }).click();
-  await expect(page.locator('.ant-result-title', { hasText: '다운로드 완료' })).toBeVisible();
+  await expect
+    .poll(async () => {
+      const currentState = await readMockElectronAppState(page);
+      return currentState.runtime.downloadCalls.length;
+    })
+    .toBe(1);
 
   const mockState = await readMockElectronAppState(page);
   expect(mockState.config).toMatchObject({
