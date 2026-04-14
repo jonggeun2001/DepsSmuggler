@@ -600,9 +600,20 @@ export function useDownloadPageController() {
         setIsPaused(false);
 
         if (data.cancelled) {
-          if (data.deliveryResult?.emailSent) {
-            const cancelledDeliveryMessage =
-              '다운로드는 취소되었지만 이메일 전달은 이미 완료되었습니다.';
+          const hasRecoverableCancelledOutcome =
+            Boolean(data.deliveryResult?.emailSent)
+            || Boolean(data.deliveryResult?.error)
+            || Boolean(data.artifactPaths && data.artifactPaths.length > 0)
+            || Boolean(data.outputPath && data.outputPath !== outputDir);
+
+          if (hasRecoverableCancelledOutcome) {
+            const cancelledDeliveryMessage = data.deliveryResult?.emailSent
+              ? '다운로드는 취소되었지만 이메일 전달은 이미 완료되었습니다.'
+              : data.deliveryResult?.error
+              || '다운로드는 취소되었지만 생성된 산출물과 전달 정보를 확인할 수 있습니다.';
+            const cancelledDeliveryTitle = data.deliveryResult?.emailSent
+              ? '취소 후 이메일 전달 완료'
+              : '취소 후 전달 정보 보존';
             cancelledCompletionRetainedRef.current = true;
             setPackagingStatus('failed');
             setPackagingProgress(100);
@@ -610,13 +621,13 @@ export function useDownloadPageController() {
             setCompletedArtifactPaths(
               data.artifactPaths && data.artifactPaths.length > 0
                 ? data.artifactPaths
-                : data.outputPath
+                : data.outputPath && data.outputPath !== outputDir
                 ? [data.outputPath]
                 : []
             );
             setCompletedDeliveryResult(data.deliveryResult);
             setCompletedError(cancelledDeliveryMessage);
-            scheduleLogBatch('warn', '취소 후 이메일 전달 완료', cancelledDeliveryMessage);
+            scheduleLogBatch('warn', cancelledDeliveryTitle, cancelledDeliveryMessage);
             message.warning(cancelledDeliveryMessage);
             void persistHistoryEntry(data, undefined, completionSessionSnapshot).catch((error) => {
               const historyError = error instanceof Error ? error.message : 'unknown error';

@@ -10,6 +10,13 @@ interface MockDownloadScenario {
   failAttemptsByPackageId?: Record<string, number[]>;
   emitLateSuccessAfterCancel?: boolean;
   cancelledCompletionRetainsDelivery?: boolean;
+  cancelledCompletionDeliveryResult?: {
+    emailSent: boolean;
+    emailsSent?: number;
+    attachmentsSent?: number;
+    splitApplied?: boolean;
+    error?: string;
+  };
   startScenarios?: MockDownloadScenario[];
 }
 
@@ -192,6 +199,7 @@ export async function setupMockElectronApp(
     let activeDownloadSequence = 0;
     let activeDownload: {
       sessionId: number;
+      outputDir: string;
       outputPath: string;
       artifactPath: string;
       packages: Array<Record<string, unknown>>;
@@ -206,6 +214,15 @@ export async function setupMockElectronApp(
           }
         | undefined;
       cancelledCompletionRetainsDelivery: boolean;
+      cancelledCompletionDeliveryResult?:
+        | {
+            emailSent: boolean;
+            emailsSent?: number;
+            attachmentsSent?: number;
+            splitApplied?: boolean;
+            error?: string;
+          }
+        | undefined;
       completionDelay: number;
       emitLateSuccessAfterCancel: boolean;
     } | null = null;
@@ -399,19 +416,24 @@ export async function setupMockElectronApp(
           }
 
           if (activeDownload) {
+            const cancelledDeliveryResult =
+              activeDownload.cancelledCompletionDeliveryResult
+              ?? (activeDownload.cancelledCompletionRetainsDelivery
+                ? activeDownload.deliveryResult
+                : undefined);
             emit(downloadAllCompleteListeners, {
               sessionId: activeDownload.sessionId,
               success: false,
               cancelled: true,
-              outputPath: activeDownload.outputPath,
-              artifactPaths: activeDownload.cancelledCompletionRetainsDelivery
+              outputPath: cancelledDeliveryResult || activeDownload.cancelledCompletionRetainsDelivery
+                ? activeDownload.outputPath
+                : activeDownload.outputDir,
+              artifactPaths: cancelledDeliveryResult || activeDownload.cancelledCompletionRetainsDelivery
                 ? [activeDownload.artifactPath]
                 : [],
               deliveryMethod: activeDownload.deliveryMethod,
-              deliveryResult: activeDownload.cancelledCompletionRetainsDelivery
-                ? activeDownload.deliveryResult
-                : undefined,
-              results: activeDownload.cancelledCompletionRetainsDelivery
+              deliveryResult: cancelledDeliveryResult,
+              results: (cancelledDeliveryResult || activeDownload.cancelledCompletionRetainsDelivery)
                 ? activeDownload.results
                 : undefined,
             });
@@ -488,6 +510,7 @@ export async function setupMockElectronApp(
           }));
           activeDownload = {
             sessionId,
+            outputDir,
             outputPath: artifactPath,
             artifactPath,
             packages: clone(packages),
@@ -496,6 +519,7 @@ export async function setupMockElectronApp(
             deliveryResult,
             cancelledCompletionRetainsDelivery:
               scenario.cancelledCompletionRetainsDelivery === true,
+            cancelledCompletionDeliveryResult: scenario.cancelledCompletionDeliveryResult,
             completionDelay,
             emitLateSuccessAfterCancel: scenario.emitLateSuccessAfterCancel === true,
           };
