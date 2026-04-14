@@ -219,7 +219,7 @@ export class ScriptGenerator {
       lines.push('');
 
       for (const pkg of dockerPackages) {
-        const imageName = pkg.name.replace(/[\/]/g, '_');
+        const imageName = pkg.name.replace(/\//g, '_');
         lines.push(`    # ${pkg.name}:${pkg.version} 로드`);
         lines.push(`    log_info "${pkg.name}:${pkg.version} 로드 중..."`);
         lines.push(`    docker load -i "$PACKAGE_DIR/${imageName}_${pkg.version}.tar" || {`);
@@ -429,7 +429,7 @@ export class ScriptGenerator {
       lines.push('');
 
       for (const pkg of dockerPackages) {
-        const imageName = pkg.name.replace(/[\/]/g, '_');
+        const imageName = pkg.name.replace(/\//g, '_');
         const tarFileName = `${imageName}_${pkg.version}.tar`;
         lines.push(`    # ${pkg.name}:${pkg.version} 로드`);
         lines.push(`    Write-Info "${pkg.name}:${pkg.version} 로드 중..."`);

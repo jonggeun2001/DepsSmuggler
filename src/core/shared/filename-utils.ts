@@ -7,7 +7,14 @@
  * Windows에서 금지된 파일명 문자
  * < > : " / \ | ? * 및 제어 문자 (0x00-0x1F)
  */
-const WINDOWS_FORBIDDEN_CHARS = /[<>:"/\\|?*\x00-\x1F]/g;
+const WINDOWS_FORBIDDEN_CHARS = new Set(['<', '>', ':', '"', '/', '\\', '|', '?', '*']);
+
+function replaceWindowsForbiddenChars(name: string): string {
+  return Array.from(name, (char) => {
+    const code = char.charCodeAt(0);
+    return code <= 0x1f || WINDOWS_FORBIDDEN_CHARS.has(char) ? '_' : char;
+  }).join('');
+}
 
 /**
  * Windows 예약 파일명
@@ -29,16 +36,14 @@ const WINDOWS_RESERVED_NAMES = [
  * @example
  * sanitizeFilename('file<>:name') // 'file___name'
  * sanitizeFilename('CON') // '_CON'
- * sanitizeFilename('@types/node') // '_types_node'
+ * sanitizeFilename('@types/node') // '@types_node'
  */
 export function sanitizeFilename(name: string, maxLength = 200): string {
   if (!name) {
     return '_empty_';
   }
 
-  let safe = name
-    // Windows 금지 문자를 언더스코어로 변환
-    .replace(WINDOWS_FORBIDDEN_CHARS, '_')
+  let safe = replaceWindowsForbiddenChars(name)
     // 연속된 언더스코어를 하나로
     .replace(/_{2,}/g, '_')
     // 앞뒤 언더스코어 제거
