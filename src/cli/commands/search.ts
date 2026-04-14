@@ -26,7 +26,7 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
 
     // 타입별 다운로더 호출
     switch (options.type) {
-      case 'pip':
+      case 'pip': {
         const pipDownloader = getPipDownloader();
         const pipResults = await pipDownloader.searchPackages(query);
         results = pipResults.map((pkg) => ({
@@ -35,8 +35,9 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
           description: pkg.metadata?.description as string,
         }));
         break;
+      }
 
-      case 'conda':
+      case 'conda': {
         const condaDownloader = getCondaDownloader();
         const condaResults = await condaDownloader.searchPackages(query);
         results = condaResults.map((pkg) => ({
@@ -45,8 +46,9 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
           description: pkg.metadata?.description as string,
         }));
         break;
+      }
 
-      case 'maven':
+      case 'maven': {
         const mavenDownloader = getMavenDownloader();
         const mavenResults = await mavenDownloader.searchPackages(query);
         results = mavenResults.map((pkg) => ({
@@ -55,8 +57,9 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
           description: pkg.metadata?.description as string,
         }));
         break;
+      }
 
-      case 'npm':
+      case 'npm': {
         const npmDownloader = getNpmDownloader();
         const npmResults = await npmDownloader.searchPackages(query, limit);
         results = npmResults.map((pkg) => ({
@@ -65,6 +68,7 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
           description: pkg.metadata?.description as string,
         }));
         break;
+      }
 
       case 'yum':
       case 'apt':
@@ -72,8 +76,9 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
         console.error(`OS 패키지 검색은 'os search' 명령어를 사용하세요.`);
         console.error(`예: depssmuggler os search ${query} --distro rocky-9`);
         process.exit(1);
+        return;
 
-      case 'docker':
+      case 'docker': {
         const dockerDownloader = getDockerDownloader();
         const dockerResults = await dockerDownloader.searchPackages(query);
         results = dockerResults.map((pkg) => ({
@@ -82,10 +87,12 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
           description: pkg.metadata?.description as string,
         }));
         break;
+      }
 
       default:
         console.log(chalk.red(`지원하지 않는 패키지 타입: ${options.type}`));
         process.exit(1);
+        return;
     }
 
     // 결과 제한

@@ -157,7 +157,7 @@ export class NpmTreeManager {
     let existingVersion: string | null = null;
 
     // 루트까지 올라가며 배치 가능 여부 확인
-    while (true) {
+    for (;;) {
       const checkPath = target ? `${target}/node_modules/${name}` : `node_modules/${name}`;
       const existing = this.tree.get(checkPath);
 
@@ -288,7 +288,7 @@ export class NpmTreeManager {
   findNodePath(name: string, startPath: string | null): string | null {
     let searchPath = startPath || '';
 
-    while (true) {
+    for (;;) {
       const checkPath = searchPath ? `${searchPath}/node_modules/${name}` : `node_modules/${name}`;
       if (this.tree.has(checkPath)) {
         return checkPath;

@@ -452,7 +452,7 @@ describe('NpmDownloader 추가 테스트', () => {
 
     it('sanitizePath 로직 테스트', () => {
       // npm의 sanitizePath는 정규식으로 위험 문자 제거
-      const sanitize = (input: string) => input.replace(/[^a-zA-Z0-9._\-]/g, '_');
+      const sanitize = (input: string) => input.replace(/[^a-zA-Z0-9._-]/g, '_');
 
       expect(sanitize('lodash-4.17.21.tgz')).toBe('lodash-4.17.21.tgz');
       expect(sanitize('package@1.0.0.tgz')).toBe('package_1.0.0.tgz'); // @ 제거

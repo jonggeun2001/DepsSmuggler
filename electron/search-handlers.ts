@@ -315,7 +315,7 @@ export function registerSearchHandlers(): void {
           results = await searchPyPI(query, options?.indexUrl);
           results = sortByRelevance(results, query, 'pip');
           break;
-        case 'conda':
+        case 'conda': {
           // conda는 실제 Anaconda API 사용
           const condaDownloader = getCondaDownloader();
           const channel = (options?.channel || 'conda-forge') as 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch' | 'all';
@@ -327,11 +327,12 @@ export function registerSearchHandlers(): void {
           }));
           results = sortByRelevance(results, query, 'conda');
           break;
+        }
         case 'maven':
           results = await searchMaven(query);
           results = sortByRelevance(results, query, 'maven');
           break;
-        case 'npm':
+        case 'npm': {
           const npmDownloader = getNpmDownloader();
           const npmResults = await npmDownloader.searchPackages(query);
           results = npmResults.map(pkg => ({
@@ -341,7 +342,8 @@ export function registerSearchHandlers(): void {
           }));
           results = sortByRelevance(results, query, 'npm');
           break;
-        case 'docker':
+        }
+        case 'docker': {
           const dockerDownloader = getDockerDownloader();
           const dockerRegistry = options?.registry || 'docker.io';
           const dockerResults = await dockerDownloader.searchPackages(query, dockerRegistry);
@@ -352,6 +354,7 @@ export function registerSearchHandlers(): void {
             registry: dockerRegistry,
           }));
           break;
+        }
         default:
           // 미구현 타입은 빈 배열 반환
           results = [];
@@ -375,24 +378,27 @@ export function registerSearchHandlers(): void {
         case 'pip':
           versions = await getPyPIVersions(packageName, options?.indexUrl);
           break;
-        case 'conda':
+        case 'conda': {
           // conda는 실제 Anaconda API 사용
           const condaDownloaderForVersions = getCondaDownloader();
           const channel = (options?.channel || 'conda-forge') as 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch' | 'all';
           versions = await condaDownloaderForVersions.getVersions(packageName, channel);
           break;
+        }
         case 'maven':
           versions = await getMavenVersions(packageName);
           break;
-        case 'npm':
+        case 'npm': {
           const npmDownloaderForVersions = getNpmDownloader();
           versions = await npmDownloaderForVersions.getVersions(packageName);
           break;
-        case 'docker':
+        }
+        case 'docker': {
           const dockerDownloaderForVersions = getDockerDownloader();
           const dockerRegistryForVersions = options?.registry || 'docker.io';
           versions = await dockerDownloaderForVersions.getVersions(packageName, dockerRegistryForVersions);
           break;
+        }
         default:
           versions = [];
       }
@@ -440,10 +446,11 @@ export function registerSearchHandlers(): void {
         case 'pip':
           searchPromise = (downloader as PipDownloader).searchPackages(query);
           break;
-        case 'conda':
+        case 'conda': {
           const condaChannel = (options?.channel || 'conda-forge') as 'conda-forge' | 'anaconda' | 'bioconda' | 'pytorch' | 'all';
           searchPromise = (downloader as CondaDownloader).searchPackages(query, condaChannel);
           break;
+        }
         case 'maven':
           searchPromise = (downloader as MavenDownloader).searchPackages(query);
           break;
@@ -654,7 +661,7 @@ export function registerSearchHandlers(): void {
       // packageManager에 따라 적절한 resolver 선택
       let searchResults;
       switch (fullDistribution.packageManager) {
-        case 'yum':
+        case 'yum': {
           const yumResolver = getYumResolver({
             repositories: fullDistribution.defaultRepos,
             architecture,
@@ -664,8 +671,9 @@ export function registerSearchHandlers(): void {
           });
           searchResults = await yumResolver.searchPackages(query, matchType === 'exact' ? 'exact' : 'partial');
           break;
+        }
 
-        case 'apt':
+        case 'apt': {
           const aptResolver = getAptResolver({
             repositories: fullDistribution.defaultRepos,
             architecture,
@@ -675,8 +683,9 @@ export function registerSearchHandlers(): void {
           });
           searchResults = await aptResolver.searchPackages(query, matchType === 'exact' ? 'exact' : 'partial');
           break;
+        }
 
-        case 'apk':
+        case 'apk': {
           const apkResolver = getApkResolver({
             repositories: fullDistribution.defaultRepos,
             architecture,
@@ -686,6 +695,7 @@ export function registerSearchHandlers(): void {
           });
           searchResults = await apkResolver.searchPackages(query, matchType === 'exact' ? 'exact' : 'partial');
           break;
+        }
 
         default:
           throw new Error(`Unsupported package manager: ${fullDistribution.packageManager}`);

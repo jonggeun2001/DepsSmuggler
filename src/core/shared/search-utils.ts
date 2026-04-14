@@ -99,15 +99,17 @@ export type PackageType = 'pip' | 'conda' | 'maven' | 'npm' | 'docker' | 'yum' |
  */
 function extractCoreName(name: string, type: PackageType): string {
   switch (type) {
-    case 'maven':
+    case 'maven': {
       // groupId:artifactId 형식에서 artifactId 추출
       const mavenParts = name.split(':');
       return mavenParts.length > 1 ? mavenParts[1] : name;
+    }
 
-    case 'docker':
+    case 'docker': {
       // namespace/image 형식에서 image 추출
       const dockerParts = name.split('/');
       return dockerParts.length > 1 ? dockerParts[dockerParts.length - 1] : name;
+    }
 
     case 'npm':
       // @org/package 형식에서 package 추출
