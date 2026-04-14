@@ -629,7 +629,12 @@ export function useDownloadPageController() {
             setCompletedError(cancelledDeliveryMessage);
             scheduleLogBatch('warn', cancelledDeliveryTitle, cancelledDeliveryMessage);
             message.warning(cancelledDeliveryMessage);
-            void persistHistoryEntry(data, undefined, completionSessionSnapshot).catch((error) => {
+            const forcedHistoryStatus = data.deliveryResult?.emailSent
+              ? undefined
+              : (data.results || []).some((result) => !result.success)
+              ? 'partial'
+              : 'failed';
+            void persistHistoryEntry(data, forcedHistoryStatus, completionSessionSnapshot).catch((error) => {
               const historyError = error instanceof Error ? error.message : 'unknown error';
               scheduleLogBatch('error', '히스토리 저장 실패', historyError);
               message.error('히스토리 저장에 실패했습니다.');
