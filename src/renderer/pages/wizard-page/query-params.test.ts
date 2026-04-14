@@ -15,6 +15,8 @@ describe('query-params', () => {
 
   it('유효하지 않은 type 파라미터는 무시한다', () => {
     expect(resolveWizardTypeParam(new URLSearchParams('type=unknown'))).toBeNull();
+    expect(resolveWizardTypeParam(new URLSearchParams('type=toString'))).toBeNull();
+    expect(resolveWizardTypeParam(new URLSearchParams('type=__proto__'))).toBeNull();
     expect(resolveWizardTypeParam(new URLSearchParams('foo=bar'))).toBeNull();
   });
 

@@ -42,5 +42,5 @@ export const PACKAGE_TYPE_TO_CATEGORY: Record<PackageType, CategoryType> = {
 };
 
 export function isPackageType(value: string): value is PackageType {
-  return value in PACKAGE_TYPE_TO_CATEGORY;
+  return Object.prototype.hasOwnProperty.call(PACKAGE_TYPE_TO_CATEGORY, value);
 }
