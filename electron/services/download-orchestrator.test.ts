@@ -201,4 +201,102 @@ describe('createDownloadOrchestrator', () => {
       })
     );
   });
+
+  it('새 세션이 시작돼도 이전 취소 세션은 취소 상태를 유지한다', async () => {
+    const { createDownloadOrchestrator } = await import('./download-orchestrator');
+
+    const router = {
+      downloadPackage: vi.fn().mockResolvedValue({
+        id: 'pip-requests-2.28.0',
+        success: true,
+      }),
+    };
+    const progressEmitter = {
+      emitDownloadStatus: vi.fn(),
+      emitAllComplete: vi.fn(),
+      clearAllPackageProgress: vi.fn(),
+    };
+    const archiveDeferred = createDeferred<string>();
+    const backgroundTasks: Promise<void>[] = [];
+
+    const orchestrator = createDownloadOrchestrator({
+      getMainWindow: () => null,
+      ensureDir: vi.fn().mockResolvedValue(undefined),
+      scheduleTask: (task: () => Promise<void>) => {
+        backgroundTasks.push(task());
+      },
+      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createPackageRouter: () => router,
+      createProgressEmitter: () => progressEmitter as never,
+      archivePackager: {
+        createArchiveFromDirectory: vi
+          .fn()
+          .mockImplementationOnce(async () => archiveDeferred.promise)
+          .mockResolvedValueOnce('/tmp/out-2.tar.gz'),
+      } as never,
+      generateInstallScripts: vi.fn(),
+    });
+
+    await orchestrator.startDownload({
+      sessionId: 1,
+      packages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+        },
+      ],
+      options: {
+        outputDir: '/tmp/out-1',
+        outputFormat: 'tar.gz',
+        includeScripts: false,
+        concurrency: 1,
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(router.downloadPackage).toHaveBeenCalledTimes(1);
+    });
+
+    await orchestrator.cancelDownload();
+
+    await orchestrator.startDownload({
+      sessionId: 2,
+      packages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+        },
+      ],
+      options: {
+        outputDir: '/tmp/out-2',
+        outputFormat: 'tar.gz',
+        includeScripts: false,
+        concurrency: 1,
+      },
+    });
+
+    archiveDeferred.resolve('/tmp/out-1.tar.gz');
+    await Promise.all(backgroundTasks);
+
+    expect(progressEmitter.emitAllComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 1,
+        success: false,
+        cancelled: true,
+        outputPath: '/tmp/out-1.tar.gz',
+        artifactPaths: ['/tmp/out-1.tar.gz'],
+      })
+    );
+    expect(progressEmitter.emitAllComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 2,
+        success: true,
+        outputPath: '/tmp/out-2.tar.gz',
+      })
+    );
+  });
 });

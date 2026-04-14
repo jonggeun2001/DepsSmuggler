@@ -23,6 +23,13 @@ const log = createScopedLogger('DownloadOrchestrator');
 
 type Limiter = <T>(task: () => Promise<T>) => Promise<T>;
 
+interface DownloadSessionState {
+  sessionId: number;
+  cancelled: boolean;
+  paused: boolean;
+  abortController: AbortController;
+}
+
 export interface DownloadOrchestratorDeps {
   getMainWindow: () => Electron.BrowserWindow | null;
   ensureDir?: (targetPath: string) => Promise<void>;
@@ -85,31 +92,21 @@ export function createDownloadOrchestrator(
   const progressEmitter = createProgressEmitter(deps.getMainWindow);
   const packageRouter = createPackageRouter();
 
-  let downloadCancelled = false;
-  let downloadPaused = false;
-  let downloadAbortController: AbortController | null = null;
+  let activeSession: DownloadSessionState | null = null;
   let lastSessionId = 0;
-
-  const state: DownloadExecutionState = {
-    isCancelled: () => downloadCancelled,
-    isPaused: () => downloadPaused,
-    waitWhilePaused: async () => {
-      while (downloadPaused && !downloadCancelled) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    },
-    get signal() {
-      return downloadAbortController?.signal;
-    },
-  };
 
   return {
     async startDownload(data) {
       const sessionId = data.sessionId ?? lastSessionId + 1;
       lastSessionId = Math.max(lastSessionId, sessionId);
-      downloadCancelled = false;
-      downloadPaused = false;
-      downloadAbortController = new AbortController();
+      const sessionState: DownloadSessionState = {
+        sessionId,
+        cancelled: false,
+        paused: false,
+        abortController: new AbortController(),
+      };
+      activeSession = sessionState;
+      const state = createExecutionState(sessionState);
       const sessionProgressEmitter = createSessionProgressEmitter(sessionId);
 
       sessionProgressEmitter.emitDownloadStatus({
@@ -117,23 +114,29 @@ export function createDownloadOrchestrator(
         message: '다운로드 중...',
       });
 
-      await Promise.resolve(scheduleTask(() => runDownload(data, sessionProgressEmitter)));
+      await Promise.resolve(scheduleTask(() => runDownload(data, sessionProgressEmitter, state)));
       return { success: true, started: true };
     },
 
     async pauseDownload() {
-      downloadPaused = true;
+      if (activeSession) {
+        activeSession.paused = true;
+      }
       return { success: true };
     },
 
     async resumeDownload() {
-      downloadPaused = false;
+      if (activeSession) {
+        activeSession.paused = false;
+      }
       return { success: true };
     },
 
     async cancelDownload() {
-      downloadCancelled = true;
-      downloadAbortController?.abort();
+      if (activeSession) {
+        activeSession.cancelled = true;
+        activeSession.abortController.abort();
+      }
       progressEmitter.clearAllPackageProgress();
       return { success: true };
     },
@@ -199,6 +202,21 @@ export function createDownloadOrchestrator(
     },
   };
 
+  function createExecutionState(session: DownloadSessionState): DownloadExecutionState {
+    return {
+      isCancelled: () => session.cancelled,
+      isPaused: () => session.paused,
+      waitWhilePaused: async () => {
+        while (session.paused && !session.cancelled) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      },
+      get signal() {
+        return session.abortController.signal;
+      },
+    };
+  }
+
   function createSessionProgressEmitter(sessionId: number): DownloadProgressEmitter {
     return {
       emitDownloadStatus(payload) {
@@ -242,7 +260,7 @@ export function createDownloadOrchestrator(
     sessionId?: number;
     packages: DownloadPackage[];
     options: DownloadOptions;
-  }, sessionProgressEmitter: DownloadProgressEmitter): Promise<void> {
+  }, sessionProgressEmitter: DownloadProgressEmitter, state: DownloadExecutionState): Promise<void> {
     const { packages, options } = data;
     const { outputDir, outputFormat, includeScripts, concurrency = 3 } = options;
     const packagesDir = path.join(outputDir, 'packages');
@@ -262,7 +280,7 @@ export function createDownloadOrchestrator(
       currentOutputPath: string,
       currentArtifactPaths?: string[]
     ): boolean => {
-      if (!downloadCancelled) {
+      if (!state.isCancelled()) {
         return false;
       }
 
@@ -286,7 +304,7 @@ export function createDownloadOrchestrator(
       const rawResults: DownloadPackageResult[] = await Promise.all(downloadPromises);
       const results = rawResults.filter((result) => result.error !== 'cancelled');
 
-      if (downloadCancelled) {
+      if (state.isCancelled()) {
         emitCancelledCompletion(outputDir);
         return;
       }
@@ -390,7 +408,7 @@ export function createDownloadOrchestrator(
           finalOutputPath,
           artifactPaths,
           failedDownloadCount,
-          isCancelled: () => downloadCancelled,
+          isCancelled: () => state.isCancelled(),
           progressEmitter: sessionProgressEmitter,
         });
 
