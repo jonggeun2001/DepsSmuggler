@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | `UI-DL-001` | `tests/e2e/download-smoke.spec.ts` | 장바구니에서 일반 다운로드 완료 화면까지, preflight 출력 형식 표시, 로컬 저장 옵션 전달 |
 | `UI-SET-001`, `UI-SET-002(성공 경로만)` | `tests/e2e/settings-regression.spec.ts` | SMTP 값 입력, 연결 테스트 성공 경로, 저장 후 새로고침 복원 |
+| `UI-CFG-001` | `tests/e2e/settings-cache-breakdown.spec.ts` | 캐시 총합, 타입별 breakdown, 캐시 비우기 후 0 값 갱신 |
 | `UI-HIS-001` | `tests/e2e/history-email-restore.spec.ts` | 이메일 히스토리 재다운로드, 저장된 수신자 복원, 파일 분할 안내 표시, 전역 설정 보존 |
 | `UI-OS-001` | `tests/e2e/os-package-download.spec.ts` | OS 패키지 검색, 전용 다운로드 화면, 출력 옵션 결과 반영 |
 

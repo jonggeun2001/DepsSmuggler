@@ -11,6 +11,10 @@ import {
   type SettingsStoreSnapshot,
   type SmtpTestMode,
 } from './settings-form-utils';
+import {
+  buildCacheDetailItems,
+  type CacheDetailItem,
+} from './cache-stats-utils';
 
 type SmtpTestResult = 'success' | 'failed' | null;
 
@@ -23,6 +27,7 @@ interface UseSettingsFormActionsOptions {
 
 interface UseSettingsFormActionsResult {
   cacheCount: number;
+  cacheDetails: CacheDetailItem[];
   cacheSize: number;
   clearingCache: boolean;
   handleCheckForUpdates: () => Promise<void>;
@@ -61,6 +66,9 @@ export function useSettingsFormActions({
   const [initialValues, setInitialValues] = React.useState<SettingsFormSubmission>({});
   const [cacheSize, setCacheSize] = React.useState(0);
   const [cacheCount, setCacheCount] = React.useState(0);
+  const [cacheDetails, setCacheDetails] = React.useState<CacheDetailItem[]>(() =>
+    buildCacheDetailItems()
+  );
   const [loadingCache, setLoadingCache] = React.useState(false);
   const [clearingCache, setClearingCache] = React.useState(false);
   const [testingSmtp, setTestingSmtp] = React.useState(false);
@@ -154,10 +162,12 @@ export function useSettingsFormActions({
       const stats = await window.electronAPI.cache.getStats();
       setCacheSize(stats.totalSize);
       setCacheCount(stats.entryCount);
+      setCacheDetails(buildCacheDetailItems(stats.details));
     } catch (error) {
       console.error('패키지 캐시 정보 로드 실패:', error);
       setCacheSize(0);
       setCacheCount(0);
+      setCacheDetails(buildCacheDetailItems());
     } finally {
       setLoadingCache(false);
     }
@@ -177,6 +187,7 @@ export function useSettingsFormActions({
       await window.electronAPI.cache.clear();
       setCacheSize(0);
       setCacheCount(0);
+      setCacheDetails(buildCacheDetailItems());
       message.success('패키지 캐시가 삭제되었습니다');
     } catch (error) {
       console.error('패키지 캐시 삭제 실패:', error);
@@ -336,6 +347,7 @@ export function useSettingsFormActions({
 
   return {
     cacheCount,
+    cacheDetails,
     cacheSize,
     clearingCache,
     handleCheckForUpdates,
