@@ -32,6 +32,7 @@ test('설정 저장값이 SMTP 테스트와 새로고침 뒤에도 유지된다'
     port: 2525,
     from: 'sender@example.com',
     user: 'sender@example.com',
+    password: 'app-password',
   });
 
   await page.getByRole('button', { name: '저장' }).click();
@@ -43,6 +44,7 @@ test('설정 저장값이 SMTP 테스트와 새로고침 뒤에도 유지된다'
   await expect(page.locator('#smtpPort')).toHaveValue('2525');
   await expect(page.locator('#smtpFrom')).toHaveValue('sender@example.com');
   await expect(page.locator('#smtpUser')).toHaveValue('sender@example.com');
+  await expect(page.locator('#smtpPassword')).toHaveValue('app-password');
   await expect(page.locator('#smtpTo')).toHaveValue('offline@example.com');
 
   mockState = await readMockElectronAppState(page);
@@ -51,6 +53,7 @@ test('설정 저장값이 SMTP 테스트와 새로고침 뒤에도 유지된다'
     smtpPort: 2525,
     smtpFrom: 'sender@example.com',
     smtpUser: 'sender@example.com',
+    smtpPassword: 'app-password',
     smtpTo: 'offline@example.com',
   });
 });
