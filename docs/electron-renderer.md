@@ -24,6 +24,8 @@
 
 공통 레이아웃은 `src/renderer/layouts/MainLayout.tsx`가 담당하고, 자동 업데이트 UI는 `src/renderer/components/UpdateNotification.tsx`가 전역으로 렌더링됩니다.
 
+`DownloadPage.tsx` 자체는 현재 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `src/renderer/pages/download-page/hooks/*`, `components/*`, `utils.ts`, `view-state.ts`로 분리되어 있습니다.
+
 ## 패키지 매니저 노출 범위
 
 ### 홈/위자드에서 노출되는 타입
@@ -131,8 +133,8 @@
 1. `WizardPage`에서 `yum`, `apt`, `apk` 중 하나 선택
 2. 배포판과 아키텍처를 `os:getAllDistributions`, `os:search`로 조회
 3. 필요 시 `os:resolveDependencies`로 전용 트리 계산
-4. `src/renderer/components/os/*`의 전용 출력 옵션 컴포넌트는 현재 라우트된 화면에서 사용되지 않습니다.
-5. 실제 다운로드는 현재 `DownloadPage`의 일반 `download:start` 경로가 기준이며, `os:download:start`는 별도 IPC로 남아 있습니다.
+4. OS 패키지만 담긴 장바구니는 `/download`에서 전용 OS 다운로드 화면으로 전환되며, `src/renderer/components/os/*`의 출력 옵션/진행률/결과 컴포넌트를 사용합니다.
+5. 실제 다운로드는 `os:download:start` IPC로 실행되고, 일반 패키지 경로 `download:start`와 분리되어 유지됩니다.
 
 ## 출력과 패키징
 
@@ -151,7 +153,7 @@
 - 아카이브 형식: `zip`, `tar.gz`
 - 스크립트 타입: `dependency-order`, `local-repo`
 
-다만 이 컴포넌트들은 현재 라우트된 GUI에 연결되어 있지 않아, 저장소 출력이나 `both` 출력은 현재 화면 기준으로는 사용할 수 없습니다.
+이 옵션들은 현재 `/download`의 OS 전용 흐름에 연결되어 있으며, 저장소 출력이나 `both` 출력도 전용 UI에서 선택할 수 있습니다.
 
 ## 자동 업데이트
 
