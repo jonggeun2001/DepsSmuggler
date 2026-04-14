@@ -16,6 +16,7 @@ depssmuggler/
 │   ├── download-handlers.ts
 │   ├── history-handlers.ts
 │   ├── search-handlers.ts
+│   ├── services/
 │   ├── updater.ts
 │   ├── version-handlers.ts
 │   └── utils/logger.ts
@@ -73,6 +74,7 @@ depssmuggler/
 
 - `main.ts`가 BrowserWindow 생성, 개발 서버 대기, 기본 다이얼로그 IPC, 버전 프리로드, updater 초기화를 담당합니다.
 - `config-handlers.ts`, `cache-handlers.ts`, `history-handlers.ts`, `search-handlers.ts`, `download-handlers.ts`, `version-handlers.ts`, `updater.ts`가 기능별 IPC를 등록합니다.
+- `electron/services/`는 메인 프로세스용 orchestration 계층입니다. download/search handler는 채널 등록만 하고, package type 분기, resolver 선택, progress emit, 패키징, OS 전용 흐름은 service/helper 모듈로 위임합니다.
 - SSL 검증은 기본적으로 완화되며 `DEPSSMUGGLER_STRICT_SSL=true`일 때만 엄격 모드로 전환됩니다.
 
 ### 4. Core (`src/core`)
@@ -108,20 +110,20 @@ depssmuggler/
 ### 일반 패키지 다운로드
 
 1. Renderer가 `window.electronAPI.search.*` 또는 `dependency.resolve` 호출
-2. `search-handlers.ts`가 downloader/resolver를 호출
+2. `search-handlers.ts`가 `electron/services/search-orchestrator.ts`와 관련 service에 위임
 3. `DownloadPage.tsx`가 `download:start`를 호출
-4. `download-handlers.ts`가 core downloader와 packager를 실행
+4. `download-handlers.ts`가 `electron/services/download-orchestrator.ts`를 호출하고, 서비스가 package router/progress emitter/packager를 조합해 실행
 5. 진행률 이벤트를 `download:*` 채널로 렌더러에 다시 전송
 6. 완료 시 출력 디렉터리와 결과를 히스토리에 저장
 
-참고: renderer 설정은 `zip`/`tar.gz`를 노출하지만, 현재 `download-handlers.ts`에서 실제 아카이브 생성이 연결된 경로는 `zip`뿐입니다.
+참고: `zip`과 `tar.gz` 패키징은 동일 orchestration service를 통해 처리되고, preload/renderer contract는 그대로 유지됩니다.
 
 ### OS 패키지 다운로드
 
 1. `WizardPage.tsx`가 `os:search`로 `yum/apt/apk` 패키지를 찾고, 전체 `OSPackageInfo`를 장바구니 메타데이터로 유지합니다.
 2. OS 패키지 전용 장바구니만 담긴 상태에서 `WizardPage.tsx`와 `DownloadPage.tsx`가 동일 라우트(`/download`) 안에서 OS 전용 다운로드 화면으로 전환됩니다.
 3. `DownloadPage.tsx`가 `os:getDistribution`으로 선택된 배포판 전체 설정을 읽고 `archive | repository | both` 출력 옵션을 노출합니다. `repository`/`both`에서는 로컬 저장소 설정 스크립트가 기본 포함됩니다.
-4. 실제 다운로드 시작은 `os:download:start` 하나로 통합되어, 메인 프로세스가 필요 시 의존성 해결과 패키징까지 수행합니다. 미해결 의존성은 이 단계에서 즉시 중단되고, resolving 단계 취소도 오류보다 우선해 중단 결과를 반환합니다.
+4. 실제 다운로드 시작은 `os:download:start` 하나로 통합되어, `electron/services/os-download-orchestrator.ts`가 필요 시 의존성 해결과 패키징까지 수행합니다. 미해결 의존성은 이 단계에서 즉시 중단되고, resolving 단계 취소도 오류보다 우선해 중단 결과를 반환합니다.
 5. 진행률은 `os:download:progress`로, 취소는 `os:download:cancel`로 처리됩니다. 취소 요청은 현재 OS 패키지 전송의 `fetch`에도 abort 신호를 전달합니다.
 6. 결과 출력물 경로와 `generatedOutputs`, `warnings`, `conflicts`, `cancelled` 상태는 `os:download:start` 반환값으로 렌더러에 전달됩니다. 취소로 최종 산출물이 생성되지 않은 경우에는 임시 다운로드를 성공으로 승격하지 않고, routed OS 결과 화면에서 중단 상태와 실제 생성물만 안내합니다.
 

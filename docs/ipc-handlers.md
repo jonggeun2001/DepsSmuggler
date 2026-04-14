@@ -15,11 +15,12 @@ electron/
 ├── download-handlers.ts
 ├── history-handlers.ts
 ├── search-handlers.ts
+├── services/
 ├── updater.ts
 └── version-handlers.ts
 ```
 
-`os-package-handlers.ts` 같은 별도 파일은 현재 존재하지 않으며, OS 패키지 IPC는 `search-handlers.ts`와 `download-handlers.ts`에 분산되어 있습니다.
+`download-handlers.ts`와 `search-handlers.ts`는 현재 thin IPC adapter 역할만 맡고, 실제 분기/오케스트레이션은 `electron/services/*.ts`로 위임합니다. `os-package-handlers.ts` 같은 별도 파일은 없고, OS 패키지 IPC도 동일하게 각 service 계층으로 연결됩니다.
 
 ## `main.ts` 공통 채널
 
@@ -75,7 +76,14 @@ electron/
 
 ### `search-handlers.ts`
 
-일반 패키지 검색과 OS 패키지 검색이 모두 이 모듈에 있습니다.
+일반 패키지 검색과 OS 패키지 검색이 모두 이 모듈에 있으며, 핸들러 본체는 채널 등록과 인자 전달만 담당합니다.
+
+주요 위임 대상:
+
+- `electron/services/search-orchestrator.ts`
+- `electron/services/search-package-router.ts`
+- `electron/services/dependency-resolve-service.ts`
+- `electron/services/os-search-service.ts`
 
 | 채널 | 설명 |
 |------|------|
@@ -100,7 +108,15 @@ electron/
 
 ### `download-handlers.ts`
 
-일반 패키지와 OS 패키지 다운로드를 모두 담당합니다.
+일반 패키지와 OS 패키지 다운로드를 모두 담당하지만, 핸들러 자체는 IPC wiring만 수행합니다.
+
+주요 위임 대상:
+
+- `electron/services/download-orchestrator.ts`
+- `electron/services/download-package-router.ts`
+- `electron/services/download-progress.ts`
+- `electron/services/os-download-orchestrator.ts`
+- `electron/services/os-package-router.ts`
 
 #### 일반 패키지 채널
 
