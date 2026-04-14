@@ -205,6 +205,7 @@ const SettingsPage: React.FC = () => {
 
   const {
     cacheCount,
+    cacheDetails,
     cacheSize,
     clearingCache,
     handleCheckForUpdates,
@@ -1193,6 +1194,7 @@ const SettingsPage: React.FC = () => {
 
         <CacheSettingsSection
           cacheCount={cacheCount}
+          cacheDetails={cacheDetails}
           cacheSize={cacheSize}
           clearingCache={clearingCache}
           formatBytes={formatBytes}
