@@ -40,6 +40,17 @@ interface DownloadSessionSnapshot {
   trackedItemIds: Set<string>;
 }
 
+interface QueuedCompletionEvent {
+  data: AllCompleteData;
+  sessionSnapshot: DownloadSessionSnapshot | null;
+}
+
+interface ProvisionalDownloadSession {
+  provisionalSessionId: number;
+  previousSessionSnapshot: DownloadSessionSnapshot | null;
+  queuedPreviousCompletion: QueuedCompletionEvent | null;
+}
+
 export function useDownloadPageController() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -119,6 +130,7 @@ export function useDownloadPageController() {
   const historyTrackedItemIdsRef = useRef<Set<string> | null>(null);
   const downloadSessionIdRef = useRef(0);
   const activeDownloadSessionRef = useRef<DownloadSessionSnapshot | null>(null);
+  const provisionalDownloadSessionRef = useRef<ProvisionalDownloadSession | null>(null);
   const pendingUpdatesRef = useRef<Map<string, Partial<DownloadItem>>>(new Map());
   const pendingLogsRef = useRef<Array<{ level: 'info' | 'warn' | 'error' | 'success'; message: string; details?: string }>>([]);
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -389,6 +401,191 @@ export function useDownloadPageController() {
     outputFormat,
   ]);
 
+  const beginProvisionalDownloadSession = useCallback((
+    sessionSnapshot: DownloadSessionSnapshot,
+    previousSessionSnapshot: DownloadSessionSnapshot | null
+  ) => {
+    provisionalDownloadSessionRef.current = {
+      provisionalSessionId: sessionSnapshot.id,
+      previousSessionSnapshot,
+      queuedPreviousCompletion: null,
+    };
+  }, []);
+
+  const queuePreviousCompletionDuringProvisionalSession = useCallback((data: AllCompleteData) => {
+    const provisionalSession = provisionalDownloadSessionRef.current;
+    if (!provisionalSession || typeof data.sessionId !== 'number') {
+      return false;
+    }
+
+    if (data.sessionId !== provisionalSession.previousSessionSnapshot?.id) {
+      return false;
+    }
+
+    provisionalSession.queuedPreviousCompletion = {
+      data,
+      sessionSnapshot: provisionalSession.previousSessionSnapshot,
+    };
+    return true;
+  }, []);
+
+  const clearProvisionalDownloadSession = useCallback((sessionId: number) => {
+    if (provisionalDownloadSessionRef.current?.provisionalSessionId === sessionId) {
+      provisionalDownloadSessionRef.current = null;
+    }
+  }, []);
+
+  const takeQueuedPreviousCompletion = useCallback((sessionId: number): QueuedCompletionEvent | null => {
+    if (provisionalDownloadSessionRef.current?.provisionalSessionId !== sessionId) {
+      return null;
+    }
+
+    const queuedPreviousCompletion = provisionalDownloadSessionRef.current.queuedPreviousCompletion;
+    provisionalDownloadSessionRef.current = null;
+    return queuedPreviousCompletion;
+  }, []);
+
+  const applyDownloadCompletion = useCallback((
+    data: AllCompleteData,
+    completionSessionSnapshot: DownloadSessionSnapshot | null,
+    handlers: {
+      updatePackage: (packageId: string, update: Partial<DownloadItem>) => void;
+      logMessage: (
+        level: 'info' | 'warn' | 'error' | 'success',
+        messageText: string,
+        details?: string
+      ) => void;
+    }
+  ) => {
+    const { updatePackage, logMessage } = handlers;
+
+    if (downloadCancelledRef.current && !data.cancelled) {
+      return;
+    }
+
+    if (!data.success) {
+      setIsDownloading(false);
+      setIsPaused(false);
+
+      if (data.cancelled) {
+        const hasRecoverableCancelledOutcome =
+          Boolean(data.deliveryResult?.emailSent)
+          || Boolean(data.deliveryResult?.error)
+          || Boolean(data.artifactPaths && data.artifactPaths.length > 0)
+          || Boolean(data.outputPath && data.outputPath !== outputDir);
+
+        if (hasRecoverableCancelledOutcome) {
+          const cancelledDeliveryMessage = data.deliveryResult?.emailSent
+            ? '다운로드는 취소되었지만 이메일 전달은 이미 완료되었습니다.'
+            : data.deliveryResult?.error
+            || '다운로드는 취소되었지만 생성된 산출물과 전달 정보를 확인할 수 있습니다.';
+          const cancelledDeliveryTitle = data.deliveryResult?.emailSent
+            ? '취소 후 이메일 전달 완료'
+            : '취소 후 전달 정보 보존';
+          cancelledCompletionRetainedRef.current = true;
+          setPackagingStatus('failed');
+          setPackagingProgress(100);
+          setCompletedOutputPath(data.outputPath || '');
+          setCompletedArtifactPaths(
+            data.artifactPaths && data.artifactPaths.length > 0
+              ? data.artifactPaths
+              : data.outputPath && data.outputPath !== outputDir
+              ? [data.outputPath]
+              : []
+          );
+          setCompletedDeliveryResult(data.deliveryResult);
+          setCompletedError(cancelledDeliveryMessage);
+          logMessage('warn', cancelledDeliveryTitle, cancelledDeliveryMessage);
+          message.warning(cancelledDeliveryMessage);
+          const forcedHistoryStatus = data.deliveryResult?.emailSent
+            ? undefined
+            : (data.results || []).some((result) => !result.success)
+            ? 'partial'
+            : 'failed';
+          void persistHistoryEntry(data, forcedHistoryStatus, completionSessionSnapshot).catch((error) => {
+            const historyError = error instanceof Error ? error.message : 'unknown error';
+            logMessage('error', '히스토리 저장 실패', historyError);
+            message.error('히스토리 저장에 실패했습니다.');
+          });
+          return;
+        }
+
+        cancelledCompletionRetainedRef.current = false;
+        setPackagingStatus('idle');
+        setPackagingProgress(0);
+        setCompletedOutputPath('');
+        setCompletedArtifactPaths([]);
+        setCompletedDeliveryResult(undefined);
+        setCompletedError('');
+        return;
+      }
+
+      setPackagingStatus('failed');
+      setPackagingProgress(0);
+      setCompletedOutputPath(data.outputPath || '');
+      setCompletedArtifactPaths(data.artifactPaths || []);
+      setCompletedDeliveryResult(data.deliveryResult);
+      setCompletedError(data.error || data.deliveryResult?.error || '');
+
+      const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
+      logMessage('error', '다운로드/패키징 실패', errorMessage);
+      message.error(errorMessage);
+      void persistHistoryEntry(data, 'failed', completionSessionSnapshot).catch((error) => {
+        const historyError = error instanceof Error ? error.message : 'unknown error';
+        logMessage('error', '히스토리 저장 실패', historyError);
+        message.error('히스토리 저장에 실패했습니다.');
+      });
+      return;
+    }
+
+    const currentItems = useDownloadStore.getState().items;
+    currentItems.forEach((item) => {
+      if (item.status === 'downloading' || item.status === 'pending') {
+        updatePackage(item.id, { status: 'completed', progress: 100 });
+      }
+    });
+
+    setIsDownloading(false);
+    setPackagingStatus('completed');
+    setPackagingProgress(100);
+    setCompletedOutputPath(data.outputPath);
+    setCompletedArtifactPaths(data.artifactPaths || [data.outputPath]);
+    setCompletedDeliveryResult(data.deliveryResult);
+    setCompletedError('');
+    const completionMessage = data.deliveryMethod === 'email'
+      ? '다운로드, 패키징 및 이메일 전달이 완료되었습니다'
+      : '다운로드 및 패키징이 완료되었습니다';
+    logMessage('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
+    message.success(completionMessage);
+    const failedCount = (data.results || []).filter((result) => !result.success).length
+      || useDownloadStore.getState().items.filter((item) => item.status === 'failed').length;
+    void persistHistoryAndMaybeClearCart({
+      persistHistory: () => persistHistoryEntry(data, undefined, completionSessionSnapshot),
+      clearCart,
+      canClearCart: () =>
+        failedCount === 0
+        && hasMatchingActiveCartSnapshot({
+          snapshot: completionSessionSnapshot?.cartSnapshot ?? [],
+          currentItems: useCartStore.getState().items,
+          expectedSessionId: completionSessionSnapshot?.id ?? null,
+          activeSessionId: activeDownloadSessionRef.current?.id ?? null,
+        }),
+      onPersistError: (error) => {
+        const historyError = error instanceof Error ? error.message : 'unknown error';
+        logMessage('error', '히스토리 저장 실패', historyError);
+        message.error('히스토리 저장에 실패했습니다.');
+      },
+    });
+  }, [
+    clearCart,
+    outputDir,
+    persistHistoryEntry,
+    setIsDownloading,
+    setIsPaused,
+    setPackagingProgress,
+    setPackagingStatus,
+  ]);
+
   useEffect(() => {
     if (!window.electronAPI?.download) return;
     const pendingUpdates = pendingUpdatesRef.current;
@@ -586,127 +783,13 @@ export function useDownloadPageController() {
 
     const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
       if (isStaleSessionEvent(data.sessionId)) {
+        queuePreviousCompletionDuringProvisionalSession(data);
         return;
       }
 
-      const completionSessionSnapshot = activeDownloadSessionRef.current;
-
-      if (downloadCancelledRef.current && !data.cancelled) {
-        return;
-      }
-
-      if (!data.success) {
-        setIsDownloading(false);
-        setIsPaused(false);
-
-        if (data.cancelled) {
-          const hasRecoverableCancelledOutcome =
-            Boolean(data.deliveryResult?.emailSent)
-            || Boolean(data.deliveryResult?.error)
-            || Boolean(data.artifactPaths && data.artifactPaths.length > 0)
-            || Boolean(data.outputPath && data.outputPath !== outputDir);
-
-          if (hasRecoverableCancelledOutcome) {
-            const cancelledDeliveryMessage = data.deliveryResult?.emailSent
-              ? '다운로드는 취소되었지만 이메일 전달은 이미 완료되었습니다.'
-              : data.deliveryResult?.error
-              || '다운로드는 취소되었지만 생성된 산출물과 전달 정보를 확인할 수 있습니다.';
-            const cancelledDeliveryTitle = data.deliveryResult?.emailSent
-              ? '취소 후 이메일 전달 완료'
-              : '취소 후 전달 정보 보존';
-            cancelledCompletionRetainedRef.current = true;
-            setPackagingStatus('failed');
-            setPackagingProgress(100);
-            setCompletedOutputPath(data.outputPath || '');
-            setCompletedArtifactPaths(
-              data.artifactPaths && data.artifactPaths.length > 0
-                ? data.artifactPaths
-                : data.outputPath && data.outputPath !== outputDir
-                ? [data.outputPath]
-                : []
-            );
-            setCompletedDeliveryResult(data.deliveryResult);
-            setCompletedError(cancelledDeliveryMessage);
-            scheduleLogBatch('warn', cancelledDeliveryTitle, cancelledDeliveryMessage);
-            message.warning(cancelledDeliveryMessage);
-            const forcedHistoryStatus = data.deliveryResult?.emailSent
-              ? undefined
-              : (data.results || []).some((result) => !result.success)
-              ? 'partial'
-              : 'failed';
-            void persistHistoryEntry(data, forcedHistoryStatus, completionSessionSnapshot).catch((error) => {
-              const historyError = error instanceof Error ? error.message : 'unknown error';
-              scheduleLogBatch('error', '히스토리 저장 실패', historyError);
-              message.error('히스토리 저장에 실패했습니다.');
-            });
-            return;
-          }
-
-          cancelledCompletionRetainedRef.current = false;
-          setPackagingStatus('idle');
-          setPackagingProgress(0);
-          setCompletedOutputPath('');
-          setCompletedArtifactPaths([]);
-          setCompletedDeliveryResult(undefined);
-          setCompletedError('');
-          return;
-        }
-
-        setPackagingStatus('failed');
-        setPackagingProgress(0);
-        setCompletedOutputPath(data.outputPath || '');
-        setCompletedArtifactPaths(data.artifactPaths || []);
-        setCompletedDeliveryResult(data.deliveryResult);
-        setCompletedError(data.error || data.deliveryResult?.error || '');
-
-        const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
-        scheduleLogBatch('error', '다운로드/패키징 실패', errorMessage);
-        message.error(errorMessage);
-        void persistHistoryEntry(data, 'failed', completionSessionSnapshot).catch((error) => {
-          const historyError = error instanceof Error ? error.message : 'unknown error';
-          scheduleLogBatch('error', '히스토리 저장 실패', historyError);
-          message.error('히스토리 저장에 실패했습니다.');
-        });
-        return;
-      }
-
-      const currentItems = useDownloadStore.getState().items;
-      currentItems.forEach((item) => {
-        if (item.status === 'downloading' || item.status === 'pending') {
-          scheduleBatchUpdate(item.id, { status: 'completed', progress: 100 });
-        }
-      });
-
-      setIsDownloading(false);
-      setPackagingStatus('completed');
-      setPackagingProgress(100);
-      setCompletedOutputPath(data.outputPath);
-      setCompletedArtifactPaths(data.artifactPaths || [data.outputPath]);
-      setCompletedDeliveryResult(data.deliveryResult);
-      setCompletedError('');
-      const completionMessage = data.deliveryMethod === 'email'
-        ? '다운로드, 패키징 및 이메일 전달이 완료되었습니다'
-        : '다운로드 및 패키징이 완료되었습니다';
-      scheduleLogBatch('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
-      message.success(completionMessage);
-      const failedCount = (data.results || []).filter((result) => !result.success).length
-        || useDownloadStore.getState().items.filter((item) => item.status === 'failed').length;
-      void persistHistoryAndMaybeClearCart({
-        persistHistory: () => persistHistoryEntry(data, undefined, completionSessionSnapshot),
-        clearCart,
-        canClearCart: () =>
-          failedCount === 0
-          && hasMatchingActiveCartSnapshot({
-            snapshot: completionSessionSnapshot?.cartSnapshot ?? [],
-            currentItems: useCartStore.getState().items,
-            expectedSessionId: completionSessionSnapshot?.id ?? null,
-            activeSessionId: activeDownloadSessionRef.current?.id ?? null,
-          }),
-        onPersistError: (error) => {
-          const historyError = error instanceof Error ? error.message : 'unknown error';
-          scheduleLogBatch('error', '히스토리 저장 실패', historyError);
-          message.error('히스토리 저장에 실패했습니다.');
-        },
+      applyDownloadCompletion(data, activeDownloadSessionRef.current, {
+        updatePackage: scheduleBatchUpdate,
+        logMessage: scheduleLogBatch,
       });
     });
 
@@ -724,21 +807,10 @@ export function useDownloadPageController() {
     };
   }, [
     addLogsBatch,
-    clearCart,
-    deliveryMethod,
+    applyDownloadCompletion,
     downloadRenderInterval,
-    effectiveSmtpTo,
-    enableFileSplit,
-    includeDependencies,
-    includeInstallScripts,
-    maxFileSize,
-    outputFormat,
-    persistHistoryEntry,
-    setIsDownloading,
-    setIsPaused,
+    queuePreviousCompletionDuringProvisionalSession,
     setItems,
-    setPackagingProgress,
-    setPackagingStatus,
     updateItemsBatch,
   ]);
 
@@ -1045,7 +1117,6 @@ export function useDownloadPageController() {
 
     setIsDownloading(true);
     setIsPaused(false);
-    cancelledCompletionRetainedRef.current = false;
     setStartTime(Date.now());
     const previousSessionState = {
       sessionCounter: downloadSessionIdRef.current,
@@ -1068,6 +1139,26 @@ export function useDownloadPageController() {
       completedDeliveryResult,
       completedError,
     };
+    const sessionSnapshot = createDownloadSessionSnapshot(
+      [...cartItems],
+      new Set(downloadItems.map((item) => item.id)),
+      buildHistorySettings({
+        outputFormat,
+        includeScripts: includeInstallScripts,
+        includeDependencies,
+        deliveryMethod,
+        smtpTo: effectiveSmtpTo,
+        fileSplitEnabled: enableFileSplit,
+        maxFileSizeMB: maxFileSize,
+      })
+    );
+    beginProvisionalDownloadSession(sessionSnapshot, previousSessionState.activeSession);
+    downloadCancelledRef.current = false;
+    downloadPausedRef.current = false;
+    cancelledCompletionRetainedRef.current = false;
+    lastSpeedCalcRef.current = { time: 0, bytes: 0 };
+    speedHistoryRef.current = [];
+
     const restorePreviousSessionState = () => {
       downloadSessionIdRef.current = previousSessionState.sessionCounter;
       activeDownloadSessionRef.current = previousSessionState.activeSession;
@@ -1088,24 +1179,15 @@ export function useDownloadPageController() {
       setCompletedArtifactPaths([...previousSessionState.completedArtifactPaths]);
       setCompletedDeliveryResult(previousSessionState.completedDeliveryResult);
       setCompletedError(previousSessionState.completedError);
+
+      const queuedPreviousCompletion = takeQueuedPreviousCompletion(sessionSnapshot.id);
+      if (queuedPreviousCompletion) {
+        applyDownloadCompletion(queuedPreviousCompletion.data, queuedPreviousCompletion.sessionSnapshot, {
+          updatePackage: updateItem,
+          logMessage: addLog,
+        });
+      }
     };
-    const sessionSnapshot = createDownloadSessionSnapshot(
-      [...cartItems],
-      new Set(downloadItems.map((item) => item.id)),
-      buildHistorySettings({
-        outputFormat,
-        includeScripts: includeInstallScripts,
-        includeDependencies,
-        deliveryMethod,
-        smtpTo: effectiveSmtpTo,
-        fileSplitEnabled: enableFileSplit,
-        maxFileSizeMB: maxFileSize,
-      })
-    );
-    downloadCancelledRef.current = false;
-    downloadPausedRef.current = false;
-    lastSpeedCalcRef.current = { time: 0, bytes: 0 };
-    speedHistoryRef.current = [];
 
     const canProceed = await checkOutputPath();
     if (!canProceed) {
@@ -1166,14 +1248,18 @@ export function useDownloadPageController() {
         packages,
         options,
       });
+      clearProvisionalDownloadSession(sessionSnapshot.id);
     } catch (error) {
       restorePreviousSessionState();
       addLog('error', '다운로드 시작 실패', String(error));
     }
   }, [
     addLog,
+    applyDownloadCompletion,
+    beginProvisionalDownloadSession,
     cartItems,
     checkOutputPath,
+    clearProvisionalDownloadSession,
     completedArtifactPaths,
     completedDeliveryResult,
     completedError,
@@ -1208,6 +1294,8 @@ export function useDownloadPageController() {
     smtpPassword,
     smtpPort,
     smtpUser,
+    takeQueuedPreviousCompletion,
+    updateItem,
   ]);
 
   const handlePauseResume = useCallback(async () => {
@@ -1309,28 +1397,6 @@ export function useDownloadPageController() {
         error: item.error,
       },
     };
-    const restorePreviousRetryState = () => {
-      downloadSessionIdRef.current = previousRetryState.sessionCounter;
-      activeDownloadSessionRef.current = previousRetryState.activeSession;
-      cartSnapshotRef.current = previousRetryState.cartSnapshot;
-      historyTrackedItemIdsRef.current = previousRetryState.historyTrackedItemIds;
-      historySettingsSnapshotRef.current = previousRetryState.historySettings;
-      downloadCancelledRef.current = previousRetryState.downloadCancelled;
-      downloadPausedRef.current = previousRetryState.downloadPaused;
-      cancelledCompletionRetainedRef.current = previousRetryState.cancelledCompletionRetained;
-      lastSpeedCalcRef.current = previousRetryState.lastSpeedCalc;
-      speedHistoryRef.current = [...previousRetryState.speedHistory];
-      setStartTime(previousRetryState.startTime);
-      setIsDownloading(previousRetryState.isDownloading);
-      setIsPaused(previousRetryState.isPaused);
-      setPackagingStatus(previousRetryState.packagingStatus);
-      setPackagingProgress(previousRetryState.packagingProgress);
-      setCompletedOutputPath(previousRetryState.completedOutputPath);
-      setCompletedArtifactPaths([...previousRetryState.completedArtifactPaths]);
-      setCompletedDeliveryResult(previousRetryState.completedDeliveryResult);
-      setCompletedError(previousRetryState.completedError);
-    };
-
     const sessionSnapshot = createDownloadSessionSnapshot(
       [{
         id: item.id,
@@ -1358,6 +1424,37 @@ export function useDownloadPageController() {
         maxFileSizeMB: maxFileSize,
       })
     );
+    beginProvisionalDownloadSession(sessionSnapshot, previousRetryState.activeSession);
+
+    const restorePreviousRetryState = () => {
+      downloadSessionIdRef.current = previousRetryState.sessionCounter;
+      activeDownloadSessionRef.current = previousRetryState.activeSession;
+      cartSnapshotRef.current = previousRetryState.cartSnapshot;
+      historyTrackedItemIdsRef.current = previousRetryState.historyTrackedItemIds;
+      historySettingsSnapshotRef.current = previousRetryState.historySettings;
+      downloadCancelledRef.current = previousRetryState.downloadCancelled;
+      downloadPausedRef.current = previousRetryState.downloadPaused;
+      cancelledCompletionRetainedRef.current = previousRetryState.cancelledCompletionRetained;
+      lastSpeedCalcRef.current = previousRetryState.lastSpeedCalc;
+      speedHistoryRef.current = [...previousRetryState.speedHistory];
+      setStartTime(previousRetryState.startTime);
+      setIsDownloading(previousRetryState.isDownloading);
+      setIsPaused(previousRetryState.isPaused);
+      setPackagingStatus(previousRetryState.packagingStatus);
+      setPackagingProgress(previousRetryState.packagingProgress);
+      setCompletedOutputPath(previousRetryState.completedOutputPath);
+      setCompletedArtifactPaths([...previousRetryState.completedArtifactPaths]);
+      setCompletedDeliveryResult(previousRetryState.completedDeliveryResult);
+      setCompletedError(previousRetryState.completedError);
+
+      const queuedPreviousCompletion = takeQueuedPreviousCompletion(sessionSnapshot.id);
+      if (queuedPreviousCompletion) {
+        applyDownloadCompletion(queuedPreviousCompletion.data, queuedPreviousCompletion.sessionSnapshot, {
+          updatePackage: updateItem,
+          logMessage: addLog,
+        });
+      }
+    };
 
     downloadCancelledRef.current = false;
     downloadPausedRef.current = false;
@@ -1414,6 +1511,7 @@ export function useDownloadPageController() {
         packages,
         options,
       });
+      clearProvisionalDownloadSession(sessionSnapshot.id);
       addLog('info', `재시도 완료: ${item.name}`);
     } catch (error) {
       restorePreviousRetryState();
@@ -1429,6 +1527,9 @@ export function useDownloadPageController() {
     }
   }, [
     addLog,
+    applyDownloadCompletion,
+    beginProvisionalDownloadSession,
+    clearProvisionalDownloadSession,
     completedArtifactPaths,
     completedDeliveryResult,
     completedError,
@@ -1460,6 +1561,7 @@ export function useDownloadPageController() {
     smtpPort,
     smtpUser,
     startTime,
+    takeQueuedPreviousCompletion,
     updateItem,
   ]);
 
@@ -1481,6 +1583,7 @@ export function useDownloadPageController() {
     setCompletedDeliveryResult(undefined);
     setCompletedError('');
     setDeliveryMethod('local');
+    provisionalDownloadSessionRef.current = null;
     activeDownloadSessionRef.current = null;
     cartSnapshotRef.current = [];
     historySettingsSnapshotRef.current = null;

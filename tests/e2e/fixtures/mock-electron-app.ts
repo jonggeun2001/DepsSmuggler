@@ -8,6 +8,7 @@ interface MockDownloadScenario {
   completeDelayMs?: number;
   cancelledCompletionDelayMs?: number;
   startErrorMessage?: string;
+  startErrorDelayMs?: number;
   failMessage?: string;
   failAttemptsByPackageId?: Record<string, number[]>;
   emitLateSuccessAfterCancel?: boolean;
@@ -611,6 +612,9 @@ export async function setupMockElectronApp(
 
           if (scenario.startErrorMessage) {
             activeDownload = null;
+            if (scenario.startErrorDelayMs && scenario.startErrorDelayMs > 0) {
+              await new Promise((resolve) => window.setTimeout(resolve, scenario.startErrorDelayMs));
+            }
             throw new Error(scenario.startErrorMessage);
           }
 
