@@ -323,12 +323,13 @@ export function createRendererDataClient({
     async getVersionsWithSource(type, packageName, options, fallbackVersions) {
       if (electronAPI?.search?.versions) {
         const response = await electronAPI.search.versions(type, packageName, options);
-        if (response.versions && response.versions.length > 0) {
-          return {
-            versions: response.versions,
-            source: 'electron',
-          };
-        }
+        return {
+          versions:
+            response.versions && response.versions.length > 0
+              ? response.versions
+              : (fallbackVersions || []),
+          source: 'electron',
+        };
       }
 
       if (!fetchImpl) {

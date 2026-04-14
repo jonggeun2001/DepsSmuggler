@@ -17,6 +17,29 @@ describe('renderer-data-client', () => {
     expect(electronAPI.search.versions).toHaveBeenCalledWith('pip', 'requests', undefined);
   });
 
+  it('Electron search.versions가 빈 결과를 반환해도 HTTP fallback으로 넘어가지 않는다', async () => {
+    const electronAPI = {
+      search: {
+        versions: vi.fn().mockResolvedValue({ versions: [] }),
+      },
+    };
+    const fetchImpl = vi.fn();
+    const client = createRendererDataClient({ electronAPI, fetchImpl });
+
+    const result = await client.getVersionsWithSource(
+      'pip',
+      'torch',
+      { indexUrl: 'https://download.pytorch.org/whl/cu124' },
+      ['2.3.1']
+    );
+
+    expect(result).toEqual({
+      versions: ['2.3.1'],
+      source: 'electron',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('Electron search가 없으면 npm 검색 HTTP fallback을 사용한다', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
