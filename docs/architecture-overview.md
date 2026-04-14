@@ -22,7 +22,8 @@ depssmuggler/
 │   └── utils/logger.ts
 ├── src/
 │   ├── renderer/
-│   │   ├── App.tsx
+│   │   ├── router.tsx
+│   │   ├── lib/
 │   │   ├── layouts/MainLayout.tsx
 │   │   ├── pages/
 │   │   ├── components/
@@ -52,11 +53,13 @@ depssmuggler/
 ### 1. Renderer (`src/renderer`)
 
 - React Router 기준 경로는 `/`, `/wizard`, `/cart`, `/download`, `/history`, `/settings`입니다.
+- 라우트 source of truth는 `src/renderer/router.tsx`이며, `src/renderer/index.tsx`는 `createAppRouter()`만 소비합니다.
 - `MainLayout.tsx`가 좌측 네비게이션과 공통 레이아웃을 담당합니다.
 - `HomePage.tsx`와 `WizardPage.tsx`는 패키지 타입 선택과 검색 진입을 담당합니다.
 - `CartPage.tsx`는 장바구니와 텍스트 입력 기반 패키지 추가를 담당합니다.
 - `DownloadPage.tsx`는 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `pages/download-page/` 아래 hook/component/util로 분리되어 있습니다.
 - `HistoryPage.tsx`와 `SettingsPage.tsx`는 각각 다운로드 이력과 앱 설정을 관리합니다.
+- `renderer/lib/renderer-data-client.ts`가 renderer와 Electron 사이의 검색/버전조회/히스토리 I/O facade 역할을 맡습니다.
 - `SettingsPage.tsx`는 페이지 조립 역할만 유지하고, `src/renderer/pages/settings/` 아래 섹션 컴포넌트와 `use-settings-form-actions.ts`가 전달/캐시/업데이트 액션과 dirty/save 계약을 담당합니다.
 - `components/os/`는 OS 패키지 전용 검색, 출력 옵션, 결과 렌더링을 분리합니다.
 - `UpdateNotification.tsx`는 Electron auto updater 상태를 UI로 노출합니다.
@@ -110,7 +113,7 @@ depssmuggler/
 
 ### 일반 패키지 다운로드
 
-1. Renderer가 `window.electronAPI.search.*` 또는 `dependency.resolve` 호출
+1. Renderer가 `renderer-data-client` facade를 통해 `window.electronAPI.search.*` 또는 `dependency.resolve`를 호출
 2. `search-handlers.ts`가 `electron/services/search-orchestrator.ts`와 관련 service에 위임
 3. `DownloadPage.tsx`의 `use-download-page-controller.tsx`가 `download:start`를 호출
 4. `download-handlers.ts`가 `electron/services/download-orchestrator.ts`를 호출하고, 서비스가 package router/progress emitter/packager를 조합해 실행
@@ -137,7 +140,7 @@ depssmuggler/
 - Renderer 상태: Zustand + persist 기반입니다.
 - 설정 상태는 Electron 환경에서 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화됩니다.
 - 설정 화면의 저장 계약은 `settings-form-utils.ts`가 form 값과 store shape 간 변환을 맡아 유지합니다.
-- 장바구니/히스토리 상태는 현재 persist 저장소가 source of truth이며, `history.json` 기반 IPC는 부분 연결 상태입니다.
+- 장바구니는 persist 기반이고, 히스토리는 `history.json`을 source of truth로 사용하는 file-backed store입니다.
 
 ## 업데이트 및 버전 프리로드
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PackageType } from '../../stores/cart-store';
+import { getRendererDataClient } from '../../lib/renderer-data-client';
 import type { SearchResult } from './types';
 import { createSearchService, type WizardSearchContext } from './search-service';
 import { createVersionService } from './version-service';
@@ -53,16 +54,15 @@ export function useWizardSearchFlow({
   setCurrentStep,
   notifier,
 }: UseWizardSearchFlowArgs) {
+  const dataClientRef = useRef(getRendererDataClient());
   const searchServiceRef = useRef(
     createSearchService({
-      electronAPI: typeof window !== 'undefined' ? window.electronAPI : undefined,
-      fetchImpl: typeof fetch === 'function' ? fetch : undefined,
+      client: dataClientRef.current,
     })
   );
   const versionServiceRef = useRef(
     createVersionService({
-      electronAPI: typeof window !== 'undefined' ? window.electronAPI : undefined,
-      fetchImpl: typeof fetch === 'function' ? fetch : undefined,
+      client: dataClientRef.current,
     })
   );
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

@@ -38,6 +38,7 @@ import { useCartStore, CartItem, PackageType } from '../stores/cart-store';
 import { useSettingsStore } from '../stores/settings-store';
 import { useDownloadStore } from '../stores/download-store';
 import { DependencyTree } from '../components';
+import { getRendererDataClient } from '../lib/renderer-data-client';
 import { DependencyResolutionResult, DependencyNode, PackageType as CorePackageType } from '../../types';
 import type { DependencyAPI } from '../../types/electron';
 
@@ -353,25 +354,7 @@ const CartPage: React.FC = () => {
   // 패키지 최신 버전 조회
   const fetchLatestVersion = async (type: PackageType, packageName: string): Promise<string | null> => {
     try {
-      if (type === 'pip') {
-        const response = await fetch(`/api/pypi/pypi/${encodeURIComponent(packageName)}/json`);
-        if (response.ok) {
-          const data = await response.json();
-          return data.info?.version || null;
-        }
-      } else if (type === 'maven') {
-        const response = await fetch(`/api/maven/versions?package=${encodeURIComponent(packageName)}`);
-        if (response.ok) {
-          const data = await response.json();
-          return data.versions?.[0] || null;
-        }
-      } else if (type === 'npm') {
-        const response = await fetch(`/api/npm/${encodeURIComponent(packageName)}`);
-        if (response.ok) {
-          const data = await response.json();
-          return data['dist-tags']?.latest || null;
-        }
-      }
+      return await getRendererDataClient().getLatestVersion(type, packageName);
     } catch (error) {
       console.warn(`최신 버전 조회 실패: ${packageName}`, error);
     }

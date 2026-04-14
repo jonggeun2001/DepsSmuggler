@@ -150,6 +150,32 @@ export function createPendingDownloadItems(items: PendingDownloadSource[]): Down
   }));
 }
 
+export function hasMatchingCartSnapshot(snapshot: CartItem[], currentItems: CartItem[]): boolean {
+  if (snapshot.length !== currentItems.length) {
+    return false;
+  }
+
+  return snapshot.every((item, index) => currentItems[index]?.id === item.id);
+}
+
+export function hasMatchingActiveCartSnapshot({
+  snapshot,
+  currentItems,
+  expectedSessionId,
+  activeSessionId,
+}: {
+  snapshot: CartItem[];
+  currentItems: CartItem[];
+  expectedSessionId: number | null;
+  activeSessionId: number | null;
+}): boolean {
+  return (
+    expectedSessionId !== null
+    && expectedSessionId === activeSessionId
+    && hasMatchingCartSnapshot(snapshot, currentItems)
+  );
+}
+
 export function formatBytes(bytes: number): string {
   if (!bytes || bytes === 0) return '-';
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
@@ -177,4 +203,34 @@ export function getPackageGroupStatus(items: DownloadItem[], parentItem: Downloa
     isAllCompleted: allItems.every((item) => ['completed', 'skipped'].includes(item.status)),
     hasFailures: failed > 0,
   };
+}
+
+export async function persistHistoryAndMaybeClearCart({
+  persistHistory,
+  clearCart,
+  canClearCart,
+  onPersistError,
+}: {
+  persistHistory: () => Promise<void>;
+  clearCart: () => void;
+  canClearCart: boolean | (() => boolean);
+  onPersistError: (error: unknown) => void;
+}): Promise<boolean> {
+  try {
+    await persistHistory();
+
+    const shouldClearCart =
+      typeof canClearCart === 'function'
+        ? canClearCart()
+        : canClearCart;
+
+    if (shouldClearCart) {
+      clearCart();
+    }
+
+    return true;
+  } catch (error) {
+    onPersistError(error);
+    return false;
+  }
 }

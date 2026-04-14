@@ -15,7 +15,12 @@ import {
   buildHistorySettings,
   getEmailDeliveryValidationError,
 } from '../../download-delivery-utils';
-import { createPendingDownloadItems, formatBytes } from '../utils';
+import {
+  createPendingDownloadItems,
+  formatBytes,
+  hasMatchingActiveCartSnapshot,
+  persistHistoryAndMaybeClearCart,
+} from '../utils';
 import { deriveDownloadPageMode, getDownloadCounts, hasRecoverableArtifacts } from '../view-state';
 import { useOSDownloadFlow } from './use-os-download-flow';
 import type {
@@ -27,6 +32,13 @@ import type {
 import type { AllCompleteData, DependencyAPI } from '../../../../types/electron';
 import type { CartItem } from '../../../stores/cart-store';
 import type { CompletionArtifactsState, HistoryDownloadState } from '../types';
+
+interface DownloadSessionSnapshot {
+  id: number;
+  cartSnapshot: CartItem[];
+  historySettings: HistorySettings;
+  trackedItemIds: Set<string>;
+}
 
 export function useDownloadPageController() {
   const location = useLocation();
@@ -104,6 +116,8 @@ export function useDownloadPageController() {
   const cartSnapshotRef = useRef<typeof cartItems>([]);
   const historySettingsSnapshotRef = useRef<HistorySettings | null>(null);
   const historyTrackedItemIdsRef = useRef<Set<string> | null>(null);
+  const downloadSessionIdRef = useRef(0);
+  const activeDownloadSessionRef = useRef<DownloadSessionSnapshot | null>(null);
   const pendingUpdatesRef = useRef<Map<string, Partial<DownloadItem>>>(new Map());
   const pendingLogsRef = useRef<Array<{ level: 'info' | 'warn' | 'error' | 'success'; message: string; details?: string }>>([]);
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -115,6 +129,29 @@ export function useDownloadPageController() {
     completedArtifactPaths,
     completedDeliveryResult,
   };
+
+  const createDownloadSessionSnapshot = useCallback((
+    cartSnapshot: CartItem[],
+    trackedItemIds: Set<string>,
+    historySettings: HistorySettings
+  ): DownloadSessionSnapshot => {
+    const nextSessionId = downloadSessionIdRef.current + 1;
+    downloadSessionIdRef.current = nextSessionId;
+
+    const sessionSnapshot: DownloadSessionSnapshot = {
+      id: nextSessionId,
+      cartSnapshot,
+      trackedItemIds,
+      historySettings,
+    };
+
+    activeDownloadSessionRef.current = sessionSnapshot;
+    cartSnapshotRef.current = cartSnapshot;
+    historyTrackedItemIdsRef.current = trackedItemIds;
+    historySettingsSnapshotRef.current = historySettings;
+
+    return sessionSnapshot;
+  }, []);
 
   const checkOutputPath = useCallback(async (): Promise<boolean> => {
     try {
@@ -258,14 +295,21 @@ export function useDownloadPageController() {
     }
   }, [cartItems, downloadItems, includeDependencies, isDownloading, setDepsResolved, setItems]);
 
-  const persistHistoryEntry = useCallback((data: AllCompleteData, forcedStatus?: HistoryStatus) => {
+  const persistHistoryEntry = useCallback(async (
+    data: AllCompleteData,
+    forcedStatus?: HistoryStatus,
+    sessionSnapshot?: DownloadSessionSnapshot | null
+  ) => {
     const finalItems = useDownloadStore.getState().items;
-    const trackedItemIds = historyTrackedItemIdsRef.current;
+    const effectiveSessionSnapshot = sessionSnapshot ?? activeDownloadSessionRef.current;
+    const trackedItemIds = effectiveSessionSnapshot?.trackedItemIds ?? historyTrackedItemIdsRef.current;
     const relevantItems = trackedItemIds && trackedItemIds.size > 0
       ? finalItems.filter((item) => trackedItemIds.has(item.id))
       : finalItems;
 
-    const historyPackages: HistoryPackageItem[] = cartSnapshotRef.current.map((item) => ({
+    const historyPackages: HistoryPackageItem[] = (
+      effectiveSessionSnapshot?.cartSnapshot ?? cartSnapshotRef.current
+    ).map((item) => ({
       type: item.type,
       name: item.name,
       version: item.version,
@@ -274,7 +318,7 @@ export function useDownloadPageController() {
       metadata: item.metadata,
     }));
 
-    const historySettings = historySettingsSnapshotRef.current ?? buildHistorySettings({
+    const historySettings = effectiveSessionSnapshot?.historySettings ?? historySettingsSnapshotRef.current ?? buildHistorySettings({
       outputFormat,
       includeScripts: includeInstallScripts,
       includeDependencies,
@@ -319,7 +363,7 @@ export function useDownloadPageController() {
 
     const totalSize = relevantItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
 
-    addHistory(
+    await addHistory(
       historyPackages,
       historySettings,
       data.outputPath,
@@ -532,6 +576,8 @@ export function useDownloadPageController() {
     });
 
     const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
+      const completionSessionSnapshot = activeDownloadSessionRef.current;
+
       if (!data.success) {
         setIsDownloading(false);
         setIsPaused(false);
@@ -556,7 +602,11 @@ export function useDownloadPageController() {
         const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
         scheduleLogBatch('error', '다운로드/패키징 실패', errorMessage);
         message.error(errorMessage);
-        persistHistoryEntry(data, 'failed');
+        void persistHistoryEntry(data, 'failed', completionSessionSnapshot).catch((error) => {
+          const historyError = error instanceof Error ? error.message : 'unknown error';
+          scheduleLogBatch('error', '히스토리 저장 실패', historyError);
+          message.error('히스토리 저장에 실패했습니다.');
+        });
         return;
       }
 
@@ -579,13 +629,25 @@ export function useDownloadPageController() {
         : '다운로드 및 패키징이 완료되었습니다';
       scheduleLogBatch('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
       message.success(completionMessage);
-      persistHistoryEntry(data);
-
       const failedCount = (data.results || []).filter((result) => !result.success).length
         || useDownloadStore.getState().items.filter((item) => item.status === 'failed').length;
-      if (failedCount === 0) {
-        clearCart();
-      }
+      void persistHistoryAndMaybeClearCart({
+        persistHistory: () => persistHistoryEntry(data, undefined, completionSessionSnapshot),
+        clearCart,
+        canClearCart: () =>
+          failedCount === 0
+          && hasMatchingActiveCartSnapshot({
+            snapshot: completionSessionSnapshot?.cartSnapshot ?? [],
+            currentItems: useCartStore.getState().items,
+            expectedSessionId: completionSessionSnapshot?.id ?? null,
+            activeSessionId: activeDownloadSessionRef.current?.id ?? null,
+          }),
+        onPersistError: (error) => {
+          const historyError = error instanceof Error ? error.message : 'unknown error';
+          scheduleLogBatch('error', '히스토리 저장 실패', historyError);
+          message.error('히스토리 저장에 실패했습니다.');
+        },
+      });
     });
 
     return () => {
@@ -935,17 +997,19 @@ export function useDownloadPageController() {
       return;
     }
 
-    cartSnapshotRef.current = [...cartItems];
-    historyTrackedItemIdsRef.current = new Set(downloadItems.map((item) => item.id));
-    historySettingsSnapshotRef.current = buildHistorySettings({
-      outputFormat,
-      includeScripts: includeInstallScripts,
-      includeDependencies,
-      deliveryMethod,
-      smtpTo: effectiveSmtpTo,
-      fileSplitEnabled: enableFileSplit,
-      maxFileSizeMB: maxFileSize,
-    });
+    createDownloadSessionSnapshot(
+      [...cartItems],
+      new Set(downloadItems.map((item) => item.id)),
+      buildHistorySettings({
+        outputFormat,
+        includeScripts: includeInstallScripts,
+        includeDependencies,
+        deliveryMethod,
+        smtpTo: effectiveSmtpTo,
+        fileSplitEnabled: enableFileSplit,
+        maxFileSizeMB: maxFileSize,
+      })
+    );
     setCompletedOutputPath('');
     setCompletedArtifactPaths([]);
     setCompletedDeliveryResult(undefined);
@@ -1005,6 +1069,7 @@ export function useDownloadPageController() {
     cartItems,
     checkOutputPath,
     concurrentDownloads,
+    createDownloadSessionSnapshot,
     defaultArchitecture,
     defaultTargetOS,
     deliveryMethod,
@@ -1095,31 +1160,33 @@ export function useDownloadPageController() {
       return;
     }
 
-    cartSnapshotRef.current = [{
-      id: item.id,
-      type: item.type as CartItem['type'],
-      name: item.name,
-      version: item.version,
-      arch: item.arch as CartItem['arch'],
-      metadata: item.metadata,
-      addedAt: Date.now(),
-      downloadUrl: item.downloadUrl,
-      repository: item.repository as CartItem['repository'],
-      location: item.location,
-      indexUrl: item.indexUrl,
-      extras: item.extras,
-      classifier: item.classifier,
-    }];
-    historyTrackedItemIdsRef.current = new Set([item.id]);
-    historySettingsSnapshotRef.current = buildHistorySettings({
-      outputFormat,
-      includeScripts: includeInstallScripts,
-      includeDependencies: false,
-      deliveryMethod,
-      smtpTo: effectiveSmtpTo,
-      fileSplitEnabled: enableFileSplit,
-      maxFileSizeMB: maxFileSize,
-    });
+    createDownloadSessionSnapshot(
+      [{
+        id: item.id,
+        type: item.type as CartItem['type'],
+        name: item.name,
+        version: item.version,
+        arch: item.arch as CartItem['arch'],
+        metadata: item.metadata,
+        addedAt: Date.now(),
+        downloadUrl: item.downloadUrl,
+        repository: item.repository as CartItem['repository'],
+        location: item.location,
+        indexUrl: item.indexUrl,
+        extras: item.extras,
+        classifier: item.classifier,
+      }],
+      new Set([item.id]),
+      buildHistorySettings({
+        outputFormat,
+        includeScripts: includeInstallScripts,
+        includeDependencies: false,
+        deliveryMethod,
+        smtpTo: effectiveSmtpTo,
+        fileSplitEnabled: enableFileSplit,
+        maxFileSizeMB: maxFileSize,
+      })
+    );
 
     retryItem(item.id);
     updateItem(item.id, { status: 'downloading', progress: 0 });
@@ -1165,6 +1232,7 @@ export function useDownloadPageController() {
     }
   }, [
     addLog,
+    createDownloadSessionSnapshot,
     defaultArchitecture,
     defaultTargetOS,
     deliveryMethod,
@@ -1202,6 +1270,9 @@ export function useDownloadPageController() {
     setCompletedDeliveryResult(undefined);
     setCompletedError('');
     setDeliveryMethod('local');
+    activeDownloadSessionRef.current = null;
+    cartSnapshotRef.current = [];
+    historySettingsSnapshotRef.current = null;
     historyTrackedItemIdsRef.current = null;
     osFlow.resetOSFlow();
     navigate('/');
