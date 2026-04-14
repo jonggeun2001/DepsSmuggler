@@ -20,6 +20,7 @@ interface DownloadOutcomeViewProps {
   completedCount: number;
   failedCount: number;
   skippedCount: number;
+  isDownloading: boolean;
   outputFormat: 'zip' | 'tar.gz';
   deliveryMethod: 'local' | 'email';
   completedOutputPath: string;
@@ -40,6 +41,7 @@ export function DownloadOutcomeView({
   completedCount,
   failedCount,
   skippedCount,
+  isDownloading,
   outputFormat,
   deliveryMethod,
   completedOutputPath,
@@ -73,6 +75,8 @@ export function DownloadOutcomeView({
         key="restart"
         icon={<DownloadOutlined />}
         onClick={onRestartDownload}
+        disabled={isDownloading}
+        loading={isDownloading}
       >
         다운로드 시작
       </Button>

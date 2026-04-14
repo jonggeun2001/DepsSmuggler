@@ -52,6 +52,7 @@ function DownloadPage() {
         completedCount={controller.completedCount}
         failedCount={controller.failedCount}
         skippedCount={controller.skippedCount}
+        isDownloading={controller.isDownloading}
         outputFormat={controller.outputFormat}
         deliveryMethod={controller.deliveryMethod}
         completedOutputPath={controller.completedOutputPath}
