@@ -49,16 +49,16 @@ export function deriveDownloadPageMode(input: DeriveDownloadPageModeInput): Down
     return 'os-reselection';
   }
 
-  if (input.cartItemCount === 0 && input.downloadItemCount === 0) {
-    return 'empty';
-  }
-
   if (input.packagingStatus === 'completed') {
     return 'completed';
   }
 
   if (input.packagingStatus === 'failed' && input.hasRecoverableFailureArtifacts) {
     return 'failed';
+  }
+
+  if (input.cartItemCount === 0 && input.downloadItemCount === 0) {
+    return 'empty';
   }
 
   return 'active';

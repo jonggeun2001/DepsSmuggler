@@ -60,6 +60,8 @@ test('이메일 히스토리 재다운로드는 저장된 수신자를 복원하
 
   await expect(page).toHaveURL(/#\/download$/);
   await expect(page.getByText('현재 수신자: history@example.com')).toBeVisible();
+  await expect(page.getByText('파일 분할: 활성')).toBeVisible();
+  await expect(page.getByText('10MB 초과 시 자동 분할하여 첨부 제한에 맞춰 전달합니다.')).toBeVisible();
   await expect(page.getByText('left-pad')).toBeVisible();
 
   await page.getByRole('button', { name: '다운로드 시작' }).click();

@@ -31,9 +31,12 @@ test('장바구니에서 일반 다운로드 완료 화면까지 도달한다', 
 
   await expect(page.getByRole('heading', { name: '다운로드' })).toBeVisible();
   await expect(page.locator('input[placeholder="다운로드 폴더 경로"]')).toHaveValue('/tmp/depssmuggler-e2e');
+  await expect(page.getByText('TAR.GZ')).toBeVisible();
   await expect(page.getByText('1개 패키지')).toBeVisible();
   await expect(page.getByText('requests')).toBeVisible();
   await expect(page.getByRole('button', { name: '다운로드 시작' })).toBeVisible();
+  await expect(page.getByText(/^현재 수신자:/)).toHaveCount(0);
+  await expect(page.getByText(/^파일 분할:/)).toHaveCount(0);
 
   await page.getByRole('button', { name: '다운로드 시작' }).click();
 

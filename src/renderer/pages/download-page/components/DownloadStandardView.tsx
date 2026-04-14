@@ -35,6 +35,9 @@ interface DownloadStandardViewProps {
   deliveryMethod: 'local' | 'email';
   onDeliveryMethodChange: (value: 'local' | 'email') => void;
   effectiveSmtpTo: string;
+  outputFormat: 'zip' | 'tar.gz';
+  fileSplitEnabled: boolean;
+  maxFileSizeMB: number;
   isDownloading: boolean;
   onSelectFolder: () => Promise<void> | void;
   downloadItems: DownloadItem[];
@@ -69,6 +72,9 @@ export function DownloadStandardView({
   deliveryMethod,
   onDeliveryMethodChange,
   effectiveSmtpTo,
+  outputFormat,
+  fileSplitEnabled,
+  maxFileSizeMB,
   isDownloading,
   onSelectFolder,
   downloadItems,
@@ -120,6 +126,13 @@ export function DownloadStandardView({
           </Space.Compact>
         </div>
 
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>출력 형식</Text>
+          <div style={{ marginTop: 8 }}>
+            <Tag color="blue">{outputFormat.toUpperCase()}</Tag>
+          </div>
+        </div>
+
         <div>
           <Text strong>전달 방식</Text>
           <Radio.Group
@@ -139,11 +152,23 @@ export function DownloadStandardView({
               showIcon
               style={{ marginTop: 12 }}
               message="설정 화면의 SMTP 발신자/수신자와 파일 분할 값을 사용합니다."
-              description={
-                effectiveSmtpTo
-                  ? `현재 수신자: ${effectiveSmtpTo}`
-                  : '수신자가 비어 있습니다. 설정 화면에서 SMTP 수신자를 먼저 입력하세요.'
-              }
+              description={(
+                <Space direction="vertical" size={4}>
+                  <Text>
+                    {effectiveSmtpTo
+                      ? `현재 수신자: ${effectiveSmtpTo}`
+                      : '현재 수신자: 없음 (설정 화면에서 SMTP 수신자를 먼저 입력하세요.)'}
+                  </Text>
+                  <Text>
+                    파일 분할: {fileSplitEnabled ? '활성' : '비활성'}
+                  </Text>
+                  <Text>
+                    {fileSplitEnabled
+                      ? `${maxFileSizeMB}MB 초과 시 자동 분할하여 첨부 제한에 맞춰 전달합니다.`
+                      : `자동 분할 비활성: ${maxFileSizeMB}MB 기준을 초과하면 이메일 전달이 실패할 수 있습니다.`}
+                  </Text>
+                </Space>
+              )}
             />
           )}
         </div>
