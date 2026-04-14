@@ -45,6 +45,7 @@ npm audit
 
 - downloader / resolver 로직
 - packager / cache / config / shared 유틸리티
+- Electron `services/` 오케스트레이션과 package router/helper
 - 네트워크 호출을 모킹한 내부 동작
 
 ### 2. 통합 테스트
@@ -121,7 +122,8 @@ npm audit
 - 단위 테스트는 네트워크/파일 시스템 부작용을 가능한 한 모킹합니다.
 - 통합 테스트는 실제 외부 저장소 호출이 필요한 경우에만 추가합니다.
 - 새 기능을 추가할 때는 구현 파일 옆에 테스트를 두는 현재 관례를 따릅니다.
-- CLI/Electron 경계는 순수 함수와 핸들러 단위로 나눠 검증하는 편이 유지보수에 유리합니다.
+- CLI/Electron 경계는 thin handler wiring 테스트와 service/helper 단위 테스트를 분리해 검증합니다.
+- Electron handler 테스트는 IPC 채널 등록과 service 위임만 확인하고, package type 분기/패키징/OS 전용 흐름은 `electron/services/*.test.ts`에서 검증합니다.
 
 ## 현재 문서화 포인트
 
