@@ -2,11 +2,19 @@ import type { Page } from '@playwright/test';
 import type { CartItem } from '../../../src/renderer/stores/cart-store';
 import type { DownloadHistory } from '../../../src/types';
 
+interface MockDownloadScenario {
+  mode?: 'success' | 'slow' | 'fail-once';
+  stepDelayMs?: number;
+  completeDelayMs?: number;
+  failMessage?: string;
+}
+
 interface MockElectronAppOptions {
   config?: Record<string, unknown>;
   cartItems?: CartItem[];
   histories?: DownloadHistory[];
   downloadDelayMs?: number;
+  downloadScenario?: MockDownloadScenario;
 }
 
 interface MockElectronAppState {
@@ -21,6 +29,8 @@ interface MockElectronAppState {
     downloadCalls: Array<{ packages: unknown[]; options: Record<string, unknown> }>;
     smtpTestCalls: Array<Record<string, unknown>>;
     openedPaths: string[];
+    cancelCount: number;
+    attemptsByPackageId: Record<string, number>;
   };
 }
 
@@ -96,6 +106,13 @@ export async function setupMockElectronApp(
     const persistedCart = readJson<{ state?: { items?: CartItem[] } }>(localStorage, CART_KEY);
     const persistedHistory = readJson<{ state?: { histories?: DownloadHistory[] } }>(localStorage, HISTORY_KEY);
     const persistedRuntime = readJson<MockElectronAppState['runtime']>(sessionStorage, RUNTIME_KEY);
+    const runtimeDefaults: MockElectronAppState['runtime'] = {
+      downloadCalls: [],
+      smtpTestCalls: [],
+      openedPaths: [],
+      cancelCount: 0,
+      attemptsByPackageId: {},
+    };
 
     const state = {
       config: {
@@ -105,10 +122,9 @@ export async function setupMockElectronApp(
       },
       cartItems: persistedCart?.state?.items || seed.cartItems || [],
       histories: persistedHistory?.state?.histories || seed.histories || [],
-      runtime: persistedRuntime || {
-        downloadCalls: [],
-        smtpTestCalls: [],
-        openedPaths: [],
+      runtime: {
+        ...runtimeDefaults,
+        ...(persistedRuntime || {}),
       },
     };
 
@@ -166,6 +182,12 @@ export async function setupMockElectronApp(
     const downloadDepsResolvedListeners = new Set<(value: unknown) => void>();
     const downloadAllCompleteListeners = new Set<(value: unknown) => void>();
     const osProgressListeners = new Set<(value: unknown) => void>();
+    let activeDownloadTimers: number[] = [];
+    let activeDownloadSequence = 0;
+    let activeDownload: {
+      outputPath: string;
+      deliveryMethod: 'local' | 'email';
+    } | null = null;
 
     const subscribe = <T,>(listeners: Set<(value: T) => void>, callback: (value: T) => void) => {
       listeners.add(callback);
@@ -174,6 +196,22 @@ export async function setupMockElectronApp(
 
     const emit = <T,>(listeners: Set<(value: T) => void>, payload: T) => {
       listeners.forEach((listener) => listener(clone(payload)));
+    };
+
+    const clearActiveDownloadTimers = () => {
+      activeDownloadTimers.forEach((timerId) => window.clearTimeout(timerId));
+      activeDownloadTimers = [];
+    };
+
+    const scheduleDownloadStep = (sequence: number, delayMs: number, action: () => void) => {
+      const timerId = window.setTimeout(() => {
+        if (sequence !== activeDownloadSequence) {
+          return;
+        }
+
+        action();
+      }, delayMs);
+      activeDownloadTimers.push(timerId);
     };
 
     const readHistories = (): DownloadHistory[] => {
@@ -292,12 +330,38 @@ export async function setupMockElectronApp(
         onAllComplete: (callback: (data: unknown) => void) => subscribe(downloadAllCompleteListeners, callback),
         pause: async () => undefined,
         resume: async () => undefined,
-        cancel: async () => undefined,
+        cancel: async () => {
+          state.runtime.cancelCount += 1;
+          persistRuntime();
+          clearActiveDownloadTimers();
+          activeDownloadSequence += 1;
+
+          if (activeDownload) {
+            emit(downloadAllCompleteListeners, {
+              success: false,
+              cancelled: true,
+              outputPath: activeDownload.outputPath,
+              artifactPaths: [],
+              deliveryMethod: activeDownload.deliveryMethod,
+            });
+            activeDownload = null;
+          }
+
+          return { success: true };
+        },
         checkPath: async () => ({ exists: false, files: [], fileCount: 0, totalSize: 0 }),
         clearPath: async () => ({ success: true, deleted: true }),
         start: async (payload: { packages: Array<Record<string, unknown>>; options: Record<string, unknown> }) => {
           state.runtime.downloadCalls.push(clone(payload));
+          (payload.packages || []).forEach((pkg) => {
+            const packageId = String(pkg.id || '');
+            state.runtime.attemptsByPackageId[packageId] =
+              (state.runtime.attemptsByPackageId[packageId] || 0) + 1;
+          });
           persistRuntime();
+          clearActiveDownloadTimers();
+          activeDownloadSequence += 1;
+          const currentSequence = activeDownloadSequence;
 
           const packages = payload.packages || [];
           const options = payload.options || {};
@@ -318,34 +382,94 @@ export async function setupMockElectronApp(
                   splitApplied: false,
                 }
               : undefined;
-          const stepDelay = seed.downloadDelayMs ?? 10;
+          const scenario = seed.downloadScenario || {};
+          const scenarioMode = scenario.mode || 'success';
+          const stepDelay = scenario.stepDelayMs ?? seed.downloadDelayMs ?? 10;
+          const completionDelay =
+            scenario.completeDelayMs ?? (scenarioMode === 'slow' ? stepDelay * 20 : stepDelay * 3);
+          const failMessage = scenario.failMessage || 'mock download failed';
+          const packageFailures = packages.map((pkg) => {
+            const packageId = String(pkg.id || '');
+            const attempts = state.runtime.attemptsByPackageId[packageId] || 1;
+            return scenarioMode === 'fail-once' && attempts === 1;
+          });
+          activeDownload = {
+            outputPath: artifactPath,
+            deliveryMethod,
+          };
 
-          window.setTimeout(() => {
+          scheduleDownloadStep(currentSequence, stepDelay, () => {
             emit(downloadStatusListeners, {
               phase: 'downloading',
               message: '다운로드 시작',
             });
 
-            packages.forEach((pkg, index) => {
+            packages.forEach((pkg) => {
+              const packageId = String(pkg.id || '');
+              const packageIndex = packages.findIndex((candidate) => String(candidate.id || '') === packageId);
+              const shouldFail = packageFailures[packageIndex];
+
+              if (shouldFail) {
+                emit(downloadProgressListeners, {
+                  packageId,
+                  status: 'failed',
+                  progress: 35,
+                  downloadedBytes: 256,
+                  totalBytes: 1024,
+                  speed: 0,
+                  error: failMessage,
+                });
+                return;
+              }
+
+              const isSlow = scenarioMode === 'slow';
               emit(downloadProgressListeners, {
-                packageId: pkg.id,
-                status: 'completed',
-                progress: 100,
-                downloadedBytes: 1024,
+                packageId,
+                status: isSlow ? 'downloading' : 'completed',
+                progress: isSlow ? 25 : 100,
+                downloadedBytes: isSlow ? 256 : 1024,
                 totalBytes: 1024,
                 speed: 0,
               });
+            });
+          });
 
-              if (index === packages.length - 1) {
-                emit(downloadStatusListeners, {
-                  phase: 'packaging',
-                  message: '패키징',
+          scheduleDownloadStep(currentSequence, completionDelay, () => {
+            if (packageFailures.some(Boolean)) {
+              emit(downloadAllCompleteListeners, {
+                success: false,
+                outputPath: artifactPath,
+                artifactPaths: [artifactPath],
+                deliveryMethod,
+                error: failMessage,
+                results: packages.map((pkg, index) => ({
+                  id: pkg.id,
+                  success: !packageFailures[index],
+                  error: packageFailures[index] ? failMessage : undefined,
+                })),
+              });
+              activeDownload = null;
+              return;
+            }
+
+            packages.forEach((pkg) => {
+              if (scenarioMode === 'slow') {
+                emit(downloadProgressListeners, {
+                  packageId: pkg.id,
+                  status: 'completed',
+                  progress: 100,
+                  downloadedBytes: 1024,
+                  totalBytes: 1024,
+                  speed: 0,
                 });
               }
             });
-          }, stepDelay);
 
-          window.setTimeout(() => {
+            emit(downloadStatusListeners, {
+              phase: 'packaging',
+              message: '패키징',
+            });
+
             emit(downloadAllCompleteListeners, {
               success: true,
               outputPath: artifactPath,
@@ -357,7 +481,8 @@ export async function setupMockElectronApp(
                 success: true,
               })),
             });
-          }, stepDelay * 3);
+            activeDownload = null;
+          });
         },
       },
       dependency: {
