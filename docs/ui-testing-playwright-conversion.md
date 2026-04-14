@@ -62,8 +62,9 @@
   - 테스트 중 버튼 재클릭이 막히거나 로딩 상태가 표시
   - 이전 결과 메시지가 새 시도와 섞이지 않음
 - mock 전략:
-  - `setupMockElectronApp` 기본 설정을 빈 SMTP 값으로 시작
-  - `runtime.smtpTestCalls` 길이와 호출 payload로 중복 실행 여부 검증
+  - `setupMockElectronApp` 기본 설정을 빈 SMTP 값으로 시작해 필수값 누락 경고 분기를 먼저 검증
+  - 로딩/중복 클릭 상태는 현재 fixture의 즉시 성공 응답만으로는 안정적으로 관찰되지 않으므로, `window.electronAPI.testSmtpConnection`을 deferred promise로 override 하거나 `setupMockElectronApp`에 `smtpTestDelayMs` 또는 결과 주입 옵션을 추가하는 전제가 필요함
+  - `runtime.smtpTestCalls` 길이와 호출 payload는 보조 증거로만 쓰고, 버튼 disabled/loading 상태를 DOM에서 직접 확인
 
 ## 수동 우선 유지 대상
 
