@@ -85,8 +85,9 @@ export function useSettingsFormActions({
   const smtpTestMode = getSmtpTestMode(window.electronAPI);
 
   React.useEffect(() => {
+    const resetBeforeApply = forceSynchronizeOnNextSnapshotRef.current;
     if (
-      !forceSynchronizeOnNextSnapshotRef.current &&
+      !resetBeforeApply &&
       lastSynchronizedValuesRef.current === synchronizedFormValuesKey
     ) {
       return;
@@ -94,6 +95,7 @@ export function useSettingsFormActions({
 
     applySynchronizedSettingsFormState({
       form,
+      resetBeforeApply,
       synchronizedValues: synchronizedFormValues as SettingsFormSubmission,
       synchronizedValuesKey: synchronizedFormValuesKey,
       setInitialValues,

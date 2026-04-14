@@ -85,11 +85,14 @@ export interface SettingsFormValues {
 export type SettingsFormSubmission = Record<string, unknown> & Partial<SettingsFormValues>;
 
 export interface SettingsFormValueWriter {
+  getFieldsValue?: (all?: boolean) => SettingsFormSubmission;
+  resetFields?: () => void;
   setFieldsValue: (values: SettingsFormSubmission) => void;
 }
 
 export interface ApplySynchronizedSettingsFormStateOptions {
   form: SettingsFormValueWriter;
+  resetBeforeApply?: boolean;
   synchronizedValues: SettingsFormSubmission;
   synchronizedValuesKey: string;
   setInitialValues: (values: SettingsFormSubmission) => void;
@@ -118,6 +121,7 @@ export const SMTP_TEST_MODE_MESSAGES: Record<SmtpTestMode, string> = {
 
 export function applySynchronizedSettingsFormState({
   form,
+  resetBeforeApply = false,
   synchronizedValues,
   synchronizedValuesKey,
   setInitialValues,
@@ -125,11 +129,21 @@ export function applySynchronizedSettingsFormState({
   setSmtpTestResult,
   synchronizationKeyRef,
 }: ApplySynchronizedSettingsFormStateOptions): void {
+  if (resetBeforeApply) {
+    form.resetFields?.();
+  }
+
   form.setFieldsValue(synchronizedValues);
-  setInitialValues(synchronizedValues);
+  const appliedValues =
+    resetBeforeApply && form.getFieldsValue
+      ? form.getFieldsValue(true)
+      : synchronizedValues;
+  setInitialValues(appliedValues);
   setIsDirty(false);
   setSmtpTestResult?.(null);
-  synchronizationKeyRef.current = synchronizedValuesKey;
+  synchronizationKeyRef.current = resetBeforeApply
+    ? JSON.stringify(appliedValues)
+    : synchronizedValuesKey;
 }
 
 export function buildSettingsFormValues(settings: SettingsStoreSnapshot): SettingsFormValues {

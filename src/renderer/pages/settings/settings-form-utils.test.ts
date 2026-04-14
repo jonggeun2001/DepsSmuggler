@@ -185,4 +185,86 @@ describe('settings-form-utils', () => {
     expect(setSmtpTestResult).toHaveBeenCalledWith(null);
     expect(synchronizationKeyRef.current).toBe(synchronizedValuesKey);
   });
+
+  it('초기화 동기화는 숨겨진 조건부 필드를 먼저 비워야 함', () => {
+    const synchronizedValues = buildSettingsFormValues({
+      concurrentDownloads: 3,
+      enableCache: true,
+      cachePath: '/tmp/cache',
+      includeDependencies: true,
+      defaultDownloadPath: '/tmp/output',
+      defaultOutputFormat: 'zip',
+      includeInstallScripts: true,
+      enableFileSplit: false,
+      maxFileSize: 25,
+      smtpHost: '',
+      smtpPort: 587,
+      smtpUser: '',
+      smtpPassword: '',
+      smtpFrom: '',
+      smtpTo: '',
+      languageVersions: { python: '3.12' },
+      defaultTargetOS: 'linux',
+      defaultArchitecture: 'x86_64',
+      pipTargetPlatform: {
+        os: 'linux',
+        arch: 'x86_64',
+        linuxDistro: 'rocky9',
+        glibcVersion: '2.34',
+      },
+      condaChannel: 'defaults',
+      cudaVersion: '12.0',
+      yumDistribution: { id: 'rocky-9', architecture: 'x86_64' },
+      aptDistribution: { id: 'ubuntu-24.04', architecture: 'amd64' },
+      apkDistribution: { id: 'alpine-3.19', architecture: 'x86_64' },
+      dockerArchitecture: 'amd64',
+      dockerLayerCompression: 'gzip',
+      dockerIncludeLoadScript: true,
+      autoUpdate: false,
+      autoDownloadUpdate: false,
+      downloadRenderInterval: 100,
+    });
+    const formState = {
+      pipTargetPlatform: {
+        os: 'darwin',
+        arch: 'arm64',
+        macosVersion: '14.0',
+      },
+    };
+    const form = {
+      resetFields: vi.fn(() => {
+        formState.pipTargetPlatform = {};
+      }),
+      setFieldsValue: vi.fn((nextValues: typeof synchronizedValues) => {
+        formState.pipTargetPlatform = {
+          ...formState.pipTargetPlatform,
+          ...nextValues.pipTargetPlatform,
+        };
+      }),
+      getFieldsValue: vi.fn(() => formState),
+    };
+    const setInitialValues = vi.fn();
+    const setIsDirty = vi.fn();
+    const synchronizationKeyRef = { current: 'stale-key' };
+
+    applySynchronizedSettingsFormState({
+      form,
+      synchronizedValues,
+      synchronizedValuesKey: JSON.stringify(synchronizedValues),
+      setInitialValues,
+      setIsDirty,
+      synchronizationKeyRef,
+      resetBeforeApply: true,
+    });
+
+    expect(form.resetFields).toHaveBeenCalledTimes(1);
+    expect(formState.pipTargetPlatform).toEqual({
+      os: 'linux',
+      arch: 'x86_64',
+      linuxDistro: 'rocky9',
+      glibcVersion: '2.34',
+    });
+    expect(setInitialValues).toHaveBeenCalledWith(formState);
+    expect(synchronizationKeyRef.current).toBe(JSON.stringify(formState));
+  });
 });
