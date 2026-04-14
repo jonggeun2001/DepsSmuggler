@@ -2,7 +2,8 @@
 
 ## 범위
 
-- 기준 커밋: `8a9b8cc`
+- 초기 관찰 기준 커밋: `8a9b8cc`
+- 후속 재검증 기준 커밋: `4a3ff40`
 - 기준 문서:
   - `docs/ui-testing-checklist.md`
   - `docs/ui-testing-test-cases.md`
