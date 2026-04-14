@@ -52,6 +52,7 @@ function DownloadPage() {
         completedCount={controller.completedCount}
         failedCount={controller.failedCount}
         skippedCount={controller.skippedCount}
+        isDownloading={controller.isDownloading}
         outputFormat={controller.outputFormat}
         deliveryMethod={controller.deliveryMethod}
         completedOutputPath={controller.completedOutputPath}
@@ -62,6 +63,7 @@ function DownloadPage() {
         downloadItems={controller.downloadItems}
         logs={controller.logs}
         onRetry={controller.executeRetryDownload}
+        onRestartDownload={controller.handleStartDownload}
         onOpenFolder={controller.handleOpenFolder}
         onComplete={controller.handleComplete}
       />

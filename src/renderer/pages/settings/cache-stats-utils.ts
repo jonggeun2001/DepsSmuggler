@@ -7,6 +7,8 @@ export interface CacheDetailItemsInput {
   conda?: unknown;
 }
 
+export type CacheCategoryDetails = CacheDetailItemsInput;
+
 export interface CacheDetailItem {
   key: CacheDetailKey;
   label: string;

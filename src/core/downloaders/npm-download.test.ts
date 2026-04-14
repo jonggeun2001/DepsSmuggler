@@ -318,6 +318,31 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       await expect(downloader.downloadPackage(info, '/tmp/test')).rejects.toThrow('Network Error');
     });
 
+    it('401 응답 오류를 그대로 전달', async () => {
+      const mockGetPackageMetadata = vi.fn().mockResolvedValue({
+        name: 'test-pkg',
+        version: '1.0.0',
+        type: 'npm',
+        metadata: {
+          downloadUrl: 'https://registry.npmjs.org/test-pkg/-/test-pkg-1.0.0.tgz',
+        },
+      });
+      (downloader as any).getPackageMetadata = mockGetPackageMetadata;
+
+      mockAxiosDefault.mockRejectedValue(
+        Object.assign(new Error('Request failed with status code 401'), {
+          response: {
+            status: 401,
+          },
+        })
+      );
+
+      const info = { type: 'npm' as const, name: 'test-pkg', version: '1.0.0' };
+      await expect(downloader.downloadPackage(info, '/tmp/test')).rejects.toThrow(
+        'Request failed with status code 401'
+      );
+    });
+
     it('writer 오류 처리', async () => {
       const mockGetPackageMetadata = vi.fn().mockResolvedValue({
         name: 'test-pkg',

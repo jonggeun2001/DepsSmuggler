@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
+import * as fs from 'fs-extra';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerDownloadHandlers } from './download-handlers';
+import { createEmailSenderMock } from '../src/core/mailer/__mocks__/email-sender-mock';
 import type { OSPackageInfo, OSDistribution } from '../src/core/downloaders/os-shared/types';
+
+type CoreModule = typeof import('../src/core');
 
 const {
   ipcHandle,
@@ -24,6 +27,20 @@ const {
   archiveCreateArchive,
   repoCreateLocalRepo,
   generateDependencyOrderScriptMock,
+  getCondaDownloaderMock,
+  getMavenDownloaderMock,
+  getDockerDownloaderMock,
+  getNpmDownloaderMock,
+  getYumDownloaderMock,
+  getAptDownloaderMock,
+  getApkDownloaderMock,
+  getPipResolverMock,
+  getCondaResolverMock,
+  getMavenResolverMock,
+  getNpmResolverMock,
+  getYumResolverMock,
+  getAptResolverMock,
+  getApkResolverMock,
 } = vi.hoisted(() => ({
   ipcHandle: vi.fn(),
   webContentsSend: vi.fn(),
@@ -43,6 +60,20 @@ const {
   archiveCreateArchive: vi.fn(),
   repoCreateLocalRepo: vi.fn(),
   generateDependencyOrderScriptMock: vi.fn(),
+  getCondaDownloaderMock: vi.fn(),
+  getMavenDownloaderMock: vi.fn(),
+  getDockerDownloaderMock: vi.fn(),
+  getNpmDownloaderMock: vi.fn(),
+  getYumDownloaderMock: vi.fn(),
+  getAptDownloaderMock: vi.fn(),
+  getApkDownloaderMock: vi.fn(),
+  getPipResolverMock: vi.fn(),
+  getCondaResolverMock: vi.fn(),
+  getMavenResolverMock: vi.fn(),
+  getNpmResolverMock: vi.fn(),
+  getYumResolverMock: vi.fn(),
+  getAptResolverMock: vi.fn(),
+  getApkResolverMock: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -72,22 +103,24 @@ vi.mock('../src/core/shared', () => ({
   generateInstallScripts: generateInstallScriptsMock,
 }));
 
-vi.mock('../src/core', () => ({
-  getCondaDownloader: vi.fn(),
-  getMavenDownloader: vi.fn(),
-  getDockerDownloader: vi.fn(),
-  getNpmDownloader: vi.fn(),
-  getYumDownloader: vi.fn(() => ({
-    downloadPackage: yumDownloadPackage,
-  })),
-  getAptDownloader: vi.fn(),
-  getApkDownloader: vi.fn(),
-  getYumResolver: vi.fn(() => ({
-    resolveDependencies: yumResolveDependencies,
-  })),
-  getAptResolver: vi.fn(),
-  getApkResolver: vi.fn(),
-}));
+vi.mock('../src/core', () =>
+  ({
+    getCondaDownloader: getCondaDownloaderMock,
+    getMavenDownloader: getMavenDownloaderMock,
+    getDockerDownloader: getDockerDownloaderMock,
+    getNpmDownloader: getNpmDownloaderMock,
+    getYumDownloader: getYumDownloaderMock,
+    getAptDownloader: getAptDownloaderMock,
+    getApkDownloader: getApkDownloaderMock,
+    getPipResolver: getPipResolverMock,
+    getCondaResolver: getCondaResolverMock,
+    getMavenResolver: getMavenResolverMock,
+    getNpmResolver: getNpmResolverMock,
+    getYumResolver: getYumResolverMock,
+    getAptResolver: getAptResolverMock,
+    getApkResolver: getApkResolverMock,
+  }) satisfies Partial<CoreModule>
+);
 
 vi.mock('../src/core/packager/archive-packager', () => ({
   getArchivePackager: vi.fn(() => ({
@@ -222,10 +255,11 @@ describe('registerDownloadHandlers', () => {
       attachmentsSent: 1,
       splitApplied: false,
     });
-    initializeEmailSenderMock.mockReturnValue({
-      sendEmail: sendEmailMock,
-      testConnection: vi.fn(),
-    });
+    initializeEmailSenderMock.mockReturnValue(
+      createEmailSenderMock({
+        sendEmail: sendEmailMock,
+      })
+    );
     splitFileMock.mockResolvedValue({
       parts: [
         path.join(tempDir, 'bundle.tar.gz.part001'),
@@ -261,6 +295,48 @@ describe('registerDownloadHandlers', () => {
       unresolved: [],
       conflicts: [],
       warnings: [],
+    });
+    getCondaDownloaderMock.mockReturnValue({
+      getPackageMetadata: vi.fn(),
+    });
+    getMavenDownloaderMock.mockReturnValue({
+      downloadPackage: vi.fn(),
+    });
+    getDockerDownloaderMock.mockReturnValue({
+      downloadImage: vi.fn(),
+    });
+    getNpmDownloaderMock.mockReturnValue({
+      getPackageMetadata: vi.fn(),
+    });
+    getYumDownloaderMock.mockReturnValue({
+      downloadPackage: yumDownloadPackage,
+    });
+    getAptDownloaderMock.mockReturnValue({
+      downloadPackage: vi.fn(),
+    });
+    getApkDownloaderMock.mockReturnValue({
+      downloadPackage: vi.fn(),
+    });
+    getPipResolverMock.mockReturnValue({
+      resolveDependencies: vi.fn(),
+    });
+    getCondaResolverMock.mockReturnValue({
+      resolveDependencies: vi.fn(),
+    });
+    getMavenResolverMock.mockReturnValue({
+      resolveDependencies: vi.fn(),
+    });
+    getNpmResolverMock.mockReturnValue({
+      resolveDependencies: vi.fn(),
+    });
+    getYumResolverMock.mockReturnValue({
+      resolveDependencies: yumResolveDependencies,
+    });
+    getAptResolverMock.mockReturnValue({
+      resolveDependencies: vi.fn(),
+    });
+    getApkResolverMock.mockReturnValue({
+      resolveDependencies: vi.fn(),
     });
     archiveCreateArchive.mockResolvedValue(`${osOutputDir}/os-packages.zip`);
     repoCreateLocalRepo.mockImplementation(
