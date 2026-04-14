@@ -1,5 +1,6 @@
 import type { OSPackageOutputOptions } from '../../core/downloaders/os-shared/types';
 import type { DeliveryMethod, HistorySettings } from '../../types';
+import type { DownloadStartOptions } from '../../types/electron';
 
 export const EMAIL_DELIVERY_VALIDATION_MESSAGE =
   '이메일 전달을 사용하려면 설정에서 SMTP 서버, 수신자, 발신자 또는 로그인 사용자를 입력하세요';
@@ -30,6 +31,26 @@ interface EmailDeliveryValidationInput {
   smtpTo: string;
   smtpFrom: string;
   smtpUser: string;
+}
+
+interface BuildDownloadStartOptionsInput {
+  outputDir: string;
+  outputFormat: 'zip' | 'tar.gz';
+  includeScripts: boolean;
+  targetOS?: string;
+  architecture?: string;
+  includeDependencies: boolean;
+  pythonVersion?: string;
+  concurrency: number;
+  deliveryMethod: DeliveryMethod;
+  smtpTo: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPassword: string;
+  smtpFrom: string;
+  fileSplitEnabled: boolean;
+  maxFileSizeMB: number;
 }
 
 export function buildHistorySettings(input: BuildHistorySettingsInput): HistorySettings {
@@ -75,4 +96,41 @@ export function getEmailDeliveryValidationError(
   }
 
   return null;
+}
+
+export function buildDownloadStartOptions(
+  input: BuildDownloadStartOptionsInput
+): DownloadStartOptions {
+  const normalizedFrom = input.smtpFrom || input.smtpUser;
+
+  return {
+    outputDir: input.outputDir,
+    outputFormat: input.outputFormat,
+    includeScripts: input.includeScripts,
+    targetOS: input.targetOS,
+    architecture: input.architecture,
+    includeDependencies: input.includeDependencies,
+    pythonVersion: input.pythonVersion,
+    concurrency: input.concurrency,
+    deliveryMethod: input.deliveryMethod,
+    email: input.deliveryMethod === 'email'
+      ? {
+          to: input.smtpTo,
+          from: normalizedFrom,
+        }
+      : undefined,
+    fileSplit: {
+      enabled: input.fileSplitEnabled,
+      maxSizeMB: input.maxFileSizeMB,
+    },
+    smtp: input.deliveryMethod === 'email'
+      ? {
+          host: input.smtpHost,
+          port: input.smtpPort,
+          user: input.smtpUser,
+          password: input.smtpPassword,
+          from: normalizedFrom,
+        }
+      : undefined,
+  };
 }

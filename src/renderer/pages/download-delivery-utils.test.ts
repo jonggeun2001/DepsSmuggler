@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildDownloadStartOptions,
   buildHistoryRestoreSettings,
   buildHistorySettings,
   getEmailDeliveryValidationError,
@@ -66,5 +67,94 @@ describe('download-delivery-utils', () => {
       smtpFrom: '',
       smtpUser: '',
     })).toBeNull();
+  });
+
+  it('이메일 전달 옵션은 smtp, email, fileSplit을 함께 조립해야 함', () => {
+    expect(
+      buildDownloadStartOptions({
+        outputDir: '/tmp/downloads',
+        outputFormat: 'zip',
+        includeScripts: true,
+        targetOS: 'linux',
+        architecture: 'x86_64',
+        includeDependencies: true,
+        pythonVersion: '3.11',
+        concurrency: 3,
+        deliveryMethod: 'email',
+        smtpTo: 'airgap@example.com',
+        smtpHost: 'smtp.example.com',
+        smtpPort: 587,
+        smtpUser: 'sender@example.com',
+        smtpPassword: 'secret',
+        smtpFrom: '',
+        fileSplitEnabled: true,
+        maxFileSizeMB: 25,
+      })
+    ).toEqual({
+      outputDir: '/tmp/downloads',
+      outputFormat: 'zip',
+      includeScripts: true,
+      targetOS: 'linux',
+      architecture: 'x86_64',
+      includeDependencies: true,
+      pythonVersion: '3.11',
+      concurrency: 3,
+      deliveryMethod: 'email',
+      email: {
+        to: 'airgap@example.com',
+        from: 'sender@example.com',
+      },
+      fileSplit: {
+        enabled: true,
+        maxSizeMB: 25,
+      },
+      smtp: {
+        host: 'smtp.example.com',
+        port: 587,
+        user: 'sender@example.com',
+        password: 'secret',
+        from: 'sender@example.com',
+      },
+    });
+  });
+
+  it('로컬 전달 옵션은 email/smtp 없이도 조립되어야 함', () => {
+    expect(
+      buildDownloadStartOptions({
+        outputDir: '/tmp/downloads',
+        outputFormat: 'tar.gz',
+        includeScripts: false,
+        targetOS: 'windows',
+        architecture: 'arm64',
+        includeDependencies: false,
+        pythonVersion: '3.12',
+        concurrency: 1,
+        deliveryMethod: 'local',
+        smtpTo: '',
+        smtpHost: '',
+        smtpPort: 587,
+        smtpUser: '',
+        smtpPassword: '',
+        smtpFrom: '',
+        fileSplitEnabled: false,
+        maxFileSizeMB: 10,
+      })
+    ).toEqual({
+      outputDir: '/tmp/downloads',
+      outputFormat: 'tar.gz',
+      includeScripts: false,
+      targetOS: 'windows',
+      architecture: 'arm64',
+      includeDependencies: false,
+      pythonVersion: '3.12',
+      concurrency: 1,
+      deliveryMethod: 'local',
+      email: undefined,
+      fileSplit: {
+        enabled: false,
+        maxSizeMB: 10,
+      },
+      smtp: undefined,
+    });
   });
 });

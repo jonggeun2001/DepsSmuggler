@@ -41,6 +41,8 @@ build/
 
 # Test coverage
 coverage/
+playwright-report/
+test-results/
 
 # DepsSmuggler cache and config (for development)
 # .depssmuggler/
@@ -59,3 +61,6 @@ AGENTS.md
 # download test
 depssmuggler-downloads/
 depssmuggler-downloads*
+
+# Local planning/spec artifacts
+docs/superpowers/

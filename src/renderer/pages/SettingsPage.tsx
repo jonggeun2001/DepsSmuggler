@@ -971,13 +971,13 @@ const SettingsPage: React.FC = () => {
         >
           <List
             dataSource={customPipIndexUrls}
-	            renderItem={(item) => (
-	              <List.Item
-	                actions={[
-	                  <Button
+            renderItem={(item) => (
+              <List.Item
+                actions={[
+                  <Button
                     key={`remove-${item.url}`}
-	                    type="link"
-	                    danger
+                    type="link"
+                    danger
                     size="small"
                     onClick={() => {
                       removeCustomPipIndexUrl(item.url);

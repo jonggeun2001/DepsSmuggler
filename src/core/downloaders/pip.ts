@@ -254,7 +254,7 @@ export class PipDownloader implements IDownloader {
 
       // 파일명 추출 (경로 조작 방지를 위해 정규화)
       const rawFileName = path.basename(new URL(downloadUrl).pathname);
-      const fileName = sanitizePath(rawFileName, /[^a-zA-Z0-9._\-]/g);
+      const fileName = sanitizePath(rawFileName, /[^a-zA-Z0-9._-]/g);
       const filePath = path.join(destPath, fileName);
 
       // 디렉토리 생성
