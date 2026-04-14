@@ -1598,6 +1598,10 @@ export function useDownloadPageController() {
   }, [addLog, cartItems, setDepsResolved, setItems]);
 
   const handleComplete = useCallback(() => {
+    if (isDownloading) {
+      return;
+    }
+
     reset();
     setDepsResolved(false);
     dependencyResolutionBypassedRef.current = false;
@@ -1613,7 +1617,7 @@ export function useDownloadPageController() {
     historyTrackedItemIdsRef.current = null;
     osFlow.resetOSFlow();
     navigate('/');
-  }, [navigate, osFlow, reset, setDepsResolved]);
+  }, [isDownloading, navigate, osFlow, reset, setDepsResolved]);
 
   const handleOpenFolder = useCallback(async () => {
     const targetPath = completedOutputPath || outputDir;

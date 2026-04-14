@@ -84,7 +84,7 @@ export function DownloadOutcomeView({
   }
 
   resultActions.push(
-    <Button key="done" icon={<ReloadOutlined />} onClick={onComplete}>
+    <Button key="done" icon={<ReloadOutlined />} onClick={onComplete} disabled={isDownloading}>
       새 다운로드
     </Button>
   );
