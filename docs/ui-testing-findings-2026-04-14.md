@@ -43,6 +43,9 @@
   - `/download` 진입 후 main 텍스트 검사 시 `hasOutputFormat: false` 확인
 - 수정 방향:
   - `DownloadStandardView`에 현재 출력 형식 요약을 추가하거나, 읽기 전용 출력 형식 행을 노출합니다.
+- 후속 반영:
+  - `DownloadStandardView`에 읽기 전용 `출력 형식` 행을 추가해 시작 전 화면에서도 `ZIP`/`TAR.GZ`를 확인할 수 있게 했습니다.
+  - `tests/e2e/download-smoke.spec.ts`가 preflight 출력 형식 노출을 회귀로 검증합니다.
 
 ### F-02 이메일 전달 안내에 분할 기준 크기와 첨부 제한 정보가 빠져 있음
 
@@ -58,6 +61,9 @@
   - 이메일 전달 선택 후 main 텍스트 검사 시 `hasMaxSizeValue: false`, `hasMB: false`, `hasAttachmentGuide: false`
 - 수정 방향:
   - 전달 안내 Alert에 `25MB 초과 시 자동 분할` 같은 요약을 추가하고, 분할 비활성 시에는 해당 사실을 명시합니다.
+- 후속 반영:
+  - 이메일 전달 안내 Alert에 현재 수신자, 파일 분할 활성화 여부, `maxFileSize` 기준 요약을 추가했습니다.
+  - `tests/e2e/history-email-restore.spec.ts`와 `tests/e2e/download-smoke.spec.ts`가 이메일/로컬 전달 분기 표시를 함께 검증합니다.
 
 ### F-03 캐시 화면이 타입별 상세 통계를 보여주지 않음
 
@@ -71,6 +77,8 @@
   - mock에서 `details.pip/npm/maven` 값을 seed했지만 화면에는 총합만 노출
 - 수정 방향:
   - `CacheSettingsSection`에 package manager별 chip/list/table을 추가해 `details`를 노출하거나, 이 기능이 의도 범위 밖이면 테스트 케이스와 체크리스트를 현재 구현 수준으로 낮춰야 합니다.
+- 후속 반영:
+  - 설정 화면이 `cache.getStats().details` 기반 breakdown을 렌더링하도록 보강했고, `tests/e2e/settings-cache-breakdown.spec.ts`로 회귀를 고정했습니다.
 
 ### F-04 취소/재시도 시나리오를 안정적으로 검증할 shared mock이 없음
 
