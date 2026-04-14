@@ -123,4 +123,49 @@ describe('renderer-data-client', () => {
     expect(await client.history.clear()).toEqual({ success: true });
     expect(await client.history.load()).toEqual([]);
   });
+
+  it('legacy Zustand persist payload도 읽어서 raw 배열로 마이그레이션한다', async () => {
+    const historyEntry: DownloadHistory = {
+      id: 'history-legacy',
+      timestamp: '2026-04-14T00:00:00.000Z',
+      packages: [],
+      settings: {
+        outputFormat: 'zip',
+        includeScripts: true,
+        includeDependencies: true,
+        deliveryMethod: 'local',
+      },
+      outputPath: '/tmp/legacy-output.zip',
+      totalSize: 4321,
+      status: 'success',
+    };
+    const storedValues = new Map<string, string>([
+      [
+        'depssmuggler-history',
+        JSON.stringify({
+          state: {
+            histories: [historyEntry],
+          },
+          version: 0,
+        }),
+      ],
+    ]);
+    const storage = {
+      getItem: vi.fn((key: string) => storedValues.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        storedValues.set(key, value);
+      }),
+      removeItem: vi.fn((key: string) => {
+        storedValues.delete(key);
+      }),
+    };
+    const client = createRendererDataClient({ storage });
+
+    expect(await client.history.load()).toEqual([historyEntry]);
+    expect(storage.setItem).toHaveBeenCalledWith(
+      'depssmuggler-history',
+      JSON.stringify([historyEntry])
+    );
+    expect(JSON.parse(storedValues.get('depssmuggler-history') ?? 'null')).toEqual([historyEntry]);
+  });
 });

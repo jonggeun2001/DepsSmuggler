@@ -279,6 +279,34 @@ function getHistoryStorage(
   return null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function normalizeStoredHistories(parsed: unknown): {
+  histories: DownloadHistory[];
+  requiresMigration: boolean;
+} {
+  if (Array.isArray(parsed)) {
+    return {
+      histories: parsed.slice(0, MAX_BROWSER_HISTORIES) as DownloadHistory[],
+      requiresMigration: false,
+    };
+  }
+
+  if (isRecord(parsed) && isRecord(parsed.state) && Array.isArray(parsed.state.histories)) {
+    return {
+      histories: parsed.state.histories.slice(0, MAX_BROWSER_HISTORIES) as DownloadHistory[],
+      requiresMigration: true,
+    };
+  }
+
+  return {
+    histories: [],
+    requiresMigration: false,
+  };
+}
+
 function readStoredHistories(
   storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null
 ): DownloadHistory[] {
@@ -293,7 +321,13 @@ function readStoredHistories(
     }
 
     const parsed = JSON.parse(rawValue);
-    return Array.isArray(parsed) ? parsed as DownloadHistory[] : [];
+    const { histories, requiresMigration } = normalizeStoredHistories(parsed);
+
+    if (requiresMigration) {
+      storage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(histories));
+    }
+
+    return histories;
   } catch (error) {
     console.error('브라우저 히스토리 로드 실패:', error);
     return [];
