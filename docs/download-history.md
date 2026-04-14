@@ -16,7 +16,7 @@
 |------|------|
 | 자동 저장 | 다운로드 완료 시 히스토리 자동 저장 |
 | 재다운로드 | 이전 다운로드 설정을 복원하여 재다운로드 |
-| 파일 동기화 | Zustand persist + 파일 기반 동기화 |
+| 파일 동기화 | file-backed Zustand store가 `history.json`과 직접 동기화 |
 | 폴더 열기 | 출력 경로가 폴더면 열고, 파일이면 Finder/Explorer에서 해당 산출물을 표시 |
 | 상태 필터링 | 성공/부분 성공/실패 상태별 필터 |
 | 통계 표시 | 전체/성공/실패 건수 및 총 용량 |
@@ -95,6 +95,9 @@ interface DownloadHistory {
 ```typescript
 interface HistoryState {
   histories: DownloadHistory[];
+  initialized: boolean;
+  loading: boolean;
+  hydrate: () => Promise<void>;
 }
 ```
 
@@ -103,6 +106,7 @@ interface HistoryState {
 | 액션 | 파라미터 | 설명 |
 |------|----------|------|
 | `addHistory` | packages, settings, outputPath, totalSize, status, downloadedCount?, failedCount?, options? | 히스토리 추가 (시작 시점 설정 스냅샷과 실제 산출물/전달 메타데이터 저장, 100개 초과 시 오래된 것 삭제) |
+| `hydrate` | - | 파일 기반 히스토리를 읽어 store 초기화 |
 | `getHistory` | id | ID로 특정 히스토리 조회 |
 | `getHistories` | - | 전체 히스토리 조회 |
 | `deleteHistory` | id | 특정 히스토리 삭제 |
@@ -110,8 +114,8 @@ interface HistoryState {
 
 ### 영속성
 
-- **Zustand persist**: `localStorage` (`depssmuggler-history` 키)
-- **파일 기반**: `~/.depssmuggler/history.json` (Electron 환경)
+- **source of truth**: `~/.depssmuggler/history.json`
+- **renderer 상태**: file-backed Zustand store cache
 
 ---
 
@@ -141,6 +145,7 @@ interface HistoryState {
 - 디렉토리 자동 생성: `~/.depssmuggler` 없으면 생성
 - 파일 자동 생성: `history.json` 없으면 빈 배열로 생성
 - 최대 100개 유지: `history:add` 시 초과분 자동 삭제
+- 렌더러는 `HistoryPage.tsx`에서 IPC를 직접 호출하지 않고 store hydrate/add/delete/clear 경로만 사용
 
 ---
 
@@ -205,7 +210,7 @@ history: {
 
 ### DownloadPage에서 자동 저장
 
-다운로드 완료 시 (`download:all-complete` 이벤트) 자동으로 히스토리 저장합니다. 아카이브 출력(`zip`, `tar.gz`)에서는 이벤트의 `outputPath`가 대표 산출물 경로를 담고, `artifactPaths`는 실제 산출물 전체 목록을 담습니다. 이메일 전달에서는 `deliveryMethod=email`, `deliveryResult`, 그리고 재다운로드 복원용 `settings.smtpTo`가 함께 저장됩니다.
+다운로드 완료 시 (`download:all-complete` 이벤트) 자동으로 히스토리 저장합니다. `use-download-page-controller.tsx`와 `use-os-download-flow.ts`가 store의 `addHistory`를 호출하면, store가 메모리 상태를 갱신하고 동시에 `history:add` IPC로 파일에도 반영합니다. 아카이브 출력(`zip`, `tar.gz`)에서는 이벤트의 `outputPath`가 대표 산출물 경로를 담고, `artifactPaths`는 실제 산출물 전체 목록을 담습니다. 이메일 전달에서는 `deliveryMethod=email`, `deliveryResult`, 그리고 재다운로드 복원용 `settings.smtpTo`가 함께 저장됩니다.
 
 ```typescript
 // DownloadPage.tsx 내 download:all-complete 핸들러

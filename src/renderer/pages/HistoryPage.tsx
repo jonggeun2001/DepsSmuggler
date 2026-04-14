@@ -94,34 +94,26 @@ const getHistoryRecipient = (history: DownloadHistory): string | undefined => hi
 
 const HistoryPage: React.FC = () => {
   const navigate = useNavigate();
-  const { histories, deleteHistory, clearAll } = useHistoryStore();
+  const {
+    histories,
+    deleteHistory,
+    clearAll,
+    hydrate,
+    loading,
+    initialized,
+  } = useHistoryStore();
   const { addItem } = useCartStore();
   const { updateSettings } = useSettingsStore();
 
   // 로컬 상태
-  const [loading, setLoading] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedHistory, setSelectedHistory] = useState<DownloadHistory | null>(null);
 
-  // Electron에서 히스토리 로드 (동기화)
-  const loadHistoryFromFile = useCallback(async () => {
-    if (window.electronAPI?.history?.load) {
-      setLoading(true);
-      try {
-        const fileHistories = await window.electronAPI.history.load();
-        // 파일 기반 히스토리를 사용하는 경우 store와 동기화 가능
-        // 현재는 Zustand persist를 주로 사용
-      } catch (error) {
-        console.error('Failed to load history from file:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-  }, []);
-
   useEffect(() => {
-    loadHistoryFromFile();
-  }, [loadHistoryFromFile]);
+    if (!initialized) {
+      void hydrate();
+    }
+  }, [hydrate, initialized]);
 
   // 상세 정보 모달 열기
   const handleShowDetail = useCallback((history: DownloadHistory) => {
@@ -172,30 +164,12 @@ const HistoryPage: React.FC = () => {
   const handleDelete = useCallback(async (id: string) => {
     deleteHistory(id);
 
-    // 파일에도 반영 (Electron 환경)
-    if (window.electronAPI?.history?.delete) {
-      try {
-        await window.electronAPI.history.delete(id);
-      } catch (error) {
-        console.error('Failed to delete from file:', error);
-      }
-    }
-
     message.success('히스토리가 삭제되었습니다.');
   }, [deleteHistory]);
 
   // 전체 삭제
   const handleClearAll = useCallback(async () => {
     clearAll();
-
-    // 파일에도 반영 (Electron 환경)
-    if (window.electronAPI?.history?.clear) {
-      try {
-        await window.electronAPI.history.clear();
-      } catch (error) {
-        console.error('Failed to clear file:', error);
-      }
-    }
 
     message.success('모든 히스토리가 삭제되었습니다.');
   }, [clearAll]);

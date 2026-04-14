@@ -2,16 +2,17 @@
 
 ## 개요
 
-데스크톱 앱은 Electron main process와 React renderer가 `window.electronAPI` IPC 브리지로 통신하는 구조입니다. 핵심 다운로드/설정/검색 흐름은 IPC 기준이지만, 일부 검색과 버전 조회에는 `/api/...` 직접 호출이나 HTTP 폴백이 남아 있는 혼합 모델입니다.
+데스크톱 앱은 Electron main process와 React renderer가 `window.electronAPI` IPC 브리지로 통신하는 구조입니다. 검색/버전조회/히스토리 I/O 같은 renderer data access는 `src/renderer/lib/renderer-data-client.ts` facade를 통해 한곳으로 모았고, Electron IPC를 우선 사용하며 브라우저/테스트 환경에서만 제한적인 HTTP fallback을 탑니다.
 
-현재 확인된 예시는 다음과 같습니다.
+현재 구조의 핵심은 다음과 같습니다.
 
-- `src/renderer/pages/CartPage.tsx`는 일부 최신 버전 조회를 `/api/pypi`, `/api/maven`, `/api/npm`으로 직접 호출합니다.
-- `src/renderer/pages/WizardPage.tsx`는 화면 조합과 store/router wiring에 집중하고, 검색/버전조회 로직은 `src/renderer/pages/wizard-page/*` 모듈로 분리되었습니다.
+- `src/renderer/pages/CartPage.tsx`는 최신 버전 조회를 직접 `fetch`하지 않고 renderer data client를 사용합니다.
+- `src/renderer/pages/WizardPage.tsx`는 화면 조합과 store/router wiring에 집중하고, 검색/버전조회 로직은 `src/renderer/pages/wizard-page/*` 모듈과 renderer data client 조합으로 분리되었습니다.
+- `src/renderer/stores/history-store.ts`는 `~/.depssmuggler/history.json`을 읽고 쓰는 file-backed store 역할을 맡고, `HistoryPage.tsx`는 store만 소비합니다.
 
 ## 현재 화면 구조
 
-현재 라우트 source of truth는 `src/renderer/index.tsx`의 `createHashRouter`입니다. `src/renderer/App.tsx`는 유사한 라우트 정의를 담고 있지만 현재 엔트리포인트에서 import되지 않는 레거시 파일입니다.
+현재 라우트 source of truth는 `src/renderer/router.tsx`의 `appRoutes`/`createAppRouter()`입니다. 엔트리포인트 `src/renderer/index.tsx`는 이 라우터만 import하며, 중복 정의를 담고 있던 `src/renderer/App.tsx`는 제거되었습니다.
 
 | 경로 | 컴포넌트 | 역할 |
 |------|----------|------|
@@ -54,10 +55,12 @@
   - `type` query param 해석 및 소비
 - `src/renderer/pages/wizard-page/os-context.ts`
   - `yum/apt/apk` 배포판/아키텍처 계산과 `osContext` snapshot 처리
+- `src/renderer/lib/renderer-data-client.ts`
+  - 검색/버전조회/히스토리 I/O facade, Electron IPC 우선, 테스트/브라우저 환경에서만 HTTP fallback
 - `src/renderer/pages/wizard-page/search-service.ts`
-  - package type별 검색 전략, Electron IPC 우선, HTTP fallback
+  - package type별 검색 전략과 OS 검색 파라미터 구성
 - `src/renderer/pages/wizard-page/version-service.ts`
-  - 버전 조회 전략, Docker tag 조회, Maven classifier 부가 조회
+  - 버전 선택 전략, Docker tag 선택, Maven classifier 부가 조회
 - `src/renderer/pages/wizard-page/useWizardSearchFlow.ts`
   - 검색 입력/제안/선택/버전조회 오케스트레이션
 
@@ -130,12 +133,10 @@
 특징:
 
 - Electron 환경에서는 settings store가 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화되며, 레거시 `defaultOutputFormat/defaultArchiveType` 조합은 로드 시 `zip | tar.gz`로 정규화됩니다.
-- settings UI는 `zip`/`tar.gz`를 노출하지만, 현재 main process에서 실제 아카이브 생성이 연결된 형식은 `zip`뿐입니다.
 - 설정 화면의 캐시 위젯은 현재 `cache:*` IPC 기준 패키지 메타데이터 캐시만 집계/삭제합니다.
 - `src/renderer/pages/settings/` 아래 `DeliverySettingsSection`, `CacheSettingsSection`, `UpdateSettingsSection`, `use-settings-form-actions.ts`가 `SettingsPage`의 세부 책임을 분리합니다.
 - SMTP 테스트 버튼은 `testSmtpConnection` IPC가 있으면 실제 연결 테스트를 실행하고, 브라우저 개발 환경에서는 시뮬레이션, IPC가 빠진 Electron 빌드에서는 경고와 비활성화 상태를 노출합니다.
-- 현재 UI 히스토리의 source of truth는 Zustand persist 키 `depssmuggler-history`입니다.
-- `window.electronAPI.history.*`와 `~/.depssmuggler/history.json` 기반 파일 히스토리도 존재하지만, 현재 렌더러에서는 부분적으로만 연결되어 있습니다.
+- 히스토리 store는 `window.electronAPI.history.*`를 통해 `~/.depssmuggler/history.json`과 직접 동기화되며, renderer localStorage persist를 source of truth로 사용하지 않습니다.
 
 ## 사용자 흐름
 

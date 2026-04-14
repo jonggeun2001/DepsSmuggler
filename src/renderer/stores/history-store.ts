@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import type {
   DownloadHistory,
   HistoryDeliveryResult,
@@ -7,20 +6,22 @@ import type {
   HistorySettings,
   HistoryStatus,
 } from '../../types';
+import {
+  getRendererDataClient,
+  type HistoryPersistenceClient,
+} from '../lib/renderer-data-client';
 
-// 최대 히스토리 개수
 const MAX_HISTORIES = 100;
 
-// 고유 ID 생성
 const generateId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
-// 히스토리 상태 인터페이스
 interface HistoryState {
   histories: DownloadHistory[];
-
-  // 히스토리 추가 (100개 초과 시 오래된 것 삭제)
+  initialized: boolean;
+  loading: boolean;
+  hydrate: () => Promise<void>;
   addHistory: (
     packages: HistoryPackageItem[],
     settings: HistorySettings,
@@ -35,86 +36,124 @@ interface HistoryState {
       deliveryResult?: HistoryDeliveryResult;
     }
   ) => string;
-
-  // ID로 히스토리 조회
   getHistory: (id: string) => DownloadHistory | undefined;
-
-  // 전체 히스토리 조회
   getHistories: () => DownloadHistory[];
-
-  // ID로 히스토리 삭제
   deleteHistory: (id: string) => void;
-
-  // 전체 삭제
   clearAll: () => void;
 }
 
-export const useHistoryStore = create<HistoryState>()(
-  persist(
-    (set, get) => ({
-      histories: [],
+export interface CreateHistoryStoreOptions {
+  client?: HistoryPersistenceClient;
+  autoHydrate?: boolean;
+}
 
-      addHistory: (
+function logHistoryPersistenceError(action: string, error: unknown): void {
+  console.error(`[history-store] ${action} 실패`, error);
+}
+
+export function createHistoryStore({
+  client = getRendererDataClient().history,
+  autoHydrate = true,
+}: CreateHistoryStoreOptions = {}) {
+  const store = create<HistoryState>()((set, get) => ({
+    histories: [],
+    initialized: false,
+    loading: false,
+
+    hydrate: async () => {
+      if (get().loading) {
+        return;
+      }
+
+      set({ loading: true });
+
+      try {
+        const histories = await client.load();
+        set({
+          histories: Array.isArray(histories) ? histories : [],
+          initialized: true,
+          loading: false,
+        });
+      } catch (error) {
+        logHistoryPersistenceError('hydrate', error);
+        set({
+          initialized: true,
+          loading: false,
+        });
+      }
+    },
+
+    addHistory: (
+      packages,
+      settings,
+      outputPath,
+      totalSize,
+      status,
+      downloadedCount,
+      failedCount,
+      options
+    ) => {
+      const id = generateId();
+      const newHistory: DownloadHistory = {
+        id,
+        timestamp: new Date().toISOString(),
         packages,
         settings,
         outputPath,
+        artifactPaths: options?.artifactPaths,
+        deliveryMethod: options?.deliveryMethod ?? settings.deliveryMethod,
+        deliveryResult: options?.deliveryResult,
         totalSize,
         status,
         downloadedCount,
         failedCount,
-        options
-      ) => {
-        const id = generateId();
-        const newHistory: DownloadHistory = {
-          id,
-          timestamp: new Date().toISOString(),
-          packages,
-          settings,
-          outputPath,
-          artifactPaths: options?.artifactPaths,
-          deliveryMethod: options?.deliveryMethod ?? settings.deliveryMethod,
-          deliveryResult: options?.deliveryResult,
-          totalSize,
-          status,
-          downloadedCount,
-          failedCount,
-        };
+      };
 
-        set((state) => {
-          const updatedHistories = [newHistory, ...state.histories];
-          // 최대 개수 초과 시 오래된 것 삭제
-          if (updatedHistories.length > MAX_HISTORIES) {
-            updatedHistories.splice(MAX_HISTORIES);
-          }
-          return { histories: updatedHistories };
-        });
+      set((state) => {
+        const updatedHistories = [newHistory, ...state.histories];
+        if (updatedHistories.length > MAX_HISTORIES) {
+          updatedHistories.splice(MAX_HISTORIES);
+        }
+        return { histories: updatedHistories };
+      });
 
-        return id;
-      },
+      void client.add(newHistory).catch((error) => {
+        logHistoryPersistenceError('add', error);
+      });
 
-      getHistory: (id) => {
-        return get().histories.find((h) => h.id === id);
-      },
+      return id;
+    },
 
-      getHistories: () => {
-        return get().histories;
-      },
+    getHistory: (id) => get().histories.find((history) => history.id === id),
 
-      deleteHistory: (id) => {
-        set((state) => ({
-          histories: state.histories.filter((h) => h.id !== id),
-        }));
-      },
+    getHistories: () => get().histories,
 
-      clearAll: () => {
-        set({ histories: [] });
-      },
-    }),
-    {
-      name: 'depssmuggler-history',
-    }
-  )
-);
+    deleteHistory: (id) => {
+      set((state) => ({
+        histories: state.histories.filter((history) => history.id !== id),
+      }));
 
-// 타입 재export
+      void client.delete(id).catch((error) => {
+        logHistoryPersistenceError('delete', error);
+      });
+    },
+
+    clearAll: () => {
+      set({ histories: [] });
+
+      void client.clear().catch((error) => {
+        logHistoryPersistenceError('clear', error);
+      });
+    },
+  }));
+
+  if (autoHydrate && typeof window !== 'undefined') {
+    void store.getState().hydrate();
+  }
+
+  return store;
+}
+
+export const useHistoryStore = createHistoryStore();
+
 export type { DownloadHistory, HistoryPackageItem, HistorySettings, HistoryStatus };
