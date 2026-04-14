@@ -7,6 +7,18 @@ interface MockElectronAppOptions {
   cartItems?: CartItem[];
   histories?: DownloadHistory[];
   downloadDelayMs?: number;
+  cacheStats?: {
+    scope?: string;
+    excludes?: string[];
+    totalSize?: number;
+    entryCount?: number;
+    details?: {
+      pip?: unknown;
+      npm?: unknown;
+      maven?: unknown;
+      conda?: unknown;
+    };
+  };
 }
 
 interface MockElectronAppState {
@@ -109,6 +121,18 @@ export async function setupMockElectronApp(
         downloadCalls: [],
         smtpTestCalls: [],
         openedPaths: [],
+      },
+    };
+    let cacheStats = {
+      scope: String(seed.cacheStats?.scope || 'package-metadata'),
+      excludes: Array.isArray(seed.cacheStats?.excludes) ? [...seed.cacheStats!.excludes!] : [],
+      totalSize: Number(seed.cacheStats?.totalSize || 0),
+      entryCount: Number(seed.cacheStats?.entryCount || 0),
+      details: {
+        pip: seed.cacheStats?.details?.pip || {},
+        npm: seed.cacheStats?.details?.npm || {},
+        maven: seed.cacheStats?.details?.maven || {},
+        conda: seed.cacheStats?.details?.conda || {},
       },
     };
 
@@ -253,14 +277,21 @@ export async function setupMockElectronApp(
       },
       cache: {
         getSize: async () => 0,
-        getStats: async () => ({
-          scope: 'all',
-          excludes: [],
-          totalSize: 0,
-          entryCount: 0,
-          details: { pip: {}, npm: {}, maven: {}, conda: {} },
-        }),
-        clear: async () => ({ success: true }),
+        getStats: async () => clone(cacheStats),
+        clear: async () => {
+          cacheStats = {
+            ...cacheStats,
+            totalSize: 0,
+            entryCount: 0,
+            details: {
+              pip: {},
+              npm: {},
+              maven: {},
+              conda: {},
+            },
+          };
+          return { success: true };
+        },
       },
       history: {
         load: async () => clone(readHistories()),

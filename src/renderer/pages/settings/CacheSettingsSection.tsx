@@ -1,6 +1,7 @@
 import { DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { Button, Card, Col, Form, Input, Popconfirm, Row, Space, Spin, Switch, Typography } from 'antd';
 import React from 'react';
+import type { CacheDetailItem } from './cache-stats-utils';
 import {
   SETTINGS_CARD_BODY_PADDING,
   SETTINGS_CARD_MARGIN,
@@ -10,6 +11,7 @@ const { Text } = Typography;
 
 interface CacheSettingsSectionProps {
   cacheCount: number;
+  cacheDetails: CacheDetailItem[];
   cacheSize: number;
   clearingCache: boolean;
   formatBytes: (bytes: number) => string;
@@ -21,6 +23,7 @@ interface CacheSettingsSectionProps {
 
 export const CacheSettingsSection: React.FC<CacheSettingsSectionProps> = ({
   cacheCount,
+  cacheDetails,
   cacheSize,
   clearingCache,
   formatBytes,
@@ -104,6 +107,7 @@ export const CacheSettingsSection: React.FC<CacheSettingsSectionProps> = ({
                   <Button
                     size="small"
                     danger
+                    aria-label="패키지 캐시 삭제"
                     icon={<DeleteOutlined />}
                     loading={clearingCache}
                     disabled={cacheSize === 0 && cacheCount === 0}
@@ -113,6 +117,35 @@ export const CacheSettingsSection: React.FC<CacheSettingsSectionProps> = ({
             </Col>
           </Row>
         </Spin>
+        <Row gutter={[8, 8]} style={{ marginTop: 12 }}>
+          {cacheDetails.map((detail) => (
+            <Col key={detail.key} xs={24} sm={12} md={6}>
+              <div
+                data-testid={`cache-detail-${detail.key}`}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: 6,
+                  padding: '10px 12px',
+                  minHeight: 88,
+                }}
+              >
+                <Text strong style={{ display: 'block', fontSize: 12 }}>
+                  {detail.label}
+                </Text>
+                <Text style={{ display: 'block', marginTop: 4, fontSize: 16 }}>
+                  {detail.entryCount}개
+                </Text>
+                <Text type="secondary" style={{ display: 'block', marginTop: 2, fontSize: 12 }}>
+                  {detail.sizeBytes === undefined ? '메모리 캐시' : formatBytes(detail.sizeBytes)}
+                </Text>
+                <Text type="secondary" style={{ display: 'block', marginTop: 6, fontSize: 11 }}>
+                  {detail.description}
+                </Text>
+              </div>
+            </Col>
+          ))}
+        </Row>
         <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
           이 영역은 패키지 메타데이터 캐시만 집계합니다. 크기는 디스크 기준이며, 캐시 항목
           수에는 메모리 기반 npm 캐시도 포함될 수 있습니다. Python 버전 목록은
