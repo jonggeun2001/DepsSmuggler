@@ -1059,6 +1059,14 @@ export function useDownloadPageController() {
       lastSpeedCalc: lastSpeedCalcRef.current,
       speedHistory: [...speedHistoryRef.current],
       startTime,
+      isDownloading,
+      isPaused,
+      packagingStatus,
+      packagingProgress,
+      completedOutputPath,
+      completedArtifactPaths: [...completedArtifactPaths],
+      completedDeliveryResult,
+      completedError,
     };
     const restorePreviousSessionState = () => {
       downloadSessionIdRef.current = previousSessionState.sessionCounter;
@@ -1072,6 +1080,14 @@ export function useDownloadPageController() {
       lastSpeedCalcRef.current = previousSessionState.lastSpeedCalc;
       speedHistoryRef.current = [...previousSessionState.speedHistory];
       setStartTime(previousSessionState.startTime);
+      setIsDownloading(previousSessionState.isDownloading);
+      setIsPaused(previousSessionState.isPaused);
+      setPackagingStatus(previousSessionState.packagingStatus);
+      setPackagingProgress(previousSessionState.packagingProgress);
+      setCompletedOutputPath(previousSessionState.completedOutputPath);
+      setCompletedArtifactPaths([...previousSessionState.completedArtifactPaths]);
+      setCompletedDeliveryResult(previousSessionState.completedDeliveryResult);
+      setCompletedError(previousSessionState.completedError);
     };
     const sessionSnapshot = createDownloadSessionSnapshot(
       [...cartItems],
@@ -1094,8 +1110,6 @@ export function useDownloadPageController() {
     const canProceed = await checkOutputPath();
     if (!canProceed) {
       restorePreviousSessionState();
-      setIsDownloading(false);
-      setIsPaused(previousSessionState.downloadPaused);
       return;
     }
     setCompletedOutputPath('');
@@ -1108,8 +1122,6 @@ export function useDownloadPageController() {
     if (!window.electronAPI?.download?.start) {
       restorePreviousSessionState();
       addLog('error', '다운로드 API를 사용할 수 없습니다');
-      setIsDownloading(false);
-      setIsPaused(previousSessionState.downloadPaused);
       return;
     }
 
@@ -1157,13 +1169,15 @@ export function useDownloadPageController() {
     } catch (error) {
       restorePreviousSessionState();
       addLog('error', '다운로드 시작 실패', String(error));
-      setIsDownloading(false);
-      setIsPaused(previousSessionState.downloadPaused);
     }
   }, [
     addLog,
     cartItems,
     checkOutputPath,
+    completedArtifactPaths,
+    completedDeliveryResult,
+    completedError,
+    completedOutputPath,
     concurrentDownloads,
     createDownloadSessionSnapshot,
     defaultArchitecture,
@@ -1175,13 +1189,19 @@ export function useDownloadPageController() {
     enableFileSplit,
     includeDependencies,
     includeInstallScripts,
+    isDownloading,
+    isPaused,
     languageVersions.python,
     maxFileSize,
     outputDir,
     outputFormat,
+    packagingProgress,
+    packagingStatus,
     startTime,
     setIsDownloading,
     setIsPaused,
+    setPackagingProgress,
+    setPackagingStatus,
     setStartTime,
     smtpFrom,
     smtpHost,

@@ -501,3 +501,65 @@ test('취소 후 전달 실패 화면에서 재시도 시작이 실패해도 이
     })
   );
 });
+
+test('취소 후 전달 완료 흐름에서 전체 재시작이 실패해도 이전 결과를 유지한다', async ({ page }) => {
+  await setupMockElectronApp(page, {
+    config: {
+      includeDependencies: false,
+      defaultDownloadPath: '/tmp/depssmuggler-e2e',
+      defaultOutputFormat: 'zip',
+      downloadRenderInterval: 0,
+      smtpHost: 'smtp.example.com',
+      smtpPort: 587,
+      smtpUser: 'sender@example.com',
+      smtpFrom: 'sender@example.com',
+      smtpTo: 'offline@example.com',
+    },
+    cartItems: singleCartItems,
+    downloadScenario: {
+      startScenarios: [
+        {
+          mode: 'slow',
+          stepDelayMs: 150,
+          completeDelayMs: 600,
+          cancelledCompletionRetainsDelivery: true,
+          cancelledCompletionDelayMs: 700,
+        },
+        {
+          startErrorMessage: 'IPC start failed',
+        },
+      ],
+    },
+  });
+
+  await openDownloadPage(page, ['requests']);
+  await page.getByRole('radio', { name: '이메일로 전달' }).click();
+  await expect(page.getByText('현재 수신자: offline@example.com')).toBeVisible();
+
+  await page.getByRole('button', { name: '다운로드 시작' }).click();
+  await expect(page.getByRole('button', { name: '취소' })).toBeVisible();
+  await page.getByRole('button', { name: '취소' }).click();
+  await expect(page.getByRole('dialog', { name: '다운로드 취소' })).toBeVisible();
+  await page.getByRole('button', { name: '취소' }).last().click();
+
+  await expect(page.getByRole('button', { name: '다운로드 시작' })).toBeVisible();
+  await page.getByRole('button', { name: '다운로드 시작' }).click();
+
+  await expect(page.getByText('취소 후 이메일 전달 완료', { exact: true })).toBeVisible();
+  await expect(page.getByText('실제 산출물:')).toBeVisible();
+  await expect(page.getByText('이메일 전달 완료 (1건)', { exact: true })).toBeVisible();
+
+  const mockState = await readMockElectronAppState(page);
+  expect(mockState.runtime.downloadCalls).toHaveLength(2);
+  expect(mockState.runtime.downloadCalls[1]?.sessionId).toBe(2);
+  expect(mockState.history.histories[0]).toEqual(
+    expect.objectContaining({
+      outputPath: '/tmp/depssmuggler-e2e/requests-2.32.3.zip',
+      deliveryMethod: 'email',
+      deliveryResult: expect.objectContaining({
+        emailSent: true,
+        emailsSent: 1,
+      }),
+    })
+  );
+});
