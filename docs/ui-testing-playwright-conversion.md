@@ -9,6 +9,7 @@
 | 수동 케이스 | 현재 Playwright 파일 | 검증 포인트 |
 | --- | --- | --- |
 | `UI-DL-001` | `tests/e2e/download-smoke.spec.ts` | 장바구니에서 일반 다운로드 완료 화면까지, preflight 출력 형식 표시, 로컬 저장 옵션 전달 |
+| `UI-DL-004` | `tests/e2e/download-cancel-retry.spec.ts` | 느린 다운로드 취소 유지, overwrite 대기 중 늦은 취소 completion 보존, delayed start failure 후 이전 outcome 복구, 실패 후 개별 재시도, 전달 실패가 남은 취소 화면에서의 새 세션 재시도, runtime download/cancel 시도 횟수 |
 | `UI-SET-001`, `UI-SET-002(성공 경로만)` | `tests/e2e/settings-regression.spec.ts` | SMTP 값 입력, 연결 테스트 성공 경로, 저장 후 새로고침 복원 |
 | `UI-CFG-001` | `tests/e2e/settings-cache-breakdown.spec.ts` | 캐시 총합, 타입별 breakdown, 캐시 비우기 후 0 값 갱신 |
 | `UI-HIS-001` | `tests/e2e/history-email-restore.spec.ts` | 이메일 히스토리 재다운로드, 저장된 수신자 복원, 파일 분할 안내 표시, 전역 설정 보존 |
@@ -73,7 +74,6 @@
 
 | 수동 케이스 | 수동 우선 이유 |
 | --- | --- |
-| `UI-DL-004` | 취소/실패 재현이 mock만으로는 실제 체감과 차이가 날 수 있음 |
 | `UI-CFG-001` | 캐시 크기와 정리 결과는 로컬 파일 상태에 따라 달라질 수 있음 |
 | `UI-ROUTE-001` | 새로고침, 창 크기 변경, 라우트 왕복은 조합이 많고 탐색적 확인 가치가 큼 |
 
@@ -82,6 +82,7 @@
 - 실제 네트워크 호출 대신 mock preload API를 사용해 결정적 실행을 유지합니다.
 - 저장/복원 시나리오는 localStorage 초기 상태와 fixture runtime state 둘 다 검증합니다.
 - 다운로드 검증은 UI 제목만 보지 말고 `runtime.downloadCalls` payload까지 확인합니다.
+- 다운로드 취소/재시도 회귀는 `downloadScenario` 기반 fixture 상태 머신과 `sessionId` 태깅을 함께 사용해, 취소 후 늦은 완료 이벤트, overwrite 대기, delayed start failure를 포함한 재시작 세션 경계를 모두 검증합니다.
 - OS 패키지 시나리오는 일반 다운로드와 별도 파일로 유지해 분기 가독성을 지킵니다.
 
 ## 신규 스펙 템플릿

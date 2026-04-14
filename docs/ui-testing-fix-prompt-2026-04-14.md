@@ -102,6 +102,7 @@ $worktree-flow UI 테스트 후속 수정 작업을 진행해라.
 - 완료 기준:
   - 느린 다운로드 상태에서 취소 버튼과 취소 후 상태 전이를 검증 가능
   - 실패 상태를 deterministic하게 만들고 재시도 버튼 동작을 검증 가능
+  - overwrite 확인 대기 중 늦게 도착한 취소 completion과 전체 재시작의 delayed start failure가 이전 outcome을 덮어쓰지 않음
   - 테스트가 CI에서 안정적으로 반복 실행 가능
 
 ## 참고 문서

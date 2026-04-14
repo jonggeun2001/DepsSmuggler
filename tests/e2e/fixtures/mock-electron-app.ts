@@ -2,11 +2,46 @@ import type { Page } from '@playwright/test';
 import type { CartItem } from '../../../src/renderer/stores/cart-store';
 import type { DownloadHistory } from '../../../src/types';
 
+interface MockDownloadScenario {
+  mode?: 'success' | 'slow' | 'fail-once';
+  stepDelayMs?: number;
+  completeDelayMs?: number;
+  cancelledCompletionDelayMs?: number;
+  startErrorMessage?: string;
+  startErrorDelayMs?: number;
+  failMessage?: string;
+  failAttemptsByPackageId?: Record<string, number[]>;
+  emitLateSuccessAfterCancel?: boolean;
+  cancelledCompletionRetainsDelivery?: boolean;
+  cancelledCompletionDeliveryResult?: {
+    emailSent: boolean;
+    emailsSent?: number;
+    attachmentsSent?: number;
+    splitApplied?: boolean;
+    error?: string;
+  };
+  startScenarios?: MockDownloadScenario[];
+}
+
 interface MockElectronAppOptions {
   config?: Record<string, unknown>;
   cartItems?: CartItem[];
   histories?: DownloadHistory[];
+  checkPathDelayMs?: number;
+  checkPathResponses?: Array<{
+    exists?: boolean;
+    files?: string[];
+    fileCount?: number;
+    totalSize?: number;
+  }>;
+  checkPathResult?: {
+    exists?: boolean;
+    files?: string[];
+    fileCount?: number;
+    totalSize?: number;
+  };
   downloadDelayMs?: number;
+  downloadScenario?: MockDownloadScenario;
   cacheStats?: {
     scope?: string;
     excludes?: string[];
@@ -30,9 +65,11 @@ interface MockElectronAppState {
     histories: DownloadHistory[];
   };
   runtime: {
-    downloadCalls: Array<{ packages: unknown[]; options: Record<string, unknown> }>;
+    downloadCalls: Array<{ sessionId?: number; packages: unknown[]; options: Record<string, unknown> }>;
     smtpTestCalls: Array<Record<string, unknown>>;
     openedPaths: string[];
+    cancelCount: number;
+    attemptsByPackageId: Record<string, number>;
   };
 }
 
@@ -108,6 +145,13 @@ export async function setupMockElectronApp(
     const persistedCart = readJson<{ state?: { items?: CartItem[] } }>(localStorage, CART_KEY);
     const persistedHistory = readJson<{ state?: { histories?: DownloadHistory[] } }>(localStorage, HISTORY_KEY);
     const persistedRuntime = readJson<MockElectronAppState['runtime']>(sessionStorage, RUNTIME_KEY);
+    const runtimeDefaults: MockElectronAppState['runtime'] = {
+      downloadCalls: [],
+      smtpTestCalls: [],
+      openedPaths: [],
+      cancelCount: 0,
+      attemptsByPackageId: {},
+    };
 
     const state = {
       config: {
@@ -117,10 +161,9 @@ export async function setupMockElectronApp(
       },
       cartItems: persistedCart?.state?.items || seed.cartItems || [],
       histories: persistedHistory?.state?.histories || seed.histories || [],
-      runtime: persistedRuntime || {
-        downloadCalls: [],
-        smtpTestCalls: [],
-        openedPaths: [],
+      runtime: {
+        ...runtimeDefaults,
+        ...(persistedRuntime || {}),
       },
     };
     let cacheStats = {
@@ -135,6 +178,20 @@ export async function setupMockElectronApp(
         conda: seed.cacheStats?.details?.conda || {},
       },
     };
+    let checkPathState = {
+      exists: Boolean(seed.checkPathResult?.exists),
+      files: Array.isArray(seed.checkPathResult?.files) ? [...seed.checkPathResult.files] : [],
+      fileCount: Number(seed.checkPathResult?.fileCount || seed.checkPathResult?.files?.length || 0),
+      totalSize: Number(seed.checkPathResult?.totalSize || 0),
+    };
+    let checkPathResponses = Array.isArray(seed.checkPathResponses)
+      ? seed.checkPathResponses.map((entry) => ({
+          exists: Boolean(entry.exists),
+          files: Array.isArray(entry.files) ? [...entry.files] : [],
+          fileCount: Number(entry.fileCount || entry.files?.length || 0),
+          totalSize: Number(entry.totalSize || 0),
+        }))
+      : [];
 
     const persistRuntime = () => {
       sessionStorage.setItem(RUNTIME_KEY, JSON.stringify(state.runtime));
@@ -190,6 +247,39 @@ export async function setupMockElectronApp(
     const downloadDepsResolvedListeners = new Set<(value: unknown) => void>();
     const downloadAllCompleteListeners = new Set<(value: unknown) => void>();
     const osProgressListeners = new Set<(value: unknown) => void>();
+    let activeDownloadTimers: number[] = [];
+    let detachedDownloadTimers: number[] = [];
+    let activeDownloadSequence = 0;
+    let activeDownload: {
+      sessionId: number;
+      outputDir: string;
+      outputPath: string;
+      artifactPath: string;
+      packages: Array<Record<string, unknown>>;
+      results: Array<{ id: unknown; success: boolean; error?: string }>;
+      deliveryMethod: 'local' | 'email';
+      deliveryResult?:
+        | {
+            emailSent: boolean;
+            emailsSent: number;
+            attachmentsSent: number;
+            splitApplied: boolean;
+          }
+        | undefined;
+      cancelledCompletionRetainsDelivery: boolean;
+      cancelledCompletionDeliveryResult?:
+        | {
+            emailSent: boolean;
+            emailsSent?: number;
+            attachmentsSent?: number;
+            splitApplied?: boolean;
+            error?: string;
+          }
+        | undefined;
+      cancelledCompletionDelay: number;
+      completionDelay: number;
+      emitLateSuccessAfterCancel: boolean;
+    } | null = null;
 
     const subscribe = <T,>(listeners: Set<(value: T) => void>, callback: (value: T) => void) => {
       listeners.add(callback);
@@ -198,6 +288,27 @@ export async function setupMockElectronApp(
 
     const emit = <T,>(listeners: Set<(value: T) => void>, payload: T) => {
       listeners.forEach((listener) => listener(clone(payload)));
+    };
+
+    const clearActiveDownloadTimers = () => {
+      activeDownloadTimers.forEach((timerId) => window.clearTimeout(timerId));
+      activeDownloadTimers = [];
+    };
+
+    const scheduleDownloadStep = (sequence: number, delayMs: number, action: () => void) => {
+      const timerId = window.setTimeout(() => {
+        if (sequence !== activeDownloadSequence) {
+          return;
+        }
+
+        action();
+      }, delayMs);
+      activeDownloadTimers.push(timerId);
+    };
+
+    const scheduleDetachedDownloadStep = (delayMs: number, action: () => void) => {
+      const timerId = window.setTimeout(action, delayMs);
+      detachedDownloadTimers.push(timerId);
     };
 
     const readHistories = (): DownloadHistory[] => {
@@ -323,12 +434,118 @@ export async function setupMockElectronApp(
         onAllComplete: (callback: (data: unknown) => void) => subscribe(downloadAllCompleteListeners, callback),
         pause: async () => undefined,
         resume: async () => undefined,
-        cancel: async () => undefined,
-        checkPath: async () => ({ exists: false, files: [], fileCount: 0, totalSize: 0 }),
-        clearPath: async () => ({ success: true, deleted: true }),
-        start: async (payload: { packages: Array<Record<string, unknown>>; options: Record<string, unknown> }) => {
-          state.runtime.downloadCalls.push(clone(payload));
+        cancel: async () => {
+          state.runtime.cancelCount += 1;
           persistRuntime();
+          const cancelledDownload = activeDownload;
+          clearActiveDownloadTimers();
+          activeDownloadSequence += 1;
+
+          if (cancelledDownload?.emitLateSuccessAfterCancel) {
+            scheduleDetachedDownloadStep(cancelledDownload.completionDelay, () => {
+              cancelledDownload.packages.forEach((pkg) => {
+                emit(downloadProgressListeners, {
+                  sessionId: cancelledDownload.sessionId,
+                  packageId: pkg.id,
+                  status: 'completed',
+                  progress: 100,
+                  downloadedBytes: 1024,
+                  totalBytes: 1024,
+                  speed: 0,
+                });
+              });
+
+              emit(downloadStatusListeners, {
+                sessionId: cancelledDownload.sessionId,
+                phase: 'packaging',
+                message: '패키징',
+              });
+
+              emit(downloadAllCompleteListeners, {
+                sessionId: cancelledDownload.sessionId,
+                success: true,
+                outputPath: cancelledDownload.outputPath,
+                artifactPaths: [cancelledDownload.artifactPath],
+                deliveryMethod: cancelledDownload.deliveryMethod,
+                deliveryResult: cancelledDownload.deliveryResult,
+                results: cancelledDownload.packages.map((pkg) => ({
+                  id: pkg.id,
+                  success: true,
+                })),
+              });
+            });
+          }
+
+          if (activeDownload) {
+            const cancelledDownloadState = activeDownload;
+            const emitCancelledCompletion = () => {
+              const cancelledDeliveryResult =
+                cancelledDownloadState.cancelledCompletionDeliveryResult
+                ?? (cancelledDownloadState.cancelledCompletionRetainsDelivery
+                  ? cancelledDownloadState.deliveryResult
+                  : undefined);
+              emit(downloadAllCompleteListeners, {
+                sessionId: cancelledDownloadState.sessionId,
+                success: false,
+                cancelled: true,
+                outputPath: cancelledDeliveryResult || cancelledDownloadState.cancelledCompletionRetainsDelivery
+                  ? cancelledDownloadState.outputPath
+                  : cancelledDownloadState.outputDir,
+                artifactPaths: cancelledDeliveryResult || cancelledDownloadState.cancelledCompletionRetainsDelivery
+                  ? [cancelledDownloadState.artifactPath]
+                  : [],
+                deliveryMethod: cancelledDownloadState.deliveryMethod,
+                deliveryResult: cancelledDeliveryResult,
+                results: (cancelledDeliveryResult || cancelledDownloadState.cancelledCompletionRetainsDelivery)
+                  ? cancelledDownloadState.results
+                  : undefined,
+              });
+            };
+
+            if (cancelledDownloadState.cancelledCompletionDelay > 0) {
+              scheduleDetachedDownloadStep(cancelledDownloadState.cancelledCompletionDelay, emitCancelledCompletion);
+            } else {
+              emitCancelledCompletion();
+            }
+            activeDownload = null;
+          }
+
+          return { success: true };
+        },
+        checkPath: async () => {
+          if (seed.checkPathDelayMs && seed.checkPathDelayMs > 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, seed.checkPathDelayMs));
+          }
+
+          if (checkPathResponses.length > 0) {
+            const nextResponse = checkPathResponses.shift();
+            if (nextResponse) {
+              checkPathState = nextResponse;
+            }
+          }
+
+          return clone(checkPathState);
+        },
+        clearPath: async () => {
+          checkPathState = {
+            exists: false,
+            files: [],
+            fileCount: 0,
+            totalSize: 0,
+          };
+          return { success: true, deleted: true };
+        },
+        start: async (payload: { sessionId?: number; packages: Array<Record<string, unknown>>; options: Record<string, unknown> }) => {
+          state.runtime.downloadCalls.push(clone(payload));
+          (payload.packages || []).forEach((pkg) => {
+            const packageId = String(pkg.id || '');
+            state.runtime.attemptsByPackageId[packageId] =
+              (state.runtime.attemptsByPackageId[packageId] || 0) + 1;
+          });
+          persistRuntime();
+          clearActiveDownloadTimers();
+          activeDownloadSequence += 1;
+          const currentSequence = activeDownloadSequence;
 
           const packages = payload.packages || [];
           const options = payload.options || {};
@@ -349,46 +566,143 @@ export async function setupMockElectronApp(
                   splitApplied: false,
                 }
               : undefined;
-          const stepDelay = seed.downloadDelayMs ?? 10;
+          const startCount = state.runtime.downloadCalls.length;
+          const rootScenario = seed.downloadScenario || {};
+          const scenario = rootScenario.startScenarios?.[startCount - 1] || rootScenario;
+          const scenarioMode = scenario.mode || 'success';
+          const stepDelay = scenario.stepDelayMs ?? seed.downloadDelayMs ?? 10;
+          const completionDelay =
+            scenario.completeDelayMs ?? (scenarioMode === 'slow' ? stepDelay * 20 : stepDelay * 3);
+          const failMessage = scenario.failMessage || 'mock download failed';
+          const sessionId = payload.sessionId ?? startCount;
+          const explicitFailurePlan = scenario.failAttemptsByPackageId || {};
+          const hasExplicitFailurePlan = Object.keys(explicitFailurePlan).length > 0;
+          const packageFailures = packages.map((pkg) => {
+            const packageId = String(pkg.id || '');
+            const attempts = state.runtime.attemptsByPackageId[packageId] || 1;
+            const failAttempts = explicitFailurePlan[packageId] || [];
 
-          window.setTimeout(() => {
+            if (failAttempts.includes(attempts)) {
+              return true;
+            }
+
+            return scenarioMode === 'fail-once' && !hasExplicitFailurePlan && attempts === 1;
+          });
+          const downloadResults = packages.map((pkg, index) => ({
+            id: pkg.id,
+            success: !packageFailures[index],
+            error: packageFailures[index] ? failMessage : undefined,
+          }));
+          activeDownload = {
+            sessionId,
+            outputDir,
+            outputPath: artifactPath,
+            artifactPath,
+            packages: clone(packages),
+            results: clone(downloadResults),
+            deliveryMethod,
+            deliveryResult,
+            cancelledCompletionRetainsDelivery:
+              scenario.cancelledCompletionRetainsDelivery === true,
+            cancelledCompletionDeliveryResult: scenario.cancelledCompletionDeliveryResult,
+            cancelledCompletionDelay: scenario.cancelledCompletionDelayMs ?? 0,
+            completionDelay,
+            emitLateSuccessAfterCancel: scenario.emitLateSuccessAfterCancel === true,
+          };
+
+          if (scenario.startErrorMessage) {
+            activeDownload = null;
+            if (scenario.startErrorDelayMs && scenario.startErrorDelayMs > 0) {
+              await new Promise((resolve) => window.setTimeout(resolve, scenario.startErrorDelayMs));
+            }
+            throw new Error(scenario.startErrorMessage);
+          }
+
+          scheduleDownloadStep(currentSequence, stepDelay, () => {
             emit(downloadStatusListeners, {
+              sessionId,
               phase: 'downloading',
               message: '다운로드 시작',
             });
 
-            packages.forEach((pkg, index) => {
+            packages.forEach((pkg) => {
+              const packageId = String(pkg.id || '');
+              const packageIndex = packages.findIndex((candidate) => String(candidate.id || '') === packageId);
+              const shouldFail = packageFailures[packageIndex] || false;
+
+              if (shouldFail) {
+                emit(downloadProgressListeners, {
+                  sessionId,
+                  packageId,
+                  status: 'failed',
+                  progress: 35,
+                  downloadedBytes: 256,
+                  totalBytes: 1024,
+                  speed: 0,
+                  error: failMessage,
+                });
+                return;
+              }
+
+              const isSlow = scenarioMode === 'slow';
               emit(downloadProgressListeners, {
-                packageId: pkg.id,
-                status: 'completed',
-                progress: 100,
-                downloadedBytes: 1024,
+                sessionId,
+                packageId,
+                status: isSlow ? 'downloading' : 'completed',
+                progress: isSlow ? 25 : 100,
+                downloadedBytes: isSlow ? 256 : 1024,
                 totalBytes: 1024,
                 speed: 0,
               });
+            });
+          });
 
-              if (index === packages.length - 1) {
-                emit(downloadStatusListeners, {
-                  phase: 'packaging',
-                  message: '패키징',
+          scheduleDownloadStep(currentSequence, completionDelay, () => {
+            const hasSuccessfulPackages = downloadResults.some((result) => result.success);
+            if (!hasSuccessfulPackages) {
+              emit(downloadAllCompleteListeners, {
+                sessionId,
+                success: false,
+                outputPath: outputDir,
+                deliveryMethod,
+                error: failMessage,
+                results: downloadResults,
+              });
+              activeDownload = null;
+              return;
+            }
+
+            packages.forEach((pkg) => {
+              if (scenarioMode === 'slow') {
+                emit(downloadProgressListeners, {
+                  sessionId,
+                  packageId: pkg.id,
+                  status: 'completed',
+                  progress: 100,
+                  downloadedBytes: 1024,
+                  totalBytes: 1024,
+                  speed: 0,
                 });
               }
             });
-          }, stepDelay);
 
-          window.setTimeout(() => {
+            emit(downloadStatusListeners, {
+              sessionId,
+              phase: 'packaging',
+              message: '패키징',
+            });
+
             emit(downloadAllCompleteListeners, {
+              sessionId,
               success: true,
               outputPath: artifactPath,
               artifactPaths: [artifactPath],
               deliveryMethod,
               deliveryResult,
-              results: packages.map((pkg) => ({
-                id: pkg.id,
-                success: true,
-              })),
+              results: downloadResults,
             });
-          }, stepDelay * 3);
+            activeDownload = null;
+          });
         },
       },
       dependency: {
