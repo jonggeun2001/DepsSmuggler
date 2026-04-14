@@ -1402,6 +1402,8 @@ export function useDownloadPageController() {
     setDeliveryMethod,
     effectiveSmtpTo,
     outputFormat,
+    fileSplitEnabled: enableFileSplit,
+    maxFileSizeMB: maxFileSize,
     includeDependencies,
     downloadItems,
     logs,

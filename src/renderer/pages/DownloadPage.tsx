@@ -75,6 +75,9 @@ function DownloadPage() {
       deliveryMethod={controller.deliveryMethod}
       onDeliveryMethodChange={controller.setDeliveryMethod}
       effectiveSmtpTo={controller.effectiveSmtpTo}
+      outputFormat={controller.outputFormat}
+      fileSplitEnabled={controller.fileSplitEnabled}
+      maxFileSizeMB={controller.maxFileSizeMB}
       isDownloading={controller.isDownloading}
       onSelectFolder={controller.handleSelectFolder}
       downloadItems={controller.downloadItems}

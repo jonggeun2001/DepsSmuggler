@@ -80,6 +80,36 @@ describe('download-page/view-state', () => {
     ).toBe('empty');
   });
 
+  it('완료 산출물이 있으면 카트가 비어도 completed mode를 유지해야 함', () => {
+    expect(
+      deriveDownloadPageMode({
+        cartItemCount: 0,
+        downloadItemCount: 0,
+        packagingStatus: 'completed',
+        isDedicatedOSFlow: false,
+        osDownloading: false,
+        hasOSResult: false,
+        requiresOSCartReselection: false,
+        hasRecoverableFailureArtifacts: false,
+      })
+    ).toBe('completed');
+  });
+
+  it('복구 가능한 실패 산출물이 있으면 카트가 비어도 failed mode를 유지해야 함', () => {
+    expect(
+      deriveDownloadPageMode({
+        cartItemCount: 0,
+        downloadItemCount: 0,
+        packagingStatus: 'failed',
+        isDedicatedOSFlow: false,
+        osDownloading: false,
+        hasOSResult: false,
+        requiresOSCartReselection: false,
+        hasRecoverableFailureArtifacts: true,
+      })
+    ).toBe('failed');
+  });
+
   it('다운로드 카운트는 completed/failed/skipped를 분리해야 함', () => {
     expect(
       getDownloadCounts([
