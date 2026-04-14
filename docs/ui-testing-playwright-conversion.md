@@ -9,7 +9,7 @@
 | 수동 케이스 | 현재 Playwright 파일 | 검증 포인트 |
 | --- | --- | --- |
 | `UI-DL-001` | `tests/e2e/download-smoke.spec.ts` | 장바구니에서 일반 다운로드 완료 화면까지, 로컬 저장 옵션 전달 |
-| `UI-SET-001`, `UI-SET-002` | `tests/e2e/settings-regression.spec.ts` | SMTP 값 입력, 연결 테스트 호출, 저장 후 새로고침 복원 |
+| `UI-SET-001`, `UI-SET-002(성공 경로만)` | `tests/e2e/settings-regression.spec.ts` | SMTP 값 입력, 연결 테스트 성공 경로, 저장 후 새로고침 복원 |
 | `UI-HIS-001` | `tests/e2e/history-email-restore.spec.ts` | 이메일 히스토리 재다운로드, 저장된 수신자 복원, 전역 설정 보존 |
 | `UI-OS-001` | `tests/e2e/os-package-download.spec.ts` | OS 패키지 검색, 전용 다운로드 화면, 출력 옵션 결과 반영 |
 
@@ -52,6 +52,18 @@
 - mock 전략:
   - `setupMockElectronApp`로 SMTP 기본 설정 주입
   - `runtime.downloadCalls`를 읽어 호출 payload 검증
+
+### 4. `UI-SET-002` 방어 분기 보강
+
+- 이유: 현재 E2E는 SMTP 테스트 성공 경로만 다루고 있어 필수값 누락 경고와 버튼 중복 클릭 방지 상태는 수동 확인에 남아 있음
+- 권장 파일: `tests/e2e/settings-smtp-guards.spec.ts`
+- 핵심 assert:
+  - 필수값 누락 시 경고 메시지 노출
+  - 테스트 중 버튼 재클릭이 막히거나 로딩 상태가 표시
+  - 이전 결과 메시지가 새 시도와 섞이지 않음
+- mock 전략:
+  - `setupMockElectronApp` 기본 설정을 빈 SMTP 값으로 시작
+  - `runtime.smtpTestCalls` 길이와 호출 payload로 중복 실행 여부 검증
 
 ## 수동 우선 유지 대상
 
