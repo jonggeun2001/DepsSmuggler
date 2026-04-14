@@ -152,7 +152,7 @@ npm run lint
 npx tsc --noEmit
 ```
 
-참고: `tests/e2e/os-package-download.spec.ts`가 routed OS 다운로드 흐름의 최소 E2E 스모크를 담당합니다. 다만 로컬 실행에는 Playwright 의존성 설치가 필요합니다.
+참고: `tests/e2e`에는 설정 반영, 장바구니→다운로드 smoke, 이메일 히스토리 복원, OS 패키지 흐름을 검증하는 기본 Playwright 회귀 세트가 있습니다. 이 세트는 `tests/e2e/fixtures/mock-electron-app.ts`로 Electron bridge와 외부 호출을 고정 응답으로 대체해 결정적으로 실행됩니다.
 
 ## 관련 문서
 

@@ -68,7 +68,7 @@ npm run lint
 npx tsc --noEmit
 ```
 
-`playwright.config.ts`는 존재하지만 현재 저장소에는 `tests/e2e` 시나리오가 없어 `npm run test:e2e`를 상시 검증 명령으로 보지 않습니다.
+`npm run test:e2e`는 `tests/e2e`의 기본 회귀 세트를 실행합니다. 현재 세트는 브라우저 내부 `window.electronAPI` mock/stub을 사용해 외부 네트워크와 Electron 런타임 의존을 줄였고, 설정 반영, 장바구니→다운로드 smoke, 히스토리 기반 이메일 전달 복원, OS 패키지 전용 흐름을 결정적으로 검증합니다.
 
 ## 사용 예시
 
