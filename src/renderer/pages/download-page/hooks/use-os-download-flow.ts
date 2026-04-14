@@ -5,6 +5,7 @@ import {
   buildOSDependencyIssueMessage,
   getOSCartContextSnapshot,
   isOSCartItem,
+  persistHistoryAndMaybeClearCart,
   toOSPackageInfo,
 } from '../utils';
 import type {
@@ -268,14 +269,19 @@ export function useOSDownloadFlow({
       }
 
       let historySaveError: string | null = null;
+      const shouldClearCart =
+        !result.cancelled && result.failed.length === 0 && result.skipped.length === 0;
 
       if (!result.cancelled) {
-        try {
-          await addOSDownloadHistory(result);
-        } catch (error) {
-          console.error('OS download history persistence failed:', error);
-          historySaveError = error instanceof Error ? error.message : 'unknown error';
-        }
+        await persistHistoryAndMaybeClearCart({
+          persistHistory: () => addOSDownloadHistory(result),
+          clearCart,
+          canClearCart: shouldClearCart,
+          onPersistError: (error) => {
+            console.error('OS download history persistence failed:', error);
+            historySaveError = error instanceof Error ? error.message : 'unknown error';
+          },
+        });
       }
       setOSResult(result);
 
@@ -289,10 +295,6 @@ export function useOSDownloadFlow({
           totalBytes: result.success.length || osPackages.length,
           speed: 0,
         });
-      }
-
-      if (!result.cancelled && result.failed.length === 0 && result.skipped.length === 0) {
-        clearCart();
       }
 
       if (result.cancelled) {

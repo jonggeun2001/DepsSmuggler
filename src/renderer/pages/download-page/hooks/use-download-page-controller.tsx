@@ -15,7 +15,7 @@ import {
   buildHistorySettings,
   getEmailDeliveryValidationError,
 } from '../../download-delivery-utils';
-import { createPendingDownloadItems, formatBytes } from '../utils';
+import { createPendingDownloadItems, formatBytes, persistHistoryAndMaybeClearCart } from '../utils';
 import { deriveDownloadPageMode, getDownloadCounts, hasRecoverableArtifacts } from '../view-state';
 import { useOSDownloadFlow } from './use-os-download-flow';
 import type {
@@ -583,17 +583,18 @@ export function useDownloadPageController() {
         : '다운로드 및 패키징이 완료되었습니다';
       scheduleLogBatch('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
       message.success(completionMessage);
-      void persistHistoryEntry(data).catch((error) => {
-        const historyError = error instanceof Error ? error.message : 'unknown error';
-        scheduleLogBatch('error', '히스토리 저장 실패', historyError);
-        message.error('히스토리 저장에 실패했습니다.');
-      });
-
       const failedCount = (data.results || []).filter((result) => !result.success).length
         || useDownloadStore.getState().items.filter((item) => item.status === 'failed').length;
-      if (failedCount === 0) {
-        clearCart();
-      }
+      void persistHistoryAndMaybeClearCart({
+        persistHistory: () => persistHistoryEntry(data),
+        clearCart,
+        canClearCart: failedCount === 0,
+        onPersistError: (error) => {
+          const historyError = error instanceof Error ? error.message : 'unknown error';
+          scheduleLogBatch('error', '히스토리 저장 실패', historyError);
+          message.error('히스토리 저장에 실패했습니다.');
+        },
+      });
     });
 
     return () => {

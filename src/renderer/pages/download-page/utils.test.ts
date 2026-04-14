@@ -3,6 +3,7 @@ import {
   createPendingDownloadItems,
   getPackageGroupStatus,
   getPackageDependencies,
+  persistHistoryAndMaybeClearCart,
 } from './utils';
 
 describe('download-page/utils', () => {
@@ -80,5 +81,45 @@ describe('download-page/utils', () => {
       isAllCompleted: false,
       hasFailures: true,
     });
+  });
+
+  it('히스토리 저장이 성공하면 장바구니를 비운다', async () => {
+    let cleared = false;
+
+    const result = await persistHistoryAndMaybeClearCart({
+      persistHistory: async () => undefined,
+      clearCart: () => {
+        cleared = true;
+      },
+      canClearCart: true,
+      onPersistError: () => {
+        throw new Error('should not be called');
+      },
+    });
+
+    expect(result).toBe(true);
+    expect(cleared).toBe(true);
+  });
+
+  it('히스토리 저장이 실패하면 장바구니를 유지한다', async () => {
+    let cleared = false;
+    let capturedError: unknown;
+
+    const result = await persistHistoryAndMaybeClearCart({
+      persistHistory: async () => {
+        throw new Error('history failed');
+      },
+      clearCart: () => {
+        cleared = true;
+      },
+      canClearCart: true,
+      onPersistError: (error) => {
+        capturedError = error;
+      },
+    });
+
+    expect(result).toBe(false);
+    expect(cleared).toBe(false);
+    expect(capturedError).toBeInstanceOf(Error);
   });
 });

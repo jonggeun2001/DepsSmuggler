@@ -178,3 +178,28 @@ export function getPackageGroupStatus(items: DownloadItem[], parentItem: Downloa
     hasFailures: failed > 0,
   };
 }
+
+export async function persistHistoryAndMaybeClearCart({
+  persistHistory,
+  clearCart,
+  canClearCart,
+  onPersistError,
+}: {
+  persistHistory: () => Promise<void>;
+  clearCart: () => void;
+  canClearCart: boolean;
+  onPersistError: (error: unknown) => void;
+}): Promise<boolean> {
+  try {
+    await persistHistory();
+
+    if (canClearCart) {
+      clearCart();
+    }
+
+    return true;
+  } catch (error) {
+    onPersistError(error);
+    return false;
+  }
+}
