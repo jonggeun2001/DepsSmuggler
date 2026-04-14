@@ -62,6 +62,9 @@ test('이메일 히스토리 재다운로드는 저장된 수신자를 복원하
   await expect(page.getByText('현재 수신자: history@example.com')).toBeVisible();
   await expect(page.getByText('left-pad')).toBeVisible();
 
+  await page.getByRole('button', { name: '다운로드 시작' }).click();
+  await expect(page.locator('.ant-result-title', { hasText: '다운로드 완료' })).toBeVisible();
+
   const mockState = await readMockElectronAppState(page);
   expect(mockState.config).toMatchObject({
     smtpTo: 'global@example.com',
@@ -69,5 +72,14 @@ test('이메일 히스토리 재다운로드는 저장된 수신자를 복원하
     enableFileSplit: true,
     maxFileSize: 10,
     defaultOutputFormat: 'zip',
+  });
+  expect(mockState.runtime.downloadCalls).toHaveLength(1);
+  expect(mockState.runtime.downloadCalls[0]).toMatchObject({
+    options: {
+      deliveryMethod: 'email',
+      email: {
+        to: 'history@example.com',
+      },
+    },
   });
 });
