@@ -37,8 +37,8 @@
 
 ## 자동화 연계
 
-- 현재 Playwright 회귀 세트와 직접 매핑되는 항목: `UI-CHK-03`, `UI-CHK-05`, `UI-CHK-06(성공 경로)`, `UI-CHK-07`, `UI-CHK-08`, `UI-CHK-11`
+- 현재 Playwright 회귀 세트와 직접 매핑되는 항목: `UI-CHK-03`, `UI-CHK-05`, `UI-CHK-06(성공 경로)`, `UI-CHK-07`, `UI-CHK-08`, `UI-CHK-10`, `UI-CHK-11`
 - 자동화 후보 우선순위가 높은 항목: `UI-CHK-01`, `UI-CHK-02`, `UI-CHK-04`
-- 수동 확인 비중이 더 큰 항목: `UI-CHK-10`, `UI-CHK-12`
+- 수동 확인 비중이 더 큰 항목: `UI-CHK-11`, `UI-CHK-12`
 
 세부 절차와 실패 기준은 [UI 상세 테스트 케이스](./ui-testing-test-cases.md), Playwright 전환 설계는 [UI Playwright 전환 시나리오](./ui-testing-playwright-conversion.md)를 참고합니다.
