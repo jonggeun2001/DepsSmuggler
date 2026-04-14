@@ -84,6 +84,20 @@ export interface SettingsFormValues {
 
 export type SettingsFormSubmission = Record<string, unknown> & Partial<SettingsFormValues>;
 
+export interface SettingsFormValueWriter {
+  setFieldsValue: (values: SettingsFormSubmission) => void;
+}
+
+export interface ApplySynchronizedSettingsFormStateOptions {
+  form: SettingsFormValueWriter;
+  synchronizedValues: SettingsFormSubmission;
+  synchronizedValuesKey: string;
+  setInitialValues: (values: SettingsFormSubmission) => void;
+  setIsDirty: (isDirty: boolean) => void;
+  setSmtpTestResult?: (result: 'success' | 'failed' | null) => void;
+  synchronizationKeyRef: { current: string };
+}
+
 export interface SmtpTester {
   testSmtpConnection?: (config: {
     host: string;
@@ -101,6 +115,22 @@ export const SMTP_TEST_MODE_MESSAGES: Record<SmtpTestMode, string> = {
   'browser-simulated': '브라우저 개발 환경에서는 SMTP 연결 테스트가 시뮬레이션됩니다.',
   'missing-ipc': '현재 Electron 빌드에는 SMTP 연결 테스트 IPC가 연결되어 있지 않습니다.',
 };
+
+export function applySynchronizedSettingsFormState({
+  form,
+  synchronizedValues,
+  synchronizedValuesKey,
+  setInitialValues,
+  setIsDirty,
+  setSmtpTestResult,
+  synchronizationKeyRef,
+}: ApplySynchronizedSettingsFormStateOptions): void {
+  form.setFieldsValue(synchronizedValues);
+  setInitialValues(synchronizedValues);
+  setIsDirty(false);
+  setSmtpTestResult?.(null);
+  synchronizationKeyRef.current = synchronizedValuesKey;
+}
 
 export function buildSettingsFormValues(settings: SettingsStoreSnapshot): SettingsFormValues {
   return {

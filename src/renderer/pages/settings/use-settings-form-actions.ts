@@ -3,6 +3,7 @@ import React from 'react';
 import { useBlocker } from 'react-router-dom';
 import {
   SMTP_TEST_MODE_MESSAGES,
+  applySynchronizedSettingsFormState,
   buildSettingsFormValues,
   getSmtpTestMode,
   normalizeSettingsFormValues,
@@ -65,6 +66,7 @@ export function useSettingsFormActions({
   const [testingSmtp, setTestingSmtp] = React.useState(false);
   const [smtpTestResult, setSmtpTestResult] = React.useState<SmtpTestResult>(null);
   const lastSynchronizedValuesRef = React.useRef<string>('');
+  const forceSynchronizeOnNextSnapshotRef = React.useRef(false);
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
       isDirty && currentLocation.pathname !== nextLocation.pathname
@@ -83,15 +85,23 @@ export function useSettingsFormActions({
   const smtpTestMode = getSmtpTestMode(window.electronAPI);
 
   React.useEffect(() => {
-    if (lastSynchronizedValuesRef.current === synchronizedFormValuesKey) {
+    if (
+      !forceSynchronizeOnNextSnapshotRef.current &&
+      lastSynchronizedValuesRef.current === synchronizedFormValuesKey
+    ) {
       return;
     }
 
-    form.setFieldsValue(synchronizedFormValues);
-    setInitialValues(synchronizedFormValues as SettingsFormSubmission);
-    setIsDirty(false);
-    setSmtpTestResult(null);
-    lastSynchronizedValuesRef.current = synchronizedFormValuesKey;
+    applySynchronizedSettingsFormState({
+      form,
+      synchronizedValues: synchronizedFormValues as SettingsFormSubmission,
+      synchronizedValuesKey: synchronizedFormValuesKey,
+      setInitialValues,
+      setIsDirty,
+      setSmtpTestResult,
+      synchronizationKeyRef: lastSynchronizedValuesRef,
+    });
+    forceSynchronizeOnNextSnapshotRef.current = false;
   }, [form, synchronizedFormValues, synchronizedFormValuesKey]);
 
   React.useEffect(() => {
@@ -185,6 +195,7 @@ export function useSettingsFormActions({
   );
 
   const handleReset = React.useCallback(() => {
+    forceSynchronizeOnNextSnapshotRef.current = true;
     resetSettings();
     setSmtpTestResult(null);
     setShowNavigationModal(false);
