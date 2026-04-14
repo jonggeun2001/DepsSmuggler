@@ -35,7 +35,7 @@ interface UseOSDownloadFlowArgs {
     status: HistoryStatus,
     downloadedCount?: number,
     failedCount?: number
-  ) => string;
+  ) => Promise<string>;
   clearCart: () => void;
   removeCartItem: (id: string) => void;
   checkOutputPath: () => Promise<boolean>;
@@ -154,7 +154,7 @@ export function useOSDownloadFlow({
     });
   }, [isDedicatedOSFlow]);
 
-  const addOSDownloadHistory = useCallback((result: OSDownloadResultData) => {
+  const addOSDownloadHistory = useCallback(async (result: OSDownloadResultData) => {
     if (cartSnapshotRef.current.length === 0) {
       return;
     }
@@ -195,7 +195,7 @@ export function useOSDownloadFlow({
 
     const totalSize = result.success.reduce((sum, item) => sum + (item.size || 0), 0);
 
-    addHistory(
+    await addHistory(
       historyPackages,
       historySettings,
       result.outputPath,
@@ -267,8 +267,15 @@ export function useOSDownloadFlow({
         return;
       }
 
+      let historySaveError: string | null = null;
+
       if (!result.cancelled) {
-        addOSDownloadHistory(result);
+        try {
+          await addOSDownloadHistory(result);
+        } catch (error) {
+          console.error('OS download history persistence failed:', error);
+          historySaveError = error instanceof Error ? error.message : 'unknown error';
+        }
       }
       setOSResult(result);
 
@@ -294,6 +301,10 @@ export function useOSDownloadFlow({
         message.warning('OS 패키지 다운로드가 부분 완료되었습니다');
       } else {
         message.success('OS 패키지 다운로드가 완료되었습니다');
+      }
+
+      if (historySaveError) {
+        message.error('다운로드 히스토리 저장에 실패했습니다');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

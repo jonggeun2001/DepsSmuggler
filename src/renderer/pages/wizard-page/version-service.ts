@@ -84,13 +84,13 @@ export function createVersionService({
       }
 
       const versionOptions = buildVersionOptions(context);
-      const usedElectronVersionLookup = Boolean(electronAPI?.search?.versions);
-      const versions = await rendererDataClient.getVersions(
+      const versionLookup = await rendererDataClient.getVersionsWithSource(
         context.packageType,
         record.name,
         versionOptions,
         record.versions || [record.version]
       );
+      const versions = versionLookup.versions;
 
       const selectedVersion = context.packageType === 'docker' && versions.includes('latest')
         ? 'latest'
@@ -107,7 +107,7 @@ export function createVersionService({
         versions,
         selectedVersion,
         usedIndexUrl:
-          usedElectronVersionLookup &&
+          versionLookup.source === 'electron' &&
           context.packageType === 'pip' &&
           versionOptions?.indexUrl
             ? versionOptions.indexUrl

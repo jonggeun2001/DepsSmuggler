@@ -68,6 +68,11 @@ export interface HistoryPersistenceClient {
   clear: () => Promise<{ success: boolean }>;
 }
 
+export interface RendererVersionLookupResult {
+  versions: string[];
+  source: 'electron' | 'http' | 'fallback';
+}
+
 export interface RendererDataClient {
   searchPackages: (
     type: PackageType,
@@ -75,6 +80,12 @@ export interface RendererDataClient {
     options?: RendererSearchOptions
   ) => Promise<SearchResult[]>;
   searchOSPackages: (request: RendererOSSearchRequest) => Promise<SearchResult[]>;
+  getVersionsWithSource: (
+    type: PackageType,
+    packageName: string,
+    options?: RendererSearchOptions,
+    fallbackVersions?: string[]
+  ) => Promise<RendererVersionLookupResult>;
   getVersions: (
     type: PackageType,
     packageName: string,
@@ -305,18 +316,32 @@ export function createRendererDataClient({
     },
 
     async getVersions(type, packageName, options, fallbackVersions) {
+      const result = await this.getVersionsWithSource(type, packageName, options, fallbackVersions);
+      return result.versions;
+    },
+
+    async getVersionsWithSource(type, packageName, options, fallbackVersions) {
       if (electronAPI?.search?.versions) {
         const response = await electronAPI.search.versions(type, packageName, options);
         if (response.versions && response.versions.length > 0) {
-          return response.versions;
+          return {
+            versions: response.versions,
+            source: 'electron',
+          };
         }
       }
 
       if (!fetchImpl) {
-        return fallbackVersions || [];
+        return {
+          versions: fallbackVersions || [],
+          source: 'fallback',
+        };
       }
 
-      return getVersionsViaHttp(fetchImpl, type, packageName, options, fallbackVersions);
+      return {
+        versions: await getVersionsViaHttp(fetchImpl, type, packageName, options, fallbackVersions),
+        source: 'http',
+      };
     },
 
     async getLatestVersion(type, packageName, options) {

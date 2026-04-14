@@ -258,7 +258,7 @@ export function useDownloadPageController() {
     }
   }, [cartItems, downloadItems, includeDependencies, isDownloading, setDepsResolved, setItems]);
 
-  const persistHistoryEntry = useCallback((data: AllCompleteData, forcedStatus?: HistoryStatus) => {
+  const persistHistoryEntry = useCallback(async (data: AllCompleteData, forcedStatus?: HistoryStatus) => {
     const finalItems = useDownloadStore.getState().items;
     const trackedItemIds = historyTrackedItemIdsRef.current;
     const relevantItems = trackedItemIds && trackedItemIds.size > 0
@@ -319,7 +319,7 @@ export function useDownloadPageController() {
 
     const totalSize = relevantItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
 
-    addHistory(
+    await addHistory(
       historyPackages,
       historySettings,
       data.outputPath,
@@ -556,7 +556,11 @@ export function useDownloadPageController() {
         const errorMessage = data.error || '패키징 중 오류가 발생했습니다';
         scheduleLogBatch('error', '다운로드/패키징 실패', errorMessage);
         message.error(errorMessage);
-        persistHistoryEntry(data, 'failed');
+        void persistHistoryEntry(data, 'failed').catch((error) => {
+          const historyError = error instanceof Error ? error.message : 'unknown error';
+          scheduleLogBatch('error', '히스토리 저장 실패', historyError);
+          message.error('히스토리 저장에 실패했습니다.');
+        });
         return;
       }
 
@@ -579,7 +583,11 @@ export function useDownloadPageController() {
         : '다운로드 및 패키징이 완료되었습니다';
       scheduleLogBatch('success', '다운로드 및 패키징 완료', `다운로드 경로: ${data.outputPath}`);
       message.success(completionMessage);
-      persistHistoryEntry(data);
+      void persistHistoryEntry(data).catch((error) => {
+        const historyError = error instanceof Error ? error.message : 'unknown error';
+        scheduleLogBatch('error', '히스토리 저장 실패', historyError);
+        message.error('히스토리 저장에 실패했습니다.');
+      });
 
       const failedCount = (data.results || []).filter((result) => !result.success).length
         || useDownloadStore.getState().items.filter((item) => item.status === 'failed').length;

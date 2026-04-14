@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PackageType } from '../../stores/cart-store';
 import type { DockerRegistry, OSDistributionSetting } from '../../stores/settings-store';
+import type { RendererDataClient } from '../../lib/renderer-data-client';
 import type { SearchResult } from './types';
 import { createVersionService } from './version-service';
 
@@ -203,5 +204,48 @@ describe('version-service', () => {
       'native-lib',
       '1.0.0'
     );
+  });
+
+  it('shared client가 Electron source를 보고하면 pip custom index를 유지한다', async () => {
+    const client: RendererDataClient = {
+      searchPackages: vi.fn(),
+      searchOSPackages: vi.fn(),
+      getVersions: vi.fn(),
+      getLatestVersion: vi.fn(),
+      getVersionsWithSource: vi.fn().mockResolvedValue({
+        versions: ['2.32.0', '2.31.0'],
+        source: 'electron',
+      }),
+      isNativeMavenArtifact: vi.fn().mockResolvedValue(false),
+      getAvailableMavenClassifiers: vi.fn().mockResolvedValue([]),
+      history: {
+        load: vi.fn(),
+        add: vi.fn(),
+        delete: vi.fn(),
+        clear: vi.fn(),
+      },
+    };
+    const service = createVersionService({ client });
+
+    const result = await service.loadVersionDetails(
+      {
+        ...baseContext,
+        packageType: 'pip',
+        useCustomIndex: true,
+        customIndexUrl: 'https://download.pytorch.org/whl/cu124',
+      },
+      {
+        name: 'requests',
+        version: '2.31.0',
+      }
+    );
+
+    expect(client.getVersionsWithSource).toHaveBeenCalledWith(
+      'pip',
+      'requests',
+      { indexUrl: 'https://download.pytorch.org/whl/cu124' },
+      ['2.31.0']
+    );
+    expect(result.usedIndexUrl).toBe('https://download.pytorch.org/whl/cu124');
   });
 });

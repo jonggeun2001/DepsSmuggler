@@ -35,11 +35,11 @@ interface HistoryState {
       deliveryMethod?: 'local' | 'email';
       deliveryResult?: HistoryDeliveryResult;
     }
-  ) => string;
+  ) => Promise<string>;
   getHistory: (id: string) => DownloadHistory | undefined;
   getHistories: () => DownloadHistory[];
-  deleteHistory: (id: string) => void;
-  clearAll: () => void;
+  deleteHistory: (id: string) => Promise<void>;
+  clearAll: () => Promise<void>;
 }
 
 export interface CreateHistoryStoreOptions {
@@ -49,6 +49,15 @@ export interface CreateHistoryStoreOptions {
 
 function logHistoryPersistenceError(action: string, error: unknown): void {
   console.error(`[history-store] ${action} 실패`, error);
+}
+
+function ensureHistoryWriteSucceeded(
+  action: 'add' | 'delete' | 'clear',
+  result: { success: boolean }
+): void {
+  if (!result.success) {
+    throw new Error(`history ${action} persistence failed`);
+  }
 }
 
 export function createHistoryStore({
@@ -83,7 +92,7 @@ export function createHistoryStore({
       }
     },
 
-    addHistory: (
+    addHistory: async (
       packages,
       settings,
       outputPath,
@@ -109,16 +118,15 @@ export function createHistoryStore({
         failedCount,
       };
 
+      const persistenceResult = await client.add(newHistory);
+      ensureHistoryWriteSucceeded('add', persistenceResult);
+
       set((state) => {
         const updatedHistories = [newHistory, ...state.histories];
         if (updatedHistories.length > MAX_HISTORIES) {
           updatedHistories.splice(MAX_HISTORIES);
         }
         return { histories: updatedHistories };
-      });
-
-      void client.add(newHistory).catch((error) => {
-        logHistoryPersistenceError('add', error);
       });
 
       return id;
@@ -128,22 +136,20 @@ export function createHistoryStore({
 
     getHistories: () => get().histories,
 
-    deleteHistory: (id) => {
+    deleteHistory: async (id) => {
+      const persistenceResult = await client.delete(id);
+      ensureHistoryWriteSucceeded('delete', persistenceResult);
+
       set((state) => ({
         histories: state.histories.filter((history) => history.id !== id),
       }));
-
-      void client.delete(id).catch((error) => {
-        logHistoryPersistenceError('delete', error);
-      });
     },
 
-    clearAll: () => {
-      set({ histories: [] });
+    clearAll: async () => {
+      const persistenceResult = await client.clear();
+      ensureHistoryWriteSucceeded('clear', persistenceResult);
 
-      void client.clear().catch((error) => {
-        logHistoryPersistenceError('clear', error);
-      });
+      set({ histories: [] });
     },
   }));
 

@@ -162,16 +162,24 @@ const HistoryPage: React.FC = () => {
 
   // 히스토리 삭제
   const handleDelete = useCallback(async (id: string) => {
-    deleteHistory(id);
-
-    message.success('히스토리가 삭제되었습니다.');
+    try {
+      await deleteHistory(id);
+      message.success('히스토리가 삭제되었습니다.');
+    } catch (error) {
+      console.error('Failed to delete history:', error);
+      message.error('히스토리 삭제에 실패했습니다.');
+    }
   }, [deleteHistory]);
 
   // 전체 삭제
   const handleClearAll = useCallback(async () => {
-    clearAll();
-
-    message.success('모든 히스토리가 삭제되었습니다.');
+    try {
+      await clearAll();
+      message.success('모든 히스토리가 삭제되었습니다.');
+    } catch (error) {
+      console.error('Failed to clear history:', error);
+      message.error('히스토리 전체 삭제에 실패했습니다.');
+    }
   }, [clearAll]);
 
   // 폴더 열기
