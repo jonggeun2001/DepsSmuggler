@@ -113,6 +113,8 @@
 - Electron 환경에서는 settings store가 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화되며, 레거시 `defaultOutputFormat/defaultArchiveType` 조합은 로드 시 `zip | tar.gz`로 정규화됩니다.
 - settings UI는 `zip`/`tar.gz`를 노출하지만, 현재 main process에서 실제 아카이브 생성이 연결된 형식은 `zip`뿐입니다.
 - 설정 화면의 캐시 위젯은 현재 `cache:*` IPC 기준 패키지 메타데이터 캐시만 집계/삭제합니다.
+- `src/renderer/pages/settings/` 아래 `DeliverySettingsSection`, `CacheSettingsSection`, `UpdateSettingsSection`, `use-settings-form-actions.ts`가 `SettingsPage`의 세부 책임을 분리합니다.
+- SMTP 테스트 버튼은 `testSmtpConnection` IPC가 있으면 실제 연결 테스트를 실행하고, 브라우저 개발 환경에서는 시뮬레이션, IPC가 빠진 Electron 빌드에서는 경고와 비활성화 상태를 노출합니다.
 - 현재 UI 히스토리의 source of truth는 Zustand persist 키 `depssmuggler-history`입니다.
 - `window.electronAPI.history.*`와 `~/.depssmuggler/history.json` 기반 파일 히스토리도 존재하지만, 현재 렌더러에서는 부분적으로만 연결되어 있습니다.
 

@@ -1,5 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useBlocker, useSearchParams } from 'react-router-dom';
+import {
+  SaveOutlined,
+  ReloadOutlined,
+  CloudOutlined,
+  InfoCircleOutlined,
+  WarningOutlined,
+} from '@ant-design/icons';
 import {
   Card,
   Form,
@@ -11,10 +16,8 @@ import {
   Typography,
   Space,
   message,
-  Statistic,
   Row,
   Col,
-  Popconfirm,
   Spin,
   Tag,
   Divider,
@@ -24,22 +27,18 @@ import {
   AutoComplete,
   List,
 } from 'antd';
-import {
-  SaveOutlined,
-  ReloadOutlined,
-  FolderOpenOutlined,
-  DeleteOutlined,
-  SendOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  CloudOutlined,
-  InfoCircleOutlined,
-  SyncOutlined,
-  WarningOutlined,
-} from '@ant-design/icons';
-
+import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useSettingsStore } from '../stores/settings-store';
-import type { OSDistribution } from '../global';
+import { CacheSettingsSection } from './settings/CacheSettingsSection';
+import { DeliverySettingsSection } from './settings/DeliverySettingsSection';
+import {
+  SETTINGS_CARD_BODY_PADDING,
+  SETTINGS_CARD_MARGIN,
+  type SettingsStoreSnapshot,
+} from './settings/settings-form-utils';
+import { UpdateSettingsSection } from './settings/UpdateSettingsSection';
+import { useSettingsFormActions } from './settings/use-settings-form-actions';
 import {
   LINUX_DISTRO_GLIBC_MAP,
   getDistrosByFamily,
@@ -49,10 +48,7 @@ import {
   isMacOSVersionCompatibleWithArch,
   type MacOSVersionInfo,
 } from '../../core/shared/platform-mappings';
-
-// 컴팩트 레이아웃 상수
-const CARD_MARGIN = 12;
-const CARD_BODY_PADDING = '12px 16px';
+import type { OSDistribution } from '../global';
 
 const { Title, Text } = Typography;
 
@@ -117,7 +113,7 @@ const SettingsPage: React.FC = () => {
 
   // 하이라이트된 카드 스타일
   const getCardStyle = (cardId: string) => {
-    const baseStyle = { marginBottom: CARD_MARGIN };
+    const baseStyle = { marginBottom: SETTINGS_CARD_MARGIN };
     if (highlightType && highlightSections[highlightType]?.includes(cardId)) {
       return {
         ...baseStyle,
@@ -137,21 +133,38 @@ const SettingsPage: React.FC = () => {
     }
   }, [highlightType]);
 
-  // 변경사항 감지 상태
-  const [isDirty, setIsDirty] = useState(false);
-  const [initialValues, setInitialValues] = useState<Record<string, unknown>>({});
-  const [showNavigationModal, setShowNavigationModal] = useState(false);
-  const isInitializedRef = React.useRef(false);
-
-  // 캐시 상태
-  const [cacheSize, setCacheSize] = useState<number>(0);
-  const [cacheCount, setCacheCount] = useState<number>(0);
-  const [loadingCache, setLoadingCache] = useState(false);
-  const [clearingCache, setClearingCache] = useState(false);
-
-  // SMTP 테스트 상태
-  const [testingSmtp, setTestingSmtp] = useState(false);
-  const [smtpTestResult, setSmtpTestResult] = useState<'success' | 'failed' | null>(null);
+  const settingsSnapshot: SettingsStoreSnapshot = {
+    concurrentDownloads,
+    enableCache,
+    cachePath,
+    includeDependencies,
+    defaultDownloadPath,
+    defaultOutputFormat,
+    includeInstallScripts,
+    enableFileSplit,
+    maxFileSize,
+    smtpHost,
+    smtpPort,
+    smtpUser,
+    smtpPassword,
+    smtpFrom,
+    smtpTo,
+    languageVersions,
+    defaultTargetOS,
+    defaultArchitecture,
+    pipTargetPlatform,
+    condaChannel,
+    cudaVersion,
+    yumDistribution,
+    aptDistribution,
+    apkDistribution,
+    dockerArchitecture,
+    dockerLayerCompression,
+    dockerIncludeLoadScript,
+    autoUpdate,
+    autoDownloadUpdate,
+    downloadRenderInterval,
+  };
 
   // Python 버전 목록 상태
   const [pythonVersions, setPythonVersions] = useState<string[]>([
@@ -190,99 +203,34 @@ const SettingsPage: React.FC = () => {
   const [selectedAptDistroId, setSelectedAptDistroId] = useState<string>(aptDistribution?.id || 'ubuntu-22.04');
   const [selectedApkDistroId, setSelectedApkDistroId] = useState<string>(apkDistribution?.id || 'alpine-3.18');
 
-  // 패키지 캐시 정보 로드
-  const loadCacheInfo = async () => {
-    setLoadingCache(true);
-    try {
-      // Electron IPC 사용 (개발/프로덕션 모두)
-      if (!window.electronAPI?.cache?.getStats) {
-        throw new Error('패키지 캐시 정보 API를 사용할 수 없습니다');
-      }
-      const stats = await window.electronAPI.cache.getStats();
-      setCacheSize(stats.totalSize);
-      setCacheCount(stats.entryCount);
-    } catch (error) {
-      console.error('패키지 캐시 정보 로드 실패:', error);
-      // 에러 시 0으로 설정
-      setCacheSize(0);
-      setCacheCount(0);
-    } finally {
-      setLoadingCache(false);
-    }
-  };
-
-  // 패키지 캐시 삭제
-  const handleClearCache = async () => {
-    setClearingCache(true);
-    try {
-      // Electron IPC 사용 (개발/프로덕션 모두)
-      if (!window.electronAPI?.cache?.clear) {
-        throw new Error('패키지 캐시 삭제 API를 사용할 수 없습니다');
-      }
-      await window.electronAPI.cache.clear();
-      setCacheSize(0);
-      setCacheCount(0);
-      message.success('패키지 캐시가 삭제되었습니다');
-    } catch (error) {
-      console.error('패키지 캐시 삭제 실패:', error);
-      message.error('패키지 캐시 삭제에 실패했습니다');
-    } finally {
-      setClearingCache(false);
-    }
-  };
-
-  // SMTP 연결 테스트
-  const handleTestSmtp = async () => {
-    const values = form.getFieldsValue();
-    if (!values.smtpHost || !values.smtpPort) {
-      message.warning('SMTP 서버와 포트를 입력하세요');
-      return;
-    }
-
-    setTestingSmtp(true);
-    setSmtpTestResult(null);
-    try {
-      const smtpTester = (window.electronAPI as typeof window.electronAPI & {
-        testSmtpConnection?: (config: {
-          host: string;
-          port: number;
-          user?: string;
-          password?: string;
-          from?: string;
-        }) => Promise<boolean | { success?: boolean; error?: string }>;
-      } | undefined)?.testSmtpConnection;
-
-      if (smtpTester) {
-        const result = await smtpTester({
-          host: values.smtpHost,
-          port: values.smtpPort,
-          user: values.smtpUser,
-          password: values.smtpPassword,
-          from: values.smtpFrom,
-        });
-        const success = typeof result === 'boolean' ? result : Boolean(result?.success);
-        setSmtpTestResult(success ? 'success' : 'failed');
-        if (success) {
-          message.success('SMTP 연결 테스트 성공');
-        } else {
-          message.error(typeof result === 'boolean' ? 'SMTP 연결 테스트 실패' : result?.error || 'SMTP 연결 테스트 실패');
-        }
-      } else if (!window.electronAPI) {
-        // 브라우저 개발 환경 시뮬레이션
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        setSmtpTestResult('success');
-        message.success('SMTP 연결 테스트 성공 (시뮬레이션)');
-      } else {
-        setSmtpTestResult('failed');
-        message.warning('현재 Electron 빌드에는 SMTP 연결 테스트 IPC가 연결되어 있지 않습니다');
-      }
-    } catch (error) {
-      setSmtpTestResult('failed');
-      message.error(error instanceof Error ? error.message : 'SMTP 연결 테스트 실패');
-    } finally {
-      setTestingSmtp(false);
-    }
-  };
+  const {
+    cacheCount,
+    cacheSize,
+    clearingCache,
+    handleCheckForUpdates,
+    handleClearCache,
+    handleFormChange,
+    handleNavigationCancel,
+    handleNavigationConfirm,
+    handleReset,
+    handleSave,
+    handleSelectCacheFolder,
+    handleSelectDownloadFolder,
+    handleTestSmtp,
+    loadCacheInfo,
+    loadingCache,
+    showNavigationModal,
+    smtpTestMode,
+    smtpTestModeMessage,
+    smtpTestResult,
+    testingSmtp,
+  } = useSettingsFormActions({
+    form,
+    resetSettings,
+    settingsSnapshot,
+    updateSettings: (updates) =>
+      updateSettings(updates as Parameters<typeof updateSettings>[0]),
+  });
 
   // 바이트 포맷
   const formatBytes = (bytes: number): string => {
@@ -347,239 +295,20 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  // 컴포넌트 마운트 시 캐시 정보 및 배포판 목록 로드
   useEffect(() => {
-    loadCacheInfo();
-    loadDistributions();
-    loadPythonVersions();
-    loadCudaVersions();
+    void loadDistributions();
+    void loadPythonVersions();
+    void loadCudaVersions();
   }, []);
 
-  // useBlocker로 페이지 이동 차단
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      isDirty && currentLocation.pathname !== nextLocation.pathname
-  );
-
-  // blocker 상태 변경 시 모달 표시
   useEffect(() => {
-    if (blocker.state === 'blocked') {
-      setShowNavigationModal(true);
-    }
-  }, [blocker.state]);
-
-  // beforeunload 이벤트 (브라우저 새로고침/닫기)
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isDirty) {
-        e.preventDefault();
-        e.returnValue = '';
-        return '';
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [isDirty]);
-
-  // 초기값 설정 (최초 1회만 실행)
-  React.useEffect(() => {
-    // 이미 초기화되었으면 스킵
-    if (isInitializedRef.current) {
-      return;
-    }
-
-    const values = {
-      concurrentDownloads,
-      enableCache,
-      cachePath,
-      includeDependencies,
-      defaultDownloadPath,
-      defaultOutputFormat,
-      includeInstallScripts,
-      enableFileSplit,
-      maxFileSize,
-      smtpHost,
-      smtpPort,
-      smtpUser,
-      smtpPassword,
-      smtpFrom,
-      smtpTo,
-      languageVersions,
-      defaultTargetOS,
-      defaultArchitecture,
-      // pip 타겟 플랫폼
-      pipTargetPlatform,
-      condaChannel,
-      cudaVersion,
-      // OS 배포판 (2단계 캐스케이드: 배포판 ID와 아키텍처 분리)
-      yumDistributionId: yumDistribution?.id || 'rocky-9',
-      yumArchitecture: yumDistribution?.architecture || 'x86_64',
-      aptDistributionId: aptDistribution?.id || 'ubuntu-22.04',
-      aptArchitecture: aptDistribution?.architecture || 'amd64',
-      apkDistributionId: apkDistribution?.id || 'alpine-3.18',
-      apkArchitecture: apkDistribution?.architecture || 'x86_64',
-      // Docker 설정
-      dockerArchitecture,
-      dockerLayerCompression,
-      dockerIncludeLoadScript,
-      // 자동 업데이트
-      autoUpdate,
-      autoDownloadUpdate,
-      // UI 렌더링
-      downloadRenderInterval,
-    };
-
-    form.setFieldsValue(values);
-    // 초기값 저장 (변경사항 감지용)
-    setInitialValues(values);
-    setIsDirty(false);
-    isInitializedRef.current = true;
-
-    // 로컬 상태도 업데이트
     setSelectedYumDistroId(yumDistribution?.id || 'rocky-9');
     setSelectedAptDistroId(aptDistribution?.id || 'ubuntu-22.04');
     setSelectedApkDistroId(apkDistribution?.id || 'alpine-3.18');
-  }, [
-    form,
-    concurrentDownloads,
-    enableCache,
-    cachePath,
-    includeDependencies,
-    defaultDownloadPath,
-    defaultOutputFormat,
-    includeInstallScripts,
-    enableFileSplit,
-    maxFileSize,
-    smtpHost,
-    smtpPort,
-    smtpUser,
-    smtpPassword,
-    smtpFrom,
-    smtpTo,
-    languageVersions,
-    defaultTargetOS,
-    defaultArchitecture,
-    pipTargetPlatform,
-    condaChannel,
-    cudaVersion,
-    yumDistribution,
-    aptDistribution,
-    apkDistribution,
-    dockerArchitecture,
-    dockerLayerCompression,
-    dockerIncludeLoadScript,
-    autoUpdate,
-    autoDownloadUpdate,
-    downloadRenderInterval,
-  ]);
-
-  // 저장
-  const handleSave = (values: Record<string, unknown>) => {
-    // OS 배포판 (2단계 캐스케이드 값을 객체로 합침)
-    const convertedValues = { ...values };
-
-    // yumDistribution 합성
-    if (values.yumDistributionId && values.yumArchitecture) {
-      convertedValues.yumDistribution = {
-        id: values.yumDistributionId as string,
-        architecture: values.yumArchitecture as string,
-      };
-      delete convertedValues.yumDistributionId;
-      delete convertedValues.yumArchitecture;
-    }
-
-    // aptDistribution 합성
-    if (values.aptDistributionId && values.aptArchitecture) {
-      convertedValues.aptDistribution = {
-        id: values.aptDistributionId as string,
-        architecture: values.aptArchitecture as string,
-      };
-      delete convertedValues.aptDistributionId;
-      delete convertedValues.aptArchitecture;
-    }
-
-    // apkDistribution 합성
-    if (values.apkDistributionId && values.apkArchitecture) {
-      convertedValues.apkDistribution = {
-        id: values.apkDistributionId as string,
-        architecture: values.apkArchitecture as string,
-      };
-      delete convertedValues.apkDistributionId;
-      delete convertedValues.apkArchitecture;
-    }
-
-    updateSettings(convertedValues);
-    message.success('설정이 저장되었습니다');
-
-    // 저장 후 isDirty 초기화
-    const newValues = form.getFieldsValue();
-    setInitialValues(newValues);
-    setIsDirty(false);
-  };
-
-  // 초기화
-  const handleReset = () => {
-    resetSettings();
-    form.resetFields();
-    message.info('설정이 초기화되었습니다');
-
-    // 초기화 후 isDirty 초기화
-    const newValues = form.getFieldsValue();
-    setInitialValues(newValues);
-    setIsDirty(false);
-  };
-
-  // 폼 값 변경 감지
-  const handleFormChange = (_changedValues?: Record<string, unknown>, allValues?: Record<string, unknown>) => {
-    const currentValues = allValues || form.getFieldsValue();
-    const hasChanges = JSON.stringify(currentValues) !== JSON.stringify(initialValues);
-    setIsDirty(hasChanges);
-  };
+  }, [yumDistribution, aptDistribution, apkDistribution]);
 
   // checkDirty는 handleFormChange의 alias
   const checkDirty = handleFormChange;
-
-  // 모달 핸들러
-  const handleNavigationConfirm = async (shouldSave: boolean) => {
-    if (shouldSave) {
-      // 저장 후 이동
-      try {
-        await form.validateFields();
-        handleSave(form.getFieldsValue());
-        blocker.proceed?.();
-      } catch (error) {
-        // 유효성 검증 실패 시 이동 취소
-        message.error('설정 저장에 실패했습니다');
-      }
-    } else {
-      // 저장 안 함, 그냥 이동
-      blocker.proceed?.();
-    }
-    setShowNavigationModal(false);
-  };
-
-  const handleNavigationCancel = () => {
-    blocker.reset?.();
-    setShowNavigationModal(false);
-  };
-
-  // 폴더 선택
-  const handleSelectFolder = async () => {
-    if (window.electronAPI?.selectFolder) {
-      const folder = await window.electronAPI.selectFolder();
-      if (folder) {
-        form.setFieldsValue({ defaultOutputPath: folder });
-        checkDirty(); // 폴더 선택 후 dirty 체크
-        message.success('폴더가 선택되었습니다');
-      }
-    } else {
-      message.info('폴더 선택 기능은 Electron 환경에서 사용 가능합니다');
-    }
-  };
 
   // 커스텀 Conda 채널 추가
   const handleAddCustomChannel = async (channel: string) => {
@@ -803,8 +532,8 @@ const SettingsPage: React.FC = () => {
         <Card
           title="다운로드 설정"
           size="small"
-          style={{ marginBottom: CARD_MARGIN }}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
+          style={{ marginBottom: SETTINGS_CARD_MARGIN }}
+          styles={{ body: { padding: SETTINGS_CARD_BODY_PADDING } }}
         >
           <Row gutter={16}>
             <Col span={12}>
@@ -829,30 +558,16 @@ const SettingsPage: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item
-            name="defaultDownloadPath"
-            label="기본 다운로드 경로"
-            tooltip="다운로드 파일이 저장될 기본 경로 (비워두면 시스템 기본 다운로드 폴더 사용)"
-            style={{ marginBottom: 8 }}
-          >
-            <Input.Search
-              placeholder="다운로드 경로를 선택하세요"
-              enterButton={<FolderOpenOutlined />}
-              onSearch={async () => {
-                if (window.electronAPI?.selectDirectory) {
-                  const selectedPath = await window.electronAPI.selectDirectory();
-                  if (selectedPath) {
-                    form.setFieldValue('defaultDownloadPath', selectedPath);
-                    checkDirty(); // 폴더 선택 후 dirty 체크
-                  }
-                } else {
-                  message.info('폴더 선택은 Electron 환경에서만 가능합니다');
-                }
-              }}
-              readOnly
-            />
-          </Form.Item>
         </Card>
+
+        <DeliverySettingsSection
+          onSelectDownloadFolder={handleSelectDownloadFolder}
+          onTestSmtp={handleTestSmtp}
+          smtpTestMode={smtpTestMode}
+          smtpTestModeMessage={smtpTestModeMessage}
+          smtpTestResult={smtpTestResult}
+          testingSmtp={testingSmtp}
+        />
 
         {/* Python 버전 설정 */}
         <div
@@ -871,7 +586,7 @@ const SettingsPage: React.FC = () => {
           }
           size="small"
           style={getCardStyle('python-settings')}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
+          styles={{ body: { padding: SETTINGS_CARD_BODY_PADDING } }}
         >
           <Form.Item
             name={['languageVersions', 'python']}
@@ -965,7 +680,7 @@ const SettingsPage: React.FC = () => {
                 label: `CUDA ${version}`,
               }))}
               filterOption={(inputValue, option) =>
-                option!.value.toLowerCase().includes(inputValue.toLowerCase())
+                String(option?.value ?? '').toLowerCase().includes(inputValue.toLowerCase())
               }
               notFoundContent={loadingCudaVersions ? <Spin size="small" /> : null}
             />
@@ -990,7 +705,7 @@ const SettingsPage: React.FC = () => {
           }
           size="small"
           style={getCardStyle('library-env')}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
+          styles={{ body: { padding: SETTINGS_CARD_BODY_PADDING } }}
         >
           <Row gutter={16}>
             <Col span={12}>
@@ -1043,7 +758,7 @@ const SettingsPage: React.FC = () => {
           }
           size="small"
           style={getCardStyle('pip-platform')}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
+          styles={{ body: { padding: SETTINGS_CARD_BODY_PADDING } }}
         >
           {/* OS 선택 */}
           <Form.Item
@@ -1252,16 +967,17 @@ const SettingsPage: React.FC = () => {
           }
           size="small"
           style={getCardStyle('pip-custom-index')}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
+          styles={{ body: { padding: SETTINGS_CARD_BODY_PADDING } }}
         >
           <List
             dataSource={customPipIndexUrls}
-            renderItem={(item) => (
-              <List.Item
-                actions={[
-                  <Button
-                    type="link"
-                    danger
+	            renderItem={(item) => (
+	              <List.Item
+	                actions={[
+	                  <Button
+                    key={`remove-${item.url}`}
+	                    type="link"
+	                    danger
                     size="small"
                     onClick={() => {
                       removeCustomPipIndexUrl(item.url);
@@ -1334,7 +1050,7 @@ const SettingsPage: React.FC = () => {
           }
           size="small"
           style={getCardStyle('os-distribution')}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
+          styles={{ body: { padding: SETTINGS_CARD_BODY_PADDING } }}
         >
           {/* YUM */}
           <Text type="secondary" style={{ fontSize: 12 }}>YUM (RHEL 계열)</Text>
@@ -1425,7 +1141,7 @@ const SettingsPage: React.FC = () => {
           }
           size="small"
           style={getCardStyle('docker-settings')}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
+          styles={{ body: { padding: SETTINGS_CARD_BODY_PADDING } }}
         >
           <Alert
             message="레지스트리는 패키지 검색 화면에서 선택합니다"
@@ -1475,133 +1191,27 @@ const SettingsPage: React.FC = () => {
         </Card>
         </div>
 
-        {/* 패키지 캐시 설정 */}
-        <Card
-          title="패키지 캐시 설정"
-          size="small"
-          style={{ marginBottom: CARD_MARGIN }}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
-        >
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item
-                name="enableCache"
-                label="패키지 캐시 사용"
-                valuePropName="checked"
-                style={{ marginBottom: 8 }}
-              >
-                <Switch size="small" />
-              </Form.Item>
-            </Col>
-            <Col span={16}>
-              <Form.Item
-                name="cachePath"
-                label="패키지 캐시 경로"
-                style={{ marginBottom: 8 }}
-              >
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input size="small" placeholder="~/.depssmuggler/cache" />
-                  <Button size="small" icon={<FolderOpenOutlined />} onClick={handleSelectFolder} />
-                </Space.Compact>
-              </Form.Item>
-            </Col>
-          </Row>
+        <CacheSettingsSection
+          cacheCount={cacheCount}
+          cacheSize={cacheSize}
+          clearingCache={clearingCache}
+          formatBytes={formatBytes}
+          loadingCache={loadingCache}
+          onClearCache={handleClearCache}
+          onRefreshCacheInfo={loadCacheInfo}
+          onSelectCacheFolder={handleSelectCacheFolder}
+        />
 
-          {/* 패키지 캐시 통계 (컴팩트) */}
-          <div style={{ padding: '8px 12px', background: '#f5f5f5', borderRadius: 4 }}>
-            <Spin spinning={loadingCache}>
-              <Row gutter={16} align="middle">
-                <Col span={8}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>디스크 크기: </Text>
-                  <Text strong style={{ fontSize: 13 }}>{formatBytes(cacheSize)}</Text>
-                </Col>
-                <Col span={8}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>캐시 항목: </Text>
-                  <Text strong style={{ fontSize: 13 }}>{cacheCount}개</Text>
-                </Col>
-                <Col span={8} style={{ textAlign: 'right' }}>
-                  <Space size={4}>
-                    <Button size="small" onClick={loadCacheInfo} loading={loadingCache}>새로고침</Button>
-                    <Popconfirm
-                      title="패키지 캐시 삭제"
-                      description="패키지 메타데이터 캐시만 삭제됩니다. 버전 목록 캐시는 유지됩니다"
-                      onConfirm={handleClearCache}
-                      okText="삭제"
-                      cancelText="취소"
-                      okButtonProps={{ danger: true }}
-                    >
-                      <Button size="small" danger icon={<DeleteOutlined />} loading={clearingCache} disabled={cacheSize === 0 && cacheCount === 0} />
-                    </Popconfirm>
-                  </Space>
-                </Col>
-              </Row>
-            </Spin>
-            <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
-              이 영역은 패키지 메타데이터 캐시만 집계합니다. 크기는 디스크 기준이며, 캐시 항목 수에는 메모리 기반 npm 캐시도 포함될 수 있습니다. Python 버전 목록은 localStorage, CUDA/Java/Node 버전 파일은 같은 cache 루트의 별도 `*-versions.json` 파일로 관리됩니다.
-            </Text>
-          </div>
-        </Card>
-
-        {/* 자동 업데이트 설정 */}
         {window.electronAPI?.updater && (
-          <Card
-            title="자동 업데이트"
-            size="small"
-            style={{ marginBottom: CARD_MARGIN }}
-            styles={{ body: { padding: CARD_BODY_PADDING } }}
-          >
-            <Row gutter={16}>
-              <Col span={8}>
-                <Form.Item
-                  name="autoUpdate"
-                  label="자동 업데이트 확인"
-                  valuePropName="checked"
-                  style={{ marginBottom: 8 }}
-                  tooltip="앱 시작 시 새 버전을 자동으로 확인합니다"
-                >
-                  <Switch size="small" />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item
-                  name="autoDownloadUpdate"
-                  label="자동 다운로드"
-                  valuePropName="checked"
-                  style={{ marginBottom: 8 }}
-                  tooltip="새 버전 발견 시 자동으로 다운로드합니다"
-                >
-                  <Switch size="small" />
-                </Form.Item>
-              </Col>
-              <Col span={8} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                <Button
-                  size="small"
-                  icon={<SyncOutlined />}
-                  onClick={async () => {
-                    if (window.electronAPI?.updater) {
-                      message.loading({ content: '업데이트 확인 중...', key: 'update-check' });
-                      const result = await window.electronAPI.updater.check();
-                      if (result.success) {
-                        message.success({ content: '업데이트 확인 완료', key: 'update-check' });
-                      } else {
-                        message.error({ content: `업데이트 확인 실패: ${result.error}`, key: 'update-check' });
-                      }
-                    }
-                  }}
-                >
-                  지금 확인
-                </Button>
-              </Col>
-            </Row>
-          </Card>
+          <UpdateSettingsSection onCheckForUpdates={handleCheckForUpdates} />
         )}
 
         {/* UI 렌더링 설정 */}
         <Card
           title="UI 렌더링"
           size="small"
-          style={{ marginBottom: CARD_MARGIN }}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
+          style={{ marginBottom: SETTINGS_CARD_MARGIN }}
+          styles={{ body: { padding: SETTINGS_CARD_BODY_PADDING } }}
         >
           <Row gutter={16}>
             <Col span={12}>
@@ -1629,157 +1239,6 @@ const SettingsPage: React.FC = () => {
           </Row>
         </Card>
 
-        {/* 출력 설정 */}
-        <Card
-          title={
-            <Space>
-              <span>출력 설정</span>
-              <Tooltip title="다운로드에 자동 적용됩니다">
-                <InfoCircleOutlined style={{ color: '#999' }} />
-              </Tooltip>
-            </Space>
-          }
-          size="small"
-          style={{ marginBottom: CARD_MARGIN }}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
-        >
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="defaultOutputFormat"
-                label="출력 형식"
-                style={{ marginBottom: 8 }}
-              >
-                <Select size="small">
-                  <Select.Option value="zip">ZIP</Select.Option>
-                  <Select.Option value="tar.gz">TAR.GZ</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="includeInstallScripts"
-                label="설치 스크립트"
-                valuePropName="checked"
-                tooltip="bash/PowerShell 스크립트 생성"
-                style={{ marginBottom: 8 }}
-              >
-                <Switch size="small" />
-              </Form.Item>
-            </Col>
-          </Row>
-        </Card>
-
-        {/* 파일 분할 설정 */}
-        <Card
-          title="파일 분할"
-          size="small"
-          style={{ marginBottom: CARD_MARGIN }}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
-        >
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item
-                name="enableFileSplit"
-                label="분할 사용"
-                valuePropName="checked"
-                style={{ marginBottom: 0 }}
-              >
-                <Switch size="small" />
-              </Form.Item>
-            </Col>
-            <Col span={16}>
-              <Form.Item
-                name="maxFileSize"
-                label="최대 크기 (MB)"
-                tooltip="이메일 첨부 제한"
-                style={{ marginBottom: 0 }}
-              >
-                <InputNumber
-                  size="small"
-                  min={1}
-                  max={1000}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-        </Card>
-
-        {/* SMTP 설정 */}
-        <Card
-          title={
-            <Space>
-              <span>SMTP 설정</span>
-              <Tooltip title="다운로드한 패키지를 이메일로 직접 발송">
-                <InfoCircleOutlined style={{ color: '#999' }} />
-              </Tooltip>
-            </Space>
-          }
-          size="small"
-          style={{ marginBottom: CARD_MARGIN }}
-          styles={{ body: { padding: CARD_BODY_PADDING } }}
-        >
-          <Row gutter={8}>
-            <Col span={12}>
-              <Form.Item name="smtpHost" label="SMTP 서버" style={{ marginBottom: 8 }}>
-                <Input size="small" placeholder="smtp.example.com" />
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="smtpPort" label="포트" style={{ marginBottom: 8 }}>
-                <InputNumber size="small" min={1} max={65535} style={{ width: '100%' }} placeholder="587" />
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="smtpFrom" label="발신자" style={{ marginBottom: 8 }}>
-                <Input size="small" placeholder="noreply@..." />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Row gutter={8}>
-            <Col span={12}>
-              <Form.Item name="smtpUser" label="사용자명" style={{ marginBottom: 8 }}>
-                <Input size="small" placeholder="user@example.com" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="smtpPassword" label="비밀번호" style={{ marginBottom: 8 }}>
-                <Input.Password size="small" placeholder="••••••••" />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Row gutter={8}>
-            <Col span={24}>
-              <Form.Item name="smtpTo" label="수신자" style={{ marginBottom: 8 }}>
-                <Input size="small" placeholder="offline@example.com" />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Space size={8}>
-            <Button
-              size="small"
-              icon={<SendOutlined />}
-              onClick={handleTestSmtp}
-              loading={testingSmtp}
-            >
-              연결 테스트
-            </Button>
-            {smtpTestResult === 'success' && (
-              <Text type="success" style={{ fontSize: 12 }}>
-                <CheckCircleOutlined /> 성공
-              </Text>
-            )}
-            {smtpTestResult === 'failed' && (
-              <Text type="danger" style={{ fontSize: 12 }}>
-                <CloseCircleOutlined /> 실패
-              </Text>
-            )}
-          </Space>
-        </Card>
         </Form>
       </div>
 
