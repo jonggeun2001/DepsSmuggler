@@ -41,6 +41,8 @@ build/
 
 # Test coverage
 coverage/
+playwright-report/
+test-results/
 
 # DepsSmuggler cache and config (for development)
 # .depssmuggler/
