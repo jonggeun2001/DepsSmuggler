@@ -98,6 +98,14 @@ npm audit
 - 최초 1회는 `npx playwright install chromium`으로 브라우저 바이너리를 설치해야 합니다.
 - 이후 `npm run test:e2e`로 전체 회귀 세트를 실행할 수 있습니다.
 
+## UI 수동 테스트 자산
+
+UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
+
+- [UI 테스트 체크리스트](./ui-testing-checklist.md): 릴리즈 전 smoke와 탐색적 QA에 바로 사용할 최소 확인 목록
+- [UI 상세 테스트 케이스](./ui-testing-test-cases.md): 테스트 ID, 사전 조건, 절차, 기대 결과, 실패 기준
+- [UI Playwright 전환 시나리오](./ui-testing-playwright-conversion.md): 현재 자동화 범위와 신규 E2E 후보, mock 전략
+
 ## GitHub Actions
 
 ### `test.yml`
