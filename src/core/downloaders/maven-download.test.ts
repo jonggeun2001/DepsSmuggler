@@ -249,6 +249,19 @@ describe('MavenDownloader downloadPackage 테스트', () => {
       ).rejects.toThrow('Network Error');
     });
 
+    it('타임아웃 오류를 그대로 전달', async () => {
+      mockAxiosGet.mockRejectedValue(new Error('Not found'));
+      mockAxiosDefault.mockRejectedValue(
+        Object.assign(new Error('timeout of 300000ms exceeded'), {
+          code: 'ECONNABORTED',
+        })
+      );
+
+      await expect(
+        downloader.downloadArtifact('com.example', 'test', '1.0.0', '/tmp/test', 'jar')
+      ).rejects.toThrow('timeout of 300000ms exceeded');
+    });
+
     it('writer 오류 처리', async () => {
       mockAxiosGet.mockRejectedValue(new Error('Not found'));
 

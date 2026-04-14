@@ -1,6 +1,7 @@
-import type { Page } from '@playwright/test';
+import type { CacheCategoryDetails } from '../../../src/renderer/pages/settings/cache-stats-utils';
 import type { CartItem } from '../../../src/renderer/stores/cart-store';
 import type { DownloadHistory } from '../../../src/types';
+import type { Page } from '@playwright/test';
 
 interface MockDownloadScenario {
   mode?: 'success' | 'slow' | 'fail-once';
@@ -47,12 +48,7 @@ interface MockElectronAppOptions {
     excludes?: string[];
     totalSize?: number;
     entryCount?: number;
-    details?: {
-      pip?: unknown;
-      npm?: unknown;
-      maven?: unknown;
-      conda?: unknown;
-    };
+    details?: CacheCategoryDetails;
   };
 }
 

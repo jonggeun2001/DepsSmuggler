@@ -304,6 +304,16 @@ describe('DockerDownloader - Download Methods', () => {
       ).rejects.toThrow('Download failed');
     });
 
+    it('should handle manifest timeout failure', async () => {
+      mockGetManifestForArchitecture.mockRejectedValueOnce(
+        new Error('manifest timeout')
+      );
+
+      await expect(
+        downloader.downloadImage('library/nginx', 'latest', 'x86_64', tmpDir)
+      ).rejects.toThrow('manifest timeout');
+    });
+
     it('should handle tar creation failure', async () => {
       mockCreateImageTar.mockRejectedValueOnce(
         new Error('Tar creation failed')

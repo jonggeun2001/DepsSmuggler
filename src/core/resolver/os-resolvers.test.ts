@@ -7,6 +7,15 @@ import { AptDependencyResolver } from './apt-resolver';
 import { YumDependencyResolver } from './yum-resolver';
 import type { OSPackageInfo, Repository } from '../downloaders/os-shared/types';
 
+type ResolverTestAccess = {
+  loadMetadata(): Promise<void>;
+  findPackagesForDependency(dependency: { name: string }): Promise<OSPackageInfo[]>;
+};
+
+function accessResolverForTest<T>(resolver: T): T & ResolverTestAccess {
+  return resolver as T & ResolverTestAccess;
+}
+
 describe('OS dependency resolvers', () => {
   const repo: Repository = {
     id: 'repo',
@@ -88,10 +97,11 @@ describe('OS dependency resolvers', () => {
       },
       architecture: 'amd64',
     });
+    const testResolver = accessResolverForTest(resolver);
 
-    await (resolver as any).loadMetadata();
-    const byProvides = await (resolver as any).findPackagesForDependency({ name: 'mail-transport-agent' });
-    const byArchSuffix = await (resolver as any).findPackagesForDependency({ name: 'libc6:amd64' });
+    await testResolver.loadMetadata();
+    const byProvides = await testResolver.findPackagesForDependency({ name: 'mail-transport-agent' });
+    const byArchSuffix = await testResolver.findPackagesForDependency({ name: 'libc6:amd64' });
 
     expect(byProvides).toHaveLength(1);
     expect(byProvides[0].name).toBe('postfix');
@@ -116,10 +126,11 @@ describe('OS dependency resolvers', () => {
         extendedRepos: [],
       },
     });
+    const testResolver = accessResolverForTest(resolver);
 
-    await (resolver as any).loadMetadata();
-    const bySo = await (resolver as any).findPackagesForDependency({ name: 'so:libcrypto.so.3' });
-    const byCmd = await (resolver as any).findPackagesForDependency({ name: 'cmd:sh' });
+    await testResolver.loadMetadata();
+    const bySo = await testResolver.findPackagesForDependency({ name: 'so:libcrypto.so.3' });
+    const byCmd = await testResolver.findPackagesForDependency({ name: 'cmd:sh' });
 
     expect(bySo).toHaveLength(1);
     expect(byCmd).toHaveLength(1);
@@ -163,9 +174,10 @@ describe('OS dependency resolvers', () => {
         extendedRepos: [],
       },
     });
+    const testResolver = accessResolverForTest(resolver);
 
-    await (resolver as any).loadMetadata();
-    const byLibrary = await (resolver as any).findPackagesForDependency({
+    await testResolver.loadMetadata();
+    const byLibrary = await testResolver.findPackagesForDependency({
       name: 'libcrypto.so.3()(64bit)',
     });
 

@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
+import { createEmailSenderMock } from '../../src/core/mailer/__mocks__/email-sender-mock';
 
 const createDeferred = <T>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -12,6 +13,12 @@ const createDeferred = <T>() => {
 };
 
 describe('createDownloadOrchestrator', () => {
+  const createArchivePackagerMock = () => ({
+    createArchiveFromDirectory: vi.fn().mockImplementation(
+      async (_sourceDir: string, outputPath: string) => outputPath
+    ),
+  });
+
   it('성공한 패키지만 패키징 대상으로 모아 완료 이벤트를 만든다', async () => {
     const { createDownloadOrchestrator } = await import('./download-orchestrator');
 
@@ -25,9 +32,7 @@ describe('createDownloadOrchestrator', () => {
       emitDownloadStatus: vi.fn(),
       emitAllComplete: vi.fn(),
     };
-    const archivePackager = {
-      createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.tar.gz'),
-    };
+    const archivePackager = createArchivePackagerMock();
     const generateInstallScripts = vi.fn();
     const ensureDir = vi.fn().mockResolvedValue(undefined);
 
@@ -109,6 +114,78 @@ describe('createDownloadOrchestrator', () => {
     );
   });
 
+  it('zip 출력 형식도 outputDir 기반 아카이브 경로로 패키징한다', async () => {
+    const { createDownloadOrchestrator } = await import('./download-orchestrator');
+
+    const router = {
+      downloadPackage: vi.fn().mockResolvedValue({
+        id: 'pip-requests-2.28.0',
+        success: true,
+      }),
+    };
+    const progressEmitter = {
+      emitDownloadStatus: vi.fn(),
+      emitAllComplete: vi.fn(),
+    };
+    const archivePackager = createArchivePackagerMock();
+    const outputDir = '/tmp/out-zip';
+    const expectedArchivePath = `${outputDir}.zip`;
+
+    const orchestrator = createDownloadOrchestrator({
+      getMainWindow: () => null,
+      ensureDir: vi.fn().mockResolvedValue(undefined),
+      scheduleTask: async (task: () => Promise<void>) => {
+        await task();
+      },
+      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createPackageRouter: () => router,
+      createProgressEmitter: () => progressEmitter as never,
+      archivePackager,
+      generateInstallScripts: vi.fn(),
+    });
+
+    await orchestrator.startDownload({
+      sessionId: 111,
+      packages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+        },
+      ],
+      options: {
+        outputDir,
+        outputFormat: 'zip',
+        includeScripts: false,
+        concurrency: 1,
+      },
+    });
+
+    expect(archivePackager.createArchiveFromDirectory).toHaveBeenCalledWith(
+      outputDir,
+      expectedArchivePath,
+      [
+        expect.objectContaining({
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+        }),
+      ],
+      expect.objectContaining({
+        format: 'zip',
+      })
+    );
+    expect(progressEmitter.emitAllComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 111,
+        success: true,
+        outputPath: expectedArchivePath,
+        artifactPaths: [expectedArchivePath],
+      })
+    );
+  });
+
   it('이메일 전달 준비 중 취소되면 sendEmail 없이 cancelled 완료 이벤트를 만든다', async () => {
     const { createDownloadOrchestrator } = await import('./download-orchestrator');
 
@@ -123,9 +200,7 @@ describe('createDownloadOrchestrator', () => {
       emitAllComplete: vi.fn(),
       clearAllPackageProgress: vi.fn(),
     };
-    const archivePackager = {
-      createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.tar.gz'),
-    };
+    const archivePackager = createArchivePackagerMock();
     const generateInstallScripts = vi.fn();
     const ensureDir = vi.fn().mockResolvedValue(undefined);
     const statDeferred = createDeferred<{ size: number }>();
@@ -144,9 +219,7 @@ describe('createDownloadOrchestrator', () => {
       createProgressEmitter: () => progressEmitter as never,
       archivePackager,
       generateInstallScripts,
-      initializeEmailSender: vi.fn(() => ({
-        sendEmail,
-      })) as never,
+      initializeEmailSender: (vi.fn(() => createEmailSenderMock({ sendEmail }))) as never,
     });
 
     const result = await orchestrator.startDownload({
@@ -234,13 +307,13 @@ describe('createDownloadOrchestrator', () => {
       createLimiter: () => ((task: () => Promise<unknown>) => task()),
       createPackageRouter: () => router,
       createProgressEmitter: () => progressEmitter as never,
-      archivePackager: {
-        createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.tar.gz'),
-      } as never,
+      archivePackager: createArchivePackagerMock() as never,
       generateInstallScripts: vi.fn(),
-      initializeEmailSender: vi.fn(() => ({
-        sendEmail: vi.fn().mockImplementation(() => sendEmailDeferred.promise),
-      })) as never,
+      initializeEmailSender: (vi.fn(() =>
+        createEmailSenderMock({
+          sendEmail: vi.fn().mockImplementation(() => sendEmailDeferred.promise),
+        })
+      )) as never,
     });
 
     const result = await orchestrator.startDownload({
