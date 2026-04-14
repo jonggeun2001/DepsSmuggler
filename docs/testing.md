@@ -2,7 +2,7 @@
 
 ## 개요
 
-이 저장소는 Vitest 기반 단위/통합 테스트를 운용하고, Playwright는 설정 파일만 준비된 스캐폴딩 상태입니다. CI는 GitHub Actions에서 테스트, 빌드, CLI 스모크, 타입 체크, 커버리지를 분리해 실행합니다.
+이 저장소는 Vitest 기반 단위/통합 테스트와 Playwright 기반 기본 E2E 회귀 세트를 함께 운용합니다. CI는 GitHub Actions에서 테스트, 빌드, CLI 스모크, 타입 체크, 커버리지를 분리해 실행합니다.
 
 ## 로컬 검증 명령
 
@@ -60,23 +60,32 @@ npx tsc --noEmit
 - `src/core/downloaders/apk.integration.test.ts`
 - `src/core/downloaders/os.integration.test.ts`
 
-### 3. E2E 스캐폴딩
+### 3. E2E 회귀 세트
 
 - 설정 파일: `playwright.config.ts`
 - 설정상 테스트 디렉터리: `tests/e2e`
 - 브라우저 프로젝트: `chromium`
 - 로컬 web server: `npm run dev:vite`
+- 공통 mock fixture: `tests/e2e/fixtures/mock-electron-app.ts`
 
-현재 상태:
+현재 포함 시나리오:
 
-- `playwright.config.ts`는 존재하지만 저장소에는 `tests/e2e` 디렉터리와 시나리오 파일이 커밋되어 있지 않습니다.
-- 따라서 `npm run test:e2e`는 "구성은 준비돼 있지만 기본 회귀 검증 체계는 아직 아님"으로 봐야 합니다.
+- `tests/e2e/settings-regression.spec.ts`: 설정 저장, SMTP 연결 테스트 호출, 새로고침 후 값 유지
+- `tests/e2e/download-smoke.spec.ts`: 장바구니에서 일반 다운로드 완료 화면까지의 smoke flow
+- `tests/e2e/history-email-restore.spec.ts`: 이메일 전달 히스토리 재다운로드 시 수신자 복원과 전역 설정 보존
+- `tests/e2e/os-package-download.spec.ts`: OS 패키지 전용 검색/다운로드 흐름
 
 구성 동작:
 
-- `CI` 환경에서는 retry `2`, worker `1`
+- Electron preload/API와 외부 네트워크는 browser-side mock/stub으로 대체해 결정적 실행을 유지합니다.
+- `CI`와 로컬 모두 worker `1`로 직렬 실행하며, `CI`에서는 retry `2`를 사용합니다.
 - 로컬에서는 기존 `http://localhost:3000` 서버 재사용 가능
 - 실패 시 screenshot, 첫 재시도에 trace 수집
+
+로컬 준비:
+
+- 최초 1회는 `npx playwright install chromium`으로 브라우저 바이너리를 설치해야 합니다.
+- 이후 `npm run test:e2e`로 전체 회귀 세트를 실행할 수 있습니다.
 
 ## GitHub Actions
 
