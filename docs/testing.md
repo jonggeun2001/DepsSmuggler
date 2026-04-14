@@ -47,6 +47,7 @@ npm audit
 - packager / cache / config / shared 유틸리티
 - Electron `services/` 오케스트레이션과 package router/helper
 - 네트워크 호출을 모킹한 내부 동작
+- renderer form 계약 유틸리티 (`src/renderer/pages/settings/settings-form-utils.test.ts`)
 
 ### 2. 통합 테스트
 
@@ -87,6 +88,10 @@ npm audit
 - `CI`와 로컬 모두 worker `1`로 직렬 실행하며, `CI`에서는 retry `2`를 사용합니다.
 - 로컬에서는 기존 `http://localhost:3000` 서버 재사용 가능
 - 실패 시 screenshot, 첫 재시도에 trace 수집
+
+설정 화면 관련 참고:
+
+- `settings-form-utils.test.ts`는 SettingsPage 리팩터링 과정에서 form 값과 store 저장 shape 변환, SMTP 테스트 경로 분류(`ipc | browser-simulated | missing-ipc`)를 고정합니다.
 
 로컬 준비:
 

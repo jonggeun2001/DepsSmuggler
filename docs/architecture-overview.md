@@ -57,6 +57,7 @@ depssmuggler/
 - `CartPage.tsx`는 장바구니와 텍스트 입력 기반 패키지 추가를 담당합니다.
 - `DownloadPage.tsx`는 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `pages/download-page/` 아래 hook/component/util로 분리되어 있습니다.
 - `HistoryPage.tsx`와 `SettingsPage.tsx`는 각각 다운로드 이력과 앱 설정을 관리합니다.
+- `SettingsPage.tsx`는 페이지 조립 역할만 유지하고, `src/renderer/pages/settings/` 아래 섹션 컴포넌트와 `use-settings-form-actions.ts`가 전달/캐시/업데이트 액션과 dirty/save 계약을 담당합니다.
 - `components/os/`는 OS 패키지 전용 검색, 출력 옵션, 결과 렌더링을 분리합니다.
 - `UpdateNotification.tsx`는 Electron auto updater 상태를 UI로 노출합니다.
 
@@ -135,6 +136,7 @@ depssmuggler/
 - Python 버전 캐시와 settings store 백업은 renderer `localStorage`를 함께 사용합니다.
 - Renderer 상태: Zustand + persist 기반입니다.
 - 설정 상태는 Electron 환경에서 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화됩니다.
+- 설정 화면의 저장 계약은 `settings-form-utils.ts`가 form 값과 store shape 간 변환을 맡아 유지합니다.
 - 장바구니/히스토리 상태는 현재 persist 저장소가 source of truth이며, `history.json` 기반 IPC는 부분 연결 상태입니다.
 
 ## 업데이트 및 버전 프리로드
