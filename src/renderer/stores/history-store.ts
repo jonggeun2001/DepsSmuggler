@@ -66,6 +66,13 @@ export function createHistoryStore({
 }: CreateHistoryStoreOptions = {}) {
   let mutationVersion = 0;
   let hydrateRequestVersion = 0;
+  let mutationQueue: Promise<void> = Promise.resolve();
+
+  const enqueueMutation = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = mutationQueue.then(operation, operation);
+    mutationQueue = result.then(() => undefined, () => undefined);
+    return result;
+  };
 
   const store = create<HistoryState>()((set, get) => ({
     histories: [],
@@ -82,6 +89,7 @@ export function createHistoryStore({
       set({ loading: true });
 
       try {
+        await mutationQueue;
         const histories = await client.load();
         set((state) => {
           if (
@@ -136,26 +144,28 @@ export function createHistoryStore({
         failedCount,
       };
 
-      const persistenceResult = await client.add(newHistory);
-      ensureHistoryWriteSucceeded('add', persistenceResult);
-      mutationVersion += 1;
+      return enqueueMutation(async () => {
+        const persistenceResult = await client.add(newHistory);
+        ensureHistoryWriteSucceeded('add', persistenceResult);
+        mutationVersion += 1;
 
-      set((state) => {
-        const updatedHistories = [newHistory, ...state.histories];
-        if (updatedHistories.length > MAX_HISTORIES) {
-          updatedHistories.splice(MAX_HISTORIES);
-        }
-        return { histories: updatedHistories };
+        set((state) => {
+          const updatedHistories = [newHistory, ...state.histories];
+          if (updatedHistories.length > MAX_HISTORIES) {
+            updatedHistories.splice(MAX_HISTORIES);
+          }
+          return { histories: updatedHistories };
+        });
+
+        return id;
       });
-
-      return id;
     },
 
     getHistory: (id) => get().histories.find((history) => history.id === id),
 
     getHistories: () => get().histories,
 
-    deleteHistory: async (id) => {
+    deleteHistory: async (id) => enqueueMutation(async () => {
       const persistenceResult = await client.delete(id);
       ensureHistoryWriteSucceeded('delete', persistenceResult);
       mutationVersion += 1;
@@ -163,15 +173,15 @@ export function createHistoryStore({
       set((state) => ({
         histories: state.histories.filter((history) => history.id !== id),
       }));
-    },
+    }),
 
-    clearAll: async () => {
+    clearAll: async () => enqueueMutation(async () => {
       const persistenceResult = await client.clear();
       ensureHistoryWriteSucceeded('clear', persistenceResult);
       mutationVersion += 1;
 
       set({ histories: [] });
-    },
+    }),
   }));
 
   if (autoHydrate && typeof window !== 'undefined') {

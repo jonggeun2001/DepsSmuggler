@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { DownloadHistory } from '../../types';
 import { createHistoryStore } from './history-store';
 
 describe('history-store', () => {
@@ -164,6 +165,71 @@ describe('history-store', () => {
       expect.objectContaining({
         id: addedId,
         outputPath: '/tmp/output.zip',
+      }),
+    ]);
+  });
+
+  it('겹치는 mutation도 직렬화해서 persistence와 store를 일치시킨다', async () => {
+    const existingHistory: DownloadHistory = {
+      id: 'history-1',
+      timestamp: '2026-04-14T00:00:00.000Z',
+      packages: [],
+      settings: {
+        outputFormat: 'zip',
+        includeScripts: true,
+        includeDependencies: true,
+        deliveryMethod: 'local',
+      },
+      outputPath: '/tmp/existing.zip',
+      totalSize: 128,
+      status: 'success',
+    };
+    let persistedHistories: DownloadHistory[] = [existingHistory];
+    const client = {
+      load: vi.fn().mockImplementation(async () => persistedHistories),
+      add: vi.fn().mockImplementation(async (entry: DownloadHistory) => {
+        const snapshot = [...persistedHistories];
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        persistedHistories = [entry, ...snapshot];
+        return { success: true };
+      }),
+      delete: vi.fn().mockImplementation(async (id: string) => {
+        const snapshot = [...persistedHistories];
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        persistedHistories = snapshot.filter((history) => history.id !== id);
+        return { success: true };
+      }),
+      clear: vi.fn().mockResolvedValue({ success: true }),
+    };
+    const store = createHistoryStore({ client, autoHydrate: false });
+
+    await store.getState().hydrate();
+
+    const deletePromise = store.getState().deleteHistory(existingHistory.id);
+    const addPromise = store.getState().addHistory(
+      [],
+      {
+        outputFormat: 'zip',
+        includeScripts: true,
+        includeDependencies: true,
+        deliveryMethod: 'local',
+      },
+      '/tmp/new.zip',
+      512,
+      'success'
+    );
+    const [, addedId] = await Promise.all([deletePromise, addPromise]);
+
+    expect(persistedHistories).toEqual([
+      expect.objectContaining({
+        id: addedId,
+        outputPath: '/tmp/new.zip',
+      }),
+    ]);
+    expect(store.getState().histories).toEqual([
+      expect.objectContaining({
+        id: addedId,
+        outputPath: '/tmp/new.zip',
       }),
     ]);
   });
