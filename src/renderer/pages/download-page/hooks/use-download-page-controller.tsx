@@ -446,6 +446,10 @@ export function useDownloadPageController() {
         error?: string;
       };
 
+      if (downloadCancelledRef.current) {
+        return;
+      }
+
       if (p.status === 'completed') {
         scheduleBatchUpdate(p.packageId, {
           status: 'completed',
@@ -480,6 +484,10 @@ export function useDownloadPageController() {
     });
 
     const unsubStatus = window.electronAPI.download.onStatus?.((status) => {
+      if (downloadCancelledRef.current) {
+        return;
+      }
+
       if (status.phase === 'resolving') {
         scheduleLogBatch('info', '의존성 분석 중...');
       } else if (status.phase === 'downloading') {
@@ -577,6 +585,10 @@ export function useDownloadPageController() {
 
     const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
       const completionSessionSnapshot = activeDownloadSessionRef.current;
+
+      if (downloadCancelledRef.current && !data.cancelled) {
+        return;
+      }
 
       if (!data.success) {
         setIsDownloading(false);

@@ -83,8 +83,9 @@
 - 수정 방향:
   - `tests/e2e/fixtures/mock-electron-app.ts`에 slow/fail/cancel 모드를 추가하고, `download-cancel-retry.spec.ts` 같은 전용 Playwright 회귀를 만드는 것이 적절합니다.
 - 후속 반영:
-  - `tests/e2e/fixtures/mock-electron-app.ts`에 `downloadScenario` 기반 `slow`/`fail-once`/cancel 제어를 추가했습니다.
-  - `tests/e2e/download-cancel-retry.spec.ts`에서 느린 다운로드 취소와 실패 후 개별 재시도 성공 경로를 Playwright 회귀로 고정했습니다.
+  - `tests/e2e/fixtures/mock-electron-app.ts`에 `downloadScenario` 기반 `slow`/`fail-once`/cancel 제어와 취소 후 늦은 완료 이벤트 재현 옵션을 추가했습니다.
+  - `tests/e2e/download-cancel-retry.spec.ts`에서 느린 다운로드 취소 유지와 실패 후 개별 재시도 성공 경로를 Playwright 회귀로 고정했습니다.
+  - `use-download-page-controller.tsx`가 취소 이후 도착한 stale progress/status/completion 이벤트를 무시하도록 보강했습니다.
 
 ## 관찰 메모
 

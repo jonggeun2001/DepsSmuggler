@@ -53,6 +53,7 @@ test('느린 다운로드는 취소 후 취소됨 상태로 고정된다', async
       mode: 'slow',
       stepDelayMs: 150,
       completeDelayMs: 1200,
+      emitLateSuccessAfterCancel: true,
     },
   });
 

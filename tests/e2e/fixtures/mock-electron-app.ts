@@ -8,6 +8,7 @@ interface MockDownloadScenario {
   completeDelayMs?: number;
   failMessage?: string;
   failAttemptsByPackageId?: Record<string, number[]>;
+  emitLateSuccessAfterCancel?: boolean;
 }
 
 interface MockElectronAppOptions {
@@ -188,6 +189,7 @@ export async function setupMockElectronApp(
     let activeDownload: {
       outputPath: string;
       deliveryMethod: 'local' | 'email';
+      emitLateSuccessAfterCancel: boolean;
     } | null = null;
 
     const subscribe = <T,>(listeners: Set<(value: T) => void>, callback: (value: T) => void) => {
@@ -334,8 +336,12 @@ export async function setupMockElectronApp(
         cancel: async () => {
           state.runtime.cancelCount += 1;
           persistRuntime();
-          clearActiveDownloadTimers();
-          activeDownloadSequence += 1;
+          const shouldEmitLateSuccessAfterCancel = activeDownload?.emitLateSuccessAfterCancel ?? false;
+
+          if (!shouldEmitLateSuccessAfterCancel) {
+            clearActiveDownloadTimers();
+            activeDownloadSequence += 1;
+          }
 
           if (activeDownload) {
             emit(downloadAllCompleteListeners, {
@@ -405,6 +411,7 @@ export async function setupMockElectronApp(
           activeDownload = {
             outputPath: artifactPath,
             deliveryMethod,
+            emitLateSuccessAfterCancel: scenario.emitLateSuccessAfterCancel === true,
           };
 
           scheduleDownloadStep(currentSequence, stepDelay, () => {
