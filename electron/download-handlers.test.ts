@@ -142,6 +142,16 @@ const waitForExpectation = async (assertion: () => void, timeoutMs = 2000): Prom
   throw lastError;
 };
 
+const createDeferred = <T>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
+
 describe('registerDownloadHandlers', () => {
   let tempDir: string;
   const distribution: OSDistribution = {
@@ -885,6 +895,128 @@ describe('registerDownloadHandlers', () => {
           success: false,
           cancelled: true,
           outputPath: outputDir,
+        })
+      );
+    });
+  });
+
+  it('파일 분할 직후 취소되면 메일 전달 없이 분할 산출물만 담은 cancelled 완료 이벤트로 끝나야 함', async () => {
+    const splitDeferred = createDeferred<{
+      parts: string[];
+      metadataPath: string;
+      metadata: {
+        originalFileName: string;
+        originalSize: number;
+        partCount: number;
+        partSize: number;
+        checksum: string;
+        createdAt: string;
+      };
+      mergeScripts: {
+        bash: string;
+        powershell: string;
+      };
+    }>();
+
+    createArchiveFromDirectoryMock.mockImplementationOnce(async (_sourceDir: string, outputPath: string) => {
+      await fs.ensureDir(path.dirname(outputPath));
+      await fs.writeFile(outputPath, Buffer.alloc(4 * 1024));
+      return outputPath;
+    });
+    splitFileMock.mockImplementationOnce(async () => splitDeferred.promise);
+
+    registerDownloadHandlers(() => ({
+      webContents: {
+        send: webContentsSend,
+      },
+    }) as never);
+
+    const downloadStartHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:start'
+    )?.[1];
+    const downloadCancelHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'download:cancel'
+    )?.[1];
+
+    expect(downloadStartHandler).toBeTypeOf('function');
+    expect(downloadCancelHandler).toBeTypeOf('function');
+
+    const outputDir = path.join(tempDir, 'cancelled-after-split-output');
+
+    await downloadStartHandler(
+      {},
+      {
+        packages: [
+          {
+            id: 'pip-requests-2.28.0',
+            type: 'pip',
+            name: 'requests',
+            version: '2.28.0',
+          },
+        ],
+        options: {
+          outputDir,
+          outputFormat: 'tar.gz',
+          includeScripts: false,
+          concurrency: 1,
+          deliveryMethod: 'email',
+          email: {
+            to: 'offline@example.com',
+          },
+          fileSplit: {
+            enabled: true,
+            maxSizeMB: 0.001,
+          },
+          smtp: {
+            host: 'smtp.example.com',
+            port: 587,
+            user: 'sender@example.com',
+          },
+        },
+      }
+    );
+
+    await waitForExpectation(() => {
+      expect(splitFileMock).toHaveBeenCalled();
+    });
+
+    await downloadCancelHandler({});
+    splitDeferred.resolve({
+      parts: [
+        path.join(tempDir, 'bundle.tar.gz.part001'),
+        path.join(tempDir, 'bundle.tar.gz.part002'),
+      ],
+      metadataPath: path.join(tempDir, 'bundle.tar.gz.meta.json'),
+      metadata: {
+        originalFileName: 'bundle.tar.gz',
+        originalSize: 2048,
+        partCount: 2,
+        partSize: 1024,
+        checksum: 'abc',
+        createdAt: new Date().toISOString(),
+      },
+      mergeScripts: {
+        bash: path.join(tempDir, 'merge.sh'),
+        powershell: path.join(tempDir, 'merge.ps1'),
+      },
+    });
+
+    await waitForExpectation(() => {
+      expect(initializeEmailSenderMock).not.toHaveBeenCalled();
+      expect(sendEmailMock).not.toHaveBeenCalled();
+      expect(webContentsSend).toHaveBeenCalledWith(
+        'download:all-complete',
+        expect.objectContaining({
+          success: false,
+          cancelled: true,
+          outputPath: path.join(tempDir, 'bundle.tar.gz.part001'),
+          artifactPaths: expect.arrayContaining([
+            path.join(tempDir, 'bundle.tar.gz.part001'),
+            path.join(tempDir, 'bundle.tar.gz.part002'),
+            path.join(tempDir, 'bundle.tar.gz.meta.json'),
+            path.join(tempDir, 'merge.sh'),
+            path.join(tempDir, 'merge.ps1'),
+          ]),
         })
       );
     });

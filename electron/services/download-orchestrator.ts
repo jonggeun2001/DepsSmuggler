@@ -346,6 +346,7 @@ export function createDownloadOrchestrator(
           finalOutputPath,
           artifactPaths,
           failedDownloadCount,
+          isCancelled: () => downloadCancelled,
         });
 
         if (!emailOutcome.success) {
@@ -392,6 +393,7 @@ export function createDownloadOrchestrator(
     finalOutputPath: string;
     artifactPaths: string[];
     failedDownloadCount: number;
+    isCancelled: () => boolean;
   }): Promise<
     | {
         success: true;
@@ -409,7 +411,7 @@ export function createDownloadOrchestrator(
         completionPayload: Record<string, unknown>;
       }
   > {
-    const { options, packageInfos, results, failedDownloadCount } = params;
+    const { options, packageInfos, results, failedDownloadCount, isCancelled } = params;
     let { finalOutputPath, artifactPaths } = params;
     const smtpOptions = options.smtp;
     const emailOptions = options.email;
@@ -459,6 +461,23 @@ export function createDownloadOrchestrator(
     const maxAttachmentSizeBytes = (options.fileSplit?.maxSizeMB ?? 25) * 1024 * 1024;
     let attachments = artifactPaths.length > 0 ? [...artifactPaths] : [finalOutputPath];
     let splitApplied = false;
+    const getCurrentArtifacts = () =>
+      attachments.length > 0 ? attachments : artifactPaths.length > 0 ? artifactPaths : [finalOutputPath];
+    const getCancelledOutcome = () => {
+      if (!isCancelled()) {
+        return null;
+      }
+
+      return {
+        success: false as const,
+        completionPayload: {
+          success: false,
+          cancelled: true,
+          outputPath: finalOutputPath,
+          artifactPaths: getCurrentArtifacts(),
+        },
+      };
+    };
 
     progressEmitter.emitDownloadStatus({
       phase: 'packaging',
@@ -466,7 +485,17 @@ export function createDownloadOrchestrator(
     });
 
     try {
+      const cancelledBeforeStat = getCancelledOutcome();
+      if (cancelledBeforeStat) {
+        return cancelledBeforeStat;
+      }
+
       const archiveStat = await (deps.stat ?? fse.stat.bind(fse))(finalOutputPath);
+      const cancelledAfterStat = getCancelledOutcome();
+      if (cancelledAfterStat) {
+        return cancelledAfterStat;
+      }
+
       if (archiveStat.size > maxAttachmentSizeBytes) {
         if (!options.fileSplit?.enabled) {
           return {
@@ -498,6 +527,11 @@ export function createDownloadOrchestrator(
         splitApplied = true;
       }
 
+      const cancelledBeforeEmailSetup = getCancelledOutcome();
+      if (cancelledBeforeEmailSetup) {
+        return cancelledBeforeEmailSetup;
+      }
+
       const emailSender = emailSenderFactory(
         {
           host: smtpOptions.host,
@@ -514,6 +548,11 @@ export function createDownloadOrchestrator(
         maxAttachmentSizeBytes
       );
 
+      const cancelledBeforeSend = getCancelledOutcome();
+      if (cancelledBeforeSend) {
+        return cancelledBeforeSend;
+      }
+
       const emailSendResult = await emailSender.sendEmail({
         to: emailOptions.to,
         subject:
@@ -528,7 +567,7 @@ export function createDownloadOrchestrator(
         ]
           .filter(Boolean)
           .join('\n'),
-        attachments,
+        attachments: getCurrentArtifacts(),
         packages: packageInfos,
       });
 

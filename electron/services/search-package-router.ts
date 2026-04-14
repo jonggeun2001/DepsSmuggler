@@ -301,11 +301,17 @@ function compareVersions(a: string, b: string): number {
 async function searchMaven(query: string): Promise<SearchPackageResult[]> {
   try {
     const results = await getMavenDownloader().searchPackages(query);
-    return results.map((pkg) => ({
-      name: pkg.name,
-      version: pkg.version,
-      description: `Maven artifact: ${pkg.name}`,
-    }));
+    return results.map((pkg) => {
+      const [groupId = '', artifactId = pkg.name] = pkg.name.split(':');
+      return {
+        name: pkg.name,
+        version: pkg.version,
+        description: `Maven artifact: ${pkg.name}`,
+        popularityCount: pkg.metadata?.popularityCount,
+        groupId,
+        artifactId,
+      };
+    });
   } catch (error) {
     throw new Error(
       error instanceof Error

@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerSearchHandlers } from './search-handlers';
 import { resolveAllDependencies } from '../src/core/shared';
 
-const { ipcHandle, senderSend } = vi.hoisted(() => ({
+const { ipcHandle, senderSend, mavenSearchPackagesMock } = vi.hoisted(() => ({
   ipcHandle: vi.fn(),
   senderSend: vi.fn(),
+  mavenSearchPackagesMock: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -35,7 +36,10 @@ vi.mock('../src/core/shared', () => ({
 
 vi.mock('../src/core', () => ({
   getPipDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
-  getMavenDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
+  getMavenDownloader: vi.fn(() => ({
+    searchPackages: mavenSearchPackagesMock,
+    getVersions: vi.fn(),
+  })),
   getCondaDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
   getDockerDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
   getYumDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
@@ -74,6 +78,7 @@ vi.mock('../src/core/shared/maven-utils', () => ({
 describe('registerSearchHandlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mavenSearchPackagesMock.mockResolvedValue([]);
     vi.mocked(resolveAllDependencies).mockResolvedValue({
       originalPackages: [],
       allPackages: [],
@@ -123,5 +128,40 @@ describe('registerSearchHandlers', () => {
         architecture: 'x86_64',
       })
     );
+  });
+
+  it('search:packages는 Maven 검색 결과의 추가 메타데이터를 유지해야 한다', async () => {
+    mavenSearchPackagesMock.mockResolvedValue([
+      {
+        name: 'org.springframework:spring-core',
+        version: '6.1.5',
+        metadata: {
+          popularityCount: 3210,
+        },
+      },
+    ]);
+
+    registerSearchHandlers();
+
+    const searchPackagesHandler = ipcHandle.mock.calls.find(
+      ([channel]) => channel === 'search:packages'
+    )?.[1];
+
+    expect(searchPackagesHandler).toBeTypeOf('function');
+
+    const result = await searchPackagesHandler({}, 'maven', 'spring-core');
+
+    expect(result).toEqual({
+      results: [
+        {
+          name: 'org.springframework:spring-core',
+          version: '6.1.5',
+          description: 'Maven artifact: org.springframework:spring-core',
+          popularityCount: 3210,
+          groupId: 'org.springframework',
+          artifactId: 'spring-core',
+        },
+      ],
+    });
   });
 });
