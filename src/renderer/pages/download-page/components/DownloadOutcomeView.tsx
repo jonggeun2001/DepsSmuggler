@@ -52,16 +52,25 @@ export function DownloadOutcomeView({
   onComplete,
 }: DownloadOutcomeViewProps) {
   const isCompleted = variant === 'completed';
+  const hasCancelledDelivery = !isCompleted && Boolean(completedDeliveryResult?.emailSent);
 
   return (
     <div>
       <Result
-        status={isCompleted ? (failedCount > 0 ? 'warning' : 'success') : 'error'}
+        status={
+          isCompleted
+            ? (failedCount > 0 ? 'warning' : 'success')
+            : hasCancelledDelivery
+            ? 'warning'
+            : 'error'
+        }
         title={
           isCompleted
             ? failedCount > 0
               ? '부분 완료'
               : '다운로드 완료'
+            : hasCancelledDelivery
+            ? '취소 후 이메일 전달 완료'
             : completedArtifactPaths.length > 0
             ? '전달 실패'
             : '다운로드 실패'
@@ -71,6 +80,8 @@ export function DownloadOutcomeView({
             ? failedCount > 0
               ? `${completedCount}개 패키지가 완료되었고 ${failedCount}개는 실패했습니다. 생성된 산출물을 확인하세요.`
               : `${completedCount}개 패키지가 성공적으로 다운로드되었습니다`
+            : hasCancelledDelivery
+            ? '다운로드는 취소되었지만 이메일 전달은 이미 완료되었습니다. 전달 이력과 산출물을 확인하세요.'
             : completedArtifactPaths.length > 0
             ? '로컬 산출물은 생성되었습니다. 경로를 확인해 수동 전달을 진행할 수 있습니다.'
             : '패키징 또는 전달 중 오류가 발생했습니다.'
@@ -90,13 +101,18 @@ export function DownloadOutcomeView({
         ]}
       />
 
-      <Card title={isCompleted ? '다운로드 결과' : '실패 결과'} style={{ marginTop: 24 }}>
+      <Card
+        title={isCompleted ? '다운로드 결과' : hasCancelledDelivery ? '전달 결과' : '실패 결과'}
+        style={{ marginTop: 24 }}
+      >
         {!isCompleted && (
           <Alert
-            type="error"
+            type={hasCancelledDelivery ? 'warning' : 'error'}
             showIcon
-            message="전달 실패 상세"
-            description={completedError || completedDeliveryResult?.error || '상세 오류를 확인할 수 없습니다.'}
+            message={hasCancelledDelivery ? '취소 이후 전달 완료' : '전달 실패 상세'}
+            description={
+              completedError || completedDeliveryResult?.error || '상세 오류를 확인할 수 없습니다.'
+            }
             style={{ marginBottom: 16 }}
           />
         )}
@@ -158,7 +174,7 @@ export function DownloadOutcomeView({
 
         {completedArtifactPaths.length > 0 && (
           <div>
-            <Text strong>{isCompleted ? '실제 산출물:' : '복구 가능한 산출물:'}</Text>
+            <Text strong>{isCompleted || hasCancelledDelivery ? '실제 산출물:' : '복구 가능한 산출물:'}</Text>
             <div style={{ marginTop: 8 }}>
               {completedArtifactPaths.map((artifactPath) => (
                 <Paragraph key={artifactPath} copyable style={{ marginBottom: 4 }}>
@@ -169,9 +185,9 @@ export function DownloadOutcomeView({
           </div>
         )}
 
-        {isCompleted && completedDeliveryResult?.emailSent && (
+        {(isCompleted || hasCancelledDelivery) && completedDeliveryResult?.emailSent && (
           <Alert
-            type="success"
+            type={hasCancelledDelivery ? 'warning' : 'success'}
             showIcon
             style={{ marginTop: 16 }}
             message={`이메일 전달 완료 (${completedDeliveryResult.emailsSent || 1}건)`}

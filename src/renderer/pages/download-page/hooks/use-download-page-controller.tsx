@@ -110,6 +110,7 @@ export function useDownloadPageController() {
 
   const downloadCancelledRef = useRef(false);
   const downloadPausedRef = useRef(false);
+  const cancelledCompletionRetainedRef = useRef(false);
   const dependencyResolutionBypassedRef = useRef(false);
   const previousIncludeDependenciesRef = useRef(includeDependencies);
   const downloadItemsRef = useRef<DownloadItem[]>([]);
@@ -599,6 +600,33 @@ export function useDownloadPageController() {
         setIsPaused(false);
 
         if (data.cancelled) {
+          if (data.deliveryResult?.emailSent) {
+            const cancelledDeliveryMessage =
+              '다운로드는 취소되었지만 이메일 전달은 이미 완료되었습니다.';
+            cancelledCompletionRetainedRef.current = true;
+            setPackagingStatus('failed');
+            setPackagingProgress(100);
+            setCompletedOutputPath(data.outputPath || '');
+            setCompletedArtifactPaths(
+              data.artifactPaths && data.artifactPaths.length > 0
+                ? data.artifactPaths
+                : data.outputPath
+                ? [data.outputPath]
+                : []
+            );
+            setCompletedDeliveryResult(data.deliveryResult);
+            setCompletedError(cancelledDeliveryMessage);
+            scheduleLogBatch('warn', '취소 후 이메일 전달 완료', cancelledDeliveryMessage);
+            message.warning(cancelledDeliveryMessage);
+            void persistHistoryEntry(data, undefined, completionSessionSnapshot).catch((error) => {
+              const historyError = error instanceof Error ? error.message : 'unknown error';
+              scheduleLogBatch('error', '히스토리 저장 실패', historyError);
+              message.error('히스토리 저장에 실패했습니다.');
+            });
+            return;
+          }
+
+          cancelledCompletionRetainedRef.current = false;
           setPackagingStatus('idle');
           setPackagingProgress(0);
           setCompletedOutputPath('');
@@ -1001,6 +1029,7 @@ export function useDownloadPageController() {
 
     setIsDownloading(true);
     setIsPaused(false);
+    cancelledCompletionRetainedRef.current = false;
     setStartTime(Date.now());
     const sessionSnapshot = createDownloadSessionSnapshot(
       [...cartItems],
@@ -1139,6 +1168,7 @@ export function useDownloadPageController() {
       cancelText: '계속',
       onOk: async () => {
         downloadCancelledRef.current = true;
+        cancelledCompletionRetainedRef.current = false;
 
         if (window.electronAPI?.download?.cancel) {
           await window.electronAPI.download.cancel();
@@ -1152,9 +1182,11 @@ export function useDownloadPageController() {
             updateItem(item.id, { status: 'cancelled' });
           }
         });
-        setPackagingStatus('idle');
-        addLog('warn', '다운로드 취소됨');
-        message.warning('다운로드가 취소되었습니다');
+        if (!cancelledCompletionRetainedRef.current) {
+          setPackagingStatus('idle');
+          addLog('warn', '다운로드 취소됨');
+          message.warning('다운로드가 취소되었습니다');
+        }
       },
     });
   }, [addLog, downloadItems, setIsDownloading, setIsPaused, setPackagingStatus, updateItem]);

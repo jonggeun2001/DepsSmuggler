@@ -9,6 +9,7 @@ interface MockDownloadScenario {
   failMessage?: string;
   failAttemptsByPackageId?: Record<string, number[]>;
   emitLateSuccessAfterCancel?: boolean;
+  cancelledCompletionRetainsDelivery?: boolean;
   startScenarios?: MockDownloadScenario[];
 }
 
@@ -194,6 +195,7 @@ export async function setupMockElectronApp(
       outputPath: string;
       artifactPath: string;
       packages: Array<Record<string, unknown>>;
+      results: Array<{ id: unknown; success: boolean; error?: string }>;
       deliveryMethod: 'local' | 'email';
       deliveryResult?:
         | {
@@ -203,6 +205,7 @@ export async function setupMockElectronApp(
             splitApplied: boolean;
           }
         | undefined;
+      cancelledCompletionRetainsDelivery: boolean;
       completionDelay: number;
       emitLateSuccessAfterCancel: boolean;
     } | null = null;
@@ -401,8 +404,16 @@ export async function setupMockElectronApp(
               success: false,
               cancelled: true,
               outputPath: activeDownload.outputPath,
-              artifactPaths: [],
+              artifactPaths: activeDownload.cancelledCompletionRetainsDelivery
+                ? [activeDownload.artifactPath]
+                : [],
               deliveryMethod: activeDownload.deliveryMethod,
+              deliveryResult: activeDownload.cancelledCompletionRetainsDelivery
+                ? activeDownload.deliveryResult
+                : undefined,
+              results: activeDownload.cancelledCompletionRetainsDelivery
+                ? activeDownload.results
+                : undefined,
             });
             activeDownload = null;
           }
@@ -470,13 +481,21 @@ export async function setupMockElectronApp(
 
             return scenarioMode === 'fail-once' && !hasExplicitFailurePlan && attempts === 1;
           });
+          const downloadResults = packages.map((pkg, index) => ({
+            id: pkg.id,
+            success: !packageFailures[index],
+            error: packageFailures[index] ? failMessage : undefined,
+          }));
           activeDownload = {
             sessionId,
             outputPath: artifactPath,
             artifactPath,
             packages: clone(packages),
+            results: clone(downloadResults),
             deliveryMethod,
             deliveryResult,
+            cancelledCompletionRetainsDelivery:
+              scenario.cancelledCompletionRetainsDelivery === true,
             completionDelay,
             emitLateSuccessAfterCancel: scenario.emitLateSuccessAfterCancel === true,
           };
@@ -521,7 +540,8 @@ export async function setupMockElectronApp(
           });
 
           scheduleDownloadStep(currentSequence, completionDelay, () => {
-            if (packageFailures.some(Boolean)) {
+            const hasSuccessfulPackages = downloadResults.some((result) => result.success);
+            if (!hasSuccessfulPackages) {
               emit(downloadAllCompleteListeners, {
                 sessionId,
                 success: false,
@@ -529,11 +549,7 @@ export async function setupMockElectronApp(
                 artifactPaths: [artifactPath],
                 deliveryMethod,
                 error: failMessage,
-                results: packages.map((pkg, index) => ({
-                  id: pkg.id,
-                  success: !packageFailures[index],
-                  error: packageFailures[index] ? failMessage : undefined,
-                })),
+                results: downloadResults,
               });
               activeDownload = null;
               return;
@@ -566,10 +582,7 @@ export async function setupMockElectronApp(
               artifactPaths: [artifactPath],
               deliveryMethod,
               deliveryResult,
-              results: packages.map((pkg) => ({
-                id: pkg.id,
-                success: true,
-              })),
+              results: downloadResults,
             });
             activeDownload = null;
           });
