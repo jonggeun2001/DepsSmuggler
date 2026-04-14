@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createPendingDownloadItems,
+  hasMatchingCartSnapshot,
   getPackageGroupStatus,
   getPackageDependencies,
   persistHistoryAndMaybeClearCart,
@@ -83,6 +84,17 @@ describe('download-page/utils', () => {
     });
   });
 
+  it('cart snapshot과 현재 장바구니가 같을 때만 true를 반환한다', () => {
+    const snapshot = [
+      { id: 'a', name: 'a', version: '1.0.0', type: 'pip', addedAt: 1 },
+      { id: 'b', name: 'b', version: '1.0.0', type: 'npm', addedAt: 2 },
+    ];
+
+    expect(hasMatchingCartSnapshot(snapshot, [...snapshot])).toBe(true);
+    expect(hasMatchingCartSnapshot(snapshot, [snapshot[0]])).toBe(false);
+    expect(hasMatchingCartSnapshot(snapshot, [snapshot[1], snapshot[0]])).toBe(false);
+  });
+
   it('히스토리 저장이 성공하면 장바구니를 비운다', async () => {
     let cleared = false;
 
@@ -121,5 +133,23 @@ describe('download-page/utils', () => {
     expect(result).toBe(false);
     expect(cleared).toBe(false);
     expect(capturedError).toBeInstanceOf(Error);
+  });
+
+  it('히스토리 저장이 성공해도 canClearCart가 false면 장바구니를 유지한다', async () => {
+    let cleared = false;
+
+    const result = await persistHistoryAndMaybeClearCart({
+      persistHistory: async () => undefined,
+      clearCart: () => {
+        cleared = true;
+      },
+      canClearCart: () => false,
+      onPersistError: () => {
+        throw new Error('should not be called');
+      },
+    });
+
+    expect(result).toBe(true);
+    expect(cleared).toBe(false);
   });
 });

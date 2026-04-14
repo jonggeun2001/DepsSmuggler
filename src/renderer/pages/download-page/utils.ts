@@ -150,6 +150,14 @@ export function createPendingDownloadItems(items: PendingDownloadSource[]): Down
   }));
 }
 
+export function hasMatchingCartSnapshot(snapshot: CartItem[], currentItems: CartItem[]): boolean {
+  if (snapshot.length !== currentItems.length) {
+    return false;
+  }
+
+  return snapshot.every((item, index) => currentItems[index]?.id === item.id);
+}
+
 export function formatBytes(bytes: number): string {
   if (!bytes || bytes === 0) return '-';
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
@@ -187,13 +195,18 @@ export async function persistHistoryAndMaybeClearCart({
 }: {
   persistHistory: () => Promise<void>;
   clearCart: () => void;
-  canClearCart: boolean;
+  canClearCart: boolean | (() => boolean);
   onPersistError: (error: unknown) => void;
 }): Promise<boolean> {
   try {
     await persistHistory();
 
-    if (canClearCart) {
+    const shouldClearCart =
+      typeof canClearCart === 'function'
+        ? canClearCart()
+        : canClearCart;
+
+    if (shouldClearCart) {
       clearCart();
     }
 

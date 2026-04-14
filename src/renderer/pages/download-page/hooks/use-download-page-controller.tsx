@@ -15,7 +15,12 @@ import {
   buildHistorySettings,
   getEmailDeliveryValidationError,
 } from '../../download-delivery-utils';
-import { createPendingDownloadItems, formatBytes, persistHistoryAndMaybeClearCart } from '../utils';
+import {
+  createPendingDownloadItems,
+  formatBytes,
+  hasMatchingCartSnapshot,
+  persistHistoryAndMaybeClearCart,
+} from '../utils';
 import { deriveDownloadPageMode, getDownloadCounts, hasRecoverableArtifacts } from '../view-state';
 import { useOSDownloadFlow } from './use-os-download-flow';
 import type {
@@ -588,7 +593,9 @@ export function useDownloadPageController() {
       void persistHistoryAndMaybeClearCart({
         persistHistory: () => persistHistoryEntry(data),
         clearCart,
-        canClearCart: failedCount === 0,
+        canClearCart: () =>
+          failedCount === 0
+          && hasMatchingCartSnapshot(cartSnapshotRef.current, useCartStore.getState().items),
         onPersistError: (error) => {
           const historyError = error instanceof Error ? error.message : 'unknown error';
           scheduleLogBatch('error', '히스토리 저장 실패', historyError);

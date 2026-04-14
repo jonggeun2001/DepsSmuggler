@@ -4,6 +4,7 @@ import { buildHistorySettings } from '../../download-delivery-utils';
 import {
   buildOSDependencyIssueMessage,
   getOSCartContextSnapshot,
+  hasMatchingCartSnapshot,
   isOSCartItem,
   persistHistoryAndMaybeClearCart,
   toOSPackageInfo,
@@ -15,7 +16,7 @@ import type {
   OSDownloadProgress as OSDownloadProgressData,
 } from '../../../../core/downloaders/os-shared/types';
 import type { HistoryPackageItem, HistorySettings, HistoryStatus } from '../../../../types';
-import type { CartItem } from '../../../stores/cart-store';
+import { useCartStore, type CartItem } from '../../../stores/cart-store';
 import type {
   OSCartContextSnapshot,
   OSDownloadResultData,
@@ -276,7 +277,9 @@ export function useOSDownloadFlow({
         await persistHistoryAndMaybeClearCart({
           persistHistory: () => addOSDownloadHistory(result),
           clearCart,
-          canClearCart: shouldClearCart,
+          canClearCart: () =>
+            shouldClearCart
+            && hasMatchingCartSnapshot(cartSnapshotRef.current, useCartStore.getState().items),
           onPersistError: (error) => {
             console.error('OS download history persistence failed:', error);
             historySaveError = error instanceof Error ? error.message : 'unknown error';
