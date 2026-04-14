@@ -435,18 +435,18 @@ export function useDownloadPageController() {
       return `${bytes} B`;
     };
 
-    const unsubProgress = window.electronAPI.download.onProgress((progress: unknown) => {
-      const p = progress as {
-        packageId: string;
-        status: string;
-        progress: number;
-        downloadedBytes: number;
-        totalBytes: number;
-        speed?: number;
-        error?: string;
-      };
+    const isStaleSessionEvent = (sessionId?: number) => {
+      if (typeof sessionId !== 'number') {
+        return false;
+      }
 
-      if (downloadCancelledRef.current) {
+      return sessionId !== activeDownloadSessionRef.current?.id;
+    };
+
+    const unsubProgress = window.electronAPI.download.onProgress((progress) => {
+      const p = progress;
+
+      if (isStaleSessionEvent(p.sessionId) || downloadCancelledRef.current) {
         return;
       }
 
@@ -484,7 +484,7 @@ export function useDownloadPageController() {
     });
 
     const unsubStatus = window.electronAPI.download.onStatus?.((status) => {
-      if (downloadCancelledRef.current) {
+      if (isStaleSessionEvent(status.sessionId) || downloadCancelledRef.current) {
         return;
       }
 
@@ -584,6 +584,10 @@ export function useDownloadPageController() {
     });
 
     const unsubAllComplete = window.electronAPI.download.onAllComplete?.((data) => {
+      if (isStaleSessionEvent(data.sessionId)) {
+        return;
+      }
+
       const completionSessionSnapshot = activeDownloadSessionRef.current;
 
       if (downloadCancelledRef.current && !data.cancelled) {
@@ -1009,7 +1013,7 @@ export function useDownloadPageController() {
       return;
     }
 
-    createDownloadSessionSnapshot(
+    const sessionSnapshot = createDownloadSessionSnapshot(
       [...cartItems],
       new Set(downloadItems.map((item) => item.id)),
       buildHistorySettings({
@@ -1071,7 +1075,11 @@ export function useDownloadPageController() {
         maxFileSizeMB: maxFileSize,
       });
 
-      await window.electronAPI.download.start({ packages, options });
+      await window.electronAPI.download.start({
+        sessionId: sessionSnapshot.id,
+        packages,
+        options,
+      });
     } catch (error) {
       addLog('error', '다운로드 시작 실패', String(error));
       setIsDownloading(false);
@@ -1172,7 +1180,7 @@ export function useDownloadPageController() {
       return;
     }
 
-    createDownloadSessionSnapshot(
+    const sessionSnapshot = createDownloadSessionSnapshot(
       [{
         id: item.id,
         type: item.type as CartItem['type'],
@@ -1236,7 +1244,11 @@ export function useDownloadPageController() {
         maxFileSizeMB: maxFileSize,
       });
 
-      await window.electronAPI.download.start({ packages, options });
+      await window.electronAPI.download.start({
+        sessionId: sessionSnapshot.id,
+        packages,
+        options,
+      });
       addLog('info', `재시도 완료: ${item.name}`);
     } catch (error) {
       addLog('error', `재시도 실패: ${item.name}`, String(error));

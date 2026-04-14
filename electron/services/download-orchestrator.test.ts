@@ -45,6 +45,7 @@ describe('createDownloadOrchestrator', () => {
     });
 
     const result = await orchestrator.startDownload({
+      sessionId: 101,
       packages: [
         {
           id: 'pip-requests-2.28.0',
@@ -68,6 +69,12 @@ describe('createDownloadOrchestrator', () => {
     });
 
     expect(result).toEqual({ success: true, started: true });
+    expect(progressEmitter.emitDownloadStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 101,
+        phase: 'downloading',
+      })
+    );
     expect(ensureDir).toHaveBeenCalledWith(path.join('/tmp/out', 'packages'));
     expect(generateInstallScripts).toHaveBeenCalledWith('/tmp/out', [
       expect.objectContaining({
@@ -91,6 +98,7 @@ describe('createDownloadOrchestrator', () => {
     );
     expect(progressEmitter.emitAllComplete).toHaveBeenCalledWith(
       expect.objectContaining({
+        sessionId: 101,
         success: true,
         outputPath: '/tmp/out.tar.gz',
         results: [
@@ -142,6 +150,7 @@ describe('createDownloadOrchestrator', () => {
     });
 
     const result = await orchestrator.startDownload({
+      sessionId: 202,
       packages: [
         {
           id: 'pip-requests-2.28.0',
@@ -184,6 +193,7 @@ describe('createDownloadOrchestrator', () => {
     expect(sendEmail).not.toHaveBeenCalled();
     expect(progressEmitter.emitAllComplete).toHaveBeenCalledWith(
       expect.objectContaining({
+        sessionId: 202,
         success: false,
         cancelled: true,
         outputPath: '/tmp/out.tar.gz',

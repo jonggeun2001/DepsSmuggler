@@ -1,6 +1,18 @@
 // Electron API 타입 정의 (렌더러 프로세스용)
 
+export interface DownloadProgressData {
+  sessionId?: number;
+  packageId: string;
+  status: string;
+  progress: number;
+  downloadedBytes: number;
+  totalBytes: number;
+  speed?: number;
+  error?: string;
+}
+
 export interface DownloadStatusData {
+  sessionId?: number;
   phase: 'resolving' | 'downloading' | 'packaging' | 'complete';
   message: string;
 }
@@ -13,6 +25,7 @@ export interface DepsResolvedData {
 }
 
 export interface AllCompleteData {
+  sessionId?: number;
   success: boolean;
   outputPath: string;
   artifactPaths?: string[];
@@ -31,6 +44,12 @@ export interface AllCompleteData {
     success: boolean;
     error?: string;
   }>;
+}
+
+export interface DownloadStartRequest {
+  sessionId?: number;
+  packages: unknown[];
+  options: DownloadStartOptions;
 }
 
 export interface DownloadStartOptions {
@@ -76,7 +95,7 @@ export interface SmtpConnectionResult {
 }
 
 export interface DownloadAPI {
-  start: (data: { packages: unknown[]; options: DownloadStartOptions }) => Promise<void>;
+  start: (data: DownloadStartRequest) => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   cancel: () => Promise<void>;
@@ -90,7 +109,7 @@ export interface DownloadAPI {
     success: boolean;
     deleted?: boolean;
   }>;
-  onProgress: (callback: (progress: unknown) => void) => () => void;
+  onProgress: (callback: (progress: DownloadProgressData) => void) => () => void;
   onStatus?: (callback: (status: DownloadStatusData) => void) => () => void;
   onDepsResolved?: (callback: (data: DepsResolvedData) => void) => () => void;
   onAllComplete?: (callback: (data: AllCompleteData) => void) => () => void;

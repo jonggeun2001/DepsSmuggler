@@ -2,6 +2,7 @@ import type { BrowserWindow } from 'electron';
 import type { OSDownloadProgress } from '../../src/core/downloaders/os-shared/types';
 
 export interface PackageProgressPayload {
+  sessionId?: number;
   status: string;
   progress: number;
   downloadedBytes: number;
@@ -11,6 +12,7 @@ export interface PackageProgressPayload {
 }
 
 export interface DownloadStatusPayload {
+  sessionId?: number;
   phase: string;
   message: string;
 }

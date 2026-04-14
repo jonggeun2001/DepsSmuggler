@@ -30,6 +30,7 @@ const electronAPI = {
   // 다운로드 관련
   download: {
     start: (data: {
+      sessionId?: number;
       packages: unknown[];
       options: {
         outputDir: string;
@@ -76,16 +77,36 @@ const electronAPI = {
       success: boolean;
       deleted?: boolean;
     }> => ipcRenderer.invoke('download:clear-path', outputDir),
-    onProgress: (callback: (progress: unknown) => void): () => void => {
+    onProgress: (callback: (progress: {
+      sessionId?: number;
+      packageId: string;
+      status: string;
+      progress: number;
+      downloadedBytes: number;
+      totalBytes: number;
+      speed?: number;
+      error?: string;
+    }) => void): () => void => {
       const handler = (_event: Electron.IpcRendererEvent, progress: unknown) =>
-        callback(progress);
+        callback(progress as {
+          sessionId?: number;
+          packageId: string;
+          status: string;
+          progress: number;
+          downloadedBytes: number;
+          totalBytes: number;
+          speed?: number;
+          error?: string;
+        });
       ipcRenderer.on('download:progress', handler);
       return () => ipcRenderer.removeListener('download:progress', handler);
     },
     // 의존성 해결 상태 이벤트
-    onStatus: (callback: (status: { phase: string; message: string }) => void): () => void => {
-      const handler = (_event: Electron.IpcRendererEvent, status: { phase: string; message: string }) =>
-        callback(status);
+    onStatus: (callback: (status: { sessionId?: number; phase: string; message: string }) => void): () => void => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        status: { sessionId?: number; phase: string; message: string }
+      ) => callback(status);
       ipcRenderer.on('download:status', handler);
       return () => ipcRenderer.removeListener('download:status', handler);
     },
@@ -103,6 +124,7 @@ const electronAPI = {
     },
     // 전체 다운로드 완료 이벤트
     onAllComplete: (callback: (data: {
+      sessionId?: number;
       success: boolean;
       outputPath: string;
       artifactPaths?: string[];
@@ -120,6 +142,7 @@ const electronAPI = {
     }) => void): () => void => {
       const handler = (_event: Electron.IpcRendererEvent, data: unknown) =>
         callback(data as {
+          sessionId?: number;
           success: boolean;
           outputPath: string;
           artifactPaths?: string[];

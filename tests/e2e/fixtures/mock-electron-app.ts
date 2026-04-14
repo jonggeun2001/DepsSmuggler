@@ -9,6 +9,7 @@ interface MockDownloadScenario {
   failMessage?: string;
   failAttemptsByPackageId?: Record<string, number[]>;
   emitLateSuccessAfterCancel?: boolean;
+  startScenarios?: MockDownloadScenario[];
 }
 
 interface MockElectronAppOptions {
@@ -28,7 +29,7 @@ interface MockElectronAppState {
     histories: DownloadHistory[];
   };
   runtime: {
-    downloadCalls: Array<{ packages: unknown[]; options: Record<string, unknown> }>;
+    downloadCalls: Array<{ sessionId?: number; packages: unknown[]; options: Record<string, unknown> }>;
     smtpTestCalls: Array<Record<string, unknown>>;
     openedPaths: string[];
     cancelCount: number;
@@ -185,10 +186,23 @@ export async function setupMockElectronApp(
     const downloadAllCompleteListeners = new Set<(value: unknown) => void>();
     const osProgressListeners = new Set<(value: unknown) => void>();
     let activeDownloadTimers: number[] = [];
+    let detachedDownloadTimers: number[] = [];
     let activeDownloadSequence = 0;
     let activeDownload: {
+      sessionId: number;
       outputPath: string;
+      artifactPath: string;
+      packages: Array<Record<string, unknown>>;
       deliveryMethod: 'local' | 'email';
+      deliveryResult?:
+        | {
+            emailSent: boolean;
+            emailsSent: number;
+            attachmentsSent: number;
+            splitApplied: boolean;
+          }
+        | undefined;
+      completionDelay: number;
       emitLateSuccessAfterCancel: boolean;
     } | null = null;
 
@@ -215,6 +229,11 @@ export async function setupMockElectronApp(
         action();
       }, delayMs);
       activeDownloadTimers.push(timerId);
+    };
+
+    const scheduleDetachedDownloadStep = (delayMs: number, action: () => void) => {
+      const timerId = window.setTimeout(action, delayMs);
+      detachedDownloadTimers.push(timerId);
     };
 
     const readHistories = (): DownloadHistory[] => {
@@ -336,15 +355,48 @@ export async function setupMockElectronApp(
         cancel: async () => {
           state.runtime.cancelCount += 1;
           persistRuntime();
-          const shouldEmitLateSuccessAfterCancel = activeDownload?.emitLateSuccessAfterCancel ?? false;
+          const cancelledDownload = activeDownload;
+          clearActiveDownloadTimers();
+          activeDownloadSequence += 1;
 
-          if (!shouldEmitLateSuccessAfterCancel) {
-            clearActiveDownloadTimers();
-            activeDownloadSequence += 1;
+          if (cancelledDownload?.emitLateSuccessAfterCancel) {
+            scheduleDetachedDownloadStep(cancelledDownload.completionDelay, () => {
+              cancelledDownload.packages.forEach((pkg) => {
+                emit(downloadProgressListeners, {
+                  sessionId: cancelledDownload.sessionId,
+                  packageId: pkg.id,
+                  status: 'completed',
+                  progress: 100,
+                  downloadedBytes: 1024,
+                  totalBytes: 1024,
+                  speed: 0,
+                });
+              });
+
+              emit(downloadStatusListeners, {
+                sessionId: cancelledDownload.sessionId,
+                phase: 'packaging',
+                message: '패키징',
+              });
+
+              emit(downloadAllCompleteListeners, {
+                sessionId: cancelledDownload.sessionId,
+                success: true,
+                outputPath: cancelledDownload.outputPath,
+                artifactPaths: [cancelledDownload.artifactPath],
+                deliveryMethod: cancelledDownload.deliveryMethod,
+                deliveryResult: cancelledDownload.deliveryResult,
+                results: cancelledDownload.packages.map((pkg) => ({
+                  id: pkg.id,
+                  success: true,
+                })),
+              });
+            });
           }
 
           if (activeDownload) {
             emit(downloadAllCompleteListeners, {
+              sessionId: activeDownload.sessionId,
               success: false,
               cancelled: true,
               outputPath: activeDownload.outputPath,
@@ -358,7 +410,7 @@ export async function setupMockElectronApp(
         },
         checkPath: async () => ({ exists: false, files: [], fileCount: 0, totalSize: 0 }),
         clearPath: async () => ({ success: true, deleted: true }),
-        start: async (payload: { packages: Array<Record<string, unknown>>; options: Record<string, unknown> }) => {
+        start: async (payload: { sessionId?: number; packages: Array<Record<string, unknown>>; options: Record<string, unknown> }) => {
           state.runtime.downloadCalls.push(clone(payload));
           (payload.packages || []).forEach((pkg) => {
             const packageId = String(pkg.id || '');
@@ -389,12 +441,15 @@ export async function setupMockElectronApp(
                   splitApplied: false,
                 }
               : undefined;
-          const scenario = seed.downloadScenario || {};
+          const startCount = state.runtime.downloadCalls.length;
+          const rootScenario = seed.downloadScenario || {};
+          const scenario = rootScenario.startScenarios?.[startCount - 1] || rootScenario;
           const scenarioMode = scenario.mode || 'success';
           const stepDelay = scenario.stepDelayMs ?? seed.downloadDelayMs ?? 10;
           const completionDelay =
             scenario.completeDelayMs ?? (scenarioMode === 'slow' ? stepDelay * 20 : stepDelay * 3);
           const failMessage = scenario.failMessage || 'mock download failed';
+          const sessionId = payload.sessionId ?? startCount;
           const explicitFailurePlan = scenario.failAttemptsByPackageId || {};
           const hasExplicitFailurePlan = Object.keys(explicitFailurePlan).length > 0;
           const packageFailures = packages.map((pkg) => {
@@ -409,13 +464,19 @@ export async function setupMockElectronApp(
             return scenarioMode === 'fail-once' && !hasExplicitFailurePlan && attempts === 1;
           });
           activeDownload = {
+            sessionId,
             outputPath: artifactPath,
+            artifactPath,
+            packages: clone(packages),
             deliveryMethod,
+            deliveryResult,
+            completionDelay,
             emitLateSuccessAfterCancel: scenario.emitLateSuccessAfterCancel === true,
           };
 
           scheduleDownloadStep(currentSequence, stepDelay, () => {
             emit(downloadStatusListeners, {
+              sessionId,
               phase: 'downloading',
               message: '다운로드 시작',
             });
@@ -427,6 +488,7 @@ export async function setupMockElectronApp(
 
               if (shouldFail) {
                 emit(downloadProgressListeners, {
+                  sessionId,
                   packageId,
                   status: 'failed',
                   progress: 35,
@@ -440,6 +502,7 @@ export async function setupMockElectronApp(
 
               const isSlow = scenarioMode === 'slow';
               emit(downloadProgressListeners, {
+                sessionId,
                 packageId,
                 status: isSlow ? 'downloading' : 'completed',
                 progress: isSlow ? 25 : 100,
@@ -453,6 +516,7 @@ export async function setupMockElectronApp(
           scheduleDownloadStep(currentSequence, completionDelay, () => {
             if (packageFailures.some(Boolean)) {
               emit(downloadAllCompleteListeners, {
+                sessionId,
                 success: false,
                 outputPath: artifactPath,
                 artifactPaths: [artifactPath],
@@ -471,6 +535,7 @@ export async function setupMockElectronApp(
             packages.forEach((pkg) => {
               if (scenarioMode === 'slow') {
                 emit(downloadProgressListeners, {
+                  sessionId,
                   packageId: pkg.id,
                   status: 'completed',
                   progress: 100,
@@ -482,11 +547,13 @@ export async function setupMockElectronApp(
             });
 
             emit(downloadStatusListeners, {
+              sessionId,
               phase: 'packaging',
               message: '패키징',
             });
 
             emit(downloadAllCompleteListeners, {
+              sessionId,
               success: true,
               outputPath: artifactPath,
               artifactPaths: [artifactPath],

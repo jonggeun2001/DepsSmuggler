@@ -81,7 +81,7 @@
 - 실제 네트워크 호출 대신 mock preload API를 사용해 결정적 실행을 유지합니다.
 - 저장/복원 시나리오는 localStorage 초기 상태와 fixture runtime state 둘 다 검증합니다.
 - 다운로드 검증은 UI 제목만 보지 말고 `runtime.downloadCalls` payload까지 확인합니다.
-- 다운로드 취소/재시도 회귀는 `downloadScenario` 기반 fixture 상태 머신으로 고정하고, 취소 후 늦은 완료 이벤트까지 포함한 상태 전이와 `runtime.cancelCount`/`attemptsByPackageId`를 함께 검증합니다.
+- 다운로드 취소/재시도 회귀는 `downloadScenario` 기반 fixture 상태 머신과 `sessionId` 태깅을 함께 사용해, 취소 후 늦은 완료 이벤트와 재시작 세션 경계를 모두 검증합니다.
 - OS 패키지 시나리오는 일반 다운로드와 별도 파일로 유지해 분기 가독성을 지킵니다.
 
 ## 신규 스펙 템플릿
