@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Steps,
@@ -35,12 +35,24 @@ import {
 } from '@ant-design/icons';
 import { useCartStore, PackageType, Architecture } from '../stores/cart-store';
 import { useSettingsStore, DockerRegistry } from '../stores/settings-store';
-import type { OSPackageInfo } from '../../core/downloaders/os-shared/types';
+import {
+  buildOSCartContext,
+  getEffectiveArchitecture,
+  getOSCartContextSnapshot,
+} from './wizard-page/os-context';
+import {
+  resolveWizardTypeParam,
+  stripWizardTypeParam,
+} from './wizard-page/query-params';
+import { useWizardSearchFlow } from './wizard-page/useWizardSearchFlow';
+import {
+  LIBRARY_PACKAGE_TYPES,
+  OS_PACKAGE_TYPES,
+  type CategoryType,
+  type OSCartContextSnapshot,
+} from './wizard-page/types';
 
 const { Title, Text } = Typography;
-
-// 카테고리 타입
-type CategoryType = 'library' | 'os' | 'container';
 
 // 카테고리 옵션
 const categoryOptions: { value: CategoryType; label: string; icon: React.ReactNode; description: string }[] = [
@@ -143,59 +155,6 @@ const dockerRegistryOptions: { value: DockerRegistry; label: string; description
   { value: 'custom', label: '커스텀 레지스트리', description: '직접 레지스트리 URL 입력' },
 ];
 
-// 검색 결과 아이템
-interface SearchResult {
-  name: string;
-  version: string;
-  description?: string;
-  versions?: string[];
-  // OS 패키지용 추가 필드
-  downloadUrl?: string;
-  repository?: { baseUrl: string; name?: string };
-  location?: string;
-  architecture?: string;
-  // OS 패키지 전체 정보 (의존성 해결에 사용)
-  osPackageInfo?: OSPackageInfo;
-  // Docker 이미지용 추가 필드
-  registry?: string;
-  isOfficial?: boolean;
-  pullCount?: number;
-  // Maven 아티팩트용 추가 필드
-  popularityCount?: number;
-  groupId?: string;
-  artifactId?: string;
-}
-
-interface OSCartContextSnapshot {
-  distributionId: string;
-  architecture: Architecture;
-  packageManager: 'yum' | 'apt' | 'apk';
-}
-
-function getOSCartContextSnapshot(
-  metadata: Record<string, unknown> | undefined
-): OSCartContextSnapshot | null {
-  const raw = metadata?.osContext;
-  if (!raw || typeof raw !== 'object') {
-    return null;
-  }
-
-  const { distributionId, architecture, packageManager } = raw as Partial<OSCartContextSnapshot>;
-  if (
-    typeof distributionId !== 'string' ||
-    typeof architecture !== 'string' ||
-    (packageManager !== 'yum' && packageManager !== 'apt' && packageManager !== 'apk')
-  ) {
-    return null;
-  }
-
-  return {
-    distributionId,
-    architecture: architecture as Architecture,
-    packageManager,
-  };
-}
-
 const WizardPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -209,33 +168,16 @@ const WizardPage: React.FC = () => {
 
   // URL 파라미터에서 패키지 타입 읽기
   useEffect(() => {
-    const typeParam = searchParams.get('type') as PackageType | null;
-    if (typeParam) {
-      const foundOption = packageTypeOptions.find(opt => opt.value === typeParam);
-      if (foundOption) {
-        setCategory(foundOption.category);
-        setPackageType(foundOption.value);
-        // 바로 검색 단계로 이동
-        setCurrentStep(2);
-        // 파라미터 사용 후 URL에서 제거 (깔끔한 URL 유지)
-        setSearchParams({}, { replace: true });
-      }
+    const resolved = resolveWizardTypeParam(searchParams);
+    if (!resolved) {
+      return;
     }
-  }, []);
 
-  // Step 3: 검색
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [selectedPackage, setSelectedPackage] = useState<SearchResult | null>(null);
-  const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Step 4: 버전
-  const [selectedVersion, setSelectedVersion] = useState<string>('');
-  const [availableVersions, setAvailableVersions] = useState<string[]>([]);
-  const [loadingVersions, setLoadingVersions] = useState(false);
+    setCategory(resolved.category);
+    setPackageType(resolved.packageType);
+    setCurrentStep(resolved.currentStep);
+    setSearchParams(stripWizardTypeParam(searchParams), { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // Step 2: 언어 버전
   const [languageVersion, setLanguageVersion] = useState<string>('');
@@ -275,28 +217,12 @@ const WizardPage: React.FC = () => {
   // pip 커스텀 인덱스 URL 상태
   const [useCustomIndex, setUseCustomIndex] = useState(false);
   const [customIndexUrl, setCustomIndexUrl] = useState('');
-  const [usedIndexUrl, setUsedIndexUrl] = useState<string | undefined>(undefined); // 실제로 버전 조회 시 사용한 indexUrl
   const [showSaveIndexUrlModal, setShowSaveIndexUrlModal] = useState(false);
   const [indexUrlLabel, setIndexUrlLabel] = useState('');
 
-  // pip extras 상태 (예: jax[cuda] → ['cuda'])
-  const [extras, setExtras] = useState<string[]>([]);
-
-  // Maven classifier 관련 상태
-  const [isNativeLibrary, setIsNativeLibrary] = useState(false);
-  const [selectedClassifier, setSelectedClassifier] = useState<string | undefined>();
-  const [availableClassifiers, setAvailableClassifiers] = useState<string[]>([]);
-  const [customClassifier, setCustomClassifier] = useState('');
-
-  // 라이브러리 패키지 타입 (설정 기본값 적용 대상)
-  const libraryPackageTypes: PackageType[] = ['pip', 'conda', 'maven', 'npm'];
-
-  // OS 패키지 타입 (배포판별 설정 아키텍처 적용)
-  const osPackageTypes: PackageType[] = ['yum', 'apt', 'apk'];
-
   // OS/아키텍처 설정 적용 여부 판단 함수
   const shouldApplyDefaultOSArch = (type: PackageType): boolean => {
-    return libraryPackageTypes.includes(type);
+    return LIBRARY_PACKAGE_TYPES.includes(type);
   };
 
   // 카테고리에 맞는 패키지 타입 필터링
@@ -312,24 +238,6 @@ const WizardPage: React.FC = () => {
       setPackageType(firstType.value);
     }
     resetSearch();
-  };
-
-  // 검색 초기화
-  const resetSearch = () => {
-    setSearchQuery('');
-    setSearchResults([]);
-    setSelectedPackage(null);
-    setSelectedVersion('');
-    setAvailableVersions([]);
-    setSuggestions([]);
-    setShowSuggestions(false);
-    setUsedIndexUrl(undefined); // 사용한 indexUrl 초기화
-    // Maven classifier 초기화
-    setIsNativeLibrary(false);
-    setSelectedClassifier(undefined);
-    setAvailableClassifiers([]);
-    setCustomClassifier('');
-    // 언어 버전은 초기화하지 않음 (설정에서 가져온 기본값 유지)
   };
 
   // URL 유효성 검사
@@ -357,7 +265,7 @@ const WizardPage: React.FC = () => {
     if (shouldApplyDefaultOSArch(packageType)) {
       // 라이브러리 패키지: 설정에서 가져온 기본값 적용
       setArchitecture(defaultArchitecture as Architecture);
-    } else if (osPackageTypes.includes(packageType)) {
+    } else if (OS_PACKAGE_TYPES.includes(packageType)) {
       // OS 패키지: 각 배포판의 설정된 아키텍처 적용
       if (packageType === 'yum') {
         setArchitecture(yumDistribution.architecture as Architecture);
@@ -372,641 +280,48 @@ const WizardPage: React.FC = () => {
     }
   }, [packageType, defaultArchitecture, yumDistribution.architecture, aptDistribution.architecture, apkDistribution.architecture, dockerArchitecture]);
 
-  // 디바운스된 실시간 검색
-  const debouncedSearch = useCallback(async (query: string) => {
-    if (!query.trim() || query.length < 2) {
-      setSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
-
-    setSearching(true);
-    try {
-      let results: SearchResult[];
-
-      // OS 패키지 타입인 경우 os.search 사용
-      const isOSPackage = ['yum', 'apt', 'apk'].includes(packageType);
-
-      if (isOSPackage && window.electronAPI?.os?.search) {
-        // OS 패키지: electronAPI.os.search 사용
-        const getDistributionInfo = () => {
-          switch (packageType) {
-            case 'yum':
-              return { id: yumDistribution.id, architecture: yumDistribution.architecture, packageManager: 'yum' };
-            case 'apt':
-              return { id: aptDistribution.id, architecture: aptDistribution.architecture, packageManager: 'apt' };
-            case 'apk':
-              return { id: apkDistribution.id, architecture: apkDistribution.architecture, packageManager: 'apk' };
-            default:
-              return null;
-          }
-        };
-
-        const distInfo = getDistributionInfo();
-        if (distInfo) {
-          const response = await window.electronAPI.os.search({
-            query,
-            distribution: {
-              id: distInfo.id,
-              name: distInfo.id,
-              packageManager: distInfo.packageManager,
-            },
-            architecture: distInfo.architecture as import('../../core/downloaders/os-shared/types').OSArchitecture,
-            matchType: 'partial',
-            limit: 20,
-          });
-
-          const packages = (response.packages || []) as OSPackageInfo[];
-          results = packages.map(pkg => ({
-            name: pkg.name,
-            version: pkg.version,
-            description: pkg.summary || pkg.description || '',
-            downloadUrl: `${pkg.repository.baseUrl}/${pkg.location}`,
-            repository: { baseUrl: pkg.repository.baseUrl, name: pkg.repository.name },
-            location: pkg.location,
-            architecture: pkg.architecture,
-            osPackageInfo: pkg,
-          }));
-        } else {
-          results = [];
-        }
-      } else if (window.electronAPI?.search?.packages) {
-        // 일반 패키지: search.packages 사용
-        let searchOptions: { channel?: string; registry?: string } | undefined;
-        if (packageType === 'conda') {
-          searchOptions = { channel: condaChannel };
-        } else if (packageType === 'docker') {
-          searchOptions = { registry: dockerRegistry };
-        }
-        const response = await window.electronAPI.search.packages(packageType, query, searchOptions);
-        results = response.results;
-      } else {
-        // 브라우저 환경: 패키지 타입별 API 직접 호출
-        results = await searchPackageByType(packageType, query);
-      }
-      setSuggestions(results);
-      setShowSuggestions(results.length > 0);
-    } catch (error) {
-      console.error('Search error:', error);
-      setSuggestions([]);
-    } finally {
-      setSearching(false);
-    }
-  }, [packageType, condaChannel, dockerRegistry, yumDistribution, aptDistribution, apkDistribution]);
-
-  // 입력 변경 핸들러 (디바운스 적용)
-  const handleInputChange = useCallback((value: string) => {
-    setSearchQuery(value);
-
-    // 기존 타이머 취소
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    // 새 디바운스 타이머 설정 (300ms)
-    debounceTimerRef.current = setTimeout(() => {
-      debouncedSearch(value);
-    }, 300);
-  }, [debouncedSearch]);
-
-  // 제안 항목 선택
-  const handleSuggestionSelect = (item: SearchResult) => {
-    setShowSuggestions(false);
-    setSearchQuery(item.name);
-    setSearchResults([item]);
-    handleSelectPackage(item);
-  };
-
-  // 브라우저에서 PyPI API로 패키지 검색
-  const searchPyPIPackage = async (query: string): Promise<SearchResult[]> => {
-    try {
-      const response = await fetch(`/api/pypi/pypi/${encodeURIComponent(query)}/json`);
-      if (!response.ok) {
-        if (response.status === 404) {
-          return [];
-        }
-        throw new Error('패키지를 찾을 수 없습니다');
-      }
-      const data = await response.json();
-      const versions = Object.keys(data.releases).sort((a, b) => {
-        // 버전 내림차순 정렬 (최신 버전 우선)
-        const partsA = a.split('.').map(Number);
-        const partsB = b.split('.').map(Number);
-        for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-          const numA = partsA[i] || 0;
-          const numB = partsB[i] || 0;
-          if (numB !== numA) return numB - numA;
-        }
-        return 0;
-      });
-      return [{
-        name: data.info.name,
-        version: data.info.version,
-        description: data.info.summary || '',
-        versions: versions.slice(0, 20), // 최신 20개 버전만
-      }];
-    } catch (error) {
-      console.error('PyPI search error:', error);
-      return [];
-    }
-  };
-
-  // 브라우저에서 Maven Central API로 패키지 검색
-  const searchMavenPackage = async (query: string): Promise<SearchResult[]> => {
-    try {
-      const response = await fetch(`/api/maven/search?q=${encodeURIComponent(query)}`);
-      if (!response.ok) {
-        return [];
-      }
-      const data = await response.json();
-      return data.results || [];
-    } catch (error) {
-      console.error('Maven search error:', error);
-      return [];
-    }
-  };
-
-  // npm Registry API로 패키지 검색 (IPC 우선, HTTP 폴백)
-  const searchNpmPackage = async (query: string): Promise<SearchResult[]> => {
-    try {
-      // Electron IPC 우선
-      if (window.electronAPI?.search?.packages) {
-        const result = await window.electronAPI.search.packages('npm', query);
-        return result.results || [];
-      }
-      // HTTP 폴백 (개발 환경)
-      const response = await fetch(`/api/npm/search?q=${encodeURIComponent(query)}`);
-      if (!response.ok) {
-        return [];
-      }
-      const data = await response.json();
-      return data.results || [];
-    } catch (error) {
-      console.error('npm search error:', error);
-      return [];
-    }
-  };
-
-  // Docker 이미지 검색 (레지스트리별, IPC 우선, HTTP 폴백)
-  const searchDockerImage = async (query: string, registry: DockerRegistry = 'docker.io'): Promise<SearchResult[]> => {
-    try {
-      const registryParam = registry === 'custom' && customRegistryUrl
-        ? customRegistryUrl
-        : registry;
-      // Electron IPC 우선
-      if (window.electronAPI?.search?.packages) {
-        const result = await window.electronAPI.search.packages('docker', query, { registry: registryParam });
-        // 검색 결과에 레지스트리 정보 추가
-        return (result.results || []).map((item: SearchResult) => ({
-          ...item,
-          registry: registryParam,
-        }));
-      }
-      // HTTP 폴백 (개발 환경)
-      const response = await fetch(`/api/docker/search?q=${encodeURIComponent(query)}&registry=${encodeURIComponent(registryParam)}`);
-      if (!response.ok) {
-        return [];
-      }
-      const data = await response.json();
-      // 검색 결과에 레지스트리 정보 추가
-      return (data.results || []).map((item: SearchResult) => ({
-        ...item,
-        registry: registryParam,
-      }));
-    } catch (error) {
-      console.error('Docker search error:', error);
-      return [];
-    }
-  };
-
-  // Docker 이미지 태그 목록 조회 (IPC 우선, HTTP 폴백)
-  const fetchDockerTags = async (imageName: string, registry: DockerRegistry = 'docker.io'): Promise<string[]> => {
-    try {
-      const registryParam = registry === 'custom' && customRegistryUrl
-        ? customRegistryUrl
-        : registry;
-      // Electron IPC 우선
-      if (window.electronAPI?.search?.versions) {
-        const result = await window.electronAPI.search.versions('docker', imageName, { registry: registryParam });
-        return result.versions || ['latest'];
-      }
-      // HTTP 폴백 (개발 환경)
-      const response = await fetch(`/api/docker/tags?image=${encodeURIComponent(imageName)}&registry=${encodeURIComponent(registryParam)}`);
-      if (!response.ok) {
-        return ['latest'];
-      }
-      const data = await response.json();
-      return data.tags || ['latest'];
-    } catch (error) {
-      console.error('Docker tags fetch error:', error);
-      return ['latest'];
-    }
-  };
-
-  // OS 패키지 API로 검색 (YUM, APT, APK) - IPC 우선, HTTP 폴백
-  const searchOSPackage = async (type: PackageType, query: string): Promise<SearchResult[]> => {
-    try {
-      // 패키지 타입에 따라 설정에서 배포판 정보 가져오기
-      const getDistributionInfo = (pkgType: string) => {
-        switch (pkgType) {
-          case 'yum':
-            return {
-              id: yumDistribution.id,
-              name: yumDistribution.id, // 서버에서 getDistributionById로 조회
-              osType: 'linux',
-              packageManager: 'yum',
-              architecture: yumDistribution.architecture,
-            };
-          case 'apt':
-            return {
-              id: aptDistribution.id,
-              name: aptDistribution.id,
-              osType: 'linux',
-              packageManager: 'apt',
-              architecture: aptDistribution.architecture,
-            };
-          case 'apk':
-            return {
-              id: apkDistribution.id,
-              name: apkDistribution.id,
-              osType: 'linux',
-              packageManager: 'apk',
-              architecture: apkDistribution.architecture,
-            };
-          default:
-            return null;
-        }
-      };
-
-      const distributionInfo = getDistributionInfo(type);
-      if (!distributionInfo) {
-        console.warn(`Unknown OS package type: ${type}`);
-        return [];
-      }
-
-      // OS 패키지 결과를 SearchResult 형식으로 변환하는 헬퍼 함수
-      // API는 OSPackageInfo[] 형식으로 반환함
-      const mapOSPackageResult = (data: { packages?: OSPackageInfo[]; totalCount?: number }): SearchResult[] => {
-        return (data.packages || []).map((pkg) => ({
-          name: pkg.name,
-          version: pkg.version,
-          description: pkg.summary || pkg.description || '',
-          versions: [pkg.version], // 단일 버전 (검색 결과는 각 패키지 1개씩)
-          downloadUrl: `${pkg.repository.baseUrl}/${pkg.location}`,
-          repository: { baseUrl: pkg.repository.baseUrl, name: pkg.repository.name },
-          location: pkg.location,
-          architecture: pkg.architecture,
-          // 전체 OSPackageInfo 저장 (의존성 해결에 사용)
-          osPackageInfo: pkg,
-        }));
-      };
-
-      // Electron IPC 사용 (개발/프로덕션 모두)
-      if (!window.electronAPI?.os?.search) {
-        console.error('OS 패키지 검색 API를 사용할 수 없습니다');
-        return [];
-      }
-      const result = await window.electronAPI.os.search({
-        query,
-        distribution: {
-          id: distributionInfo.id,
-          name: distributionInfo.name,
-          osType: distributionInfo.osType,
-          packageManager: distributionInfo.packageManager,
-        },
-        architecture: distributionInfo.architecture,
-        matchType: 'contains',
-        limit: 50,
-      }) as { packages: OSPackageInfo[]; totalCount: number };
-      return mapOSPackageResult(result);
-    } catch (error) {
-      console.error(`${type} search error:`, error);
-      return [];
-    }
-  };
-
-  // 패키지 타입별 브라우저 검색 함수
-  const searchPackageByType = async (type: PackageType, query: string): Promise<SearchResult[]> => {
-    switch (type) {
-      case 'pip':
-      case 'conda':
-        return searchPyPIPackage(query);
-      case 'maven':
-        return searchMavenPackage(query);
-      case 'npm':
-        return searchNpmPackage(query);
-      case 'docker':
-        return searchDockerImage(query, dockerRegistry);
-      case 'yum':
-      case 'apt':
-      case 'apk':
-        return searchOSPackage(type, query);
-      default:
-        return [];
-    }
-  };
-
-  // 패키지 검색 (IPC 호출)
-  const handleSearch = async (query: string) => {
-    if (!query.trim()) {
-      message.warning('검색어를 입력하세요');
-      return;
-    }
-
-    // pip 패키지명에서 extras 파싱 (예: jax[cuda] → name: jax, extras: [cuda])
-    let searchQuery = query;
-    let parsedExtras: string[] = [];
-
-    if (packageType === 'pip') {
-      const extrasMatch = query.match(/^([a-zA-Z0-9_-]+)\[([a-zA-Z0-9_,\s]+)\]$/);
-      if (extrasMatch) {
-        searchQuery = extrasMatch[1]; // 패키지명만 추출
-        parsedExtras = extrasMatch[2].split(',').map(e => e.trim()); // extras 배열
-        setExtras(parsedExtras);
-      } else {
-        setExtras([]); // extras 없는 경우 초기화
-      }
-    }
-
-    setSearching(true);
-    setSearchResults([]);
-
-    try {
-      let results: SearchResult[];
-
-      // OS 패키지 타입인 경우 별도의 OS API 사용
-      const isOSPackage = ['yum', 'apt', 'apk'].includes(packageType);
-
-      if (isOSPackage && window.electronAPI?.os?.search) {
-        // OS 패키지: electronAPI.os.search 사용
-        const getDistributionInfo = () => {
-          switch (packageType) {
-            case 'yum':
-              return { id: yumDistribution.id, architecture: yumDistribution.architecture, packageManager: 'yum' };
-            case 'apt':
-              return { id: aptDistribution.id, architecture: aptDistribution.architecture, packageManager: 'apt' };
-            case 'apk':
-              return { id: apkDistribution.id, architecture: apkDistribution.architecture, packageManager: 'apk' };
-            default:
-              return null;
-          }
-        };
-
-        const distInfo = getDistributionInfo();
-        if (!distInfo) {
-          throw new Error(`지원하지 않는 OS 패키지 타입: ${packageType}`);
-        }
-
-        const response = await window.electronAPI.os.search({
-          query: searchQuery,
-          distribution: {
-            id: distInfo.id,
-            name: distInfo.id,
-            osType: 'linux',
-            packageManager: distInfo.packageManager,
-          },
-          architecture: distInfo.architecture as import('../../core/downloaders/os-shared/types').OSArchitecture,
-          matchType: 'partial',
-          limit: 50,
-        });
-
-        // OS 패키지 결과를 SearchResult 형식으로 변환 (메타데이터 포함)
-        const packages = (response.packages || []) as OSPackageInfo[];
-        results = packages.map(pkg => ({
-          name: pkg.name,
-          version: pkg.version,
-          description: pkg.summary || pkg.description || '',
-          downloadUrl: `${pkg.repository.baseUrl}/${pkg.location}`,
-          repository: { baseUrl: pkg.repository.baseUrl, name: pkg.repository.name },
-          location: pkg.location,
-          architecture: pkg.architecture,
-          osPackageInfo: pkg,
-        }));
-      } else if (window.electronAPI?.search?.packages) {
-        // 일반 패키지: electronAPI.search.packages 사용
-        let searchOptions: { channel?: string; registry?: string; indexUrl?: string } | undefined;
-
-        if (packageType === 'pip') {
-          // pip 커스텀 인덱스 URL 전달
-          if (useCustomIndex && customIndexUrl) {
-            searchOptions = { indexUrl: customIndexUrl };
-          }
-        } else if (packageType === 'conda') {
-          searchOptions = { channel: condaChannel };
-        } else if (packageType === 'docker') {
-          const registryValue = dockerRegistry === 'custom' && customRegistryUrl
-            ? customRegistryUrl
-            : dockerRegistry;
-          searchOptions = { registry: registryValue };
-        }
-
-        const response = await window.electronAPI.search.packages(packageType, searchQuery, searchOptions);
-        results = response.results;
-      } else {
-        // 브라우저 환경: 패키지 타입별 API 직접 호출
-        results = await searchPackageByType(packageType, searchQuery);
-      }
-
-      setSearchResults(results);
-
-      if (results.length === 0) {
-        message.info('검색 결과가 없습니다');
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '검색 중 오류가 발생했습니다';
-      message.error(errorMessage);
-      console.error('Search error:', error);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  // 브라우저에서 PyPI API로 버전 목록 조회
-  const fetchPyPIVersions = async (packageName: string): Promise<string[]> => {
-    try {
-      const response = await fetch(`/api/pypi/pypi/${encodeURIComponent(packageName)}/json`);
-      if (!response.ok) return [];
-      const data = await response.json();
-      const versions = Object.keys(data.releases).sort((a, b) => {
-        const partsA = a.split('.').map(Number);
-        const partsB = b.split('.').map(Number);
-        for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-          const numA = partsA[i] || 0;
-          const numB = partsB[i] || 0;
-          if (numB !== numA) return numB - numA;
-        }
-        return 0;
-      });
-      return versions;
-    } catch (error) {
-      console.error('PyPI versions fetch error:', error);
-      return [];
-    }
-  };
-
-  // 패키지 선택 및 버전 목록 조회
-  const handleSelectPackage = async (record: SearchResult) => {
-    setSelectedPackage(record);
-    setSelectedVersion(record.version);
-    setCurrentStep(3); // 버전 선택 단계로 이동
-    setLoadingVersions(true);
-
-    try {
-      if (window.electronAPI?.search?.versions) {
-        // 패키지 타입별 옵션 전달
-        let searchOptions: { channel?: string; registry?: string; indexUrl?: string } | undefined;
-        let actualIndexUrl: string | undefined = undefined;
-
-        if (packageType === 'pip') {
-          // pip 커스텀 인덱스 URL 전달
-          if (useCustomIndex && customIndexUrl) {
-            searchOptions = { indexUrl: customIndexUrl };
-            actualIndexUrl = customIndexUrl; // 실제 사용한 indexUrl 기록
-          }
-        } else if (packageType === 'conda') {
-          searchOptions = { channel: condaChannel };
-        } else if (packageType === 'docker') {
-          const registryValue = dockerRegistry === 'custom' && customRegistryUrl
-            ? customRegistryUrl
-            : dockerRegistry;
-          searchOptions = { registry: registryValue };
-        }
-
-        const response = await window.electronAPI.search.versions(packageType, record.name, searchOptions);
-        if (response.versions && response.versions.length > 0) {
-          setAvailableVersions(response.versions);
-          setSelectedVersion(response.versions[0]);
-          // pip의 경우 실제 사용한 indexUrl 저장
-          if (packageType === 'pip') {
-            setUsedIndexUrl(actualIndexUrl);
-          }
-        } else {
-          setAvailableVersions([record.version]);
-        }
-
-        // Maven: Electron 환경에서도 네이티브 아티팩트 여부 확인 및 classifier 조회
-        if (packageType === 'maven' && window.electronAPI?.maven) {
-          const groupId = record.groupId || record.name.split(':')[0];
-          const artifactId = record.artifactId || record.name.split(':')[1] || record.name;
-          const version = record.version;
-
-          console.log('[Classifier] Checking native artifact (Electron):', { groupId, artifactId, version, record });
-
-          try {
-            const isNative = await window.electronAPI.maven.isNativeArtifact(groupId, artifactId, version);
-            console.log('[Classifier] isNativeArtifact result:', isNative);
-            setIsNativeLibrary(isNative);
-
-            if (isNative) {
-              const classifiers = await window.electronAPI.maven.getAvailableClassifiers(groupId, artifactId, version);
-              console.log('[Classifier] Available classifiers:', classifiers);
-              setAvailableClassifiers(classifiers);
-              // 기본값: 선택 안함 (사용자가 명시적으로 선택)
-              setSelectedClassifier(undefined);
-            } else {
-              setAvailableClassifiers([]);
-              setSelectedClassifier(undefined);
-            }
-          } catch (err) {
-            console.error('Maven native check error:', err);
-            setIsNativeLibrary(false);
-            setAvailableClassifiers([]);
-            setSelectedClassifier(undefined);
-          }
-        }
-      } else if (packageType === 'pip' || packageType === 'conda') {
-        // 브라우저 환경: PyPI API 직접 호출
-        const versions = await fetchPyPIVersions(record.name);
-        if (versions.length > 0) {
-          setAvailableVersions(versions);
-          setSelectedVersion(versions[0]);
-          // 브라우저 환경에서는 항상 PyPI 사용 (커스텀 인덱스 미지원)
-          setUsedIndexUrl(undefined);
-        } else {
-          setAvailableVersions(record.versions || [record.version]);
-        }
-      } else if (packageType === 'maven') {
-        // 브라우저 환경: Maven 버전 API 직접 호출
-        try {
-          const response = await fetch(`/api/maven/versions?package=${encodeURIComponent(record.name)}`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.versions && data.versions.length > 0) {
-              setAvailableVersions(data.versions);
-              setSelectedVersion(data.versions[0]);
-            } else {
-              setAvailableVersions([record.version]);
-            }
-          } else {
-            setAvailableVersions([record.version]);
-          }
-        } catch (err) {
-          console.error('Maven version fetch error:', err);
-          setAvailableVersions([record.version]);
-        }
-
-        // Maven: 네이티브 아티팩트 여부 확인 및 classifier 조회
-        if (window.electronAPI?.maven) {
-          const groupId = record.groupId || record.name.split(':')[0];
-          const artifactId = record.artifactId || record.name.split(':')[1] || record.name;
-          const version = record.version;
-
-          console.log('[Classifier] Checking native artifact:', { groupId, artifactId, version, record });
-
-          try {
-            const isNative = await window.electronAPI.maven.isNativeArtifact(groupId, artifactId, version);
-            console.log('[Classifier] isNativeArtifact result:', isNative);
-            setIsNativeLibrary(isNative);
-
-            if (isNative) {
-              const classifiers = await window.electronAPI.maven.getAvailableClassifiers(groupId, artifactId, version);
-              console.log('[Classifier] Available classifiers:', classifiers);
-              setAvailableClassifiers(classifiers);
-              // 기본값: 선택 안함 (사용자가 명시적으로 선택)
-              setSelectedClassifier(undefined);
-            } else {
-              setAvailableClassifiers([]);
-              setSelectedClassifier(undefined);
-            }
-          } catch (err) {
-            console.error('Maven native check error:', err);
-            setIsNativeLibrary(false);
-            setAvailableClassifiers([]);
-            setSelectedClassifier(undefined);
-          }
-        } else {
-          console.log('[Classifier] electronAPI.maven not available');
-        }
-      } else if (packageType === 'docker') {
-        // Docker: 태그 목록 조회
-        const tags = await fetchDockerTags(record.name, dockerRegistry);
-        if (tags.length > 0) {
-          setAvailableVersions(tags);
-          // latest가 있으면 기본 선택, 아니면 첫 번째
-          const defaultTag = tags.includes('latest') ? 'latest' : tags[0];
-          setSelectedVersion(defaultTag);
-        } else {
-          setAvailableVersions(['latest']);
-          setSelectedVersion('latest');
-        }
-      } else if (['yum', 'apt', 'apk'].includes(packageType)) {
-        // OS 패키지: 검색 결과에 이미 버전 목록이 포함됨 (그룹화된 결과)
-        if (record.versions && record.versions.length > 0) {
-          setAvailableVersions(record.versions);
-          setSelectedVersion(record.versions[0]); // 최신 버전 선택
-        } else {
-          setAvailableVersions([record.version]);
-        }
-      } else {
-        setAvailableVersions(record.versions || [record.version]);
-      }
-    } catch (error) {
-      console.error('Version fetch error:', error);
-      setAvailableVersions([record.version]);
-    } finally {
-      setLoadingVersions(false);
-    }
-  };
+  const {
+    searchQuery,
+    searching,
+    selectedPackage,
+    suggestions,
+    showSuggestions,
+    setShowSuggestions,
+    selectedVersion,
+    setSelectedVersion,
+    availableVersions,
+    loadingVersions,
+    usedIndexUrl,
+    extras,
+    isNativeLibrary,
+    selectedClassifier,
+    setSelectedClassifier,
+    availableClassifiers,
+    customClassifier,
+    setCustomClassifier,
+    resetSearch,
+    handleInputChange,
+    handleSuggestionSelect,
+  } = useWizardSearchFlow({
+    packageType,
+    searchContext: {
+      packageType,
+      condaChannel,
+      dockerRegistry,
+      customRegistryUrl,
+      useCustomIndex,
+      customIndexUrl,
+      yumDistribution,
+      aptDistribution,
+      apkDistribution,
+    },
+    setCurrentStep,
+    notifier: {
+      info: message.info,
+      warning: message.warning,
+      error: message.error,
+    },
+  });
 
   // 장바구니 추가
   const handleAddToCart = () => {
@@ -1017,41 +332,28 @@ const WizardPage: React.FC = () => {
       return;
     }
 
-    // 아키텍처 결정 로직
-    const getEffectiveArchitecture = (): Architecture => {
-      // 라이브러리 패키지: 설정의 기본 아키텍처 사용
-      if (libraryPackageTypes.includes(packageType)) {
-        return defaultArchitecture as Architecture;
-      }
-      // OS 패키지: 각 배포판의 설정된 아키텍처 사용
-      if (packageType === 'yum') return yumDistribution.architecture as Architecture;
-      if (packageType === 'apt') return aptDistribution.architecture as Architecture;
-      if (packageType === 'apk') return apkDistribution.architecture as Architecture;
-      // Docker: 설정의 Docker 아키텍처 사용
-      if (packageType === 'docker') return dockerArchitecture as Architecture;
-      // 기타: 수동 선택된 아키텍처 사용 (폴백)
-      return architecture;
-    };
-    const effectiveArch = getEffectiveArchitecture();
-    const osCartContext = packageType === 'yum'
-      ? {
-          distributionId: yumDistribution.id,
-          architecture: effectiveArch,
-          packageManager: 'yum' as const,
-        }
-      : packageType === 'apt'
-      ? {
-          distributionId: aptDistribution.id,
-          architecture: effectiveArch,
-          packageManager: 'apt' as const,
-        }
-      : packageType === 'apk'
-      ? {
-          distributionId: apkDistribution.id,
-          architecture: effectiveArch,
-          packageManager: 'apk' as const,
-        }
-      : null;
+    const effectiveArch = getEffectiveArchitecture(
+      packageType,
+      {
+        defaultArchitecture,
+        yumDistribution,
+        aptDistribution,
+        apkDistribution,
+        dockerArchitecture,
+      },
+      architecture
+    );
+    const osCartContext = buildOSCartContext(
+      packageType,
+      {
+        defaultArchitecture,
+        yumDistribution,
+        aptDistribution,
+        apkDistribution,
+        dockerArchitecture,
+      },
+      effectiveArch
+    );
 
     // Docker 이미지: 레지스트리 정보 포함
     const dockerMetadata = packageType === 'docker' ? {
@@ -1070,11 +372,11 @@ const WizardPage: React.FC = () => {
         description: selectedPackage.description,
         category,
         // 라이브러리 패키지는 targetOS도 저장
-        ...(libraryPackageTypes.includes(packageType) && { targetOS: defaultTargetOS }),
+        ...(LIBRARY_PACKAGE_TYPES.includes(packageType) && { targetOS: defaultTargetOS }),
         // Docker 이미지 메타데이터
         ...dockerMetadata,
         // OS 패키지 전체 정보 (의존성 해결에 사용)
-        ...(osPackageTypes.includes(packageType) && selectedPackage.osPackageInfo && {
+        ...(OS_PACKAGE_TYPES.includes(packageType) && selectedPackage.osPackageInfo && {
           osPackageInfo: selectedPackage.osPackageInfo,
         }),
         ...(osCartContext && {
