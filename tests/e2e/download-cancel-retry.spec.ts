@@ -138,12 +138,13 @@ test('취소 직후 새 다운로드를 시작해도 이전 세션의 늦은 완
       downloadRenderInterval: 0,
     },
     cartItems: singleCartItems,
+    checkPathDelayMs: 1500,
     downloadScenario: {
       startScenarios: [
         {
           mode: 'slow',
           stepDelayMs: 150,
-          completeDelayMs: 1200,
+          completeDelayMs: 600,
           emitLateSuccessAfterCancel: true,
         },
         {
@@ -167,6 +168,12 @@ test('취소 직후 새 다운로드를 시작해도 이전 세션의 늦은 완
 
   await expect(page.getByRole('button', { name: '다운로드 시작' })).toBeVisible();
   await page.getByRole('button', { name: '다운로드 시작' }).click();
+
+  await page.waitForTimeout(900);
+  const pendingState = await readMockElectronAppState(page);
+  expect(pendingState.runtime.downloadCalls).toHaveLength(1);
+  await expect(page.getByText('다운로드 완료', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('전달 실패', { exact: true })).toHaveCount(0);
 
   const failedRow = page.locator('tr', { hasText: 'requests' });
   await expect(page.getByText('전달 실패', { exact: true })).toBeVisible();

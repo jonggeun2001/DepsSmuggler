@@ -1002,17 +1002,6 @@ export function useDownloadPageController() {
     setIsDownloading(true);
     setIsPaused(false);
     setStartTime(Date.now());
-    downloadCancelledRef.current = false;
-    downloadPausedRef.current = false;
-    lastSpeedCalcRef.current = { time: 0, bytes: 0 };
-    speedHistoryRef.current = [];
-
-    const canProceed = await checkOutputPath();
-    if (!canProceed) {
-      setIsDownloading(false);
-      return;
-    }
-
     const sessionSnapshot = createDownloadSessionSnapshot(
       [...cartItems],
       new Set(downloadItems.map((item) => item.id)),
@@ -1026,6 +1015,16 @@ export function useDownloadPageController() {
         maxFileSizeMB: maxFileSize,
       })
     );
+    downloadCancelledRef.current = false;
+    downloadPausedRef.current = false;
+    lastSpeedCalcRef.current = { time: 0, bytes: 0 };
+    speedHistoryRef.current = [];
+
+    const canProceed = await checkOutputPath();
+    if (!canProceed) {
+      setIsDownloading(false);
+      return;
+    }
     setCompletedOutputPath('');
     setCompletedArtifactPaths([]);
     setCompletedDeliveryResult(undefined);

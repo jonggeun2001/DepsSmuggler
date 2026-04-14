@@ -16,6 +16,7 @@ interface MockElectronAppOptions {
   config?: Record<string, unknown>;
   cartItems?: CartItem[];
   histories?: DownloadHistory[];
+  checkPathDelayMs?: number;
   downloadDelayMs?: number;
   downloadScenario?: MockDownloadScenario;
 }
@@ -408,7 +409,13 @@ export async function setupMockElectronApp(
 
           return { success: true };
         },
-        checkPath: async () => ({ exists: false, files: [], fileCount: 0, totalSize: 0 }),
+        checkPath: async () => {
+          if (seed.checkPathDelayMs && seed.checkPathDelayMs > 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, seed.checkPathDelayMs));
+          }
+
+          return { exists: false, files: [], fileCount: 0, totalSize: 0 };
+        },
         clearPath: async () => ({ success: true, deleted: true }),
         start: async (payload: { sessionId?: number; packages: Array<Record<string, unknown>>; options: Record<string, unknown> }) => {
           state.runtime.downloadCalls.push(clone(payload));
