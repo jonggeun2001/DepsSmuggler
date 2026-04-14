@@ -105,6 +105,8 @@ UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
 - [UI 테스트 체크리스트](./ui-testing-checklist.md): 릴리즈 전 smoke와 탐색적 QA에 바로 사용할 최소 확인 목록
 - [UI 상세 테스트 케이스](./ui-testing-test-cases.md): 테스트 ID, 사전 조건, 절차, 기대 결과, 실패 기준
 - [UI Playwright 전환 시나리오](./ui-testing-playwright-conversion.md): 현재 자동화 범위와 신규 E2E 후보, mock 전략
+- [UI 테스트 결과 2026-04-14](./ui-testing-findings-2026-04-14.md): 생성된 UI 테스트 문서 기준 실제 실행 결과와 수정 필요 사항
+- [UI 테스트 후속 수정 프롬프트 2026-04-14](./ui-testing-fix-prompt-2026-04-14.md): 다음 구현 세션용 실행 프롬프트와 ASCII-art 병렬도
 
 ## GitHub Actions
 
