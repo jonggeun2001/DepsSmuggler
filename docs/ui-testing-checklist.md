@@ -37,7 +37,7 @@
 
 ## 자동화 연계
 
-- 현재 Playwright 회귀 세트와 직접 매핑되는 항목: `UI-CHK-03`, `UI-CHK-05`, `UI-CHK-07`, `UI-CHK-08`
+- 현재 Playwright 회귀 세트와 직접 매핑되는 항목: `UI-CHK-03`, `UI-CHK-05`, `UI-CHK-06`, `UI-CHK-07`, `UI-CHK-08`
 - 자동화 후보 우선순위가 높은 항목: `UI-CHK-01`, `UI-CHK-02`, `UI-CHK-04`
 - 수동 확인 비중이 더 큰 항목: `UI-CHK-10`, `UI-CHK-11`, `UI-CHK-12`
 
