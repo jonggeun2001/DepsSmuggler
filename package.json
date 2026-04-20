@@ -27,8 +27,29 @@
     "test:e2e:report": "playwright show-report",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "lint:fix": "eslint . --ext .ts,.tsx,.js,.jsx --fix",
+    "typecheck": "tsc --noEmit",
+    "guardrails:eslint": "node scripts/check-eslint-guardrails.mjs",
+    "guardrails:eslint:update-baseline": "node scripts/check-eslint-guardrails.mjs --update",
+    "guardrails:typecheck": "node scripts/check-strict-typecheck-baseline.mjs",
+    "guardrails:typecheck:update-baseline": "node scripts/check-strict-typecheck-baseline.mjs --update",
+    "guardrails:check": "npm run guardrails:eslint && npm run guardrails:typecheck",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json}\" \"electron/**/*.{ts,js}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json}\" \"electron/**/*.{ts,js}\""
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json}\" \"electron/**/*.{ts,js}\"",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --cache --fix",
+      "tsc-files --noEmit --pretty false",
+      "vitest related --run --passWithNoTests"
+    ],
+    "*.{js,jsx}": [
+      "eslint --cache --fix",
+      "vitest related --run --passWithNoTests"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --check"
+    ]
   },
   "bin": {
     "depssmuggler": "./dist/src/cli/index.js"
@@ -73,13 +94,17 @@
     "electron-builder": "^26.8.1",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^10.1.0",
+    "eslint-plugin-boundaries": "^6.0.2",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-react": "^7.37.0",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "nodemon": "^3.1.14",
     "playwright": "^1.57.0",
     "prettier": "^3.5.0",
     "sharp": "^0.34.5",
+    "tsc-files": "^1.1.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vite": "^7.3.2",

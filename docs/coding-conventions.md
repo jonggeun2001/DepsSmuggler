@@ -54,6 +54,8 @@
 ```bash
 npm run lint          # ESLint 검사
 npm run lint:fix      # ESLint 자동 수정
+npm run typecheck     # TypeScript 타입 검사
+npm run guardrails:check  # 아키텍처/strict baseline 가드 검사
 npm run format        # Prettier 포맷팅
 npm run format:check  # Prettier 검사만
 ```
@@ -121,6 +123,12 @@ expect(testable.isRunning).toBe(true);
   }
 }
 ```
+
+추가 가드:
+
+- `noImplicitOverride`
+- `noFallthroughCasesInSwitch`
+- `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`는 `tsconfig.strict-baseline.json`과 baseline 체크로 점진 적용
 
 ### Null 체크
 
@@ -228,16 +236,16 @@ electron/
 
 **글로벌 표준 준수**: Node.js 프로젝트 표준에 맞게 kebab-case를 사용합니다.
 
-| 유형 | 규칙 | 예시 |
-|------|------|------|
-| React 컴포넌트 | **PascalCase** | `WizardPage.tsx`, `DownloadButton.tsx` |
-| 일반 모듈 | **kebab-case** | `download-manager.ts`, `cache-manager.ts` |
-| Zustand 스토어 | **kebab-case** | `cart-store.ts`, `settings-store.ts` |
-| 유틸리티 | **kebab-case** | `file-utils.ts`, `path-utils.ts` |
-| 다운로더 | **kebab-case** | `pip.ts`, `maven.ts`, `docker-auth-client.ts` |
-| 리졸버 | **kebab-case** | `pip-resolver.ts`, `npm-resolver.ts` |
-| 테스트 | 원본명 + `.test` | `pip.test.ts`, `download-manager.test.ts` |
-| 타입 정의 | **kebab-case** | `npm-types.ts`, `maven-types.ts` |
+| 유형           | 규칙             | 예시                                          |
+| -------------- | ---------------- | --------------------------------------------- |
+| React 컴포넌트 | **PascalCase**   | `WizardPage.tsx`, `DownloadButton.tsx`        |
+| 일반 모듈      | **kebab-case**   | `download-manager.ts`, `cache-manager.ts`     |
+| Zustand 스토어 | **kebab-case**   | `cart-store.ts`, `settings-store.ts`          |
+| 유틸리티       | **kebab-case**   | `file-utils.ts`, `path-utils.ts`              |
+| 다운로더       | **kebab-case**   | `pip.ts`, `maven.ts`, `docker-auth-client.ts` |
+| 리졸버         | **kebab-case**   | `pip-resolver.ts`, `npm-resolver.ts`          |
+| 테스트         | 원본명 + `.test` | `pip.test.ts`, `download-manager.test.ts`     |
+| 타입 정의      | **kebab-case**   | `npm-types.ts`, `maven-types.ts`              |
 
 **예외**: 단일 단어 파일은 그대로 사용 (`pip.ts`, `maven.ts`, `factory.ts`)
 
@@ -452,6 +460,13 @@ chore: 의존성 업데이트
 - 하나의 PR은 하나의 기능/수정에 집중
 - 테스트 포함 필수
 - 관련 문서 업데이트
+
+### Guardrails
+
+- renderer에서는 `window.electronAPI` 직접 호출을 새로 추가하지 않습니다. 가능한 경우 preload 계약이나 `renderer-data-client` 같은 게이트웨이를 사용합니다.
+- `src/core/downloaders/**`와 `src/core/resolver/**` 사이의 직접 import는 금지하고, 이후 단계에서 `src/core/ports/**`를 통해 연결합니다.
+- 아키텍처 관련 ESLint 규칙과 강화 strict 타입체크는 baseline 파일로 기존 부채를 고정하고, `npm run guardrails:check`와 CI Guardrails job에서 새 위반만 차단합니다.
+- 커밋 전에는 `lint-staged`가 변경된 TS/JS 파일에 대해 eslint, 관련 Vitest, TS 파일 타입체크를 실행합니다.
 
 ---
 

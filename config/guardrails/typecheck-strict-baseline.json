@@ -1,0 +1,1602 @@
+{
+  "generatedAt": "2026-04-20T09:29:09.792Z",
+  "configPath": "tsconfig.strict-baseline.json",
+  "entries": [
+    {
+      "filePath": "electron/main.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ host: string; port: number; secure: boolean; auth: { user: string; pass: string; } | undefined; from: string | undefined; }' is not assignable to parameter of type 'SmtpConfig' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'auth' are incompatible.\n    Type '{ user: string; pass: string; } | undefined' is not assignable to type '{ user: string; pass: string; }'.\n      Type 'undefined' is not assignable to type '{ user: string; pass: string; }'.",
+      "count": 1
+    },
+    {
+      "filePath": "electron/services/dependency-resolve-service.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ includeDependencies: boolean | undefined; targetOS: \"linux\" | \"windows\" | \"any\" | \"macos\" | undefined; architecture: string | undefined; pythonVersion: string | undefined; ... 5 more ...; onProgress: (progress: { ...; }) => void; }' is not assignable to parameter of type 'DependencyResolverOptions' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'includeDependencies' are incompatible.\n    Type 'boolean | undefined' is not assignable to type 'boolean'.\n      Type 'undefined' is not assignable to type 'boolean'.",
+      "count": 1
+    },
+    {
+      "filePath": "electron/services/download-orchestrator.ts",
+      "code": "TS2375",
+      "message": "Type '{ emailSent: true; emailsSent: number | undefined; attachmentsSent: number | undefined; splitApplied: boolean; }' is not assignable to type '{ emailSent: true; emailsSent?: number; attachmentsSent?: number; splitApplied: boolean; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'emailsSent' are incompatible.\n    Type 'number | undefined' is not assignable to type 'number'.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "electron/services/download-orchestrator.ts",
+      "code": "TS2375",
+      "message": "Type '{ type: PackageInfo[\"type\"]; name: string; version: string; arch: PackageInfo[\"arch\"]; metadata: Record<string, unknown> | undefined; }' is not assignable to type 'PackageInfo' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'arch' are incompatible.\n    Type 'Architecture | undefined' is not assignable to type 'Architecture'.\n      Type 'undefined' is not assignable to type 'Architecture'.",
+      "count": 1
+    },
+    {
+      "filePath": "electron/services/download-orchestrator.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ emailSent: boolean; emailsSent: number | undefined; attachmentsSent: number | undefined; splitApplied: boolean; error: string | undefined; }' is not assignable to parameter of type '{ emailSent: boolean; emailsSent?: number; attachmentsSent?: number; splitApplied?: boolean; error?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'emailsSent' are incompatible.\n    Type 'number | undefined' is not assignable to type 'number'.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "electron/services/download-orchestrator.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ host: string; port: number; secure: boolean; auth: { user: string; pass: string; } | undefined; from: string; }' is not assignable to parameter of type 'SmtpConfig' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'auth' are incompatible.\n    Type '{ user: string; pass: string; } | undefined' is not assignable to type '{ user: string; pass: string; }'.\n      Type 'undefined' is not assignable to type '{ user: string; pass: string; }'.",
+      "count": 1
+    },
+    {
+      "filePath": "electron/services/download-package-router.ts",
+      "code": "TS2375",
+      "message": "Type '{ groupId: string | undefined; artifactId: string | undefined; classifier: string | undefined; }' is not assignable to type 'PackageMetadata' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'groupId' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "electron/services/download-package-router.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ signal: AbortSignal | undefined; shouldPause: () => boolean; }' is not assignable to parameter of type 'DownloadOptions' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'signal' are incompatible.\n    Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal'.\n      Type 'undefined' is not assignable to type 'AbortSignal'.",
+      "count": 1
+    },
+    {
+      "filePath": "electron/services/os-package-router.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ distribution: OSDistribution; architecture: OSArchitecture; repositories: Repository[]; outputDir: string; concurrency: number; abortSignal: AbortSignal | undefined; onProgress: (progress: OSDownloadProgress) => void; onError: (error: { package?: OSPackageInfo; message: string; }) => Promise<OSErrorAction>; }' is not assignable to parameter of type 'BaseDownloaderOptions' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'abortSignal' are incompatible.\n    Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal'.\n      Type 'undefined' is not assignable to type 'AbortSignal'.",
+      "count": 3
+    },
+    {
+      "filePath": "electron/services/os-package-router.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ repositories: Repository[]; architecture: OSArchitecture; includeOptional: boolean; includeRecommends: boolean; distribution: OSDistribution; onProgress: (message: string, current: number, total: number) => void; abortSignal: AbortSignal | undefined; }' is not assignable to parameter of type 'DependencyResolverOptions' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'abortSignal' are incompatible.\n    Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal'.\n      Type 'undefined' is not assignable to type 'AbortSignal'.",
+      "count": 3
+    },
+    {
+      "filePath": "electron/services/search-package-router.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 3
+    },
+    {
+      "filePath": "electron/services/search-package-router.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "electron/version-handlers.ts",
+      "code": "TS2375",
+      "message": "Type '{ valid: boolean; age: number | undefined; }' is not assignable to type '{ valid: boolean; age?: number; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'age' are incompatible.\n    Type 'number | undefined' is not assignable to type 'number'.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/cli/commands/download.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/cli/commands/download.ts",
+      "code": "TS2375",
+      "message": "Type '{ groupId: string | undefined; artifactId: string | undefined; }' is not assignable to type 'PackageMetadata' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'groupId' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/cli/commands/download.ts",
+      "code": "TS2375",
+      "message": "Type '{ id: string; type: PackageType; name: string; version: string; architecture: Architecture | undefined; metadata: Record<string, unknown> | undefined; }' is not assignable to type 'DownloadPackage' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'architecture' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/cli/commands/download.ts",
+      "code": "TS2375",
+      "message": "Type '{ type: PackageType; name: string; version: string; arch: Architecture | undefined; metadata: Record<string, unknown> | undefined; }' is not assignable to type 'PackageInfo' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'arch' are incompatible.\n    Type 'Architecture | undefined' is not assignable to type 'Architecture'.\n      Type 'undefined' is not assignable to type 'Architecture'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/cli/commands/os.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ name: string; version: string; repoName: string; summary: string | undefined; }' is not assignable to parameter of type '{ name: string; version: string; repoName: string; summary?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'summary' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/config.ts",
+      "code": "TS2322",
+      "message": "Type 'string' is not assignable to type 'NonSharedBuffer & string'.\n  Type 'string' is not assignable to type 'NonSharedBuffer'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/config.ts",
+      "code": "TS2769",
+      "message": "No overload matches this call.\n  Overload 1 of 4, '(arrayBuffer: WithImplicitCoercion<ArrayBufferLike>, byteOffset?: number | undefined, length?: number | undefined): Buffer<ArrayBufferLike>', gave the following error.\n    Argument of type 'string | undefined' is not assignable to parameter of type 'WithImplicitCoercion<ArrayBufferLike>'.\n      Type 'undefined' is not assignable to type 'WithImplicitCoercion<ArrayBufferLike>'.\n  Overload 2 of 4, '(string: WithImplicitCoercion<string>, encoding?: BufferEncoding | undefined): Buffer<ArrayBuffer>', gave the following error.\n    Argument of type 'string | undefined' is not assignable to parameter of type 'WithImplicitCoercion<string>'.\n      Type 'undefined' is not assignable to type 'WithImplicitCoercion<string>'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/config.ts",
+      "code": "TS2769",
+      "message": "No overload matches this call.\n  Overload 1 of 4, '(data: ArrayBufferView<ArrayBufferLike>, inputEncoding: undefined, outputEncoding: Encoding): string', gave the following error.\n    Argument of type 'string | undefined' is not assignable to parameter of type 'ArrayBufferView<ArrayBufferLike>'.\n      Type 'undefined' is not assignable to type 'ArrayBufferView<ArrayBufferLike>'.\n  Overload 2 of 4, '(data: string, inputEncoding: Encoding | undefined, outputEncoding: Encoding): string', gave the following error.\n    Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/download-manager.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ concurrency: number | undefined; }' is not assignable to parameter of type 'Options<PriorityQueue, QueueAddOptions>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Type '{ concurrency: number | undefined; }' is not assignable to type '{ readonly concurrency?: number; readonly autoStart?: boolean; readonly queueClass?: new () => PriorityQueue; readonly intervalCap?: number; readonly interval?: number; readonly carryoverIntervalCount?: boolean; readonly carryoverConcurrencyCount?: boolean; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n    Types of property 'concurrency' are incompatible.\n      Type 'number | undefined' is not assignable to type 'number'.\n        Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/apk.ts",
+      "code": "TS2322",
+      "message": "Type 'OSPackageInfo | undefined' is not assignable to type 'OSPackageInfo'.\n  Type 'undefined' is not assignable to type 'OSPackageInfo'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/apk.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/apk.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; version: string | undefined; operator: VersionOperator | undefined; }' is not assignable to type 'PackageDependency' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'version' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/apk.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; version: string; architecture: OSArchitecture; size: number; installedSize: number | undefined; checksum: Checksum; location: string; repository: Repository; ... 4 more ...; provides: string[] | undefined; }' is not assignable to type 'OSPackageInfo' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'installedSize' are incompatible.\n    Type 'number | undefined' is not assignable to type 'number'.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/apk.ts",
+      "code": "TS2412",
+      "message": "Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.\n  Type 'undefined' is not assignable to type 'AbortSignal'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/apk.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/apk.ts",
+      "code": "TS2769",
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(input: string | URL | Request, init?: RequestInit | undefined): Promise<Response>', gave the following error.\n    Argument of type '{ signal: AbortSignal | undefined; }' is not assignable to parameter of type 'RequestInit' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n      Types of property 'signal' are incompatible.\n        Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal | null'.\n          Type 'undefined' is not assignable to type 'AbortSignal | null'.\n  Overload 2 of 2, '(input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>', gave the following error.\n    Argument of type '{ signal: AbortSignal | undefined; }' is not assignable to parameter of type 'RequestInit' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n      Types of property 'signal' are incompatible.\n        Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal | null'.\n          Type 'undefined' is not assignable to type 'AbortSignal | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/apt.ts",
+      "code": "TS2322",
+      "message": "Type 'OSPackageInfo | undefined' is not assignable to type 'OSPackageInfo'.\n  Type 'undefined' is not assignable to type 'OSPackageInfo'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/apt.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/apt.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; version: string | undefined; operator: VersionOperator | undefined; }' is not assignable to type 'PackageDependency' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'version' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/apt.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; version: string; architecture: OSArchitecture; size: number; installedSize: number | undefined; checksum: Checksum; location: string; repository: Repository; ... 7 more ...; recommends: string[] | undefined; }' is not assignable to type 'OSPackageInfo' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'installedSize' are incompatible.\n    Type 'number | undefined' is not assignable to type 'number'.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/apt.ts",
+      "code": "TS2412",
+      "message": "Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.\n  Type 'undefined' is not assignable to type 'AbortSignal'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/apt.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/downloaders/apt.ts",
+      "code": "TS2769",
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(input: string | URL | Request, init?: RequestInit | undefined): Promise<Response>', gave the following error.\n    Argument of type '{ signal: AbortSignal | undefined; }' is not assignable to parameter of type 'RequestInit' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n      Types of property 'signal' are incompatible.\n        Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal | null'.\n          Type 'undefined' is not assignable to type 'AbortSignal | null'.\n  Overload 2 of 2, '(input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>', gave the following error.\n    Argument of type '{ signal: AbortSignal | undefined; }' is not assignable to parameter of type 'RequestInit' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n      Types of property 'signal' are incompatible.\n        Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal | null'.\n          Type 'undefined' is not assignable to type 'AbortSignal | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/conda.ts",
+      "code": "TS2322",
+      "message": "Type '{ filename: string; pkg: RepoDataPackage; } | undefined' is not assignable to type '{ filename: string; pkg: RepoDataPackage; } | null'.\n  Type 'undefined' is not assignable to type '{ filename: string; pkg: RepoDataPackage; } | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/conda.ts",
+      "code": "TS2322",
+      "message": "Type 'CondaPackageFile | undefined' is not assignable to type 'CondaPackageFile | null'.\n  Type 'undefined' is not assignable to type 'CondaPackageFile | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/conda.ts",
+      "code": "TS2375",
+      "message": "Type '{ md5: string | undefined; sha256: string | undefined; }' is not assignable to type '{ md5?: string; sha1?: string; sha256?: string; sha512?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'md5' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/conda.ts",
+      "code": "TS2375",
+      "message": "Type '{ type: \"conda\"; name: string; version: string; arch: Architecture | undefined; metadata: PackageMetadata; }' is not assignable to type 'PackageInfo' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'arch' are incompatible.\n    Type 'Architecture | undefined' is not assignable to type 'Architecture'.\n      Type 'undefined' is not assignable to type 'Architecture'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/conda.ts",
+      "code": "TS2412",
+      "message": "Type '{ md5: string; sha256: string | undefined; } | undefined' is not assignable to type '{ md5?: string; sha1?: string; sha256?: string; sha512?: string; } | undefined' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/docker-auth-client.ts",
+      "code": "TS2322",
+      "message": "Type 'RegistryConfig | undefined' is not assignable to type 'RegistryConfig'.\n  Type 'undefined' is not assignable to type 'RegistryConfig'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/docker-auth-client.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'RegistryConfig | undefined' is not assignable to parameter of type 'RegistryConfig'.\n  Type 'undefined' is not assignable to type 'RegistryConfig'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/docker-search-service.ts",
+      "code": "TS2375",
+      "message": "Type '{ registry: string; tag: string; digest: string | undefined; }' is not assignable to type 'PackageMetadata' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'digest' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/docker-utils.ts",
+      "code": "TS18048",
+      "message": "'firstPart' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/docker-utils.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string | null'.\n  Type 'undefined' is not assignable to type 'string | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/docker-utils.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/downloaders/docker-utils.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/maven.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/maven.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string | ArrayBufferView<ArrayBufferLike>'.\n  Type 'undefined' is not assignable to type 'string | ArrayBufferView<ArrayBufferLike>'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/maven.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 10
+    },
+    {
+      "filePath": "src/core/downloaders/maven.ts",
+      "code": "TS2375",
+      "message": "Type '{ groupId: string | undefined; artifactId: string | undefined; downloadUrl: string; checksum: { sha1: string; } | undefined; packaging: string; }' is not assignable to type 'PackageMetadata' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'checksum' are incompatible.\n    Type '{ sha1: string; } | undefined' is not assignable to type '{ md5?: string; sha1?: string; sha256?: string; sha512?: string; }'.\n      Type 'undefined' is not assignable to type '{ md5?: string; sha1?: string; sha256?: string; sha512?: string; }'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/maven.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/downloaders/npm.ts",
+      "code": "TS2322",
+      "message": "Type '{ type: \"npm\"; name: string; version: string; metadata: { description: string | undefined; author: string | undefined; homepage: string | undefined; }; }[]' is not assignable to type 'PackageInfo[]'.\n  Type '{ type: \"npm\"; name: string; version: string; metadata: { description: string | undefined; author: string | undefined; homepage: string | undefined; }; }' is not assignable to type 'PackageInfo'.\n    The types of 'metadata.description' are incompatible between these types.\n      Type 'string | undefined' is not assignable to type 'string'.\n        Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/npm.ts",
+      "code": "TS2375",
+      "message": "Type '{ sha1: string; sha512: string | undefined; }' is not assignable to type '{ md5?: string; sha1?: string; sha256?: string; sha512?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'sha512' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/base-downloader.ts",
+      "code": "TS2375",
+      "message": "Type '{ success: true; filePath: string; verification: VerificationResult | undefined; }' is not assignable to type 'DownloadResult' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'verification' are incompatible.\n    Type 'VerificationResult | undefined' is not assignable to type 'VerificationResult'.\n      Type 'undefined' is not assignable to type 'VerificationResult'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/base-downloader.ts",
+      "code": "TS2769",
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(input: string | URL | Request, init?: RequestInit | undefined): Promise<Response>', gave the following error.\n    Argument of type '{ signal: AbortSignal | undefined; }' is not assignable to parameter of type 'RequestInit' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n      Types of property 'signal' are incompatible.\n        Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal | null'.\n          Type 'undefined' is not assignable to type 'AbortSignal | null'.\n  Overload 2 of 2, '(input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>', gave the following error.\n    Argument of type '{ signal: AbortSignal | undefined; }' is not assignable to parameter of type 'RequestInit' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n      Types of property 'signal' are incompatible.\n        Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal | null'.\n          Type 'undefined' is not assignable to type 'AbortSignal | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/base-resolver.ts",
+      "code": "TS18048",
+      "message": "'pkg' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/base-resolver.ts",
+      "code": "TS2322",
+      "message": "Type 'OSPackageInfo | undefined' is not assignable to type 'OSPackageInfo'.\n  Type 'undefined' is not assignable to type 'OSPackageInfo'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/base-resolver.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'OSPackageInfo | undefined' is not assignable to parameter of type 'OSPackageInfo'.\n  Type 'undefined' is not assignable to type 'OSPackageInfo'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/base-resolver.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/base-resolver.ts",
+      "code": "TS2375",
+      "message": "Type '{ package: OSPackageInfo; requiredVersion: string | undefined; }' is not assignable to type '{ package: OSPackageInfo; requiredVersion?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'requiredVersion' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/cache-manager.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/cache-manager.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/cli-backend.ts",
+      "code": "TS2322",
+      "message": "Type 'OSPackageInfo | undefined' is not assignable to type 'OSPackageInfo'.\n  Type 'undefined' is not assignable to type 'OSPackageInfo'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/cli-backend.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/distribution-fetcher.ts",
+      "code": "TS18048",
+      "message": "'aMajor' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/distribution-fetcher.ts",
+      "code": "TS18048",
+      "message": "'aMinor' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/distribution-fetcher.ts",
+      "code": "TS18048",
+      "message": "'bMajor' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/distribution-fetcher.ts",
+      "code": "TS18048",
+      "message": "'bMinor' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/distribution-fetcher.ts",
+      "code": "TS18048",
+      "message": "'major' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/distribution-fetcher.ts",
+      "code": "TS18048",
+      "message": "'version' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/distribution-fetcher.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/distribution-fetcher.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/distribution-fetcher.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ id: string; name: string; version: string; codename: string | undefined; packageManager: OSPackageManager; architectures: OSArchitecture[]; }' is not assignable to parameter of type 'Omit<OSDistribution, \"defaultRepos\" | \"extendedRepos\">' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'codename' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/gpg-verifier.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/os-shared/repos/repository-utils.ts",
+      "code": "TS2375",
+      "message": "Type '{ id: string; name: string; baseUrl: string; enabled: boolean; gpgCheck: boolean; gpgKeyUrl: string | undefined; priority: number; isOfficial: false; }' is not assignable to type 'Repository' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'gpgKeyUrl' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/pip.ts",
+      "code": "TS18048",
+      "message": "'platformPart' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/pip.ts",
+      "code": "TS18048",
+      "message": "'pythonTag' is possibly 'undefined'.",
+      "count": 8
+    },
+    {
+      "filePath": "src/core/downloaders/pip.ts",
+      "code": "TS2322",
+      "message": "Type 'PyPIRelease | undefined' is not assignable to type 'PyPIRelease | null'.\n  Type 'undefined' is not assignable to type 'PyPIRelease | null'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/downloaders/pip.ts",
+      "code": "TS2322",
+      "message": "Type 'SimpleApiPackageFile | undefined' is not assignable to type 'SimpleApiPackageFile | null'.\n  Type 'undefined' is not assignable to type 'SimpleApiPackageFile | null'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/pip.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/downloaders/pip.ts",
+      "code": "TS2375",
+      "message": "Type '{ description: string | undefined; author: string | undefined; license: string | undefined; homepage: string | undefined; }' is not assignable to type 'PackageMetadata' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'description' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/pip.ts",
+      "code": "TS2375",
+      "message": "Type '{ description: string | undefined; author: string | undefined; license: string | undefined; homepage: string | undefined; pythonVersion: string | undefined; checksum: { md5: string; sha256: string; } | undefined; downloadUrl: string | undefined; size: number | undefined; }' is not assignable to type 'PackageMetadata' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'description' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/pip.ts",
+      "code": "TS2375",
+      "message": "Type '{ description: string; checksum: { sha256: string; } | undefined; downloadUrl: string; indexUrl: string; }' is not assignable to type 'PackageMetadata' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'checksum' are incompatible.\n    Type '{ sha256: string; } | undefined' is not assignable to type '{ md5?: string; sha1?: string; sha256?: string; sha512?: string; }'.\n      Type 'undefined' is not assignable to type '{ md5?: string; sha1?: string; sha256?: string; sha512?: string; }'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/pip.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/downloaders/pip.ts",
+      "code": "TS2538",
+      "message": "Type 'undefined' cannot be used as an index type.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/yum.ts",
+      "code": "TS2375",
+      "message": "Type '{ location: string; checksum: { type: ChecksumType; value: string; }; timestamp: number | undefined; size: number | undefined; openSize: number | undefined; }' is not assignable to type 'RepomdDataInfo' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'timestamp' are incompatible.\n    Type 'number | undefined' is not assignable to type 'number'.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/yum.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; version: string; release: string | undefined; epoch: number | undefined; architecture: OSArchitecture; size: number; installedSize: number | undefined; ... 11 more ...; recommends: string[] | undefined; }' is not assignable to type 'OSPackageInfo' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'release' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/yum.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ name: string; version: string | undefined; operator: VersionOperator | undefined; isOptional: boolean; }' is not assignable to parameter of type 'PackageDependency' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'version' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/yum.ts",
+      "code": "TS2412",
+      "message": "Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.\n  Type 'undefined' is not assignable to type 'AbortSignal'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/yum.ts",
+      "code": "TS2769",
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(input: string | URL | Request, init?: RequestInit | undefined): Promise<Response>', gave the following error.\n    Argument of type '{ signal: AbortSignal | undefined; }' is not assignable to parameter of type 'RequestInit' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n      Types of property 'signal' are incompatible.\n        Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal | null'.\n          Type 'undefined' is not assignable to type 'AbortSignal | null'.\n  Overload 2 of 2, '(input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>', gave the following error.\n    Argument of type '{ signal: AbortSignal | undefined; }' is not assignable to parameter of type 'RequestInit' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n      Types of property 'signal' are incompatible.\n        Type 'AbortSignal | undefined' is not assignable to type 'AbortSignal | null'.\n          Type 'undefined' is not assignable to type 'AbortSignal | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/downloaders/yum.ts",
+      "code": "TS2769",
+      "message": "No overload matches this call.\n  The last overload gave the following error.\n    Argument of type 'string | undefined' is not assignable to parameter of type '(substring: string, ...args: any[]) => string'.\n      Type 'undefined' is not assignable to type '(substring: string, ...args: any[]) => string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/mailer/email-sender.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string[] | undefined' is not assignable to parameter of type 'string[]'.\n  Type 'undefined' is not assignable to type 'string[]'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/packager/archive-packager.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/packager/file-splitter.ts",
+      "code": "TS2339",
+      "message": "Property 'length' does not exist on type 'Promise<NonSharedBuffer> & Promise<string> & Promise<string | NonSharedBuffer> & void'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/packager/file-splitter.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'Promise<NonSharedBuffer> & Promise<string> & Promise<string | NonSharedBuffer> & void' is not assignable to parameter of type 'BinaryLike'.\n  Type 'Promise<NonSharedBuffer> & Promise<string> & Promise<string | NonSharedBuffer> & void' is missing the following properties from type 'DataView<ArrayBufferLike>': buffer, byteLength, byteOffset, getFloat32, and 21 more.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/packager/file-splitter.ts",
+      "code": "TS2375",
+      "message": "Type '{ parts: string[]; metadata: { originalFileName: string; originalSize: number; partCount: number; partSize: number; checksum: string; createdAt: string; }; metadataPath: undefined; }' is not assignable to type 'SplitResult' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'metadataPath' are incompatible.\n    Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/packager/file-splitter.ts",
+      "code": "TS2769",
+      "message": "No overload matches this call.\n  Overload 1 of 7, '(path: PathOrFileDescriptor, options?: { encoding?: null | undefined; flag?: string | undefined; } | null | undefined): Promise<NonSharedBuffer>', gave the following error.\n    Argument of type 'string | undefined' is not assignable to parameter of type 'PathOrFileDescriptor'.\n      Type 'undefined' is not assignable to type 'PathOrFileDescriptor'.\n  Overload 2 of 7, '(path: PathOrFileDescriptor, options?: BufferEncoding | (ObjectEncodingOptions & { flag?: string | undefined; }) | null | undefined): Promise<...>', gave the following error.\n    Argument of type 'string | undefined' is not assignable to parameter of type 'PathOrFileDescriptor'.\n      Type 'undefined' is not assignable to type 'PathOrFileDescriptor'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/apk-resolver.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/resolver/apt-resolver.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/apt-resolver.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/apt-resolver.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/conda-repodata-processor.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/conda-resolver.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string | null'.\n  Type 'undefined' is not assignable to type 'string | null'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/resolver/conda-resolver.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/resolver/conda-resolver.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; versionSpec: string | undefined; build: string | undefined; }' is not assignable to type 'ParsedDependency' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'versionSpec' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/conda-resolver.ts",
+      "code": "TS2375",
+      "message": "Type '{ repository: string; subdir: string | undefined; filename: string | undefined; downloadUrl: string | undefined; size: number; }' is not assignable to type 'PackageMetadata' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'downloadUrl' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/conda-resolver.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 11
+    },
+    {
+      "filePath": "src/core/resolver/maven-queue-processor.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/maven-resolver.ts",
+      "code": "TS18048",
+      "message": "'groupId' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/maven-resolver.ts",
+      "code": "TS2375",
+      "message": "Type '{ groupId: string; artifactId: string; version: string; classifier: string | undefined; }' is not assignable to type 'MavenCoordinate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'classifier' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/maven-resolver.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ repoUrl: string; memoryTtl: number; diskTtl?: number; forceRefresh?: boolean; useDiskCache?: boolean; cacheDir?: string; }' is not assignable to parameter of type 'MavenCacheOptions' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'memoryTtl' are incompatible.\n    Type 'number | undefined' is not assignable to type 'number'.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/maven-resolver.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ repoUrl: string; memoryTtl: number; diskTtl?: number; forceRefresh?: boolean; useDiskCache?: boolean; cacheDir?: string; batchSize: number | undefined; }' is not assignable to parameter of type 'MavenCacheOptions & { batchSize?: number; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Type '{ repoUrl: string; memoryTtl: number; diskTtl?: number; forceRefresh?: boolean; useDiskCache?: boolean; cacheDir?: string; batchSize: number | undefined; }' is not assignable to type 'MavenCacheOptions' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n    Types of property 'memoryTtl' are incompatible.\n      Type 'number | undefined' is not assignable to type 'number'.\n        Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/npm-tree-manager.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ name: string; version: string; tarball: string; integrity: string | undefined; shasum: string; size: number | undefined; hoistedPath: string; filename: string | undefined; }' is not assignable to parameter of type 'NpmFlatPackage' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'integrity' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/os-resolver-utils.ts",
+      "code": "TS2322",
+      "message": "Type 'OSPackageInfo | undefined' is not assignable to type 'OSPackageInfo'.\n  Type 'undefined' is not assignable to type 'OSPackageInfo'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS18048",
+      "message": "'mainPart' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS18048",
+      "message": "'platformPart' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS18048",
+      "message": "'pythonTag' is possibly 'undefined'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS18048",
+      "message": "'requiredMachine' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2322",
+      "message": "Type 'PyPIRelease | undefined' is not assignable to type 'PyPIRelease | null'.\n  Type 'undefined' is not assignable to type 'PyPIRelease | null'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2322",
+      "message": "Type 'SimpleApiPackageFile | undefined' is not assignable to type 'SimpleApiPackageFile | null'.\n  Type 'undefined' is not assignable to type 'SimpleApiPackageFile | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string | null'.\n  Type 'undefined' is not assignable to type 'string | null'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 5
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; version: string; indexUrl: string | undefined; extras: string[] | undefined; parentCacheKey: undefined; depth: number; }' is not assignable to type 'QueueItem & { depth: number; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Type '{ name: string; version: string; indexUrl: string | undefined; extras: string[] | undefined; parentCacheKey: undefined; depth: number; }' is not assignable to type 'QueueItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n    Types of property 'indexUrl' are incompatible.\n      Type 'string | undefined' is not assignable to type 'string'.\n        Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; versionSpec: string | undefined; extras: string[] | undefined; markers: string | undefined; }' is not assignable to type 'ParsedDependency' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'versionSpec' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2375",
+      "message": "Type '{ os: \"linux\" | \"windows\" | \"macos\"; arch: \"x86_64\" | \"aarch64\" | \"arm64\"; pythonVersion: string | undefined; }' is not assignable to type 'PipTargetPlatform' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'pythonVersion' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ name: string; version: string; indexUrl: string | undefined; extras: string[] | undefined; parentCacheKey: string; depth: number; }' is not assignable to parameter of type 'QueueItem & { depth: number; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Type '{ name: string; version: string; indexUrl: string | undefined; extras: string[] | undefined; parentCacheKey: string; depth: number; }' is not assignable to type 'QueueItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n    Types of property 'indexUrl' are incompatible.\n      Type 'string | undefined' is not assignable to type 'string'.\n        Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/resolver/pip-resolver.ts",
+      "code": "TS2538",
+      "message": "Type 'undefined' cannot be used as an index type.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-simple-api.ts",
+      "code": "TS18048",
+      "message": "'aBase' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-simple-api.ts",
+      "code": "TS18048",
+      "message": "'bBase' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-simple-api.ts",
+      "code": "TS18048",
+      "message": "'url' is possibly 'undefined'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/resolver/pip-simple-api.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string | null'.\n  Type 'undefined' is not assignable to type 'string | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-simple-api.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 10
+    },
+    {
+      "filePath": "src/core/resolver/pip-simple-api.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string | URL'.\n  Type 'undefined' is not assignable to type 'string | URL'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/resolver/pip-simple-api.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/resolver/pip-simple-api.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/resolver/yum-resolver.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/shared/axios-http-client.ts",
+      "code": "TS2375",
+      "message": "Type '{ loaded: number; total: number | undefined; progress: number | undefined; }' is not assignable to type 'ProgressEvent' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'total' are incompatible.\n    Type 'number | undefined' is not assignable to type 'number'.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/axios-http-client.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ baseURL: string | undefined; timeout: number; headers: { 'User-Agent': string; }; maxRedirects: number; }' is not assignable to parameter of type 'CreateAxiosDefaults<any>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'baseURL' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/cache-manager.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ name: string; ttlMs: number; maxSize: number | undefined; }' is not assignable to parameter of type 'CacheManagerOptions<T>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'maxSize' are incompatible.\n    Type 'number | undefined' is not assignable to type 'number'.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/cache-manager.ts",
+      "code": "TS2412",
+      "message": "Type 'number | undefined' is not assignable to type 'number' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.\n  Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/cache-manager.ts",
+      "code": "TS2412",
+      "message": "Type 'string | undefined' is not assignable to type 'string' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/cache-utils.ts",
+      "code": "TS2375",
+      "message": "Type '{ data: T; cachedAt: number; ttl: number; metadata: M | undefined; }' is not assignable to type 'CacheEntryWithMeta<T, M>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'metadata' are incompatible.\n    Type 'M | undefined' is not assignable to type 'M'.\n      'M' could be instantiated with an arbitrary type which could be unrelated to 'M | undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/conda-cache.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/conda-cache.ts",
+      "code": "TS2375",
+      "message": "Type '{ etag: string | undefined; lastModified: string | undefined; maxAge: number; }' is not assignable to type '{ etag?: string; lastModified?: string; maxAge: number; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'etag' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/conda-cache.ts",
+      "code": "TS2375",
+      "message": "Type '{ url: string; etag: string | undefined; lastModified: string | undefined; maxAge: number; cachedAt: number; fileSize: number; packageCount: number; compressed: boolean; }' is not assignable to type 'RepodataCacheMeta' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'etag' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/conda-matchspec.ts",
+      "code": "TS18048",
+      "message": "'channelPart' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/conda-matchspec.ts",
+      "code": "TS18048",
+      "message": "'mainVersion' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/conda-matchspec.ts",
+      "code": "TS18048",
+      "message": "'part' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/conda-matchspec.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/shared/conda-matchspec.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/shared/conda-matchspec.ts",
+      "code": "TS2412",
+      "message": "Type 'string | undefined' is not assignable to type 'string' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 7
+    },
+    {
+      "filePath": "src/core/shared/conda-utils.ts",
+      "code": "TS18048",
+      "message": "'selected' is possibly 'undefined'.",
+      "count": 7
+    },
+    {
+      "filePath": "src/core/shared/conda-utils.ts",
+      "code": "TS2322",
+      "message": "Type 'AnacondaFileInfo | undefined' is not assignable to type 'AnacondaFileInfo'.\n  Type 'undefined' is not assignable to type 'AnacondaFileInfo'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/shared/dependency-resolver.ts",
+      "code": "TS18048",
+      "message": "'osPkg' is possibly 'undefined'.",
+      "count": 9
+    },
+    {
+      "filePath": "src/core/shared/dependency-resolver.ts",
+      "code": "TS18048",
+      "message": "'rootPkg' is possibly 'undefined'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/shared/dependency-resolver.ts",
+      "code": "TS2322",
+      "message": "Type '{ package: { type: \"npm\"; name: string; version: string; metadata: { size: number | undefined; }; }; dependencies: never[]; }[]' is not assignable to type 'DependencyNode[]'.\n  Type '{ package: { type: \"npm\"; name: string; version: string; metadata: { size: number | undefined; }; }; dependencies: never[]; }' is not assignable to type 'DependencyNode'.\n    The types of 'package.metadata.size' are incompatible between these types.\n      Type 'number | undefined' is not assignable to type 'number'.\n        Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/dependency-resolver.ts",
+      "code": "TS2322",
+      "message": "Type '{ type: \"npm\"; name: string; version: string; metadata: { size: number | undefined; }; }[]' is not assignable to type 'PackageInfo[]'.\n  Type '{ type: \"npm\"; name: string; version: string; metadata: { size: number | undefined; }; }' is not assignable to type 'PackageInfo'.\n    The types of 'metadata.size' are incompatible between these types.\n      Type 'number | undefined' is not assignable to type 'number'.\n        Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/dependency-resolver.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/dependency-resolver.ts",
+      "code": "TS2375",
+      "message": "Type '{ id: string; type: PackageType; name: string; version: string; architecture: string | undefined; size: number | undefined; }' is not assignable to type 'DownloadPackage' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'architecture' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/dependency-resolver.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ id: string; type: string; name: string; version: string; architecture: string | undefined; size: number | undefined; filename: string | undefined; }' is not assignable to parameter of type 'DownloadPackage' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'architecture' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/dependency-resolver.ts",
+      "code": "TS2412",
+      "message": "Type 'string | undefined' is not assignable to type 'string' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/maven-bom-processor.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ dep: PomDependency; properties: Record<string, string> | undefined; }' is not assignable to parameter of type '{ dep: PomDependency; properties?: Record<string, string>; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'properties' are incompatible.\n    Type 'Record<string, string> | undefined' is not assignable to type 'Record<string, string>'.\n      Type 'undefined' is not assignable to type 'Record<string, string>'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/maven-pom-utils.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/maven-pom-utils.ts",
+      "code": "TS2375",
+      "message": "Type '{ groupId: string; artifactId: string; version: string; classifier: string | undefined; type: string | undefined; }' is not assignable to type 'MavenCoordinate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'classifier' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/maven-types.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/shared/maven-utils.ts",
+      "code": "TS18048",
+      "message": "'classifier' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/maven-utils.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/mock-http-client.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ method: string; url: string; options: RequestOptions | undefined; }' is not assignable to parameter of type '{ method: string; url: string; options?: RequestOptions; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'options' are incompatible.\n    Type 'RequestOptions | undefined' is not assignable to type 'RequestOptions'.\n      Type 'undefined' is not assignable to type 'RequestOptions'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-backtracking-resolver.ts",
+      "code": "TS2322",
+      "message": "Type 'Candidate | undefined' is not assignable to type 'Candidate | null'.\n  Type 'undefined' is not assignable to type 'Candidate | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-backtracking-resolver.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'Candidate | undefined' is not assignable to parameter of type 'Candidate | null'.\n  Type 'undefined' is not assignable to type 'Candidate | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-backtracking-resolver.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'Candidate | undefined' is not assignable to parameter of type 'Candidate'.\n  Type 'undefined' is not assignable to type 'Candidate'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/pip-backtracking-resolver.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-cache.ts",
+      "code": "TS2375",
+      "message": "Type '{ cachedAt: number; ttl: number; packageName: string; version: string | undefined; }' is not assignable to type '{ cachedAt: number; ttl: number; packageName: string; version?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'version' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-cache.ts",
+      "code": "TS2375",
+      "message": "Type '{ data: PyPIResponse; fromCache: boolean; cacheType: \"memory\" | undefined; }' is not assignable to type 'PipCacheResult' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'cacheType' are incompatible.\n    Type '\"memory\" | undefined' is not assignable to type '\"memory\" | \"disk\"'.\n      Type 'undefined' is not assignable to type '\"memory\" | \"disk\"'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-candidate.ts",
+      "code": "TS18048",
+      "message": "'targetMajor' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-candidate.ts",
+      "code": "TS18048",
+      "message": "'targetMinor' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-candidate.ts",
+      "code": "TS2322",
+      "message": "Type 'InstallationCandidate | null | undefined' is not assignable to type 'InstallationCandidate | null'.\n  Type 'undefined' is not assignable to type 'InstallationCandidate | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-candidate.ts",
+      "code": "TS2322",
+      "message": "Type 'InstallationCandidate | undefined' is not assignable to type 'InstallationCandidate | null'.\n  Type 'undefined' is not assignable to type 'InstallationCandidate | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-candidate.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-candidate.ts",
+      "code": "TS2375",
+      "message": "Type '{ hasAllowedHash: boolean; isNotYanked: boolean; isBinary: boolean; version: string; tagPriority: number | undefined; buildTag: BuildTag; }' is not assignable to type 'CandidateSortingKey' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'tagPriority' are incompatible.\n    Type 'number | undefined' is not assignable to type 'number'.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-candidate.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; version: string; url: string; filename: string; size: number; hash: string; packageType: \"sdist\" | \"wheel\"; wheelInfo: WheelInfo | undefined; isYanked: boolean | undefined; yankedReason: string | undefined; requiresPython: string | undefined; }' is not assignable to type 'InstallationCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'wheelInfo' are incompatible.\n    Type 'WheelInfo | undefined' is not assignable to type 'WheelInfo'.\n      Type 'undefined' is not assignable to type 'WheelInfo'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-provider.ts",
+      "code": "TS18048",
+      "message": "'mainPart' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/pip-provider.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/pip-provider.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-provider.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; versionSpec: string | undefined; extras: string[] | undefined; marker: string | undefined; }' is not assignable to type 'Requirement' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'versionSpec' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-provider.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 5
+    },
+    {
+      "filePath": "src/core/shared/pip-provider.ts",
+      "code": "TS2538",
+      "message": "Type 'undefined' cannot be used as an index type.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-simple-api.ts",
+      "code": "TS18048",
+      "message": "'fullUrl' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-simple-api.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string | null'.\n  Type 'undefined' is not assignable to type 'string | null'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/shared/pip-simple-api.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-simple-api.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/pip-tags.ts",
+      "code": "TS18048",
+      "message": "'m' is possibly 'undefined'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/shared/pip-tags.ts",
+      "code": "TS18048",
+      "message": "'major' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-tags.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/shared/pip-wheel.ts",
+      "code": "TS18048",
+      "message": "'abi' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-wheel.ts",
+      "code": "TS18048",
+      "message": "'plat' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-wheel.ts",
+      "code": "TS18048",
+      "message": "'pyver' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-wheel.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-wheel.ts",
+      "code": "TS2322",
+      "message": "Type 'WheelInfo | undefined' is not assignable to type 'WheelInfo | null'.\n  Type 'undefined' is not assignable to type 'WheelInfo | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-wheel.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'PlatformTag | undefined' is not assignable to parameter of type 'PlatformTag'.\n  Type 'undefined' is not assignable to type 'PlatformTag'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pip-wheel.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/platform-mappings.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pypi-utils.ts",
+      "code": "TS18048",
+      "message": "'abiTag' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pypi-utils.ts",
+      "code": "TS18048",
+      "message": "'platformTag' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pypi-utils.ts",
+      "code": "TS18048",
+      "message": "'pythonTag' is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/shared/pypi-utils.ts",
+      "code": "TS18048",
+      "message": "'supported' is possibly 'undefined'.",
+      "count": 5
+    },
+    {
+      "filePath": "src/core/shared/pypi-utils.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string | null'.\n  Type 'undefined' is not assignable to type 'string | null'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/pypi-utils.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/pypi-utils.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 4
+    },
+    {
+      "filePath": "src/core/shared/search-utils.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/core/shared/version-fetcher.ts",
+      "code": "TS18048",
+      "message": "'aMajor' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/version-fetcher.ts",
+      "code": "TS18048",
+      "message": "'aMinor' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/version-fetcher.ts",
+      "code": "TS18048",
+      "message": "'bMajor' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/version-fetcher.ts",
+      "code": "TS18048",
+      "message": "'bMinor' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/core/shared/version-fetcher.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/core/speed-calculator.ts",
+      "code": "TS2322",
+      "message": "Type 'number | undefined' is not assignable to type 'number'.\n  Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/components/DependencyTree.tsx",
+      "code": "TS2375",
+      "message": "Type '{ children: Element[]; title: Element; extra: Element; style: CSSProperties | undefined; styles: { body: { padding: number; }; }; }' is not assignable to type 'CardProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'style' are incompatible.\n    Type 'CSSProperties | undefined' is not assignable to type 'CSSProperties'.\n      Type 'undefined' is not assignable to type 'Properties<string | number, string & {}>'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/components/DependencyTree.tsx",
+      "code": "TS2375",
+      "message": "Type '{ version: string; type: PackageType; optional: boolean | undefined; scope: DependencyScope | undefined; size: string | undefined; }' is not assignable to type '{ version: string; type: PackageType; optional?: boolean; scope?: string; size?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'optional' are incompatible.\n    Type 'boolean | undefined' is not assignable to type 'boolean'.\n      Type 'undefined' is not assignable to type 'boolean'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/lib/renderer-data-client.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ electronAPI: ElectronAPI | undefined; fetchImpl: { (input: RequestInfo | URL, init?: RequestInit): Promise<Response>; (input: string | URL | Request, init?: RequestInit): Promise<Response>; } | undefined; }' is not assignable to parameter of type 'RendererDataClientDependencies' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'electronAPI' are incompatible.\n    Type 'ElectronAPI | undefined' is not assignable to type 'RendererDataClientElectronAPI'.\n      Type 'undefined' is not assignable to type 'RendererDataClientElectronAPI'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/CartPage.tsx",
+      "code": "TS2345",
+      "message": "Argument of type '{ root: DependencyNode; flatList: PackageInfo[]; conflicts: never[]; totalSize: undefined; }' is not assignable to parameter of type 'SetStateAction<DependencyResolutionResult | null>'.\n  Type '{ root: DependencyNode; flatList: PackageInfo[]; conflicts: never[]; totalSize: undefined; }' is not assignable to type 'DependencyResolutionResult' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n    Types of property 'totalSize' are incompatible.\n      Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/CartPage.tsx",
+      "code": "TS2345",
+      "message": "Argument of type 'CartItem | undefined' is not assignable to parameter of type 'CartItem'.\n  Type 'undefined' is not assignable to type 'CartItem'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/CartPage.tsx",
+      "code": "TS2345",
+      "message": "Argument of type 'DependencyResolutionResult | undefined' is not assignable to parameter of type 'SetStateAction<DependencyResolutionResult | null>'.\n  Type 'undefined' is not assignable to type 'SetStateAction<DependencyResolutionResult | null>'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/CartPage.tsx",
+      "code": "TS2375",
+      "message": "Type '{ type: CorePackageType; name: string; version: string; arch: \"x86_64\" | \"arm64\" | \"i386\" | \"noarch\" | undefined; }' is not assignable to type 'PackageInfo' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'arch' are incompatible.\n    Type '\"x86_64\" | \"arm64\" | \"i386\" | \"noarch\" | undefined' is not assignable to type 'Architecture'.\n      Type 'undefined' is not assignable to type 'Architecture'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/CartPage.tsx",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/renderer/pages/download-delivery-utils.ts",
+      "code": "TS2375",
+      "message": "Type '{ outputDir: string; outputFormat: \"zip\" | \"tar.gz\"; includeScripts: boolean; targetOS: string | undefined; architecture: string | undefined; includeDependencies: boolean; pythonVersion: string | undefined; ... 4 more ...; smtp: { ...; } | undefined; }' is not assignable to type 'DownloadStartOptions' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'targetOS' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/components/DedicatedOSDownloadView.tsx",
+      "code": "TS2375",
+      "message": "Type '{ packages: OSPackageInfo[]; distribution: OSDistribution | null; isDownloading: false; initialOutputOptions: OSPackageOutputOptions | undefined; onRemovePackage: (pkg: OSPackageInfo) => void; onClearAll: () => void; onStartDownload: (outputOptions: OSPackageOutputOptions) => Promise<...>; }' is not assignable to type 'OSPackageCartProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'initialOutputOptions' are incompatible.\n    Type 'OSPackageOutputOptions | undefined' is not assignable to type 'OSPackageOutputOptions'.\n      Type 'undefined' is not assignable to type 'OSPackageOutputOptions'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/components/DedicatedOSDownloadView.tsx",
+      "code": "TS2375",
+      "message": "Type '{ success: OSPackageInfo[]; failed: { package: OSPackageInfo; error: string; }[]; skipped: OSPackageInfo[]; outputPath: string; outputOptions: OSPackageOutputOptions; ... 6 more ...; onClose: () => void; }' is not assignable to type 'OSDownloadResultProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'generatedOutputs' are incompatible.\n    Type '{ type: \"archive\" | \"repository\"; path: string; label: string; }[] | undefined' is not assignable to type '{ type: \"archive\" | \"repository\"; path: string; label: string; }[]'.\n      Type 'undefined' is not assignable to type '{ type: \"archive\" | \"repository\"; path: string; label: string; }[]'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/components/DownloadLogsCard.tsx",
+      "code": "TS2375",
+      "message": "Type '{ children: Element; size: \"small\"; title: Element; style: CSSProperties | undefined; styles: { body: { padding: number; }; }; }' is not assignable to type 'CardProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'style' are incompatible.\n    Type 'CSSProperties | undefined' is not assignable to type 'CSSProperties'.\n      Type 'undefined' is not assignable to type 'Properties<string | number, string & {}>'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "code": "TS2322",
+      "message": "Type '{ id: string; name: string; version: string; type: string; status: DownloadStatus; progress: number; downloadedBytes: number; totalBytes: number; speed: number; isDependency: boolean; ... 5 more ...; classifier: string | undefined; }[]' is not assignable to type 'DownloadItem[]'.\n  Type '{ id: string; name: string; version: string; type: string; status: DownloadStatus; progress: number; downloadedBytes: number; totalBytes: number; speed: number; isDependency: boolean; parentId: string | undefined; ... 4 more ...; classifier: string | undefined; }' is not assignable to type 'DownloadItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n    Types of property 'parentId' are incompatible.\n      Type 'string | undefined' is not assignable to type 'string'.\n        Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "code": "TS2322",
+      "message": "Type '{ id: string; name: string; version: string; type: string; status: DownloadStatus; progress: number; downloadedBytes: number; totalBytes: number; speed: number; isDependency: boolean; parentId: string | undefined; dependencyOf: string | undefined; filename: string | undefined; }[]' is not assignable to type 'DownloadItem[]'.\n  Type '{ id: string; name: string; version: string; type: string; status: DownloadStatus; progress: number; downloadedBytes: number; totalBytes: number; speed: number; isDependency: boolean; parentId: string | undefined; dependencyOf: string | undefined; filename: string | undefined; }' is not assignable to type 'DownloadItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n    Types of property 'parentId' are incompatible.\n      Type 'string | undefined' is not assignable to type 'string'.\n        Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "code": "TS2322",
+      "message": "Type '{ type: PackageType; name: string; version: string; arch: Architecture | undefined; languageVersion: string | undefined; metadata: Record<string, unknown> | undefined; }[]' is not assignable to type 'HistoryPackageItem[]'.\n  Type '{ type: PackageType; name: string; version: string; arch: Architecture | undefined; languageVersion: string | undefined; metadata: Record<string, unknown> | undefined; }' is not assignable to type 'HistoryPackageItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n    Types of property 'arch' are incompatible.\n      Type 'Architecture | undefined' is not assignable to type 'Architecture'.\n        Type 'undefined' is not assignable to type 'Architecture'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "code": "TS2375",
+      "message": "Type '{ completedOutputPath: string; completedArtifactPaths: string[]; completedDeliveryResult: HistoryDeliveryResult | undefined; }' is not assignable to type 'CompletionArtifactsState' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'completedDeliveryResult' are incompatible.\n    Type 'HistoryDeliveryResult | undefined' is not assignable to type 'HistoryDeliveryResult'.\n      Type 'undefined' is not assignable to type 'HistoryDeliveryResult'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "code": "TS2375",
+      "message": "Type '{ id: string; type: CartItem[\"type\"]; name: string; version: string; arch: CartItem[\"arch\"]; metadata: Record<string, unknown> | undefined; addedAt: number; downloadUrl: string | undefined; ... 4 more ...; classifier: string | undefined; }' is not assignable to type 'CartItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'arch' are incompatible.\n    Type 'Architecture | undefined' is not assignable to type 'Architecture'.\n      Type 'undefined' is not assignable to type 'Architecture'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "code": "TS2379",
+      "message": "Argument of type '{ artifactPaths: string[] | undefined; deliveryMethod: DeliveryMethod; deliveryResult: { emailSent: boolean; emailsSent?: number; attachmentsSent?: number; splitApplied?: boolean; error?: string; } | undefined; }' is not assignable to parameter of type '{ artifactPaths?: string[]; deliveryMethod?: \"local\" | \"email\"; deliveryResult?: HistoryDeliveryResult; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'artifactPaths' are incompatible.\n    Type 'string[] | undefined' is not assignable to type 'string[]'.\n      Type 'undefined' is not assignable to type 'string[]'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "code": "TS2379",
+      "message": "Argument of type '{ cartItems: CartItem[]; outputDir: string; includeDependencies: boolean; concurrentDownloads: number; historyOSOutputOptions: OSPackageOutputOptions | undefined; ... 4 more ...; checkOutputPath: () => Promise<boolean>; }' is not assignable to parameter of type 'UseOSDownloadFlowArgs' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'historyOSOutputOptions' are incompatible.\n    Type 'OSPackageOutputOptions | undefined' is not assignable to type 'OSPackageOutputOptions'.\n      Type 'undefined' is not assignable to type 'OSPackageOutputOptions'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "code": "TS2379",
+      "message": "Argument of type '{ completedOutputPath: string; completedArtifactPaths: string[]; completedDeliveryResult: HistoryDeliveryResult | undefined; }' is not assignable to parameter of type 'RecoverableArtifactsInput' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'completedDeliveryResult' are incompatible.\n    Type 'HistoryDeliveryResult | undefined' is not assignable to type 'HistoryDeliveryResult'.\n      Type 'undefined' is not assignable to type 'HistoryDeliveryResult'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "code": "TS2379",
+      "message": "Argument of type '{ level: \"error\" | \"success\" | \"info\" | \"warn\"; message: string; details: string | undefined; }' is not assignable to parameter of type '{ level: \"error\" | \"success\" | \"info\" | \"warn\"; message: string; details?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'details' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "code": "TS2379",
+      "message": "Argument of type '{ status: \"failed\"; error: string | undefined; }' is not assignable to parameter of type 'Partial<DownloadItem>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'error' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
+      "code": "TS18048",
+      "message": "'firstSnapshot' is possibly 'undefined'.",
+      "count": 3
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
+      "code": "TS2322",
+      "message": "Type '{ type: PackageType; name: string; version: string; arch: Architecture | undefined; languageVersion: string | undefined; metadata: Record<string, unknown> | undefined; }[]' is not assignable to type 'HistoryPackageItem[]'.\n  Type '{ type: PackageType; name: string; version: string; arch: Architecture | undefined; languageVersion: string | undefined; metadata: Record<string, unknown> | undefined; }' is not assignable to type 'HistoryPackageItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n    Types of property 'arch' are incompatible.\n      Type 'Architecture | undefined' is not assignable to type 'Architecture'.\n        Type 'undefined' is not assignable to type 'Architecture'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
+      "code": "TS2345",
+      "message": "Argument of type '() => OSCartContextSnapshot | null | undefined' is not assignable to parameter of type '() => OSCartContextSnapshot | null'.\n  Type 'OSCartContextSnapshot | null | undefined' is not assignable to type 'OSCartContextSnapshot | null'.\n    Type 'undefined' is not assignable to type 'OSCartContextSnapshot | null'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/utils.ts",
+      "code": "TS2322",
+      "message": "Type '{ id: string; name: string; version: string; type: string | undefined; arch: string | undefined; status: DownloadStatus; progress: number; downloadedBytes: number; totalBytes: number; ... 8 more ...; extras: string[] | undefined; }[]' is not assignable to type 'DownloadItem[]'.\n  Type '{ id: string; name: string; version: string; type: string | undefined; arch: string | undefined; status: DownloadStatus; progress: number; downloadedBytes: number; totalBytes: number; speed: number; ... 7 more ...; extras: string[] | undefined; }' is not assignable to type 'DownloadItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n    Types of property 'type' are incompatible.\n      Type 'string | undefined' is not assignable to type 'string'.\n        Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/utils.ts",
+      "code": "TS2375",
+      "message": "Type '{ name: string; version: string; architecture: OSArchitecture; size: number; checksum: { type: \"sha256\"; value: string; }; location: string; repository: Repository; dependencies: never[]; description: string | undefined; summary: string | undefined; }' is not assignable to type 'OSPackageInfo' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'description' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/DownloadPage.tsx",
+      "code": "TS2375",
+      "message": "Type '{ outputDir: string; onOutputDirChange: Dispatch<SetStateAction<string>>; onSelectFolder: () => Promise<void>; osDownloadError: string | null; ... 12 more ...; onClearCart: () => void; }' is not assignable to type 'DedicatedOSDownloadViewProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'historyOSOutputOptions' are incompatible.\n    Type 'OSPackageOutputOptions | undefined' is not assignable to type 'OSPackageOutputOptions'.\n      Type 'undefined' is not assignable to type 'OSPackageOutputOptions'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/DownloadPage.tsx",
+      "code": "TS2375",
+      "message": "Type '{ variant: \"failed\" | \"completed\"; completedCount: number; failedCount: number; skippedCount: number; isDownloading: boolean; outputFormat: \"zip\" | \"tar.gz\"; deliveryMethod: \"local\" | \"email\"; ... 10 more ...; onComplete: () => void; }' is not assignable to type 'DownloadOutcomeViewProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'completedDeliveryResult' are incompatible.\n    Type 'HistoryDeliveryResult | undefined' is not assignable to type 'HistoryDeliveryResult'.\n      Type 'undefined' is not assignable to type 'HistoryDeliveryResult'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/HistoryPage.tsx",
+      "code": "TS2375",
+      "message": "Type '{ children: string; type: \"danger\" | undefined; }' is not assignable to type 'TextProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'type' are incompatible.\n    Type '\"danger\" | undefined' is not assignable to type 'BaseType'.\n      Type 'undefined' is not assignable to type 'BaseType'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/HistoryPage.tsx",
+      "code": "TS2375",
+      "message": "Type '{ children: string; type: \"secondary\" | \"danger\" | undefined; style: { fontSize: number; }; }' is not assignable to type 'TextProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'type' are incompatible.\n    Type '\"secondary\" | \"danger\" | undefined' is not assignable to type 'BaseType'.\n      Type 'undefined' is not assignable to type 'BaseType'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/HistoryPage.tsx",
+      "code": "TS2379",
+      "message": "Argument of type '{ type: PackageType; name: string; version: string; arch: Architecture | undefined; languageVersion: string | undefined; metadata: Record<string, unknown> | undefined; }' is not assignable to parameter of type 'Omit<CartItem, \"id\" | \"addedAt\">' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'arch' are incompatible.\n    Type 'Architecture | undefined' is not assignable to type 'Architecture'.\n      Type 'undefined' is not assignable to type 'Architecture'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/cache-stats-utils.ts",
+      "code": "TS2375",
+      "message": "Type '{ key: \"npm\"; label: string; entryCount: number; sizeBytes: undefined; description: string; }' is not assignable to type 'CacheDetailItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'sizeBytes' are incompatible.\n    Type 'undefined' is not assignable to type 'number'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ host: string; port: number; user: string | undefined; password: string | undefined; from: string | undefined; }' is not assignable to parameter of type 'SmtpConnectionConfig' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'user' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/SettingsPage.tsx",
+      "code": "TS18048",
+      "message": "'highlightSections.pip' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/renderer/pages/wizard-page/search-service.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ electronAPI: RendererDataClientElectronAPI | undefined; fetchImpl: { (input: RequestInfo | URL, init?: RequestInit): Promise<Response>; (input: string | URL | Request, init?: RequestInit): Promise<Response>; } | undefined; }' is not assignable to parameter of type 'RendererDataClientDependencies' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'electronAPI' are incompatible.\n    Type 'RendererDataClientElectronAPI | undefined' is not assignable to type 'RendererDataClientElectronAPI'.\n      Type 'undefined' is not assignable to type 'RendererDataClientElectronAPI'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/wizard-page/useWizardSearchFlow.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/wizard-page/useWizardSearchFlow.ts",
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/wizard-page/version-service.ts",
+      "code": "TS2322",
+      "message": "Type 'string | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/wizard-page/version-service.ts",
+      "code": "TS2345",
+      "message": "Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/renderer/pages/wizard-page/version-service.ts",
+      "code": "TS2375",
+      "message": "Type '{ isNativeLibrary: boolean; availableClassifiers: string[]; versions: string[]; selectedVersion: string; usedIndexUrl: string | undefined; }' is not assignable to type 'VersionDetails' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'usedIndexUrl' are incompatible.\n    Type 'string | undefined' is not assignable to type 'string'.\n      Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/wizard-page/version-service.ts",
+      "code": "TS2379",
+      "message": "Argument of type '{ electronAPI: RendererDataClientElectronAPI | undefined; fetchImpl: { (input: RequestInfo | URL, init?: RequestInit): Promise<Response>; (input: string | URL | Request, init?: RequestInit): Promise<Response>; } | undefined; }' is not assignable to parameter of type 'RendererDataClientDependencies' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'electronAPI' are incompatible.\n    Type 'RendererDataClientElectronAPI | undefined' is not assignable to type 'RendererDataClientElectronAPI'.\n      Type 'undefined' is not assignable to type 'RendererDataClientElectronAPI'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/WizardPage.tsx",
+      "code": "TS2379",
+      "message": "Argument of type '{ classifier?: string; extras?: string[]; indexUrl?: string; type: PackageType; name: string; version: string; arch: Architecture; languageVersion: string | undefined; metadata: { ...; } | { ...; }; downloadUrl: string | undefined; repository: { ...; } | undefined; location: string | undefined; }' is not assignable to parameter of type 'Omit<CartItem, \"id\" | \"addedAt\">' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'repository' are incompatible.\n    Type '{ baseUrl: string; name?: string; } | undefined' is not assignable to type '{ baseUrl: string; name?: string; }'.\n      Type 'undefined' is not assignable to type '{ baseUrl: string; name?: string; }'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/download-store.ts",
+      "code": "TS2345",
+      "message": "Argument of type '(state: DownloadState) => { items: (DownloadItem | { status: DownloadStatus; progress: number; error: undefined; id: string; name: string; ... 18 more ...; extras?: string[]; })[]; }' is not assignable to parameter of type 'DownloadState | Partial<DownloadState> | ((state: DownloadState) => DownloadState | Partial<DownloadState>)'.\n  Type '(state: DownloadState) => { items: (DownloadItem | { status: DownloadStatus; progress: number; error: undefined; id: string; name: string; ... 18 more ...; extras?: string[]; })[]; }' is not assignable to type '(state: DownloadState) => DownloadState | Partial<DownloadState>'.\n    Type '{ items: (DownloadItem | { status: DownloadStatus; progress: number; error: undefined; id: string; name: string; version: string; type?: string; arch?: string; downloadedBytes: number; ... 14 more ...; extras?: string[]; })[]; }' is not assignable to type 'DownloadState | Partial<DownloadState>'.\n      Type '{ items: (DownloadItem | { status: DownloadStatus; progress: number; error: undefined; id: string; name: string; version: string; type?: string; arch?: string; downloadedBytes: number; ... 14 more ...; extras?: string[]; })[]; }' is not assignable to type 'Partial<DownloadState>'.\n        Types of property 'items' are incompatible.\n          Type '(DownloadItem | { status: DownloadStatus; progress: number; error: undefined; id: string; name: string; version: string; type?: string; arch?: string; downloadedBytes: number; ... 14 more ...; extras?: string[]; })[]' is not assignable to type 'DownloadItem[]'.\n            Type 'DownloadItem | { status: DownloadStatus; progress: number; error: undefined; id: string; name: string; version: string; type?: string; arch?: string; downloadedBytes: number; ... 14 more ...; extras?: string[]; }' is not assignable to type 'DownloadItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n              Type '{ status: DownloadStatus; progress: number; error: undefined; id: string; name: string; version: string; type?: string; arch?: string; downloadedBytes: number; totalBytes: number; speed: number; ... 12 more ...; extras?: string[]; }' is not assignable to type 'DownloadItem' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n                Types of property 'error' are incompatible.\n                  Type 'undefined' is not assignable to type 'string'.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/download-store.ts",
+      "code": "TS2345",
+      "message": "Argument of type '(state: DownloadState) => { logs: (LogEntry | { id: string; timestamp: number; level: \"error\" | \"success\" | \"info\" | \"warn\"; message: string; details: string | undefined; })[]; }' is not assignable to parameter of type 'DownloadState | Partial<DownloadState> | ((state: DownloadState) => DownloadState | Partial<DownloadState>)'.\n  Type '(state: DownloadState) => { logs: (LogEntry | { id: string; timestamp: number; level: \"error\" | \"success\" | \"info\" | \"warn\"; message: string; details: string | undefined; })[]; }' is not assignable to type '(state: DownloadState) => DownloadState | Partial<DownloadState>'.\n    Type '{ logs: (LogEntry | { id: string; timestamp: number; level: \"error\" | \"success\" | \"info\" | \"warn\"; message: string; details: string | undefined; })[]; }' is not assignable to type 'DownloadState | Partial<DownloadState>'.\n      Type '{ logs: (LogEntry | { id: string; timestamp: number; level: \"error\" | \"success\" | \"info\" | \"warn\"; message: string; details: string | undefined; })[]; }' is not assignable to type 'Partial<DownloadState>'.\n        Types of property 'logs' are incompatible.\n          Type '(LogEntry | { id: string; timestamp: number; level: \"error\" | \"success\" | \"info\" | \"warn\"; message: string; details: string | undefined; })[]' is not assignable to type 'LogEntry[]'.\n            Type 'LogEntry | { id: string; timestamp: number; level: \"error\" | \"success\" | \"info\" | \"warn\"; message: string; details: string | undefined; }' is not assignable to type 'LogEntry' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n              Type '{ id: string; timestamp: number; level: \"error\" | \"success\" | \"info\" | \"warn\"; message: string; details: string | undefined; }' is not assignable to type 'LogEntry' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n                Types of property 'details' are incompatible.\n                  Type 'string | undefined' is not assignable to type 'string'.\n                    Type 'undefined' is not assignable to type 'string'.",
+      "count": 2
+    },
+    {
+      "filePath": "src/renderer/stores/history-store.ts",
+      "code": "TS2375",
+      "message": "Type '{ id: string; timestamp: string; packages: HistoryPackageItem[]; settings: HistorySettings; outputPath: string; artifactPaths: string[] | undefined; ... 5 more ...; failedCount: number | undefined; }' is not assignable to type 'DownloadHistory' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.\n  Types of property 'artifactPaths' are incompatible.\n    Type 'string[] | undefined' is not assignable to type 'string[]'.\n      Type 'undefined' is not assignable to type 'string[]'.",
+      "count": 1
+    }
+  ]
+}

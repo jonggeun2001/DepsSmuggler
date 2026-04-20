@@ -1,0 +1,84 @@
+{
+  "generatedAt": "2026-04-20T09:34:28.679Z",
+  "rules": [
+    "boundaries/dependencies",
+    "import/no-cycle",
+    "import/no-internal-modules",
+    "import/no-restricted-paths",
+    "no-restricted-syntax"
+  ],
+  "entries": [
+    {
+      "filePath": "src/renderer/components/os/OSPackageSearch.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "count": 2
+    },
+    {
+      "filePath": "src/renderer/components/UpdateNotification.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "count": 8
+    },
+    {
+      "filePath": "src/renderer/index.tsx",
+      "ruleId": "import/no-internal-modules",
+      "message": "Reaching to \"./styles/global.css\" is not allowed.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/CartPage.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "count": 24
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "count": 7
+    },
+    {
+      "filePath": "src/renderer/pages/HistoryPage.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "count": 2
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "count": 12
+    },
+    {
+      "filePath": "src/renderer/pages/SettingsPage.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "count": 7
+    },
+    {
+      "filePath": "src/renderer/stores/cart-store.ts",
+      "ruleId": "import/no-internal-modules",
+      "message": "Reaching to \"zustand/middleware\" is not allowed.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "import/no-internal-modules",
+      "message": "Reaching to \"zustand/middleware\" is not allowed.",
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "count": 12
+    }
+  ]
+}

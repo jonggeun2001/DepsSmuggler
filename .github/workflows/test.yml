@@ -80,7 +80,27 @@ jobs:
         run: npm ci
 
       - name: Run TypeScript type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
+
+  boundaries-check:
+    name: Guardrails
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run guardrail baseline checks
+        run: npm run guardrails:check
 
   e2e:
     name: Playwright E2E
@@ -138,4 +158,4 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           file: ./coverage/lcov.info
-          fail_ci_if_error: false
+          fail_ci_if_error: true

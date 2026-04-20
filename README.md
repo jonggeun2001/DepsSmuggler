@@ -11,16 +11,16 @@
 
 ## 지원 범위
 
-| 영역 | GUI | CLI | 비고 |
-|------|-----|-----|------|
-| Python `pip` | 지원 | 지원 | PyPI 검색/버전 조회/다운로드 |
-| Python `conda` | 지원 | 지원 | 채널 선택 지원 |
-| Java `maven` | 지원 | 지원 | 네이티브 classifier 확인 지원 |
-| Node.js `npm` | 지원 | 지원 | npm Registry 검색/버전 조회/다운로드 |
-| OS `yum` | 지원 | 지원 | `os list-distros/search/download/cache` 제공 |
-| OS `apt` | 지원 | 지원 | `os download`로 의존성 포함 다운로드 가능 |
-| OS `apk` | 지원 | 지원 | CLI에서 아카이브/로컬 저장소 출력 지원 |
-| Container `docker` | 지원 | 지원 | GUI는 Docker Hub 외 레지스트리 선택 UI 포함 |
+| 영역               | GUI  | CLI  | 비고                                         |
+| ------------------ | ---- | ---- | -------------------------------------------- |
+| Python `pip`       | 지원 | 지원 | PyPI 검색/버전 조회/다운로드                 |
+| Python `conda`     | 지원 | 지원 | 채널 선택 지원                               |
+| Java `maven`       | 지원 | 지원 | 네이티브 classifier 확인 지원                |
+| Node.js `npm`      | 지원 | 지원 | npm Registry 검색/버전 조회/다운로드         |
+| OS `yum`           | 지원 | 지원 | `os list-distros/search/download/cache` 제공 |
+| OS `apt`           | 지원 | 지원 | `os download`로 의존성 포함 다운로드 가능    |
+| OS `apk`           | 지원 | 지원 | CLI에서 아카이브/로컬 저장소 출력 지원       |
+| Container `docker` | 지원 | 지원 | GUI는 Docker Hub 외 레지스트리 선택 UI 포함  |
 
 ## 주요 기능
 
@@ -65,7 +65,8 @@ npm run test
 INTEGRATION_TEST=true npm run test
 npm run test:coverage
 npm run lint
-npx tsc --noEmit
+npm run typecheck
+npm run guardrails:check
 ```
 
 `npm run test:e2e`는 `tests/e2e`의 기본 회귀 세트를 실행합니다. 현재 세트는 브라우저 내부 `window.electronAPI` mock/stub을 사용해 외부 네트워크와 Electron 런타임 의존을 줄였고, 설정 반영, 장바구니→다운로드 smoke, 히스토리 기반 이메일 전달 복원, OS 패키지 전용 흐름을 결정적으로 검증합니다.
@@ -151,14 +152,14 @@ depssmuggler/
 
 ## 기술 스택
 
-| 구분 | 기술 |
-|------|------|
-| Desktop | Electron |
-| UI | React 19, Ant Design, Zustand, React Router |
-| Language | TypeScript |
-| Build | Vite, TypeScript Compiler, electron-builder |
-| Test | Vitest, Playwright |
-| Target OS | Windows, macOS, Linux |
+| 구분      | 기술                                        |
+| --------- | ------------------------------------------- |
+| Desktop   | Electron                                    |
+| UI        | React 19, Ant Design, Zustand, React Router |
+| Language  | TypeScript                                  |
+| Build     | Vite, TypeScript Compiler, electron-builder |
+| Test      | Vitest, Playwright                          |
+| Target OS | Windows, macOS, Linux                       |
 
 ## 라이선스
 

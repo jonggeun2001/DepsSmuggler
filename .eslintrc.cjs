@@ -22,11 +22,28 @@ module.exports = {
       jsx: true,
     },
   },
-  plugins: ['@typescript-eslint', 'react', 'react-hooks', 'import'],
+  plugins: ['@typescript-eslint', 'react', 'react-hooks', 'import', 'boundaries'],
   settings: {
     react: {
       version: 'detect',
     },
+    'import/core-modules': ['electron'],
+    'boundaries/dependency-nodes': ['import'],
+    'boundaries/elements': [
+      { type: 'electron', pattern: 'electron/**/*' },
+      { type: 'renderer', pattern: 'src/renderer/**/*' },
+      { type: 'cli', pattern: 'src/cli/**/*' },
+      { type: 'core-downloaders', pattern: 'src/core/downloaders/**/*' },
+      { type: 'core-resolver', pattern: 'src/core/resolver/**/*' },
+      { type: 'core-ports', pattern: 'src/core/ports/**/*' },
+      { type: 'core-shared', pattern: 'src/core/shared/**/*' },
+      { type: 'core-packager', pattern: 'src/core/packager/**/*' },
+      { type: 'core-mailer', pattern: 'src/core/mailer/**/*' },
+      { type: 'core-root', pattern: 'src/core/*' },
+      { type: 'types', pattern: 'src/types/**/*' },
+      { type: 'utils', pattern: 'src/utils/**/*' },
+      { type: 'tests', pattern: 'tests/**/*' },
+    ],
   },
   ignorePatterns: ['dist/', 'build/', 'coverage/', 'node_modules/', '*.min.js'],
   rules: {
@@ -55,19 +72,75 @@ module.exports = {
     'import/order': [
       'warn',
       {
-        groups: [
-          'builtin',
-          'external',
-          'internal',
-          ['parent', 'sibling'],
-          'index',
-          'type',
-        ],
+        groups: ['builtin', 'external', 'internal', ['parent', 'sibling'], 'index', 'type'],
         'newlines-between': 'never',
         alphabetize: {
           order: 'asc',
           caseInsensitive: true,
         },
+      },
+    ],
+    'import/no-cycle': 'warn',
+    'import/no-internal-modules': [
+      'warn',
+      {
+        allow: [
+          './**',
+          '../**',
+          '../../**',
+          '../../../**',
+          '../../../../**',
+          '../../../../../**',
+          'antd/**',
+          'react-dom/**',
+          'vite/**',
+          'vitest/**',
+        ],
+      },
+    ],
+    'import/no-restricted-paths': [
+      'warn',
+      {
+        basePath: __dirname,
+        zones: [
+          {
+            target: './src/core/downloaders',
+            from: './src/core/resolver',
+            message: '다운로더는 resolver 구현이 아니라 core/ports를 통해 상호작용해야 합니다.',
+          },
+          {
+            target: './src/core/resolver',
+            from: './src/core/downloaders',
+            message: 'resolver는 downloader 구현이 아니라 core/ports를 통해 상호작용해야 합니다.',
+          },
+        ],
+      },
+    ],
+    'boundaries/dependencies': [
+      'warn',
+      {
+        default: 'allow',
+        rules: [
+          { from: { type: 'renderer' }, disallow: { to: { type: 'electron' } } },
+          { from: { type: 'electron' }, disallow: { to: { type: 'renderer' } } },
+          { from: { type: 'cli' }, disallow: { to: { type: ['renderer', 'electron'] } } },
+          {
+            from: { type: 'core-downloaders' },
+            disallow: { to: { type: ['renderer', 'electron', 'cli'] } },
+          },
+          {
+            from: { type: 'core-resolver' },
+            disallow: { to: { type: ['renderer', 'electron', 'cli'] } },
+          },
+        ],
+      },
+    ],
+    'no-restricted-syntax': [
+      'warn',
+      {
+        selector: "MemberExpression[object.name='window'][property.name='electronAPI']",
+        message:
+          'renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
     ],
 
@@ -87,6 +160,7 @@ module.exports = {
       rules: {
         '@typescript-eslint/no-explicit-any': 'off',
         'no-console': 'off',
+        'no-restricted-syntax': 'off',
       },
     },
     {
@@ -102,6 +176,12 @@ module.exports = {
       env: {
         node: true,
         browser: false,
+      },
+    },
+    {
+      files: ['src/renderer/lib/renderer-data-client.ts'],
+      rules: {
+        'no-restricted-syntax': 'off',
       },
     },
   ],
