@@ -16,6 +16,8 @@ export default defineConfig({
       reporter: ['text', 'json', 'html', 'lcov'],
       include: ['src/**/*.ts', 'src/**/*.tsx', 'electron/**/*.ts'],
       exclude: [
+        'electron/**/*.test.ts',
+        'electron/**/*.spec.ts',
         'src/**/*.test.ts',
         'src/**/*.test.tsx',
         'src/core/**/*.test.ts',

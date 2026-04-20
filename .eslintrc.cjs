@@ -40,6 +40,7 @@ module.exports = {
       { type: 'core-packager', pattern: 'src/core/packager/**/*' },
       { type: 'core-mailer', pattern: 'src/core/mailer/**/*' },
       { type: 'core-root', pattern: 'src/core/*' },
+      { type: 'core-constants', pattern: 'src/core/constants/**/*' },
       { type: 'types', pattern: 'src/types/**/*' },
       { type: 'utils', pattern: 'src/utils/**/*' },
       { type: 'tests', pattern: 'tests/**/*' },
@@ -125,11 +126,18 @@ module.exports = {
           { from: { type: 'electron' }, disallow: { to: { type: 'renderer' } } },
           { from: { type: 'cli' }, disallow: { to: { type: ['renderer', 'electron'] } } },
           {
-            from: { type: 'core-downloaders' },
-            disallow: { to: { type: ['renderer', 'electron', 'cli'] } },
-          },
-          {
-            from: { type: 'core-resolver' },
+            from: {
+              type: [
+                'core-root',
+                'core-constants',
+                'core-downloaders',
+                'core-resolver',
+                'core-ports',
+                'core-shared',
+                'core-packager',
+                'core-mailer',
+              ],
+            },
             disallow: { to: { type: ['renderer', 'electron', 'cli'] } },
           },
         ],

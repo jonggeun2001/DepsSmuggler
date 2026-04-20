@@ -40,6 +40,10 @@ function summarize(entries) {
   }, {});
 }
 
+function getGuardrailMessages(result) {
+  return [...result.messages, ...(result.suppressedMessages ?? [])];
+}
+
 const eslint = new ESLint({ cwd: repoRoot, cache: false });
 const results = await eslint.lintFiles([
   'electron/**/*.ts',
@@ -51,7 +55,7 @@ const currentEntriesMap = new Map();
 for (const result of results) {
   const filePath = normalizePath(path.relative(repoRoot, result.filePath));
 
-  for (const message of result.messages) {
+  for (const message of getGuardrailMessages(result)) {
     if (!message.ruleId || !TARGET_RULE_IDS.includes(message.ruleId)) {
       continue;
     }
