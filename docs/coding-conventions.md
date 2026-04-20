@@ -463,7 +463,7 @@ chore: 의존성 업데이트
 
 ### Guardrails
 
-- renderer에서는 `window.electronAPI` 또는 `globalThis.electronAPI` 직접 호출을 새로 추가하지 않습니다. 가능한 경우 preload 계약이나 `renderer-data-client` 같은 게이트웨이를 사용합니다.
+- renderer에서는 `window.electronAPI`, `globalThis.electronAPI`, 또는 전역 객체 체인을 통한 직접 bridge 접근을 새로 추가하지 않습니다. 가능한 경우 preload 계약이나 `renderer-data-client` 같은 게이트웨이를 사용합니다.
 - `src/core/downloaders/**`와 `src/core/resolver/**` 사이의 직접 import는 금지하고, 이후 단계에서 `src/core/ports/**`를 통해 연결합니다.
 - 아키텍처 관련 ESLint 규칙과 강화 strict 타입체크는 baseline 파일로 기존 부채를 고정하고, `npm run guardrails:check`와 CI Guardrails job에서 새 위반만 차단합니다.
 - 커밋 전에는 `lint-staged`가 변경된 TS/JS 파일에 대해 eslint, 관련 Vitest, TS 파일 타입체크를 실행합니다.
