@@ -217,6 +217,150 @@ module.exports = {
       },
       {
         selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSAsExpression'][object.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSAsExpression'][object.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[computed=true][property.value='electronAPI'][object.type='TSAsExpression'][object.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[computed=true][property.value='electronAPI'][object.type='TSAsExpression'][object.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSAsExpression'][object.expression.type='MemberExpression'][object.expression.property.name='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSAsExpression'][object.expression.type='MemberExpression'][object.expression.property.name='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSAsExpression'][object.expression.type='MemberExpression'][object.expression.computed=true][object.expression.property.value='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSAsExpression'][object.expression.type='MemberExpression'][object.expression.computed=true][object.expression.property.value='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSNonNullExpression'][object.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 non-null 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSNonNullExpression'][object.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 non-null 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[computed=true][property.value='electronAPI'][object.type='TSNonNullExpression'][object.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 non-null 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[computed=true][property.value='electronAPI'][object.type='TSNonNullExpression'][object.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 non-null 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSNonNullExpression'][object.expression.type='MemberExpression'][object.expression.property.name='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSNonNullExpression'][object.expression.type='MemberExpression'][object.expression.property.name='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSNonNullExpression'][object.expression.type='MemberExpression'][object.expression.computed=true][object.expression.property.value='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSNonNullExpression'][object.expression.type='MemberExpression'][object.expression.computed=true][object.expression.property.value='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSTypeAssertion'][object.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSTypeAssertion'][object.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[computed=true][property.value='electronAPI'][object.type='TSTypeAssertion'][object.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[computed=true][property.value='electronAPI'][object.type='TSTypeAssertion'][object.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSTypeAssertion'][object.expression.type='MemberExpression'][object.expression.property.name='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSTypeAssertion'][object.expression.type='MemberExpression'][object.expression.property.name='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSTypeAssertion'][object.expression.type='MemberExpression'][object.expression.computed=true][object.expression.property.value='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[property.name='electronAPI'][object.type='TSTypeAssertion'][object.expression.type='MemberExpression'][object.expression.computed=true][object.expression.property.value='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 electronAPI 직접 접근을 우회하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
           "VariableDeclarator[init.name='window'] > ObjectPattern > Property[key.name='electronAPI']",
         message:
           'renderer에서는 window.electronAPI를 직접 구조분해하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
@@ -462,6 +606,108 @@ module.exports = {
           'renderer에서는 전역 객체 체인을 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
       {
+        selector: "VariableDeclarator[init.type='TSAsExpression'][init.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "VariableDeclarator[init.type='TSAsExpression'][init.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSAsExpression'][init.expression.type='MemberExpression'][init.expression.property.name='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSAsExpression'][init.expression.type='MemberExpression'][init.expression.property.name='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSAsExpression'][init.expression.type='MemberExpression'][init.expression.computed=true][init.expression.property.value='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSAsExpression'][init.expression.type='MemberExpression'][init.expression.computed=true][init.expression.property.value='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "VariableDeclarator[init.type='TSNonNullExpression'][init.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "VariableDeclarator[init.type='TSNonNullExpression'][init.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSNonNullExpression'][init.expression.type='MemberExpression'][init.expression.property.name='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSNonNullExpression'][init.expression.type='MemberExpression'][init.expression.property.name='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSNonNullExpression'][init.expression.type='MemberExpression'][init.expression.computed=true][init.expression.property.value='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSNonNullExpression'][init.expression.type='MemberExpression'][init.expression.computed=true][init.expression.property.value='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "VariableDeclarator[init.type='TSTypeAssertion'][init.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "VariableDeclarator[init.type='TSTypeAssertion'][init.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSTypeAssertion'][init.expression.type='MemberExpression'][init.expression.property.name='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSTypeAssertion'][init.expression.type='MemberExpression'][init.expression.property.name='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSTypeAssertion'][init.expression.type='MemberExpression'][init.expression.computed=true][init.expression.property.value='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='TSTypeAssertion'][init.expression.type='MemberExpression'][init.expression.computed=true][init.expression.property.value='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
         selector: "VariableDeclarator[init.name='window'][id.type='Identifier']",
         message:
           'renderer에서는 window를 별칭으로 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
@@ -596,6 +842,108 @@ module.exports = {
           "AssignmentExpression[right.type='MemberExpression'][right.computed=true][right.property.value='globalThis'] > ObjectPattern > Property[computed=true][key.value='electronAPI']",
         message:
           'renderer에서는 전역 객체 체인을 통해 electronAPI를 직접 구조분해하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "AssignmentExpression[right.type='TSAsExpression'][right.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "AssignmentExpression[right.type='TSAsExpression'][right.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSAsExpression'][right.expression.type='MemberExpression'][right.expression.property.name='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSAsExpression'][right.expression.type='MemberExpression'][right.expression.property.name='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSAsExpression'][right.expression.type='MemberExpression'][right.expression.computed=true][right.expression.property.value='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSAsExpression'][right.expression.type='MemberExpression'][right.expression.computed=true][right.expression.property.value='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "AssignmentExpression[right.type='TSNonNullExpression'][right.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "AssignmentExpression[right.type='TSNonNullExpression'][right.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSNonNullExpression'][right.expression.type='MemberExpression'][right.expression.property.name='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSNonNullExpression'][right.expression.type='MemberExpression'][right.expression.property.name='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSNonNullExpression'][right.expression.type='MemberExpression'][right.expression.computed=true][right.expression.property.value='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSNonNullExpression'][right.expression.type='MemberExpression'][right.expression.computed=true][right.expression.property.value='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 non-null 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "AssignmentExpression[right.type='TSTypeAssertion'][right.expression.name='window']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "AssignmentExpression[right.type='TSTypeAssertion'][right.expression.name='globalThis']",
+        message:
+          'renderer에서는 window/globalThis에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSTypeAssertion'][right.expression.type='MemberExpression'][right.expression.property.name='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSTypeAssertion'][right.expression.type='MemberExpression'][right.expression.property.name='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSTypeAssertion'][right.expression.type='MemberExpression'][right.expression.computed=true][right.expression.property.value='window']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='TSTypeAssertion'][right.expression.type='MemberExpression'][right.expression.computed=true][right.expression.property.value='globalThis']",
+        message:
+          'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
       {
         selector: "AssignmentExpression[right.name='window'] > ObjectPattern > RestElement[argument.type='Identifier']",
