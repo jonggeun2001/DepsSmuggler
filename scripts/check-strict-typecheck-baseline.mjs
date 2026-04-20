@@ -23,7 +23,33 @@ function createSignature(entry) {
     filePath: entry.filePath,
     code: entry.code,
     message: entry.message,
+    line: entry.line,
+    column: entry.column,
+    endLine: entry.endLine,
+    endColumn: entry.endColumn,
   });
+}
+
+function getDiagnosticLocation(diagnostic) {
+  if (!diagnostic.file || diagnostic.start === undefined) {
+    return {
+      line: null,
+      column: null,
+      endLine: null,
+      endColumn: null,
+    };
+  }
+
+  const start = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+  const endPosition = diagnostic.start + (diagnostic.length ?? 0);
+  const end = diagnostic.file.getLineAndCharacterOfPosition(endPosition);
+
+  return {
+    line: start.line + 1,
+    column: start.character + 1,
+    endLine: end.line + 1,
+    endColumn: end.character + 1,
+  };
 }
 
 const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
@@ -55,6 +81,7 @@ for (const diagnostic of ts.getPreEmitDiagnostics(program)) {
       : '<config>',
     code: `TS${diagnostic.code}`,
     message: flattenMessage(diagnostic.messageText),
+    ...getDiagnosticLocation(diagnostic),
     count: 1,
   };
   const signature = createSignature(entry);
@@ -120,7 +147,7 @@ if (regressions.length > 0) {
   console.error('Strict typecheck baseline regression detected:');
   for (const regression of regressions) {
     console.error(
-      `- ${regression.filePath} [${regression.code}] baseline=${regression.baselineCount} current=${regression.count}`
+      `- ${regression.filePath}:${regression.line ?? '?'}:${regression.column ?? '?'} [${regression.code}] baseline=${regression.baselineCount} current=${regression.count}`
     );
     console.error(`  ${regression.message}`);
   }

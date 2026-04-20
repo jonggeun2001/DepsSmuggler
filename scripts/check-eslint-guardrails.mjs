@@ -26,6 +26,10 @@ function createSignature(entry) {
     filePath: entry.filePath,
     ruleId: entry.ruleId,
     message: entry.message,
+    line: entry.line,
+    column: entry.column,
+    endLine: entry.endLine,
+    endColumn: entry.endColumn,
   });
 }
 
@@ -56,6 +60,10 @@ for (const result of results) {
       filePath,
       ruleId: message.ruleId,
       message: message.message,
+      line: message.line ?? null,
+      column: message.column ?? null,
+      endLine: message.endLine ?? null,
+      endColumn: message.endColumn ?? null,
       count: 1,
     };
     const signature = createSignature(entry);
@@ -120,7 +128,7 @@ if (regressions.length > 0) {
   console.error('ESLint guardrail baseline regression detected:');
   for (const regression of regressions) {
     console.error(
-      `- ${regression.filePath} [${regression.ruleId}] baseline=${regression.baselineCount} current=${regression.count}`
+      `- ${regression.filePath}:${regression.line ?? '?'}:${regression.column ?? '?'} [${regression.ruleId}] baseline=${regression.baselineCount} current=${regression.count}`
     );
     console.error(`  ${regression.message}`);
   }

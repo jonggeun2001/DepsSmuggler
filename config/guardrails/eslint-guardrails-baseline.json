@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-20T09:34:28.679Z",
+  "generatedAt": "2026-04-20T10:02:42.951Z",
   "rules": [
     "boundaries/dependencies",
     "import/no-cycle",
@@ -12,73 +12,781 @@
       "filePath": "src/renderer/components/os/OSPackageSearch.tsx",
       "ruleId": "no-restricted-syntax",
       "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
-      "count": 2
+      "line": 57,
+      "column": 12,
+      "endLine": 57,
+      "endColumn": 30,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/components/os/OSPackageSearch.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 60,
+      "column": 23,
+      "endLine": 60,
+      "endColumn": 41,
+      "count": 1
     },
     {
       "filePath": "src/renderer/components/UpdateNotification.tsx",
       "ruleId": "no-restricted-syntax",
       "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
-      "count": 8
+      "line": 104,
+      "column": 8,
+      "endLine": 104,
+      "endColumn": 26,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/components/UpdateNotification.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 36,
+      "column": 10,
+      "endLine": 36,
+      "endColumn": 28,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/components/UpdateNotification.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 38,
+      "column": 25,
+      "endLine": 38,
+      "endColumn": 43,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/components/UpdateNotification.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 59,
+      "column": 5,
+      "endLine": 59,
+      "endColumn": 23,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/components/UpdateNotification.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 68,
+      "column": 10,
+      "endLine": 68,
+      "endColumn": 28,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/components/UpdateNotification.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 70,
+      "column": 26,
+      "endLine": 70,
+      "endColumn": 44,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/components/UpdateNotification.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 78,
+      "column": 10,
+      "endLine": 78,
+      "endColumn": 28,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/components/UpdateNotification.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 80,
+      "column": 11,
+      "endLine": 80,
+      "endColumn": 29,
+      "count": 1
     },
     {
       "filePath": "src/renderer/index.tsx",
       "ruleId": "import/no-internal-modules",
       "message": "Reaching to \"./styles/global.css\" is not allowed.",
+      "line": 8,
+      "column": 8,
+      "endLine": 8,
+      "endColumn": 29,
       "count": 1
     },
     {
       "filePath": "src/renderer/pages/CartPage.tsx",
       "ruleId": "no-restricted-syntax",
       "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 142,
+      "column": 29,
+      "endLine": 142,
+      "endColumn": 47,
       "count": 1
     },
     {
       "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
       "ruleId": "no-restricted-syntax",
       "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
-      "count": 24
+      "line": 1222,
+      "column": 12,
+      "endLine": 1222,
+      "endColumn": 30,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1264,
+      "column": 15,
+      "endLine": 1264,
+      "endColumn": 33,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1328,
+      "column": 11,
+      "endLine": 1328,
+      "endColumn": 29,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1329,
+      "column": 15,
+      "endLine": 1329,
+      "endColumn": 33,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1335,
+      "column": 11,
+      "endLine": 1335,
+      "endColumn": 29,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1336,
+      "column": 15,
+      "endLine": 1336,
+      "endColumn": 33,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1353,
+      "column": 13,
+      "endLine": 1353,
+      "endColumn": 31,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1354,
+      "column": 17,
+      "endLine": 1354,
+      "endColumn": 35,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1375,
+      "column": 10,
+      "endLine": 1375,
+      "endColumn": 28,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1532,
+      "column": 13,
+      "endLine": 1532,
+      "endColumn": 31,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1624,
+      "column": 9,
+      "endLine": 1624,
+      "endColumn": 27,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 1625,
+      "column": 13,
+      "endLine": 1625,
+      "endColumn": 31,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 172,
+      "column": 12,
+      "endLine": 172,
+      "endColumn": 30,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 176,
+      "column": 26,
+      "endLine": 176,
+      "endColumn": 44,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 209,
+      "column": 18,
+      "endLine": 209,
+      "endColumn": 36,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 214,
+      "column": 39,
+      "endLine": 214,
+      "endColumn": 57,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 591,
+      "column": 10,
+      "endLine": 591,
+      "endColumn": 28,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 645,
+      "column": 27,
+      "endLine": 645,
+      "endColumn": 45,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 685,
+      "column": 25,
+      "endLine": 685,
+      "endColumn": 43,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 697,
+      "column": 31,
+      "endLine": 697,
+      "endColumn": 49,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 785,
+      "column": 30,
+      "endLine": 785,
+      "endColumn": 48,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 823,
+      "column": 9,
+      "endLine": 823,
+      "endColumn": 27,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 824,
+      "column": 28,
+      "endLine": 824,
+      "endColumn": 46,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-download-page-controller.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 925,
+      "column": 27,
+      "endLine": 925,
+      "endColumn": 45,
+      "count": 1
     },
     {
       "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
       "ruleId": "no-restricted-syntax",
       "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
-      "count": 7
+      "line": 123,
+      "column": 65,
+      "endLine": 123,
+      "endColumn": 83,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 130,
+      "column": 5,
+      "endLine": 130,
+      "endColumn": 23,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 149,
+      "column": 32,
+      "endLine": 149,
+      "endColumn": 50,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 154,
+      "column": 12,
+      "endLine": 154,
+      "endColumn": 30,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 232,
+      "column": 27,
+      "endLine": 232,
+      "endColumn": 45,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 349,
+      "column": 14,
+      "endLine": 349,
+      "endColumn": 32,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/download-page/hooks/use-os-download-flow.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 354,
+      "column": 15,
+      "endLine": 354,
+      "endColumn": 33,
+      "count": 1
     },
     {
       "filePath": "src/renderer/pages/HistoryPage.tsx",
       "ruleId": "no-restricted-syntax",
       "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
-      "count": 2
+      "line": 187,
+      "column": 9,
+      "endLine": 187,
+      "endColumn": 27,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/HistoryPage.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 189,
+      "column": 15,
+      "endLine": 189,
+      "endColumn": 33,
+      "count": 1
     },
     {
       "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
       "ruleId": "no-restricted-syntax",
       "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
-      "count": 12
+      "line": 158,
+      "column": 12,
+      "endLine": 158,
+      "endColumn": 30,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 162,
+      "column": 27,
+      "endLine": 162,
+      "endColumn": 45,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 183,
+      "column": 12,
+      "endLine": 183,
+      "endColumn": 30,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 187,
+      "column": 13,
+      "endLine": 187,
+      "endColumn": 31,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 245,
+      "column": 10,
+      "endLine": 245,
+      "endColumn": 28,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 250,
+      "column": 32,
+      "endLine": 250,
+      "endColumn": 50,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 260,
+      "column": 10,
+      "endLine": 260,
+      "endColumn": 28,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 265,
+      "column": 26,
+      "endLine": 265,
+      "endColumn": 44,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 299,
+      "column": 26,
+      "endLine": 299,
+      "endColumn": 44,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 331,
+      "column": 10,
+      "endLine": 331,
+      "endColumn": 28,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 336,
+      "column": 26,
+      "endLine": 336,
+      "endColumn": 44,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/settings/use-settings-form-actions.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 93,
+      "column": 40,
+      "endLine": 93,
+      "endColumn": 58,
+      "count": 1
     },
     {
       "filePath": "src/renderer/pages/SettingsPage.tsx",
       "ruleId": "no-restricted-syntax",
       "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
-      "count": 7
+      "line": 1207,
+      "column": 10,
+      "endLine": 1207,
+      "endColumn": 28,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/SettingsPage.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 249,
+      "column": 11,
+      "endLine": 249,
+      "endColumn": 29,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/SettingsPage.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 250,
+      "column": 32,
+      "endLine": 250,
+      "endColumn": 50,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/SettingsPage.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 267,
+      "column": 11,
+      "endLine": 267,
+      "endColumn": 29,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/SettingsPage.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 268,
+      "column": 32,
+      "endLine": 268,
+      "endColumn": 50,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/SettingsPage.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 286,
+      "column": 12,
+      "endLine": 286,
+      "endColumn": 30,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/pages/SettingsPage.tsx",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 290,
+      "column": 26,
+      "endLine": 290,
+      "endColumn": 44,
+      "count": 1
     },
     {
       "filePath": "src/renderer/stores/cart-store.ts",
       "ruleId": "import/no-internal-modules",
       "message": "Reaching to \"zustand/middleware\" is not allowed.",
+      "line": 2,
+      "column": 25,
+      "endLine": 2,
+      "endColumn": 45,
       "count": 1
     },
     {
       "filePath": "src/renderer/stores/settings-store.ts",
       "ruleId": "import/no-internal-modules",
       "message": "Reaching to \"zustand/middleware\" is not allowed.",
+      "line": 2,
+      "column": 58,
+      "endLine": 2,
+      "endColumn": 78,
       "count": 1
     },
     {
       "filePath": "src/renderer/stores/settings-store.ts",
       "ruleId": "no-restricted-syntax",
       "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
-      "count": 12
+      "line": 227,
+      "column": 42,
+      "endLine": 227,
+      "endColumn": 60,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 229,
+      "column": 30,
+      "endLine": 229,
+      "endColumn": 48,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 246,
+      "column": 42,
+      "endLine": 246,
+      "endColumn": 60,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 253,
+      "column": 15,
+      "endLine": 253,
+      "endColumn": 33,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 262,
+      "column": 42,
+      "endLine": 262,
+      "endColumn": 60,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 264,
+      "column": 15,
+      "endLine": 264,
+      "endColumn": 33,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 281,
+      "column": 46,
+      "endLine": 281,
+      "endColumn": 64,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 282,
+      "column": 11,
+      "endLine": 282,
+      "endColumn": 29,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 317,
+      "column": 46,
+      "endLine": 317,
+      "endColumn": 64,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 319,
+      "column": 38,
+      "endLine": 319,
+      "endColumn": 56,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 359,
+      "column": 19,
+      "endLine": 359,
+      "endColumn": 37,
+      "count": 1
+    },
+    {
+      "filePath": "src/renderer/stores/settings-store.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 364,
+      "column": 16,
+      "endLine": 364,
+      "endColumn": 34,
+      "count": 1
     }
   ]
 }
