@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-20T10:16:47.814Z",
+  "generatedAt": "2026-04-20T10:22:42.212Z",
   "rules": [
     "boundaries/dependencies",
     "import/no-cycle",
@@ -8,6 +8,16 @@
     "no-restricted-syntax"
   ],
   "entries": [
+    {
+      "filePath": "electron/updater.ts",
+      "ruleId": "no-restricted-syntax",
+      "message": "renderer에서는 window를 별칭으로 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.",
+      "line": 43,
+      "column": 3,
+      "endLine": 43,
+      "endColumn": 22,
+      "count": 1
+    },
     {
       "filePath": "src/renderer/components/os/OSPackageSearch.tsx",
       "ruleId": "no-restricted-syntax",

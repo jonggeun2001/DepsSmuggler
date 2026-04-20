@@ -162,6 +162,22 @@ module.exports = {
         message:
           'renderer에서는 window.electronAPI를 직접 구조분해하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
+      {
+        selector:
+          "VariableDeclarator[init.name='window'] > ObjectPattern > Property[computed=true][key.value='electronAPI']",
+        message:
+          'renderer에서는 window.electronAPI를 직접 구조분해하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "VariableDeclarator[init.name='window'][id.type='Identifier']",
+        message:
+          'renderer에서는 window를 별칭으로 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "AssignmentExpression[right.name='window'][left.type='Identifier']",
+        message:
+          'renderer에서는 window를 별칭으로 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
     ],
 
     // General
