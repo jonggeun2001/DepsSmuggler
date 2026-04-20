@@ -715,6 +715,12 @@ module.exports = {
       },
       {
         selector:
+          ":matches(VariableDeclarator[init.type='TSAsExpression'], VariableDeclarator[init.type='TSNonNullExpression'], VariableDeclarator[init.type='TSTypeAssertion']):has(:matches(TSAsExpression, TSNonNullExpression, TSTypeAssertion) > :matches(Identifier[name='window'], Identifier[name='globalThis'], MemberExpression[property.name='window'], MemberExpression[property.name='globalThis'], MemberExpression[computed=true][property.value='window'], MemberExpression[computed=true][property.value='globalThis']))",
+        message:
+          'renderer에서는 중첩된 TS wrapper로 window/globalThis 또는 전역 객체 체인을 변수/구조분해 대상으로 끌어오지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
           "VariableDeclarator[init.type='TSNonNullExpression'][init.expression.type='TSAsExpression'][init.expression.expression.name='window']",
         message:
           'renderer에서는 중첩된 TS wrapper로 window/globalThis를 변수나 구조분해 대상으로 끌어오지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
@@ -1022,6 +1028,12 @@ module.exports = {
           "AssignmentExpression[right.type='TSTypeAssertion'][right.expression.type='MemberExpression'][right.expression.computed=true][right.expression.property.value='globalThis']",
         message:
           'renderer에서는 전역 객체 체인에 타입 단언을 적용해 direct bridge 우회를 시도하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          ":matches(AssignmentExpression[right.type='TSAsExpression'], AssignmentExpression[right.type='TSNonNullExpression'], AssignmentExpression[right.type='TSTypeAssertion']):has(:matches(TSAsExpression, TSNonNullExpression, TSTypeAssertion) > :matches(Identifier[name='window'], Identifier[name='globalThis'], MemberExpression[property.name='window'], MemberExpression[property.name='globalThis'], MemberExpression[computed=true][property.value='window'], MemberExpression[computed=true][property.value='globalThis']))",
+        message:
+          'renderer에서는 중첩된 TS wrapper로 window/globalThis 또는 전역 객체 체인을 대입식에 끌어오지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
       {
         selector:
