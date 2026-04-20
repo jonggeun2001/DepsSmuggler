@@ -151,10 +151,21 @@ module.exports = {
           'renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
       {
+        selector: "MemberExpression[object.name='globalThis'][property.name='electronAPI']",
+        message:
+          'renderer에서는 globalThis.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
         selector:
           "MemberExpression[object.name='window'][computed=true][property.value='electronAPI']",
         message:
           'renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[object.name='globalThis'][computed=true][property.value='electronAPI']",
+        message:
+          'renderer에서는 globalThis.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
       {
         selector:
@@ -164,9 +175,21 @@ module.exports = {
       },
       {
         selector:
+          "VariableDeclarator[init.name='globalThis'] > ObjectPattern > Property[key.name='electronAPI']",
+        message:
+          'renderer에서는 globalThis.electronAPI를 직접 구조분해하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
           "VariableDeclarator[init.name='window'] > ObjectPattern > Property[computed=true][key.value='electronAPI']",
         message:
           'renderer에서는 window.electronAPI를 직접 구조분해하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.name='globalThis'] > ObjectPattern > Property[computed=true][key.value='electronAPI']",
+        message:
+          'renderer에서는 globalThis.electronAPI를 직접 구조분해하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
       {
         selector: "VariableDeclarator[init.name='window'][id.type='Identifier']",
@@ -174,9 +197,19 @@ module.exports = {
           'renderer에서는 window를 별칭으로 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
       {
+        selector: "VariableDeclarator[init.name='globalThis'][id.type='Identifier']",
+        message:
+          'renderer에서는 globalThis를 별칭으로 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
         selector: "AssignmentExpression[right.name='window'][left.type='Identifier']",
         message:
           'renderer에서는 window를 별칭으로 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "AssignmentExpression[right.name='globalThis'][left.type='Identifier']",
+        message:
+          'renderer에서는 globalThis를 별칭으로 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
     ],
 
