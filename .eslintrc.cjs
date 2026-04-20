@@ -28,7 +28,7 @@ module.exports = {
       version: 'detect',
     },
     'import/core-modules': ['electron'],
-    'boundaries/dependency-nodes': ['import'],
+    'boundaries/dependency-nodes': ['import', 'dynamic-import', 'require', 'export'],
     'boundaries/elements': [
       { type: 'electron', pattern: 'electron/**/*' },
       { type: 'renderer', pattern: 'src/renderer/**/*' },
@@ -149,6 +149,18 @@ module.exports = {
         selector: "MemberExpression[object.name='window'][property.name='electronAPI']",
         message:
           'renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "MemberExpression[object.name='window'][computed=true][property.value='electronAPI']",
+        message:
+          'renderer에서는 window.electronAPI를 직접 호출하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.name='window'] > ObjectPattern > Property[key.name='electronAPI']",
+        message:
+          'renderer에서는 window.electronAPI를 직접 구조분해하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
     ],
 

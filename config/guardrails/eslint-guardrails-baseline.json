@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-20T10:09:37.452Z",
+  "generatedAt": "2026-04-20T10:16:47.814Z",
   "rules": [
     "boundaries/dependencies",
     "import/no-cycle",
