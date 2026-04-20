@@ -36,19 +36,19 @@ const ELECTRON_API_ALIAS_MESSAGE =
 class Scope {
   constructor(parent = null) {
     this.parent = parent;
-    this.constStrings = new Map();
+    this.constValues = new Map();
     this.valueKinds = new Map();
   }
 
-  lookupConstString(name) {
-    if (this.constStrings.has(name)) {
-      return this.constStrings.get(name);
+  lookupConstValue(name) {
+    if (this.constValues.has(name)) {
+      return this.constValues.get(name);
     }
-    return this.parent?.lookupConstString(name) ?? null;
+    return this.parent?.lookupConstValue(name) ?? null;
   }
 
-  setConstString(name, value) {
-    this.constStrings.set(name, value);
+  setConstValue(name, value) {
+    this.constValues.set(name, value);
   }
 
   lookupValueKind(name) {
@@ -98,7 +98,11 @@ function unwrapExpression(node) {
   return current;
 }
 
-function resolveStringLiteral(node, scope) {
+function isPlainObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function resolveConstValue(node, scope) {
   const current = unwrapExpression(node);
   if (!isNode(current)) {
     return null;
@@ -117,10 +121,51 @@ function resolveStringLiteral(node, scope) {
   }
 
   if (current.type === 'Identifier') {
-    return scope.lookupConstString(current.name);
+    return scope.lookupConstValue(current.name);
+  }
+
+  if (current.type === 'ObjectExpression') {
+    const resolvedObject = {};
+    for (const property of current.properties) {
+      if (!isNode(property) || property.type !== 'Property') {
+        return null;
+      }
+
+      const key = resolvePropertyKey(property.key, property.computed, scope);
+      if (!key) {
+        return null;
+      }
+
+      const value = resolveConstValue(property.value, scope);
+      if (value === null) {
+        return null;
+      }
+
+      resolvedObject[key] = value;
+    }
+    return resolvedObject;
+  }
+
+  if (current.type === 'MemberExpression') {
+    const objectValue = resolveConstValue(current.object, scope);
+    if (!isPlainObject(objectValue)) {
+      return null;
+    }
+
+    const key = resolvePropertyKey(current.property, current.computed, scope);
+    if (!key || !(key in objectValue)) {
+      return null;
+    }
+
+    return objectValue[key];
   }
 
   return null;
+}
+
+function resolveStringLiteral(node, scope) {
+  const value = resolveConstValue(node, scope);
+  return typeof value === 'string' ? value : null;
 }
 
 function resolvePropertyKey(property, computed, scope) {
@@ -146,6 +191,41 @@ function resolveValueKind(node, scope) {
       return 'guard-global';
     }
     return scope.lookupValueKind(current.name);
+  }
+
+  if (current.type === 'LogicalExpression') {
+    const leftKind = resolveValueKind(current.left, scope);
+    const rightKind = resolveValueKind(current.right, scope);
+    if (leftKind === 'guard-global' || rightKind === 'guard-global') {
+      return 'guard-global';
+    }
+    if (leftKind === 'electron-api' || rightKind === 'electron-api') {
+      return 'electron-api';
+    }
+    return null;
+  }
+
+  if (current.type === 'ConditionalExpression') {
+    const consequentKind = resolveValueKind(current.consequent, scope);
+    const alternateKind = resolveValueKind(current.alternate, scope);
+    if (consequentKind === 'guard-global' || alternateKind === 'guard-global') {
+      return 'guard-global';
+    }
+    if (consequentKind === 'electron-api' || alternateKind === 'electron-api') {
+      return 'electron-api';
+    }
+    return null;
+  }
+
+  if (current.type === 'SequenceExpression') {
+    const kinds = current.expressions.map((expression) => resolveValueKind(expression, scope));
+    if (kinds.includes('guard-global')) {
+      return 'guard-global';
+    }
+    if (kinds.includes('electron-api')) {
+      return 'electron-api';
+    }
+    return null;
   }
 
   if (current.type !== 'MemberExpression') {
@@ -276,9 +356,9 @@ function handleVariableDeclarator(node, scope, filePath, violationsMap, declarat
   }
 
   if (declarationKind === 'const' && node.id.type === 'Identifier') {
-    const stringValue = resolveStringLiteral(node.init, scope);
-    if (stringValue) {
-      scope.setConstString(node.id.name, stringValue);
+    const constValue = resolveConstValue(node.init, scope);
+    if (constValue !== null) {
+      scope.setConstValue(node.id.name, constValue);
     }
   }
 
