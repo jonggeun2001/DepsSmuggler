@@ -428,6 +428,40 @@ module.exports = {
           'renderer에서는 전역 객체 체인을 구조분해해 별칭으로 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
       {
+        selector: "VariableDeclarator[init.name='window'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 window/globalThis를 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "VariableDeclarator[init.name='globalThis'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 window/globalThis를 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='MemberExpression'][init.property.name='window'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 전역 객체 체인을 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='MemberExpression'][init.property.name='globalThis'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 전역 객체 체인을 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='MemberExpression'][init.computed=true][init.property.value='window'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 전역 객체 체인을 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "VariableDeclarator[init.type='MemberExpression'][init.computed=true][init.property.value='globalThis'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 전역 객체 체인을 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
         selector: "VariableDeclarator[init.name='window'][id.type='Identifier']",
         message:
           'renderer에서는 window를 별칭으로 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
@@ -562,6 +596,40 @@ module.exports = {
           "AssignmentExpression[right.type='MemberExpression'][right.computed=true][right.property.value='globalThis'] > ObjectPattern > Property[computed=true][key.value='electronAPI']",
         message:
           'renderer에서는 전역 객체 체인을 통해 electronAPI를 직접 구조분해하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "AssignmentExpression[right.name='window'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 window/globalThis를 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector: "AssignmentExpression[right.name='globalThis'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 window/globalThis를 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='MemberExpression'][right.property.name='window'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 전역 객체 체인을 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='MemberExpression'][right.property.name='globalThis'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 전역 객체 체인을 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='MemberExpression'][right.computed=true][right.property.value='window'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 전역 객체 체인을 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
+      },
+      {
+        selector:
+          "AssignmentExpression[right.type='MemberExpression'][right.computed=true][right.property.value='globalThis'] > ObjectPattern > RestElement[argument.type='Identifier']",
+        message:
+          'renderer에서는 전역 객체 체인을 rest 구조분해로 별칭 저장하지 말고 preload 계약 또는 renderer-data-client 게이트웨이를 사용하세요.',
       },
       {
         selector: "AssignmentExpression[right.name='window'] > ObjectPattern > Property[key.name='window']",
