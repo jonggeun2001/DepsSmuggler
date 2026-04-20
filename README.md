@@ -66,7 +66,7 @@ INTEGRATION_TEST=true npm run test
 npm run test:coverage
 npm run lint
 npm run typecheck
-npm run guardrails:check
+npm run guardrails:check  # renderer bridge/아키텍처/strict baseline 가드 검사
 ```
 
 `npm run test:e2e`는 `tests/e2e`의 기본 회귀 세트를 실행합니다. 현재 세트는 브라우저 내부 `window.electronAPI` mock/stub을 사용해 외부 네트워크와 Electron 런타임 의존을 줄였고, 설정 반영, 장바구니→다운로드 smoke, 히스토리 기반 이메일 전달 복원, OS 패키지 전용 흐름을 결정적으로 검증합니다.
