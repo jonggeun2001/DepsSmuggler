@@ -2,9 +2,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { OSCacheManager } from './cache-manager';
+import { OsPackageCache } from './cache-manager';
 
-describe('OSCacheManager', () => {
+describe('OsPackageCache', () => {
   let tempDir: string;
 
   beforeEach(() => {
@@ -24,15 +24,15 @@ describe('OSCacheManager', () => {
       gpgCheck: false,
       isOfficial: true,
     };
-    const key = OSCacheManager.createKey('yum', repo, 'x86_64', 'primary');
+    const key = OsPackageCache.createKey('yum', repo, 'x86_64', 'primary');
 
-    const writer = new OSCacheManager({
+    const writer = new OsPackageCache({
       type: 'persistent',
       directory: tempDir,
     });
     await writer.set(key, { packages: ['httpd'] });
 
-    const reader = new OSCacheManager({
+    const reader = new OsPackageCache({
       type: 'persistent',
       directory: tempDir,
     });
@@ -54,7 +54,7 @@ describe('OSCacheManager', () => {
       })
     );
 
-    const cacheManager = new OSCacheManager({
+    const cacheManager = new OsPackageCache({
       type: 'persistent',
       directory: tempDir,
     });

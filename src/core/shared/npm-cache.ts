@@ -2,13 +2,13 @@
  * npm Registry Packument 공유 캐시
  * NpmDownloader와 NpmResolver가 공유하여 중복 API 호출 방지
  *
- * CacheManager를 사용하여 캐싱 로직 통합
+ * CacheStore를 사용하여 캐싱 로직 통합
  */
 
 import axios, { AxiosInstance } from 'axios';
 import logger from '../../utils/logger';
 import { NpmPackument } from './npm-types';
-import { CacheManager, createMemoryCache } from './cache-manager';
+import { createMemoryCache } from './cache/cache-store';
 import { DEFAULT_MEMORY_TTL_MS } from './cache-utils';
 
 /** 기본 TTL: 5분 */
@@ -79,7 +79,7 @@ export async function fetchPackument(
 
   const cacheKey = getCacheKey(name, registryUrl);
 
-  // CacheManager의 getOrFetch 사용
+  // CacheStore의 getOrFetch 사용
   const result = await cacheManager.getOrFetch(
     cacheKey,
     async () => {
@@ -211,7 +211,7 @@ export function isPackumentCached(
 // 하위 호환성을 위한 export (deprecated)
 // ============================================================================
 
-/** @deprecated CacheManager로 이전됨 */
+/** @deprecated CacheStore로 이전됨 */
 export const packumentCache = {
   get size() {
     return cacheManager.size;
@@ -221,17 +221,17 @@ export const packumentCache = {
   },
 };
 
-/** @deprecated CacheManager로 이전됨 */
+/** @deprecated CacheStore로 이전됨 */
 export const pendingManager = {
   get size() {
     return cacheManager.getStats().pendingRequests;
   },
   clear() {
-    // CacheManager 내부에서 관리됨
+    // CacheStore 내부에서 관리됨
   },
 };
 
-/** @deprecated CacheManager로 이전됨 */
+/** @deprecated CacheStore로 이전됨 */
 export const pendingRequests = {
   get: () => undefined,
   set: () => {},

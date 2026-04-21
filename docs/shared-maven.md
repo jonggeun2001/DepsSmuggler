@@ -15,7 +15,7 @@ src/core/shared/
 ├── maven-cache.ts         # POM 캐싱 시스템
 ├── maven-pom-utils.ts     # POM 파싱 유틸리티
 ├── maven-bom-processor.ts # BOM 처리기
-└── maven-skipper.ts       # 의존성 스킵/캐시 관리
+└── maven-skipper.ts       # compatibility shim → maven-dedupe-index.ts
 ```
 
 ---
@@ -213,7 +213,7 @@ console.log(`메모리: ${stats.memoryEntries}개`);
 
 ---
 
-## Maven 스킵/캐시 관리 (`maven-skipper.ts`)
+## Maven 스킵/캐시 관리 (`shared/maven-dedupe-index.ts`)
 
 Maven 의존성 해결 최적화를 위한 스킵 로직 및 캐시
 
@@ -256,12 +256,12 @@ class CoordinateManager {
 }
 ```
 
-### CacheManager
+### MavenDedupeIndex
 
 POM 캐시 관리
 
 ```typescript
-class CacheManager {
+class MavenDedupeIndex {
   // POM 캐시 조회
   getPom(coordinate: MavenCoordinate): PomCacheEntry | null;
 

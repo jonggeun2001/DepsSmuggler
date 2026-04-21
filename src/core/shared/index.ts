@@ -165,12 +165,13 @@ export type {
   ParallelDownloaderOptions,
 } from './maven-types';
 
-// Maven Skipper (maven-skipper.ts)
+// Maven Dedupe Index (maven-dedupe-index.ts)
 export {
   CoordinateManager,
+  MavenDedupeIndex,
   CacheManager,
   DependencyResolutionSkipper,
-} from './maven-skipper';
+} from './maven-dedupe-index';
 
 // npm 타입 (npm-types.ts)
 export type {

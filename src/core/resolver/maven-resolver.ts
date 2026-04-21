@@ -30,7 +30,7 @@ import {
   MavenResolutionContext,
   QueueProcessorDependencies,
 } from './maven-queue-processor';
-import { DependencyResolutionSkipper } from '../shared/maven-skipper';
+import { DependencyResolutionSkipper } from '../shared/maven-dedupe-index';
 import {
   fetchPom as fetchPomFromCache,
   prefetchPomsParallel,

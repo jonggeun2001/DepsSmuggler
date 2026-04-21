@@ -13,7 +13,7 @@ export type { DependencyResolverOptions, PackageMetadataCache } from './base-res
 export * from './types';
 
 // Utilities
-export { OSCacheManager } from './cache-manager';
+export { OsPackageCache, OSCacheManager } from './cache-manager';
 export { GPGVerifier } from './gpg-verifier';
 export { OSScriptGenerator } from './script-generator';
 export type { GeneratedScripts, ScriptGeneratorOptions } from './script-generator';

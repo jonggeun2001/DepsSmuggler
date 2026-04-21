@@ -42,7 +42,7 @@ export { ApkResolver, getApkResolver } from './resolver/apk-resolver';
 export { NpmResolver, getNpmResolver } from './resolver/npm-resolver';
 
 // Cache Manager
-export { CacheManager, getCacheManager } from './cache-manager';
+export { ArtifactCacheManager, CacheManager, getCacheManager } from './cache-manager';
 
 // Config
 export { ConfigManager, getConfigManager } from './config';

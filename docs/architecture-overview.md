@@ -41,7 +41,7 @@ depssmuggler/
 │   │   ├── shared/
 │   │   ├── config.ts
 │   │   ├── download-manager.ts
-│   │   └── cache-manager.ts
+│   │   └── cache-manager.ts      # compatibility shim → shared/cache/artifact-cache.ts
 │   ├── types/
 │   └── utils/
 ├── docs/
@@ -108,7 +108,7 @@ depssmuggler/
 | 공통 의존성 유틸 | `src/core/shared/dependency-resolver.ts` | 타입별 resolver orchestration |
 | 일반 패키징 | `src/core/packager/*` | archive, script, file splitter |
 | 설정 | `src/core/config.ts` | `~/.depssmuggler/settings.json` |
-| 캐시 | `src/core/cache-manager.ts`, `src/core/shared/*-cache.ts` | 타입별 캐시 분리 |
+| 캐시 | `src/core/shared/cache/artifact-cache.ts`, `src/core/shared/cache/cache-store.ts`, `src/core/shared/*-cache.ts` | canonical cache modules + compatibility shims |
 | 메일 | `src/core/mailer/email-sender.ts` | SMTP 테스트/발송 |
 
 ## 런타임 데이터 흐름

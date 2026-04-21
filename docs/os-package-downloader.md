@@ -423,7 +423,7 @@ class OSDependencyTree {
 
 ## 유틸리티 모듈
 
-### OSCacheManager
+### OsPackageCache
 
 - **위치**: `src/core/downloaders/os-shared/cache-manager.ts`
 - **특징**: LRU 캐시 + TTL 지원
@@ -437,7 +437,7 @@ interface OSCacheConfig {
   directory?: string;            // persistent 모드 저장 경로
 }
 
-class OSCacheManager {
+class OsPackageCache {
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, data: T): Promise<void>;
   invalidate(pattern?: string): Promise<void>;

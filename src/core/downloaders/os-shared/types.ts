@@ -300,9 +300,9 @@ export interface DependencyResolver {
 }
 
 /**
- * 캐시 관리자 인터페이스
+ * OS 패키지 캐시 포트 인터페이스
  */
-export interface CacheManager {
+export interface OsPackageCachePort {
   /** 캐시된 메타데이터 가져오기 */
   getMetadata(key: string): Promise<unknown | null>;
   /** 메타데이터 캐시 저장 */
@@ -316,6 +316,8 @@ export interface CacheManager {
   /** 캐시 통계 */
   getStats(): Promise<{ size: number; count: number }>;
 }
+
+export type CacheManager = OsPackageCachePort;
 
 /**
  * GPG 검증기 인터페이스
