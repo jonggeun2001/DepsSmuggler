@@ -218,6 +218,8 @@ interface CacheStoreOptions {
 | Maven | O | O | 메모리 5분, 디스크 24시간 | [shared-maven.md](./shared-maven.md) |
 | Conda | X | O | HTTP Cache-Control 기반 | [shared-conda.md](./shared-conda.md) |
 
+Maven 메모리 캐시와 중복 요청 관리는 `CacheStore<PomCacheEntry>` 어댑터로 통합되고, 디스크 캐시만 Maven 전용 파일 구조를 유지합니다.
+
 ---
 
 ## 캐시 디렉토리 구조
@@ -233,8 +235,8 @@ interface CacheStoreOptions {
 │   └── {groupId}/
 │       └── {artifactId}/
 │           └── {version}/
-│               ├── pom.xml
-│               └── meta.json
+│               ├── {artifactId}-{version}.pom
+│               └── cache-meta.json
 └── conda/
     └── {channel}/
         └── {subdir}/
