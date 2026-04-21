@@ -17,6 +17,7 @@ async function readStream(stream: NodeJS.ReadableStream): Promise<string> {
 
 describe('FetchApiPackageFetchPort', () => {
   it('GET 응답 body를 Node readable stream으로 변환해야 함', async () => {
+    const controller = new AbortController();
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       new Response('payload-data', {
         status: 200,
@@ -38,6 +39,7 @@ describe('FetchApiPackageFetchPort', () => {
       headers: {
         authorization: 'Bearer token',
       },
+      signal: controller.signal,
     });
 
     await expect(readStream(stream)).resolves.toBe('payload-data');
@@ -47,10 +49,12 @@ describe('FetchApiPackageFetchPort', () => {
         'x-default-header': 'default-value',
         authorization: 'Bearer token',
       },
+      signal: controller.signal,
     });
   });
 
   it('HEAD 응답 헤더를 표준 PackageHead로 매핑해야 함', async () => {
+    const controller = new AbortController();
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(null, {
         status: 200,
@@ -68,6 +72,7 @@ describe('FetchApiPackageFetchPort', () => {
     await expect(
       port.headPackage({
         url: 'https://example.com/packages/pkg.tar.gz',
+        signal: controller.signal,
       })
     ).resolves.toEqual({
       url: 'https://example.com/packages/pkg.tar.gz',
@@ -86,6 +91,7 @@ describe('FetchApiPackageFetchPort', () => {
     expect(fetchImpl).toHaveBeenCalledWith('https://example.com/packages/pkg.tar.gz', {
       method: 'HEAD',
       headers: {},
+      signal: controller.signal,
     });
   });
 

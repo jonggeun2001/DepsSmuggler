@@ -2,6 +2,7 @@ export interface PackageRef {
   url: string;
   filename?: string;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
   metadata?: Record<string, unknown>;
 }
 

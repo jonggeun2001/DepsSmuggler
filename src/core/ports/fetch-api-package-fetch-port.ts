@@ -21,6 +21,7 @@ export class FetchApiPackageFetchPort implements PackageFetchPort {
     const response = await this.fetchImpl(ref.url, {
       method: 'GET',
       headers: this.createHeaders(ref.headers),
+      signal: ref.signal,
     });
 
     if (!response.ok) {
@@ -38,6 +39,7 @@ export class FetchApiPackageFetchPort implements PackageFetchPort {
     const response = await this.fetchImpl(ref.url, {
       method: 'HEAD',
       headers: this.createHeaders(ref.headers),
+      signal: ref.signal,
     });
 
     if (!response.ok) {

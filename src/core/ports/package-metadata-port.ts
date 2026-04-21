@@ -21,7 +21,7 @@ export interface PackageArtifact {
   metadata?: Record<string, unknown>;
 }
 
-export interface PackageManifest {
+export interface PackageMetadataManifest {
   name: string;
   version: string;
   summary?: string;
@@ -46,5 +46,5 @@ export interface PackageMetadataPort {
     name: string,
     version: string,
     request?: PackageMetadataRequest
-  ): Promise<PackageManifest>;
+  ): Promise<PackageMetadataManifest>;
 }
