@@ -35,6 +35,7 @@ depssmuggler/
 │   ├── core/
 │   │   ├── downloaders/
 │   │   ├── downloaders/os-shared/
+│   │   ├── ports/
 │   │   ├── resolver/
 │   │   ├── packager/
 │   │   ├── mailer/
@@ -85,6 +86,7 @@ depssmuggler/
 
 - `downloaders/`: 패키지 타입별 검색/다운로드 구현
 - `downloaders/os-shared/`: YUM/APT/APK 공용 저장소, 캐시, 스크립트, 아카이브, 로컬 저장소 패키징
+- `ports/`: downloader와 resolver 사이에 두는 패키지 메타데이터/파일 fetch 경계. orchestration 계층이 구현체를 조합합니다.
 - `resolver/`: 타입별 의존성 계산
 - `packager/`: 일반 패키지용 아카이브/스크립트/분할 처리
 - `mailer/`: SMTP 발송
@@ -104,6 +106,7 @@ depssmuggler/
 |------|----------------|------|
 | 일반 다운로드 | `src/core/downloaders/*.ts` | `pip`, `conda`, `maven`, `npm`, `docker`, `yum`, `apt`, `apk` |
 | OS 공용 기능 | `src/core/downloaders/os-shared/*` | 저장소 프리셋, GPG, 로컬 repo 패키징 |
+| Core 경계 포트 | `src/core/ports/*` | package metadata 조회, package fetch 스트림 |
 | 의존성 해결 | `src/core/resolver/*.ts` | `pip`, `conda`, `maven`, `npm`, `yum`, `apt`, `apk` |
 | 공통 의존성 유틸 | `src/core/shared/dependency-resolver.ts` | 타입별 resolver orchestration |
 | 일반 패키징 | `src/core/packager/*` | archive, script, file splitter |

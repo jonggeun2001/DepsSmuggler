@@ -4,6 +4,7 @@
 - 목적: 각 패키지 관리자별 패키지 검색 및 다운로드 구현
 - 위치: `src/core/downloaders/`
 - 공통 체크섬 검증은 `src/core/shared/integrity/checksum.ts`를 통해 공유한다. `pip`, `conda`, `maven`, Docker blob 다운로드, 캐시 검증, OS GPG verifier가 이 유틸리티를 재사용한다.
+- Phase 4부터 downloader가 resolver 구현에 직접 기대지 않도록 `src/core/ports/package-metadata-port.ts`, `src/core/ports/package-fetch-port.ts` 경계를 기준으로 점진적으로 정리한다.
 
 ---
 
