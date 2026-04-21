@@ -1,7 +1,8 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
-import pLimit from 'p-limit';
+import { createConcurrencyLimiter } from './download/concurrency-limiter';
 import { createDeliveryPipeline } from './download/delivery-pipeline';
+import { createDownloadSessionRunner } from './download/download-session';
 import {
   bindSessionProgressEmitter,
   createDownloadSessionRegistry,
@@ -9,8 +10,6 @@ import {
 } from './download/session-registry';
 import {
   createDownloadPackageRouter,
-  type DownloadExecutionState,
-  type DownloadPackageResult,
   type DownloadPackageRouter,
 } from './download-package-router';
 import {
@@ -22,12 +21,10 @@ import { getArchivePackager } from '../../src/core/packager/archive-packager';
 import { getFileSplitter } from '../../src/core/packager/file-splitter';
 import { generateInstallScripts } from '../../src/core/shared';
 import { createScopedLogger } from '../utils/logger';
+import type { ConcurrencyLimiterFactory } from './download/concurrency-limiter';
 import type { DownloadOptions, DownloadPackage } from '../../src/core/shared';
-import type { PackageInfo } from '../../src/types';
 
 const log = createScopedLogger('DownloadOrchestrator');
-
-type Limiter = <T>(task: () => Promise<T>) => Promise<T>;
 
 export interface DownloadOrchestratorDeps {
   getMainWindow: () => Electron.BrowserWindow | null;
@@ -36,7 +33,7 @@ export interface DownloadOrchestratorDeps {
   emptyDir?: (targetPath: string) => Promise<void>;
   readdir?: typeof fse.readdir;
   stat?: typeof fse.stat;
-  createLimiter?: (concurrency: number) => Limiter;
+  createLimiter?: ConcurrencyLimiterFactory;
   scheduleTask?: (task: () => Promise<void>) => Promise<void> | void;
   createPackageRouter?: () => DownloadPackageRouter;
   createProgressEmitter?: (
@@ -71,9 +68,7 @@ export function createDownloadOrchestrator(
   const emptyDir = deps.emptyDir ?? ((targetPath) => fse.emptyDir(targetPath));
   const readdir = deps.readdir ?? fse.readdir.bind(fse);
   const stat = deps.stat ?? fse.stat.bind(fse);
-  const createLimiter =
-    deps.createLimiter ??
-    ((concurrency: number): Limiter => pLimit(concurrency) as unknown as Limiter);
+  const createLimiter = deps.createLimiter ?? createConcurrencyLimiter;
   const scheduleTask =
     deps.scheduleTask ??
     ((task: () => Promise<void>) => {
@@ -98,6 +93,12 @@ export function createDownloadOrchestrator(
     getFileSplitter: fileSplitterFactory,
     stat,
   });
+  const downloadSession = createDownloadSessionRunner({
+    ensureDir,
+    createLimiter,
+    packageRouter,
+    deliveryPipeline,
+  });
 
   return {
     async startDownload(data) {
@@ -110,7 +111,7 @@ export function createDownloadOrchestrator(
         message: '다운로드 중...',
       });
 
-      await Promise.resolve(scheduleTask(() => runDownload(data, sessionProgressEmitter, state)));
+      await Promise.resolve(scheduleTask(() => downloadSession.run(data, sessionProgressEmitter, state)));
       return { success: true, started: true };
     },
 
@@ -189,85 +190,5 @@ export function createDownloadOrchestrator(
         return { success: false, deleted: false };
       }
     },
-  };
-
-  async function runDownload(data: {
-    sessionId?: number;
-    packages: DownloadPackage[];
-    options: DownloadOptions;
-  }, sessionProgressEmitter: DownloadProgressEmitter, state: DownloadExecutionState): Promise<void> {
-    const { packages, options } = data;
-    const { outputDir, concurrency = 3 } = options;
-    const packagesDir = path.join(outputDir, 'packages');
-    const limit = createLimiter(concurrency);
-    const emitCancelledCompletion = (
-      currentOutputPath: string,
-      currentArtifactPaths?: string[]
-    ) => {
-      sessionProgressEmitter.emitAllComplete({
-        success: false,
-        cancelled: true,
-        outputPath: currentOutputPath,
-        artifactPaths: currentArtifactPaths,
-      });
-    };
-
-    try {
-      await ensureDir(packagesDir);
-      const downloadPromises = packages.map((pkg) =>
-        limit(() =>
-          packageRouter.downloadPackage(pkg, {
-            packagesDir,
-            options,
-            progressEmitter: sessionProgressEmitter,
-            state,
-          })
-        )
-      );
-
-      const rawResults: DownloadPackageResult[] = await Promise.all(downloadPromises);
-      const results = rawResults.filter((result) => result.error !== 'cancelled');
-
-      if (state.isCancelled()) {
-        emitCancelledCompletion(outputDir);
-        return;
-      }
-
-      const successfulPackageIds = new Set(
-        results.filter((result) => result.success).map((result) => result.id)
-      );
-      const deliveredPackages = packages.filter((pkg) => successfulPackageIds.has(pkg.id));
-      const packageInfos = deliveredPackages.map(toPackageInfo);
-      const failedDownloadCount = results.filter((result) => !result.success).length;
-      const completionPayload = await deliveryPipeline.finalizeDownload({
-        outputDir,
-        options,
-        deliveredPackages,
-        packageInfos,
-        results,
-        failedDownloadCount,
-        progressEmitter: sessionProgressEmitter,
-        isCancelled: () => state.isCancelled(),
-      });
-
-      sessionProgressEmitter.emitAllComplete(completionPayload);
-    } catch (error) {
-      sessionProgressEmitter.emitAllComplete({
-        success: false,
-        outputPath: outputDir,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-}
-
-function toPackageInfo(pkg: DownloadPackage): PackageInfo {
-  return {
-    type: pkg.type as PackageInfo['type'],
-    name: pkg.name,
-    version: pkg.version,
-    arch: pkg.architecture as PackageInfo['arch'],
-    metadata: pkg.metadata,
   };
 }
