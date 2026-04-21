@@ -113,6 +113,8 @@ electron/
 주요 위임 대상:
 
 - `electron/services/download-orchestrator.ts`
+- `electron/services/download/download-session.ts`
+- `electron/services/download/concurrency-limiter.ts`
 - `electron/services/download/delivery-pipeline.ts`
 - `electron/services/download/session-registry.ts`
 - `electron/services/download-package-router.ts`

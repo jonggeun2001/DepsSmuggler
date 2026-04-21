@@ -124,7 +124,7 @@ depssmuggler/
 1. Renderer가 `renderer-data-client` facade를 통해 `window.electronAPI.search.*` 또는 `dependency.resolve`를 호출
 2. `search-handlers.ts`가 `electron/services/search-orchestrator.ts`와 관련 service에 위임
 3. `DownloadPage.tsx`의 `use-download-page-controller.tsx`가 `download:start`를 호출
-4. `download-handlers.ts`가 `electron/services/download-orchestrator.ts`를 호출하고, 서비스가 `electron/services/download/session-registry.ts`와 `electron/services/download/delivery-pipeline.ts`로 세션 상태/전달 파이프라인을 분리한 뒤 package router/progress emitter/packager를 조합해 실행
+4. `download-handlers.ts`가 `electron/services/download-orchestrator.ts`를 호출하고, 서비스가 `electron/services/download/session-registry.ts`, `download-session.ts`, `delivery-pipeline.ts`, `concurrency-limiter.ts`로 세션 상태/실행 루프/전달 파이프라인/동시성 제어를 분리한 뒤 package router/progress emitter/packager를 조합해 실행
 5. 진행률 이벤트를 `download:*` 채널로 렌더러에 다시 전송
 6. 완료 시 출력 디렉터리와 결과를 히스토리에 저장
 
