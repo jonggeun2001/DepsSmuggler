@@ -34,6 +34,7 @@ depssmuggler/
 │   │   └── commands/
 │   ├── core/
 │   │   ├── downloaders/
+│   │   ├── downloaders/lang-shared/
 │   │   ├── downloaders/os-shared/
 │   │   ├── ports/
 │   │   ├── resolver/
@@ -85,6 +86,7 @@ depssmuggler/
 ### 4. Core (`src/core`)
 
 - `downloaders/`: 패키지 타입별 검색/다운로드 구현
+- `downloaders/lang-shared/`: 언어 패키지 downloader가 공유하는 스트림 저장, 진행률 계산, 파일명 정규화, 검증 실패 정리 계층
 - `downloaders/os-shared/`: YUM/APT/APK 공용 저장소, 캐시, 스크립트, 아카이브, 로컬 저장소 패키징
 - `ports/`: downloader와 resolver 사이에 두는 패키지 메타데이터/파일 fetch 경계. orchestration 계층이 구현체를 조합합니다.
 - `resolver/`: 타입별 의존성 계산
@@ -105,6 +107,7 @@ depssmuggler/
 | 영역 | 현재 구현 위치 | 비고 |
 |------|----------------|------|
 | 일반 다운로드 | `src/core/downloaders/*.ts` | `pip`, `conda`, `maven`, `npm`, `docker`, `yum`, `apt`, `apk` |
+| 언어 downloader 공용 레이어 | `src/core/downloaders/lang-shared/*` | 현재 `pip`, `conda`, `npm`이 공통 artifact 저장 로직을 재사용 |
 | OS 공용 기능 | `src/core/downloaders/os-shared/*` | 저장소 프리셋, GPG, 로컬 repo 패키징 |
 | Core 경계 포트 | `src/core/ports/*` | package metadata 조회, package fetch 스트림 |
 | 의존성 해결 | `src/core/resolver/*.ts` | `pip`, `conda`, `maven`, `npm`, `yum`, `apt`, `apk` |
