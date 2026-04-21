@@ -2,8 +2,14 @@ import archiver from 'archiver';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { PackageInfo } from '../../types';
+import type { ArchivePackageManifest } from '../../types/manifest/package-manifest';
 import logger from '../../utils/logger';
 import { resolvePath, toUnixPath } from '../shared/path-utils';
+
+export type {
+  ArchivePackageManifest,
+  ArchivePackageManifest as PackageManifest,
+} from '../../types/manifest/package-manifest';
 
 // 압축 형식 타입
 export type ArchiveFormat = 'zip' | 'tar.gz';
@@ -24,15 +30,6 @@ export interface ArchiveProgress {
   processedBytes: number;
   totalBytes: number;
   percentage: number;
-}
-
-// 패키지 매니페스트
-export interface PackageManifest {
-  version: string;
-  createdAt: string;
-  packages: PackageInfo[];
-  totalSize: number;
-  fileCount: number;
 }
 
 export class ArchivePackager {
@@ -324,7 +321,7 @@ export class ArchivePackager {
     packages: PackageInfo[],
     totalSize: number,
     fileCount: number
-  ): PackageManifest {
+  ): ArchivePackageManifest {
     return {
       version: '1.0',
       createdAt: new Date().toISOString(),

@@ -13,6 +13,7 @@ export { NpmDownloader, getNpmDownloader } from './downloaders/npm';
 // Packager
 export { ArchivePackager, getArchivePackager } from './packager/archive-packager';
 export type { ArchiveOptions, ArchiveProgress, PackageManifest } from './packager/archive-packager';
+export type { ArchivePackageManifest } from '../types/manifest/package-manifest';
 
 export { ScriptGenerator, getScriptGenerator } from './packager/script-generator';
 export type { ScriptOptions, GeneratedScript } from './packager/script-generator';

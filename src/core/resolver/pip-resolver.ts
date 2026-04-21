@@ -16,7 +16,7 @@ import {
   PyPIRelease,
   PyPIPackageInfo,
 } from '../shared/pip-cache';
-import type { PipTargetPlatform } from '../../types/pip-target-platform';
+import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 import {
   fetchPackageFiles,
   extractVersionFromFilename,

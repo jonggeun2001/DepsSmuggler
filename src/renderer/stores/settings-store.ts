@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
-import type { PipTargetPlatform } from '../../types/pip-target-platform';
+import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 
 // 언어 버전 타입 정의
 export interface LanguageVersions {
@@ -33,7 +33,7 @@ export type DockerRetryStrategy = 'layer' | 'full';
 export type DockerArchitecture = 'amd64' | 'arm64' | 'arm/v7' | '386';
 
 // pip 타겟 플랫폼 타입 정의 (타입은 별도 파일에서 import)
-export type { PipTargetPlatform } from '../../types/pip-target-platform';
+export type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 
 // OS 배포판 설정 타입 정의
 // id: 배포판 식별자 (예: 'rocky-9', 'almalinux-8', 'ubuntu-22.04', 'debian-12', 'alpine-3.18')

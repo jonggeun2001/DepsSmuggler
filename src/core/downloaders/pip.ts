@@ -22,7 +22,7 @@ import {
   PyPIRelease,
   PyPIResponse,
 } from '../shared/pip-types';
-import type { PipTargetPlatform } from '../../types/pip-target-platform';
+import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 
 export class PipDownloader implements IDownloader {
   readonly type = 'pip' as const;

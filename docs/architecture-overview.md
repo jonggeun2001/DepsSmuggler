@@ -89,6 +89,7 @@ depssmuggler/
 - `packager/`: 일반 패키지용 아카이브/스크립트/분할 처리
 - `mailer/`: SMTP 발송
 - `shared/`: HTTP, 캐시, 버전 비교, 플랫폼 매핑, 버전 프리로드, 마스킹 등 공통 유틸리티
+- `types/`: `src/types/index.ts` barrel과 `download/`, `manifest/`, `package-manager/`, `platform/`, `resolver/` 하위 canonical module로 분리된 공용 타입 정의
 
 ### 5. CLI (`src/cli`)
 

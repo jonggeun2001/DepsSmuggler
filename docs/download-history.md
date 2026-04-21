@@ -5,7 +5,7 @@
 - 위치:
   - 스토어: `src/renderer/stores/history-store.ts`
   - 페이지: `src/renderer/pages/HistoryPage.tsx`
-  - 타입: `src/types/index.ts`
+  - 타입: `src/types/history.ts` (`src/types/index.ts` barrel re-export)
   - IPC: `electron/main.ts`
 
 ---
