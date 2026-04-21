@@ -48,5 +48,8 @@ export { ArtifactCacheManager, CacheManager, getCacheManager } from './cache-man
 export { ConfigManager, getConfigManager } from './config';
 export type { Config, CLIConfig } from './config';
 
+// Ports
+export * from './ports';
+
 // Shared utilities
 export * from './shared';
