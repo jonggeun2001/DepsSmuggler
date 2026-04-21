@@ -4,26 +4,31 @@
  * 네트워크 호출 없이 DownloadManager의 핵심 로직을 테스트합니다.
  */
 
+import PQueue from 'p-queue';
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { DownloadManager, DownloadItem, OverallProgress, DownloadOptions, DownloadResult } from './download-manager';
+import {
+  DownloadManager,
+  type DownloadManagerItem,
+  type DownloadManagerOptions,
+  type DownloadManagerResult,
+} from './download-manager';
 import { IDownloader, PackageType, DownloadProgressEvent } from '../types';
 import { SpeedCalculator } from './speed-calculator';
-import PQueue from 'p-queue';
 
 /**
  * 테스트용 DownloadManager 인터페이스
  * private 멤버에 타입 안전하게 접근하기 위한 인터페이스
  */
 interface DownloadManagerTestable {
-  items: Map<string, DownloadItem>;
+  items: Map<string, DownloadManagerItem>;
   isRunning: boolean;
   isCancelled: boolean;
   startTime: number;
-  options: DownloadOptions;
+  options: DownloadManagerOptions;
   downloaders: Map<PackageType, IDownloader>;
   queue: PQueue;
   speedCalculator: SpeedCalculator;
-  createResult: () => DownloadResult;
+  createResult: () => DownloadManagerResult;
   updateItemProgress: (id: string, event: DownloadProgressEvent) => void;
   initDownloaders: () => Promise<void>;
 }
@@ -322,7 +327,7 @@ describe('DownloadManager 단위 테스트', () => {
   });
 
   describe('createResult', () => {
-    const callCreateResult = (manager: DownloadManager): DownloadResult => {
+    const callCreateResult = (manager: DownloadManager): DownloadManagerResult => {
       return asTestable(manager).createResult();
     };
 
@@ -720,7 +725,7 @@ describe('DownloadManager 단위 테스트', () => {
       const itemsArray = Array.from(items.values());
       itemsArray[0].status = 'completed';
 
-      const result = await manager.startDownload({
+      await manager.startDownload({
         outputPath: '/test/output',
         concurrency: 5,
         maxRetries: 2,

@@ -1,4 +1,5 @@
-import type { DownloadProgressEvent, DownloadItem } from './download/item';
+import type { DownloadItem } from './download/item';
+import type { DownloadProgressEvent } from './download/progress';
 import type { PackageInfo } from './package-manager/metadata';
 import type { PackageType } from './package-manager/package-manager';
 import type { PackagingOptions, PackagingResult } from './packaging';

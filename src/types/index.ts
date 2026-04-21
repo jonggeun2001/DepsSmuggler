@@ -1,4 +1,7 @@
+export * from './download/error';
 export * from './download/item';
+export * from './download/options';
+export * from './download/progress';
 export * from './download/result';
 export * from './history';
 export * from './interfaces';
@@ -7,5 +10,6 @@ export * from './package-manager/metadata';
 export * from './package-manager/package-manager';
 export * from './packaging';
 export * from './platform/architecture';
+export * from './platform/os-target';
 export * from './platform/pip-target-platform';
 export * from './resolver/dependency-graph';

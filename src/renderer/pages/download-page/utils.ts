@@ -11,8 +11,8 @@ import type {
 } from '../../../core/downloaders/os-shared/types';
 import type { CartItem } from '../../stores/cart-store';
 import type {
-  DownloadItem,
-  DownloadStatus,
+  DownloadStoreItem,
+  DownloadStoreStatus,
 } from '../../stores/download-store';
 
 export function isOSCartItem(item: CartItem): item is CartItem & { type: SupportedOSPackageManager } {
@@ -127,14 +127,14 @@ export function buildOSDependencyIssueMessage(
   return sections.join('\n\n');
 }
 
-export function createPendingDownloadItems(items: PendingDownloadSource[]): DownloadItem[] {
+export function createPendingDownloadItems(items: PendingDownloadSource[]): DownloadStoreItem[] {
   return items.map((item) => ({
     id: item.id,
     name: item.name,
     version: item.version,
     type: item.type,
     arch: item.arch,
-    status: 'pending' as DownloadStatus,
+    status: 'pending' as DownloadStoreStatus,
     progress: 0,
     downloadedBytes: 0,
     totalBytes: 0,
@@ -184,11 +184,11 @@ export function formatBytes(bytes: number): string {
   return `${bytes} B`;
 }
 
-export function getPackageDependencies(items: DownloadItem[], parentId: string): DownloadItem[] {
+export function getPackageDependencies(items: DownloadStoreItem[], parentId: string): DownloadStoreItem[] {
   return items.filter((item) => item.isDependency && item.parentId === parentId);
 }
 
-export function getPackageGroupStatus(items: DownloadItem[], parentItem: DownloadItem) {
+export function getPackageGroupStatus(items: DownloadStoreItem[], parentItem: DownloadStoreItem) {
   const deps = getPackageDependencies(items, parentItem.id);
   const allItems = [parentItem, ...deps];
   const completed = allItems.filter((item) => item.status === 'completed').length;

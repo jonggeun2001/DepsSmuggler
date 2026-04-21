@@ -1,4 +1,8 @@
 // 공통 타입 정의
+import type { DownloadOptions as CanonicalDownloadOptions } from '../../types/download/options';
+import type { DownloadProgress as CanonicalDownloadProgress } from '../../types/download/progress';
+import type { Architecture as CanonicalArchitecture } from '../../types/platform/architecture';
+import type { TargetOS as CanonicalTargetOS } from '../../types/platform/os-target';
 
 export interface DownloadPackage {
   id: string;
@@ -26,37 +30,9 @@ export interface DownloadPackage {
   metadata?: Record<string, unknown>;
 }
 
-export type TargetOS = 'windows' | 'macos' | 'linux' | 'any';
-export type Architecture = 'x86_64' | 'amd64' | 'arm64' | 'aarch64' | 'noarch';
-
-export interface DownloadOptions {
-  outputDir: string;
-  outputFormat: 'zip' | 'tar.gz';
-  includeScripts: boolean;
-  targetOS?: TargetOS;
-  architecture?: Architecture;
-  includeDependencies?: boolean;
-  pythonVersion?: string;
-  concurrency?: number;
-  deliveryMethod?: 'local' | 'email';
-  email?: {
-    to: string;
-    from?: string;
-    subject?: string;
-  };
-  fileSplit?: {
-    enabled: boolean;
-    maxSizeMB: number;
-  };
-  smtp?: {
-    host: string;
-    port: number;
-    user?: string;
-    password?: string;
-    from?: string;
-    secure?: boolean;
-  };
-}
+export type TargetOS = CanonicalTargetOS;
+export type Architecture = CanonicalArchitecture;
+export type DownloadOptions = CanonicalDownloadOptions;
 
 export interface DownloadUrlResult {
   url: string;
@@ -64,18 +40,12 @@ export interface DownloadUrlResult {
   size?: number;
 }
 
-export interface DownloadProgress {
-  packageId: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed';
-  progress: number;
-  downloadedBytes: number;
-  totalBytes: number;
-  speed: number;
-  error?: string;
-}
+export type DownloadProgress = CanonicalDownloadProgress;
 
-export interface DownloadResult {
+export interface DownloadPackageResult {
   id: string;
   success: boolean;
   error?: string;
 }
+
+export type DownloadResult = DownloadPackageResult;

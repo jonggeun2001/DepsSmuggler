@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   calculateFileChecksum,
   verifyFileChecksum,
@@ -63,5 +65,41 @@ describe('checksum', () => {
     const filePath = await createFixtureFile();
 
     await expect(verifyFileChecksum(filePath, 'sha256:deadbeef')).resolves.toBe(false);
+  });
+
+  it('파일 스트림 close 이후에만 체크섬 계산을 완료한다', async () => {
+    vi.resetModules();
+
+    const stream = new EventEmitter();
+    const createReadStream = vi.fn(() => stream);
+
+    vi.doMock('fs-extra', () => ({
+      createReadStream,
+    }));
+
+    try {
+      const { calculateFileChecksum: mockedCalculateFileChecksum } = await import('./checksum');
+      const checksumPromise = mockedCalculateFileChecksum('/tmp/mock-fixture.txt');
+      let settled = false;
+
+      void checksumPromise.then(() => {
+        settled = true;
+      });
+
+      stream.emit('data', Buffer.from('checksum-fixture'));
+      stream.emit('end');
+      await Promise.resolve();
+
+      expect(settled).toBe(false);
+
+      stream.emit('close');
+
+      await expect(checksumPromise).resolves.toBe(
+        createHash('sha256').update('checksum-fixture').digest('hex')
+      );
+    } finally {
+      vi.doUnmock('fs-extra');
+      vi.resetModules();
+    }
   });
 });

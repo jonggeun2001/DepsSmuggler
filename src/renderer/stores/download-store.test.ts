@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   useDownloadStore,
-  type DownloadItem,
+  type DownloadStoreItem,
 } from './download-store';
 
-const createItem = (overrides?: Partial<DownloadItem>): DownloadItem => ({
+const createItem = (overrides?: Partial<DownloadStoreItem>): DownloadStoreItem => ({
   id: 'pkg-1',
   name: 'requests',
   version: '2.32.0',

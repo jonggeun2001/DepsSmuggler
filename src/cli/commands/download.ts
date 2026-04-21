@@ -1,15 +1,15 @@
-import cliProgress from 'cli-progress';
-import chalk from 'chalk';
 import * as path from 'path';
+import chalk from 'chalk';
+import cliProgress from 'cli-progress';
 import * as fs from 'fs-extra';
-import { PackageInfo, PackageType, Architecture } from '../../types';
 import { getDownloadManager, OverallProgress } from '../../core/download-manager';
 import { getArchivePackager, ArchiveFormat } from '../../core/packager/archive-packager';
 import { getScriptGenerator } from '../../core/packager/script-generator';
 import { DownloadPackage, resolveAllDependencies } from '../../core/shared';
+import { PackageInfo, PackageType, Architecture } from '../../types';
 
 // 다운로드 옵션
-interface DownloadOptions {
+interface DownloadCommandOptions {
   type: PackageType;
   package?: string;
   pkgVersion: string;
@@ -79,7 +79,7 @@ function toPackageInfo(pkg: DownloadPackage): PackageInfo {
 
 async function preparePackagesForDownload(
   packages: PackageInfo[],
-  options: Pick<DownloadOptions, 'arch' | 'deps'>
+  options: Pick<DownloadCommandOptions, 'arch' | 'deps'>
 ): Promise<PreparedPackagesResult> {
   if (!options.deps) {
     return {
@@ -118,7 +118,7 @@ async function preparePackagesForDownload(
 /**
  * download 명령어 핸들러
  */
-export async function downloadCommand(options: DownloadOptions): Promise<void> {
+export async function downloadCommand(options: DownloadCommandOptions): Promise<void> {
   console.log(chalk.cyan('다운로드 준비 중...'));
 
   try {
@@ -226,8 +226,9 @@ export async function downloadCommand(options: DownloadOptions): Promise<void> {
 
       // 패키징 처리
       const files = result.items
-        .filter((item) => item.status === 'completed' && item.filePath)
-        .map((item) => item.filePath!);
+        .flatMap((item) => (
+          item.status === 'completed' && item.filePath ? [item.filePath] : []
+        ));
 
       // 압축 파일 생성
       console.log(chalk.cyan('\n압축 파일 생성 중...'));

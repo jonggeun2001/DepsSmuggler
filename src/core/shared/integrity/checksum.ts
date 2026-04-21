@@ -22,10 +22,34 @@ export function calculateFileChecksum(
   return new Promise((resolve, reject) => {
     const hash = createHash(algorithm);
     const stream = fs.createReadStream(filePath);
+    let digest: string | null = null;
+    let settled = false;
 
     stream.on('data', (data) => hash.update(data));
-    stream.on('end', () => resolve(hash.digest('hex')));
-    stream.on('error', reject);
+    stream.on('end', () => {
+      digest = hash.digest('hex');
+    });
+    stream.on('close', () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      if (digest === null) {
+        reject(new Error('Checksum stream closed before completion'));
+        return;
+      }
+
+      resolve(digest);
+    });
+    stream.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      reject(error);
+    });
   });
 }
 

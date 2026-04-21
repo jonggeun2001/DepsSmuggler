@@ -22,7 +22,15 @@ export { FileSplitter, getFileSplitter } from './packager/file-splitter';
 
 // Download Manager
 export { DownloadManager, getDownloadManager } from './download-manager';
-export type { DownloadItem, DownloadOptions, DownloadResult, OverallProgress, DownloadManagerEvents } from './download-manager';
+export type {
+  DownloadManagerItem,
+  DownloadManagerItemStatus,
+  DownloadManagerOptions,
+  DownloadManagerResult,
+  OverallProgress,
+  DownloadManagerEvents,
+} from './download-manager';
+export type { DownloadItem, DownloadItemStatus, DownloadOptions, DownloadResult } from './download-manager';
 
 // Resolvers
 export { PipResolver, getPipResolver } from './resolver/pip-resolver';

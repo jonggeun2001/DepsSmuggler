@@ -1,13 +1,13 @@
 // 파일 다운로드 및 압축 유틸리티
 import * as fs from 'fs';
-import * as https from 'https';
 import * as http from 'http';
+import * as https from 'https';
 import archiver from 'archiver';
 import logger from '../../utils/logger';
 
 export type ProgressCallback = (downloaded: number, total: number) => void;
 
-export interface DownloadOptions {
+export interface FileDownloadOptions {
   signal?: AbortSignal;
   shouldPause?: () => boolean;  // 일시정지 여부를 체크하는 콜백
 }
@@ -20,7 +20,7 @@ export async function downloadFile(
   url: string,
   destPath: string,
   onProgress: ProgressCallback,
-  options?: DownloadOptions
+  options?: FileDownloadOptions
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(destPath);

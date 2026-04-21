@@ -3,15 +3,15 @@ import { Button, Collapse, List, Progress, Space, Table, Tag, Typography } from 
 import { useMemo } from 'react';
 import { statusColors, statusIcons, statusLabels } from '../presentation';
 import { formatBytes, getPackageDependencies, getPackageGroupStatus } from '../utils';
-import type { DownloadItem, DownloadStatus } from '../../../stores/download-store';
+import type { DownloadStoreItem, DownloadStoreStatus } from '../../../stores/download-store';
 
 const { Panel } = Collapse;
 const { Text } = Typography;
 
 interface DownloadItemsTableProps {
-  downloadItems: DownloadItem[];
+  downloadItems: DownloadStoreItem[];
   showDependenciesTree: boolean;
-  onRetry: (item: DownloadItem) => void;
+  onRetry: (item: DownloadStoreItem) => void;
   paginate?: boolean;
 }
 
@@ -28,7 +28,7 @@ export function DownloadItemsTable({
         dataIndex: 'status',
         key: 'status',
         width: 120,
-        render: (status: DownloadStatus) => (
+        render: (status: DownloadStoreStatus) => (
           <Space>
             {statusIcons[status]}
             <Tag color={statusColors[status]}>{statusLabels[status]}</Tag>
@@ -39,7 +39,7 @@ export function DownloadItemsTable({
         title: '패키지',
         dataIndex: 'name',
         key: 'name',
-        render: (name: string, record: DownloadItem) => (
+        render: (name: string, record: DownloadStoreItem) => (
           <div>
             <div>
               <Text strong>{name}</Text>
@@ -68,7 +68,7 @@ export function DownloadItemsTable({
         dataIndex: 'progress',
         key: 'progress',
         width: 200,
-        render: (progress: number, record: DownloadItem) => (
+        render: (progress: number, record: DownloadStoreItem) => (
           <Progress
             percent={Math.round(progress)}
             size="small"
@@ -95,7 +95,7 @@ export function DownloadItemsTable({
         title: '액션',
         key: 'action',
         width: 100,
-        render: (_: unknown, record: DownloadItem) => (
+        render: (_: unknown, record: DownloadStoreItem) => (
           <Space>
             {record.status === 'failed' && (
               <Button

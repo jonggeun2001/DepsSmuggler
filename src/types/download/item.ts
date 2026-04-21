@@ -22,10 +22,4 @@ export interface DownloadItem {
   completedAt?: Date;
 }
 
-export interface DownloadProgressEvent {
-  itemId: string;
-  progress: number;
-  downloadedBytes: number;
-  totalBytes: number;
-  speed: number;
-}
+export type { DownloadProgressEvent } from './progress';

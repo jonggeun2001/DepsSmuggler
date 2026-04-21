@@ -25,7 +25,7 @@ import {
 import { DownloadItemsTable } from './DownloadItemsTable';
 import { DownloadLogsCard } from './DownloadLogsCard';
 import { formatBytes } from '../utils';
-import type { DownloadItem, LogEntry, PackagingStatus } from '../../../stores/download-store';
+import type { DownloadStoreItem, LogEntry, PackagingStatus } from '../../../stores/download-store';
 
 const { Title, Text } = Typography;
 
@@ -40,7 +40,7 @@ interface DownloadStandardViewProps {
   maxFileSizeMB: number;
   isDownloading: boolean;
   onSelectFolder: () => Promise<void> | void;
-  downloadItems: DownloadItem[];
+  downloadItems: DownloadStoreItem[];
   completedCount: number;
   failedCount: number;
   skippedCount: number;
@@ -57,7 +57,7 @@ interface DownloadStandardViewProps {
   isResolvingDeps: boolean;
   allCompleted: boolean;
   logs: LogEntry[];
-  onRetry: (item: DownloadItem) => void;
+  onRetry: (item: DownloadStoreItem) => void;
   onResolveDependencies: () => Promise<void> | void;
   onResetDependencies: () => void;
   onStartDownload: () => Promise<void> | void;

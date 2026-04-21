@@ -4,9 +4,9 @@ import {
   getDownloadCounts,
   hasRecoverableArtifacts,
 } from './view-state';
-import type { DownloadStatus } from '../../stores/download-store';
+import type { DownloadStoreStatus } from '../../stores/download-store';
 
-function createItem(status: DownloadStatus) {
+function createItem(status: DownloadStoreStatus) {
   return {
     id: `${status}-1`,
     name: 'pkg',
