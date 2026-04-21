@@ -1,5 +1,6 @@
 import { Readable } from 'stream';
 import { PackageFetchPort, PackageHead, PackageRef } from './package-fetch-port';
+import type { ReadableStream as WebReadableStream } from 'stream/web';
 
 type FetchLike = typeof fetch;
 
@@ -32,7 +33,7 @@ export class FetchApiPackageFetchPort implements PackageFetchPort {
       throw new Error(`패키지 다운로드 스트림이 비어 있습니다: ${ref.url}`);
     }
 
-    return Readable.fromWeb(response.body as globalThis.ReadableStream<Uint8Array>);
+    return Readable.fromWeb(response.body as WebReadableStream<Uint8Array>);
   }
 
   async headPackage(ref: PackageRef): Promise<PackageHead> {
@@ -74,6 +75,12 @@ export class FetchApiPackageFetchPort implements PackageFetchPort {
   }
 
   private toHeaderMap(headers: Headers): Record<string, string> {
-    return Object.fromEntries(headers.entries());
+    const mapped: Record<string, string> = {};
+
+    headers.forEach((value, key) => {
+      mapped[key] = value;
+    });
+
+    return mapped;
   }
 }
