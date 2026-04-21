@@ -30,7 +30,7 @@ interface DownloadManagerTestable {
   speedCalculator: SpeedCalculator;
   createResult: () => DownloadManagerResult;
   updateItemProgress: (id: string, event: DownloadProgressEvent) => void;
-  initDownloaders: () => Promise<void>;
+  initDownloaders: () => void;
 }
 
 /**
@@ -582,10 +582,9 @@ describe('DownloadManager 단위 테스트', () => {
   });
 
   describe('initDownloaders', () => {
-    it('다운로더 초기화 호출', async () => {
+    it('다운로더 초기화 호출', () => {
       const manager = createManager();
-      // initDownloaders는 private async 메서드이므로 직접 호출
-      await asTestable(manager).initDownloaders();
+      asTestable(manager).initDownloaders();
 
       // 다운로더가 설정되었는지 확인 (에러 없이 완료)
       expect(asTestable(manager).downloaders).toBeDefined();

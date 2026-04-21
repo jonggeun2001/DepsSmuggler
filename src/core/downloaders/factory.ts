@@ -3,10 +3,12 @@
  * 테스트 용이성을 위해 의존성 주입을 지원하는 팩토리 패턴 구현
  */
 
+import {
+  type DownloaderCreator,
+  isRegisteredDownloaderType,
+  registerDefaultDownloaderCreators,
+} from './registry';
 import { IDownloader, PackageType } from '../../types';
-
-// 다운로더 생성 함수 타입
-type DownloaderCreator = () => IDownloader;
 
 /**
  * 다운로더 레지스트리
@@ -204,33 +206,17 @@ export function resetDownloaderRegistry(): void {
 }
 
 /**
- * 모든 다운로더 등록 (지연 로딩)
- * 앱 시작 시 또는 첫 다운로더 요청 시 호출
+ * 기본 다운로더 등록
+ * downloader registry를 단일 진실로 사용한다.
  */
 export async function initializeDownloaders(): Promise<void> {
   if (initialized) return;
 
-  // 동적 import로 순환 참조 방지
-  const [
-    { PipDownloader },
-    { CondaDownloader },
-    { MavenDownloader },
-    { NpmDownloader },
-    { DockerDownloader },
-  ] = await Promise.all([
-    import('./pip'),
-    import('./conda'),
-    import('./maven'),
-    import('./npm'),
-    import('./docker'),
-  ]);
-
-  registry.registerCreator('pip', () => new PipDownloader());
-  registry.registerCreator('conda', () => new CondaDownloader());
-  registry.registerCreator('maven', () => new MavenDownloader());
-  registry.registerCreator('npm', () => new NpmDownloader());
-  registry.registerCreator('docker', () => new DockerDownloader());
-  // yum, apt, apk는 별도의 OS 패키지 다운로더로 처리됨
+  registerDefaultDownloaderCreators((type, creator) => {
+    if (!registry.has(type)) {
+      registry.registerCreator(type, creator);
+    }
+  });
 
   initialized = true;
 }
@@ -240,7 +226,7 @@ export async function initializeDownloaders(): Promise<void> {
  * 초기화되지 않았으면 자동으로 초기화 후 반환
  */
 export async function getDownloaderAsync(type: PackageType): Promise<IDownloader> {
-  if (!initialized && !registry.has(type)) {
+  if (!initialized && isRegisteredDownloaderType(type) && !registry.has(type)) {
     await initializeDownloaders();
   }
   return registry.get(type);

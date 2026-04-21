@@ -3,12 +3,7 @@ import * as fs from 'fs-extra';
 import PQueue from 'p-queue';
 import logger from '../utils/logger';
 import { DOWNLOAD_CONSTANTS } from './constants/download';
-// 다운로더 가져오기
-import { getCondaDownloader } from './downloaders/conda';
-import { getDockerDownloader } from './downloaders/docker';
-import { getMavenDownloader } from './downloaders/maven';
-import { getNpmDownloader } from './downloaders/npm';
-import { getPipDownloader } from './downloaders/pip';
+import { createRegisteredDownloader, getRegisteredDownloaderTypes } from './downloaders/registry';
 import { SpeedCalculator } from './speed-calculator';
 import type {
   PackageInfo,
@@ -105,12 +100,9 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
    * 다운로더 초기화
    */
   private initDownloaders(): void {
-    this.downloaders.set('pip', getPipDownloader());
-    this.downloaders.set('conda', getCondaDownloader());
-    this.downloaders.set('maven', getMavenDownloader());
-    // yum, apt, apk는 별도의 OS 패키지 다운로더로 처리됨
-    this.downloaders.set('docker', getDockerDownloader());
-    this.downloaders.set('npm', getNpmDownloader());
+    for (const type of getRegisteredDownloaderTypes()) {
+      this.downloaders.set(type, createRegisteredDownloader(type));
+    }
   }
 
   /**

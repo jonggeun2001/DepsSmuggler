@@ -3,6 +3,7 @@
 ## 개요
 - 목적: 패키지 타입별 다운로더 인스턴스를 중앙에서 관리하는 레지스트리 패턴 구현
 - 위치: `src/core/downloaders/factory.ts`
+- 기본 downloader 정의 위치: `src/core/downloaders/registry.ts`
 
 ---
 
@@ -11,7 +12,7 @@
 기존에는 각 다운로더가 개별 싱글톤 패턴으로 구현되어 있었으나, 테스트 시 모킹이 어렵고 인스턴스 관리가 분산되어 있었음. Factory 패턴을 도입하여:
 - 중앙 집중식 다운로더 관리
 - 테스트 시 쉬운 모킹/오버라이드 지원
-- 지연 초기화(lazy initialization) 지원
+- downloader 등록의 단일 진실 유지
 
 ---
 
@@ -59,6 +60,14 @@
 | `registerDownloader(type, creator)` | 다운로더 생성자 등록 |
 | `initializeDownloaders()` | 모든 기본 다운로더 등록 |
 | `resetDownloaderRegistry()` | 레지스트리 초기화 |
+
+### 기본 downloader registry
+
+`src/core/downloaders/registry.ts`는 기본 downloader 타입과 creator를 한 곳에서 정의합니다.
+
+- `getRegisteredDownloaderTypes()`는 등록 대상 타입 목록을 반환합니다.
+- `createRegisteredDownloader(type)`는 registry에 정의된 creator로 downloader를 생성합니다.
+- `registerDefaultDownloaderCreators(register)`는 factory가 기본 creator를 내부 레지스트리에 복사할 때 사용합니다.
 
 ### 테스트 헬퍼 함수
 
@@ -131,7 +140,7 @@ const downloader = await getDownloaderAsync('npm');
 
 ## 등록되는 기본 다운로더
 
-`initializeDownloaders()` 호출 시 등록되는 다운로더:
+`initializeDownloaders()` 호출 시 `registry.ts`를 통해 등록되는 다운로더:
 
 | 타입 | 다운로더 클래스 | 설명 |
 |------|----------------|------|
@@ -140,9 +149,8 @@ const downloader = await getDownloaderAsync('npm');
 | `maven` | MavenDownloader | Maven Central 아티팩트 |
 | `npm` | NpmDownloader | npm 패키지 |
 | `docker` | DockerDownloader | Docker 이미지 |
-| `yum` | YumDownloader | YUM/RPM 패키지 |
-| `apt` | AptDownloader | APT/DEB 패키지 |
-| `apk` | ApkDownloader | Alpine APK 패키지 |
+
+`yum`, `apt`, `apk`는 별도의 OS 패키지 downloader 경로에서 옵션과 함께 생성되므로 이 기본 registry에는 포함되지 않습니다.
 
 ---
 
