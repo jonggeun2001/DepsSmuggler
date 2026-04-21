@@ -141,7 +141,7 @@ depssmuggler os search bash --distro ubuntu-22.04 --arch amd64
 ```
 
 - 배포판 ID와 아키텍처를 기준으로 저장소 메타데이터를 직접 조회합니다.
-- 배포판별 parser(`YumMetadataParser`, `AptMetadataParser`, `ApkMetadataParser`)를 사용합니다.
+- 배포판별 parser는 shared shim(`src/core/shared/{yum,apt,apk}-metadata-parser.ts`)을 통해 사용합니다.
 
 ### `os download`
 

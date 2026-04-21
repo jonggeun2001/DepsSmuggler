@@ -436,6 +436,7 @@ const downloadResult = await downloader.download({
 - 목적: YUM/RPM 패키지 검색 및 다운로드 (RHEL, CentOS, Rocky, AlmaLinux)
 - 위치: `src/core/downloaders/yum.ts`
 - Resolver: `src/core/resolver/yum-resolver.ts`
+- Resolver와의 직접 경로 결합을 피하기 위해 parser 공유 경로는 `src/core/shared/yum-metadata-parser.ts`를 사용합니다.
 
 ### 클래스 구조
 
@@ -472,6 +473,7 @@ const downloadResult = await downloader.download({
 - 목적: APT/DEB 패키지 검색 및 다운로드 (Ubuntu, Debian)
 - 위치: `src/core/downloaders/apt.ts`
 - Resolver: `src/core/resolver/apt-resolver.ts`
+- Resolver와의 직접 경로 결합을 피하기 위해 parser 공유 경로는 `src/core/shared/apt-metadata-parser.ts`를 사용합니다.
 
 ### 클래스 구조
 
@@ -519,6 +521,7 @@ const versions = await downloader.getVersions('nginx');
 - 목적: APK 패키지 검색 및 다운로드 (Alpine Linux)
 - 위치: `src/core/downloaders/apk.ts`
 - Resolver: `src/core/resolver/apk-resolver.ts`
+- Resolver와의 직접 경로 결합을 피하기 위해 parser 공유 경로는 `src/core/shared/apk-metadata-parser.ts`를 사용합니다.
 
 ### 클래스 구조
 

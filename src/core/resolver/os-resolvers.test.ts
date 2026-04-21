@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApkMetadataParser } from '../downloaders/apk';
-import { AptMetadataParser } from '../downloaders/apt';
-import { YumMetadataParser } from '../downloaders/yum';
 import { ApkDependencyResolver } from './apk-resolver';
 import { AptDependencyResolver } from './apt-resolver';
 import { YumDependencyResolver } from './yum-resolver';
+import { ApkMetadataParser } from '../shared/apk-metadata-parser';
+import { AptMetadataParser } from '../shared/apt-metadata-parser';
+import { YumMetadataParser } from '../shared/yum-metadata-parser';
 import type { OSPackageInfo, Repository } from '../downloaders/os-shared/types';
 
 type ResolverTestAccess = {

@@ -16,6 +16,8 @@ export {
 
 // PyPI 유틸리티
 export { getPyPIDownloadUrl } from './pypi-utils';
+export { ApkMetadataParser } from './apk-metadata-parser';
+export { AptMetadataParser } from './apt-metadata-parser';
 
 // Conda 유틸리티
 export { getCondaDownloadUrl, getCondaSubdir } from './conda-utils';
@@ -172,6 +174,7 @@ export {
   CacheManager,
   DependencyResolutionSkipper,
 } from './maven-dedupe-index';
+export { YumMetadataParser } from './yum-metadata-parser';
 
 // npm 타입 (npm-types.ts)
 export type {

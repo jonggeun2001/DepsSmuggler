@@ -3,12 +3,12 @@
  * RHEL/CentOS 계열 의존성 해결기 (플랫 구조)
  */
 
-import type { OSPackageInfo, PackageDependency, Repository, OSPackageSearchResult } from '../downloaders/os-shared/types';
+import { searchPackagesCommon, createResolverFactory } from './os-resolver-utils';
 import { BaseOSDependencyResolver, type DependencyResolverOptions } from '../downloaders/os-shared/base-resolver';
 import { OsPackageCache } from '../downloaders/os-shared/cache-manager';
-import { YumMetadataParser } from '../downloaders/yum';
 import { isArchitectureCompatible } from '../downloaders/os-shared/repositories';
-import { searchPackagesCommon, createResolverFactory } from './os-resolver-utils';
+import { YumMetadataParser } from '../shared/yum-metadata-parser';
+import type { OSPackageInfo, PackageDependency, OSPackageSearchResult } from '../downloaders/os-shared/types';
 
 /**
  * YUM 의존성 해결기

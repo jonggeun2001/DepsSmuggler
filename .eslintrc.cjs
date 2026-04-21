@@ -27,6 +27,11 @@ module.exports = {
     react: {
       version: 'detect',
     },
+    'import/resolver': {
+      node: {
+        extensions: ['.js', '.jsx', '.ts', '.tsx', '.d.ts'],
+      },
+    },
   },
   ignorePatterns: ['dist/', 'build/', 'coverage/', 'node_modules/', '*.min.js'],
   rules: {
@@ -68,6 +73,24 @@ module.exports = {
           order: 'asc',
           caseInsensitive: true,
         },
+      },
+    ],
+    'import/no-restricted-paths': [
+      'error',
+      {
+        basePath: __dirname,
+        zones: [
+          {
+            target: './src/core/downloaders/{pip,npm}.ts',
+            from: './src/core/resolver/{pip-simple-api,npm-version-resolver}.ts',
+            message: 'core/ports 또는 src/core/shared 경계를 사용하세요.',
+          },
+          {
+            target: './src/core/resolver/{apt-resolver,apk-resolver,yum-resolver}.ts',
+            from: './src/core/downloaders/{apt,apk,yum}.ts',
+            message: 'core/ports 또는 src/core/shared 경계를 사용하세요.',
+          },
+        ],
       },
     ],
 
