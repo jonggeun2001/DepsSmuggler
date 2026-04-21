@@ -55,6 +55,7 @@
   "homepage": "https://github.com/jonggeun2001/DepsSmuggler#readme",
   "devDependencies": {
     "@playwright/test": "^1.57.0",
+    "@testing-library/react": "^16.3.2",
     "@types/cli-progress": "^3.11.6",
     "@types/fs-extra": "^11.0.4",
     "@types/js-yaml": "^4.0.9",
@@ -76,6 +77,7 @@
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-react": "^7.37.0",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "jsdom": "^29.0.2",
     "nodemon": "^3.1.14",
     "playwright": "^1.57.0",
     "prettier": "^3.5.0",

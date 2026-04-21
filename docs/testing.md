@@ -37,9 +37,11 @@ npm audit
 ### 1. 단위 테스트
 
 - 설정 파일: `vitest.config.ts`
-- 기본 include: `src/**/*.test.ts`, `tests/unit/**/*.test.ts`
+- 기본 include: `src/**/*.test.ts`, `src/**/*.test.tsx`, `tests/unit/**/*.test.ts`, `tests/unit/**/*.test.tsx`
 - 기본 exclude: `node_modules`, `dist`, `tests/e2e/**`
-- 실행 환경: `node`
+- 기본 실행 환경: `node`
+
+렌더러 훅처럼 DOM이 필요한 일부 테스트는 파일 상단 `// @vitest-environment jsdom` 주석으로 개별 override 합니다. 현재 `src/renderer/pages/download-page/hooks/use-download-page-controller.test.tsx`가 이 방식을 사용하며, Electron preload API/Ant Design modal/router hook을 mock한 상태에서 다운로드 시작·일시정지·재개·취소·완료·오류 플로우를 고정합니다.
 
 대상 예시:
 
@@ -48,6 +50,18 @@ npm audit
 - Electron `services/` 오케스트레이션과 package router/helper
 - 네트워크 호출을 모킹한 내부 동작
 - renderer form 계약 유틸리티 (`src/renderer/pages/settings/settings-form-utils.test.ts`)
+- renderer store / hook 오케스트레이션 (`cart-store`, `download-store`, `settings-store`, `use-download-page-controller`)
+
+Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스트는 다음과 같습니다.
+
+- `src/core/resolver/pip-resolver.characterization.test.ts`
+  - simple / extras / conflicts / markers / wheel-tags 5개 fixture를 JSON snapshot으로 고정
+- `electron/services/download-orchestrator.test.ts`
+  - 패키지 매니저별 happy path 매핑, 취소 경계, concurrency limiter, 진행률 이벤트 순서를 고정
+- `src/renderer/stores/cart-store.test.ts`
+- `src/renderer/stores/download-store.test.ts`
+- `src/renderer/stores/settings-store.test.ts`
+- `src/renderer/pages/download-page/hooks/use-download-page-controller.test.tsx`
 
 ### 2. 통합 테스트
 
@@ -139,6 +153,7 @@ UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
 - 새 기능을 추가할 때는 구현 파일 옆에 테스트를 두는 현재 관례를 따릅니다.
 - CLI/Electron 경계는 thin handler wiring 테스트와 service/helper 단위 테스트를 분리해 검증합니다.
 - Electron handler 테스트는 IPC 채널 등록과 service 위임만 확인하고, package type 분기/패키징/OS 전용 흐름은 `electron/services/*.test.ts`에서 검증합니다.
+- renderer 다운로드 흐름처럼 상태 전이가 많은 코드는 page 컴포넌트 전체보다 store/hook 단위 characterization test를 우선 추가합니다.
 
 ## 현재 문서화 포인트
 
