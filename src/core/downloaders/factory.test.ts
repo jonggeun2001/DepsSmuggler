@@ -14,7 +14,8 @@ import {
   initializeDownloaders,
   getDownloaderAsync,
 } from './factory';
-import { IDownloader, PackageType, PackageInfo, DownloadProgressEvent } from '../../types';
+import { getRegisteredDownloaderTypes } from './registry';
+import { IDownloader, PackageType, PackageInfo } from '../../types';
 
 // 테스트용 Mock 다운로더 생성
 function createMockDownloader(type: PackageType): IDownloader {
@@ -231,12 +232,7 @@ describe('initializeDownloaders & getDownloaderAsync', () => {
     const registry = getDownloaderRegistry();
     const types = registry.getRegisteredTypes();
 
-    expect(types).toContain('pip');
-    expect(types).toContain('conda');
-    expect(types).toContain('maven');
-    expect(types).toContain('npm');
-    expect(types).toContain('docker');
-    // yum, apt, apk는 별도의 OS 패키지 다운로더로 처리되므로 factory에 등록되지 않음
+    expect(types).toEqual(getRegisteredDownloaderTypes());
   });
 
   it('getDownloaderAsync가 자동으로 초기화해야 함', async () => {
@@ -245,6 +241,15 @@ describe('initializeDownloaders & getDownloaderAsync', () => {
 
     expect(downloader).toBeDefined();
     expect(downloader.type).toBe('pip');
+  });
+
+  it('수동 등록된 creator가 있으면 기본 registry로 덮어쓰지 않아야 함', async () => {
+    const customPip = createMockDownloader('pip');
+    registerDownloader('pip', () => customPip);
+
+    const downloader = await getDownloaderAsync('pip');
+
+    expect(downloader).toBe(customPip);
   });
 
   it('이미 초기화된 경우 다시 초기화하지 않아야 함', async () => {
