@@ -3,6 +3,7 @@
 ## 개요
 - 목적: 각 패키지 관리자별 패키지 검색 및 다운로드 구현
 - 위치: `src/core/downloaders/`
+- 공통 체크섬 검증은 `src/core/shared/integrity/checksum.ts`를 통해 공유한다. `pip`, `conda`, `maven`, Docker blob 다운로드, 캐시 검증, OS GPG verifier가 이 유틸리티를 재사용한다.
 
 ---
 
@@ -21,7 +22,7 @@
 | `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 상세 메타데이터 조회 |
 | `downloadPackage` | name: string, version: string, destDir: string, options? | Promise<DownloadResult> | 패키지 파일 다운로드 |
 | `getReleasesForArch` | releases: PyPIRelease[], arch?: string | PyPIRelease[] | 특정 아키텍처용 릴리즈 필터링 |
-| `verifyChecksum` | filePath: string, expectedHash: string | Promise<boolean> | SHA256 체크섬 검증 |
+| `verifyChecksum` | filePath: string, expectedHash: string | Promise<boolean> | shared checksum 유틸리티를 통한 SHA256 체크섬 검증 |
 
 ### 내부 메서드
 
@@ -81,7 +82,7 @@ const result = await downloader.downloadPackage('numpy', '1.26.0', '/tmp/downloa
 | `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
 | `downloadPackage` | name: string, version: string, destDir: string, options? | Promise<DownloadResult> | 패키지 다운로드 |
 | `getPackageFiles` | name: string, version: string, channel?: string | Promise<CondaPackageFile[]> | 패키지 파일 목록 조회 |
-| `verifyChecksum` | filePath: string, expectedHash: string | Promise<boolean> | SHA256/MD5 체크섬 검증 |
+| `verifyChecksum` | filePath: string, expectedHash: string | Promise<boolean> | shared checksum 유틸리티를 통한 SHA256/MD5 체크섬 검증 |
 | `clearCache` | - | void | repodata 캐시 초기화 |
 
 ### 내부 메서드
@@ -213,7 +214,7 @@ const valid = await downloader.verifyChecksum(result.filePath, result.sha256);
 | `downloadPom` | artifact: MavenArtifact, destDir: string | Promise<DownloadResult> | POM 파일 다운로드 |
 | `downloadSources` | artifact: MavenArtifact, destDir: string | Promise<DownloadResult> | 소스 JAR 다운로드 |
 | `downloadJavadoc` | artifact: MavenArtifact, destDir: string | Promise<DownloadResult> | Javadoc JAR 다운로드 |
-| `verifyChecksum` | filePath: string, checksumUrl: string | Promise<boolean> | SHA1 체크섬 검증 |
+| `verifyChecksum` | filePath: string, checksumUrl: string | Promise<boolean> | shared checksum 유틸리티를 통한 SHA1 체크섬 검증 |
 
 ### 내부 메서드
 

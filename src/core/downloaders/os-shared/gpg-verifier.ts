@@ -4,7 +4,11 @@
  */
 
 import * as crypto from 'crypto';
-import * as fs from 'fs';
+import {
+  calculateFileChecksum,
+  isChecksumAlgorithm,
+  normalizeChecksum,
+} from '../../shared/integrity/checksum';
 import type { OSPackageInfo, Repository, OSPackageManager } from './types';
 
 /**
@@ -168,31 +172,14 @@ export class GPGVerifier {
     }
 
     try {
-      const fileBuffer = fs.readFileSync(filePath);
-      const hashType = pkg.checksum.type.toLowerCase() as 'md5' | 'sha1' | 'sha256' | 'sha512';
-
-      let hash: crypto.Hash;
-      switch (hashType) {
-        case 'md5':
-          hash = crypto.createHash('md5');
-          break;
-        case 'sha1':
-          hash = crypto.createHash('sha1');
-          break;
-        case 'sha256':
-          hash = crypto.createHash('sha256');
-          break;
-        case 'sha512':
-          hash = crypto.createHash('sha512');
-          break;
-        default:
-          return { verified: true, skipped: true };
+      const hashType = pkg.checksum.type.toLowerCase();
+      if (!isChecksumAlgorithm(hashType)) {
+        return { verified: true, skipped: true };
       }
 
-      hash.update(fileBuffer);
-      const calculated = hash.digest('hex');
+      const calculated = await calculateFileChecksum(filePath, hashType);
 
-      if (calculated.toLowerCase() === pkg.checksum.value.toLowerCase()) {
+      if (normalizeChecksum(calculated) === normalizeChecksum(pkg.checksum.value)) {
         return { verified: true, skipped: false };
       } else {
         return {
