@@ -30,6 +30,10 @@ src/core/shared/
 ├── axios-http-client.ts          # Axios 기반 구현체
 ├── mock-http-client.ts           # 테스트용 Mock 구현체
 │
+│   # 무결성 검사 유틸리티
+├── integrity/
+│   └── checksum.ts               # 파일 체크섬 계산/검증 공통 모듈
+│
 │   # 공유 캐시 모듈
 ├── cache-utils.ts                # 캐시 공통 유틸리티
 ├── cache-manager.ts              # 범용 캐시 매니저
@@ -136,7 +140,41 @@ export type {
   ResolvedPackageList,
   DependencyResolverOptions,
 } from './dependency-resolver';
+
+// 무결성 검사 유틸리티
+export {
+  SUPPORTED_CHECKSUM_ALGORITHMS,
+  calculateFileChecksum,
+  isChecksumAlgorithm,
+  normalizeChecksum,
+  verifyFileChecksum,
+} from './integrity/checksum';
+export type { ChecksumAlgorithm } from './integrity/checksum';
 ```
+
+---
+
+## 무결성 검사 유틸리티 (`integrity/checksum.ts`)
+
+파일 기반 체크섬 계산과 검증을 공통 모듈로 통합했습니다.
+
+### 제공 함수
+
+| 함수 | 설명 |
+|------|------|
+| `calculateFileChecksum(filePath, algorithm?)` | 파일의 체크섬을 계산합니다. 기본 알고리즘은 `sha256`입니다. |
+| `verifyFileChecksum(filePath, expectedChecksum, algorithm?)` | 파일 체크섬이 기대값과 일치하는지 검증합니다. |
+| `normalizeChecksum(checksum)` | 대소문자/`sha256:` 같은 알고리즘 프리픽스를 정규화합니다. |
+| `isChecksumAlgorithm(value)` | 지원하는 알고리즘(`md5`, `sha1`, `sha256`, `sha512`) 여부를 확인합니다. |
+
+### 주요 사용처
+
+- `src/core/downloaders/pip.ts`
+- `src/core/downloaders/conda.ts`
+- `src/core/downloaders/maven.ts`
+- `src/core/downloaders/docker-utils.ts`
+- `src/core/cache-manager.ts`
+- `src/core/downloaders/os-shared/gpg-verifier.ts`
 
 ---
 

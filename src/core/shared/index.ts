@@ -219,6 +219,16 @@ export type {
 } from './http-client';
 export { HttpError } from './http-client';
 
+// 무결성 검사 유틸리티
+export {
+  SUPPORTED_CHECKSUM_ALGORITHMS,
+  calculateFileChecksum,
+  isChecksumAlgorithm,
+  normalizeChecksum,
+  verifyFileChecksum,
+} from './integrity/checksum';
+export type { ChecksumAlgorithm } from './integrity/checksum';
+
 // Axios HTTP 클라이언트 (axios-http-client.ts)
 export {
   AxiosHttpClient,

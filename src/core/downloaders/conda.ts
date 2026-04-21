@@ -1,7 +1,6 @@
+import * as path from 'path';
 import axios, { AxiosInstance } from 'axios';
 import * as fs from 'fs-extra';
-import * as path from 'path';
-import * as crypto from 'crypto';
 import {
   IDownloader,
   PackageInfo,
@@ -10,14 +9,15 @@ import {
   Architecture,
 } from '../../types';
 import logger from '../../utils/logger';
+import { compareVersions, getCondaSubdir } from '../shared';
+import { fetchRepodata } from '../shared/conda-cache';
 import {
   RepoData,
   RepoDataPackage,
   CondaSearchResult,
   CondaPackageFile,
 } from '../shared/conda-types';
-import { compareVersions, getCondaSubdir } from '../shared';
-import { fetchRepodata } from '../shared/conda-cache';
+import { verifyFileChecksum } from '../shared/integrity/checksum';
 
 // CondaPackageInfo는 downloader 전용 (files, versions 등 추가 필드 포함)
 interface CondaPackageInfo {
@@ -467,17 +467,7 @@ export class CondaDownloader implements IDownloader {
     expected: string,
     algorithm: 'md5' | 'sha256' = 'md5'
   ): Promise<boolean> {
-    return new Promise((resolve, reject) => {
-      const hash = crypto.createHash(algorithm);
-      const stream = fs.createReadStream(filePath);
-
-      stream.on('data', (data) => hash.update(data));
-      stream.on('end', () => {
-        const actual = hash.digest('hex').toLowerCase();
-        resolve(actual === expected.toLowerCase());
-      });
-      stream.on('error', reject);
-    });
+    return verifyFileChecksum(filePath, expected, algorithm);
   }
 
   /**

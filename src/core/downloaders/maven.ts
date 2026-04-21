@@ -1,7 +1,6 @@
+import * as path from 'path';
 import axios, { AxiosInstance } from 'axios';
 import * as fs from 'fs-extra';
-import * as path from 'path';
-import * as crypto from 'crypto';
 import {
   IDownloader,
   PackageInfo,
@@ -9,8 +8,9 @@ import {
   DownloadProgressEvent,
 } from '../../types';
 import logger from '../../utils/logger';
-import { sanitizePath } from '../shared/path-utils';
+import { verifyFileChecksum } from '../shared/integrity/checksum';
 import { isNativeArtifact } from '../shared/maven-utils';
+import { sanitizePath } from '../shared/path-utils';
 import {
   retryWithExponentialBackoff,
   isRetryableHttpError,
@@ -683,17 +683,7 @@ export class MavenDownloader implements IDownloader {
    * 체크섬 검증 (SHA-1)
    */
   async verifyChecksum(filePath: string, expected: string): Promise<boolean> {
-    return new Promise((resolve, reject) => {
-      const hash = crypto.createHash('sha1');
-      const stream = fs.createReadStream(filePath);
-
-      stream.on('data', (data) => hash.update(data));
-      stream.on('end', () => {
-        const actual = hash.digest('hex').toLowerCase();
-        resolve(actual === expected.toLowerCase());
-      });
-      stream.on('error', reject);
-    });
+    return verifyFileChecksum(filePath, expected, 'sha1');
   }
 
   /**
