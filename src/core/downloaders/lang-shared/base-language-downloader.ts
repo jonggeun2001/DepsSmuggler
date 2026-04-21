@@ -9,19 +9,20 @@ export interface LanguageArtifactDownloadPlan {
   itemId: string;
   timeoutMs: number;
   fileName?: string;
+  relativeFilePath?: string;
   verifyFile?: (filePath: string) => Promise<boolean>;
   verificationFailureMessage?: string;
 }
 
 export abstract class BaseLanguageDownloader {
-  protected async downloadArtifact(
+  protected async downloadArtifactFile(
     destPath: string,
     plan: LanguageArtifactDownloadPlan,
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string> {
     const filePath = this.resolveFilePath(plan, destPath);
 
-    await fs.ensureDir(destPath);
+    await fs.ensureDir(path.dirname(filePath));
 
     const response = await axios({
       method: 'GET',
@@ -77,6 +78,14 @@ export abstract class BaseLanguageDownloader {
   }
 
   private resolveFilePath(plan: LanguageArtifactDownloadPlan, destPath: string): string {
+    if (plan.relativeFilePath) {
+      const relativePathSegments = plan.relativeFilePath
+        .split(/[\\/]+/)
+        .filter(Boolean)
+        .map((segment) => sanitizePath(segment, /[^a-zA-Z0-9._-]/g));
+      return path.join(destPath, ...relativePathSegments);
+    }
+
     const rawFileName = plan.fileName ?? path.basename(new URL(plan.downloadUrl).pathname);
     const fileName = sanitizePath(rawFileName, /[^a-zA-Z0-9._-]/g);
     return path.join(destPath, fileName);

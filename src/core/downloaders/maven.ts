@@ -15,6 +15,7 @@ import {
   retryWithExponentialBackoff,
   isRetryableHttpError,
 } from '../shared/retry-utils';
+import { BaseLanguageDownloader } from './lang-shared/base-language-downloader';
 
 // Maven Central Search API 응답 타입
 interface MavenSearchResponse {
@@ -110,13 +111,14 @@ const VALID_ARTIFACT_TYPES: ArtifactType[] = [
   'bundle', 'rar', 'aar', 'hpi', 'test-jar', 'sources', 'javadoc'
 ];
 
-export class MavenDownloader implements IDownloader {
+export class MavenDownloader extends BaseLanguageDownloader implements IDownloader {
   readonly type = 'maven' as const;
   private client: AxiosInstance;
   private readonly searchUrl = 'https://search.maven.org/solrsearch/select';
   private readonly repoUrl = 'https://repo1.maven.org/maven2';
 
   constructor() {
+    super();
     this.client = axios.create({
       timeout: 30000,
       headers: {
@@ -133,9 +135,11 @@ export class MavenDownloader implements IDownloader {
 
     // coordinates 형식이면 Sonatype API 우선 사용
     if (parsed.type === 'coordinates' && parsed.groupId && parsed.artifactId) {
+      const groupId = parsed.groupId;
+      const artifactId = parsed.artifactId;
       try {
         return await retryWithExponentialBackoff(
-          () => this.searchViaSonatypeApi(parsed.groupId!, parsed.artifactId!),
+          () => this.searchViaSonatypeApi(groupId, artifactId),
           {
             maxRetries: 2,
             delayMs: 1000,
@@ -245,18 +249,23 @@ export class MavenDownloader implements IDownloader {
             }
           );
 
-          return response.data.components
-            .filter((comp) => comp.latestVersionInfo?.version) // 버전이 있는 것만
-            .map((comp) => ({
+          return response.data.components.flatMap((comp) => {
+            const latestVersion = comp.latestVersionInfo?.version;
+            if (!latestVersion) {
+              return [];
+            }
+
+            return [{
               type: 'maven' as const,
               name: `${comp.namespace}:${comp.name}`,
-              version: comp.latestVersionInfo!.version,
+              version: latestVersion,
               metadata: {
                 groupId: comp.namespace,
                 artifactId: comp.name,
                 popularityCount: comp.nsPopularityAppCount,
               },
-            }));
+            }];
+          });
         },
         {
           maxRetries: 2,
@@ -424,7 +433,7 @@ export class MavenDownloader implements IDownloader {
   ): Promise<string> {
     const groupId = (info.metadata?.groupId as string) || info.name.split(':')[0];
     const artifactId = (info.metadata?.artifactId as string) || info.name.split(':')[1];
-    let classifier = info.metadata?.classifier as string | undefined;
+    const classifier = info.metadata?.classifier as string | undefined;
 
     // 네이티브 패키지이고 classifier가 없으면 경고만 표시 (자동 생성하지 않음)
     // 각 라이브러리마다 classifier 형식이 다르므로 (LWJGL: natives-linux, Netty: linux-x86_64)
@@ -547,14 +556,11 @@ export class MavenDownloader implements IDownloader {
     try {
       const downloadUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType, classifier);
       const fileName = this.buildFileName(artifactId, version, artifactType, classifier);
-      
+
       // .m2 형식의 디렉토리 구조 생성
       const m2SubPath = this.buildM2Path(groupId, artifactId, version);
-      const artifactDir = path.join(destPath, m2SubPath);
-      const filePath = path.join(artifactDir, fileName);
 
-      // 디렉토리 생성
-      await fs.ensureDir(artifactDir);
+      const artifactIdForProgress = `${groupId}:${artifactId}@${version}`;
 
       // SHA-1 체크섬 조회
       let expectedSha1: string | undefined;
@@ -565,60 +571,22 @@ export class MavenDownloader implements IDownloader {
         // 체크섬 없을 수 있음
       }
 
-      // 파일 다운로드
-      const response = await axios({
-        method: 'GET',
-        url: downloadUrl,
-        responseType: 'stream',
-        timeout: 300000,
-      });
+      const verifyFile = expectedSha1 === undefined
+        ? undefined
+        : async (artifactPath: string) => this.verifyChecksum(artifactPath, expectedSha1);
 
-      const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
-      let downloadedBytes = 0;
-      let lastBytes = 0;
-      let lastTime = Date.now();
-      let currentSpeed = 0;
-
-      const writer = fs.createWriteStream(filePath);
-
-      response.data.on('data', (chunk: Buffer) => {
-        downloadedBytes += chunk.length;
-
-        // 속도 계산 (0.3초마다)
-        const now = Date.now();
-        const elapsed = (now - lastTime) / 1000;
-        if (elapsed >= 0.3) {
-          currentSpeed = (downloadedBytes - lastBytes) / elapsed;
-          lastBytes = downloadedBytes;
-          lastTime = now;
-        }
-
-        if (onProgress) {
-          onProgress({
-            itemId: `${groupId}:${artifactId}@${version}`,
-            progress: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0,
-            downloadedBytes,
-            totalBytes,
-            speed: currentSpeed,
-          });
-        }
-      });
-
-      response.data.pipe(writer);
-
-      await new Promise<void>((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
-
-      // 체크섬 검증
-      if (expectedSha1) {
-        const isValid = await this.verifyChecksum(filePath, expectedSha1);
-        if (!isValid) {
-          await fs.remove(filePath);
-          throw new Error('체크섬 검증 실패');
-        }
-      }
+      const filePath = await this.downloadArtifactFile(
+        destPath,
+        {
+          downloadUrl,
+          itemId: artifactIdForProgress,
+          timeoutMs: 300000,
+          relativeFilePath: path.posix.join(m2SubPath, fileName),
+          verifyFile,
+          verificationFailureMessage: '체크섬 검증 실패',
+        },
+        onProgress
+      );
 
       logger.info('Maven 아티팩트 다운로드 완료', {
         groupId,

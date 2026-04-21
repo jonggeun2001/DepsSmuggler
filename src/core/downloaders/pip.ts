@@ -252,7 +252,7 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
       }
 
       const expectedSha256 = packageInfo.metadata?.checksum?.sha256;
-      const filePath = await this.downloadArtifact(
+      const filePath = await this.downloadArtifactFile(
         destPath,
         {
           downloadUrl,
