@@ -70,6 +70,24 @@ module.exports = {
         },
       },
     ],
+    'import/no-restricted-paths': [
+      'error',
+      {
+        basePath: __dirname,
+        zones: [
+          {
+            target: './src/core/downloaders',
+            from: './src/core/resolver',
+            message: 'core/ports 또는 src/core/shared 경계를 사용하세요.',
+          },
+          {
+            target: './src/core/resolver',
+            from: './src/core/downloaders',
+            message: 'core/ports 또는 src/core/shared 경계를 사용하세요.',
+          },
+        ],
+      },
+    ],
 
     // General
     'no-console': ['warn', { allow: ['warn', 'error'] }],

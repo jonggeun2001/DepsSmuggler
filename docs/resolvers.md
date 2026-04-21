@@ -596,6 +596,7 @@ const deps = resolver.parseFromText(`
 ### 개요
 - 목적: YUM/RPM 패키지 의존성 해결
 - 위치: `src/core/resolver/yumResolver.ts`
+- 메타데이터 파서는 `src/core/shared/yum-metadata-parser.ts` shim을 통해 참조합니다.
 
 ### 클래스 구조
 
@@ -671,6 +672,7 @@ const deps = resolver.parseFromText(`
 - **Provides 지원**: 가상 패키지 (예: `mail-transport-agent`)
 - **Component 자동 추출**: URL에서 main, universe, multiverse 등 추출
 - **Release 파일 파싱**: 저장소 메타데이터 검증
+- **메타데이터 파서 경계**: resolver는 `src/core/shared/apt-metadata-parser.ts` shim을 통해 parser를 사용합니다.
 
 ---
 
@@ -718,6 +720,7 @@ p:nginx=1.24.0-r6
 필드 매핑:
 - `P`: Package name
 - `V`: Version
+- resolver는 `src/core/shared/apk-metadata-parser.ts` shim을 통해 parser를 참조합니다.
 - `A`: Architecture
 - `D`: Dependencies
 - `S`: Size
