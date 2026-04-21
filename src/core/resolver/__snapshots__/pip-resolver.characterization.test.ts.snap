@@ -191,29 +191,19 @@ exports[`PipResolver characterization > simple fixture의 그래프를 고정한
 
 exports[`PipResolver characterization > wheel-tags fixture의 그래프를 고정한다 1`] = `
 {
-  "conflicts": [
-    {
-      "packageName": "typing_extensions",
-      "resolvedVersion": "4.12.2-py3-none-any",
-      "type": "version",
-      "versions": [
-        ">=4.12.2",
-        "4.12.2-py3-none-any",
-      ],
-    },
-  ],
+  "conflicts": [],
   "flatList": [
     {
       "filename": "numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.whl",
       "indexUrl": "https://packages.example.com/simple",
       "name": "numpy",
-      "version": "1.26.4-cp311-cp311-manylinux_2_17_x86_64",
+      "version": "1.26.4",
     },
     {
       "filename": "typing_extensions-4.12.2-py3-none-any.whl",
       "indexUrl": "https://packages.example.com/simple",
       "name": "typing_extensions",
-      "version": "4.12.2-py3-none-any",
+      "version": "4.12.2",
     },
   ],
   "root": {
@@ -223,13 +213,13 @@ exports[`PipResolver characterization > wheel-tags fixture의 그래프를 고�
         "filename": "typing_extensions-4.12.2-py3-none-any.whl",
         "indexUrl": "https://packages.example.com/simple",
         "name": "typing_extensions",
-        "version": "4.12.2-py3-none-any",
+        "version": "4.12.2",
       },
     ],
     "filename": "numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.whl",
     "indexUrl": "https://packages.example.com/simple",
     "name": "numpy",
-    "version": "1.26.4-cp311-cp311-manylinux_2_17_x86_64",
+    "version": "1.26.4",
   },
 }
 `;

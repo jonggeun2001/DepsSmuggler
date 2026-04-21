@@ -33,20 +33,6 @@ const pipCacheMock = vi.hoisted(() => ({
 const simpleApiMock = vi.hoisted(() => ({
   fetchPackageFiles: vi.fn(),
   fetchWheelMetadata: vi.fn(),
-  extractVersionFromFilename: vi.fn((filename: string) => {
-    const match = filename.match(/-(\d+(?:\.\d+)+(?:[A-Za-z0-9._+-]*)?)(?=-|\.tar\.gz|\.whl)/);
-    if (!match) {
-      throw new Error(`version not found: ${filename}`);
-    }
-    return match[1];
-  }),
-  findLatestVersion: vi.fn((files: Array<{ filename: string }>) => {
-    const versions = files.map((file) => {
-      const match = file.filename.match(/-(\d+(?:\.\d+)+(?:[A-Za-z0-9._+-]*)?)(?=-|\.tar\.gz|\.whl)/);
-      return match?.[1] ?? '0.0.0';
-    });
-    return versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0] ?? null;
-  }),
 }));
 
 vi.mock('../shared/pip-cache', () => ({
@@ -54,12 +40,15 @@ vi.mock('../shared/pip-cache', () => ({
   clearMemoryCache: pipCacheMock.clearMemoryCache,
 }));
 
-vi.mock('./pip-simple-api', () => ({
-  fetchPackageFiles: simpleApiMock.fetchPackageFiles,
-  fetchWheelMetadata: simpleApiMock.fetchWheelMetadata,
-  extractVersionFromFilename: simpleApiMock.extractVersionFromFilename,
-  findLatestVersion: simpleApiMock.findLatestVersion,
-}));
+vi.mock('./pip-simple-api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./pip-simple-api')>();
+
+  return {
+    ...actual,
+    fetchPackageFiles: simpleApiMock.fetchPackageFiles,
+    fetchWheelMetadata: simpleApiMock.fetchWheelMetadata,
+  };
+});
 
 import { PipResolver } from './pip-resolver';
 
