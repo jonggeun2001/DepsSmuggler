@@ -13,6 +13,7 @@
 ### 개요
 - 목적: PyPI 패키지 검색 및 다운로드
 - 위치: `src/core/downloaders/pip.ts`
+- 커스텀 인덱스용 Simple API 조회는 `src/core/shared/pip-simple-api-client.ts`를 재사용한다.
 
 ### 클래스 구조
 
@@ -575,6 +576,7 @@ const versions = await downloader.getVersions('nginx');
 ### 개요
 - 목적: npm 패키지 검색 및 다운로드
 - 위치: `src/core/downloaders/npm.ts`
+- 버전 스펙 해석과 packument 조회는 `src/core/shared/npm-version-resolver.ts`를 재사용한다.
 
 ### 클래스 구조
 

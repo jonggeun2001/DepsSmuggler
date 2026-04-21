@@ -70,8 +70,8 @@ src/core/shared/
 │   # 검색 유틸리티
 └── search-utils.ts               # 검색 결과 정렬/관련성 점수 계산
 
-src/core/resolver/
-└── pip-simple-api.ts             # PyPI Simple API 파싱
+src/core/shared/
+└── pip-simple-api-client.ts      # PyPI Simple API 파싱
 
 src/utils/
 ├── logger.ts                     # 로깅 유틸리티

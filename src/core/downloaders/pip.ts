@@ -9,15 +9,15 @@ import {
   Architecture,
 } from '../../types';
 import logger from '../../utils/logger';
+import { compareVersions } from '../shared';
+import { verifyFileChecksum } from '../shared/integrity/checksum';
+import { sanitizePath } from '../shared/path-utils';
 import {
   fetchPackageFiles,
   extractVersionFromFilename,
   findLatestVersion as findLatestVersionFromSimpleApi,
   SimpleApiPackageFile,
-} from '../resolver/pip-simple-api';
-import { compareVersions } from '../shared';
-import { verifyFileChecksum } from '../shared/integrity/checksum';
-import { sanitizePath } from '../shared/path-utils';
+} from '../shared/pip-simple-api-client';
 import {
   PyPIRelease,
   PyPIResponse,

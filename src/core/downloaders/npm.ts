@@ -5,26 +5,26 @@
  * 버전 해결 로직은 NpmVersionResolver에 위임
  */
 
+import * as crypto from 'crypto';
+import * as path from 'path';
 import axios, { AxiosInstance } from 'axios';
 import * as fs from 'fs-extra';
-import * as path from 'path';
-import * as crypto from 'crypto';
 import * as ssri from 'ssri';
-import {
-  NpmPackageVersion,
-  NpmSearchResponse,
-  NpmSearchResult,
-} from '../shared/npm-types';
 import {
   PackageInfo,
   IDownloader,
   DownloadProgressEvent,
 } from '../../types';
 import logger from '../../utils/logger';
-import { clearNpmCache } from '../shared/npm-cache';
-import { sanitizePath } from '../shared/path-utils';
-import { NpmVersionResolver } from '../resolver/npm-version-resolver';
 import { NPM_CONSTANTS } from '../constants/npm';
+import { clearNpmCache } from '../shared/npm-cache';
+import {
+  NpmPackageVersion,
+  NpmSearchResponse,
+  NpmSearchResult,
+} from '../shared/npm-types';
+import { NpmVersionResolver } from '../shared/npm-version-resolver';
+import { sanitizePath } from '../shared/path-utils';
 
 /**
  * npm 다운로더 클래스
@@ -314,7 +314,6 @@ export class NpmDownloader implements IDownloader {
   async verifyIntegrity(filePath: string, expectedIntegrity: string): Promise<boolean> {
     try {
       const fileBuffer = await fs.readFile(filePath);
-      const actual = ssri.fromData(fileBuffer);
       return ssri.checkData(fileBuffer, expectedIntegrity) !== false;
     } catch {
       return false;

@@ -2,7 +2,7 @@
 
 ## 개요
 - 목적: PyPI 패키지 다운로드 및 의존성 해결을 위한 유틸리티
-- 위치: `src/core/shared/pypi-utils.ts`, `pip-*.ts`, `src/core/resolver/pip-simple-api.ts`
+- 위치: `src/core/shared/pypi-utils.ts`, `pip-*.ts`, `src/core/shared/pip-simple-api-client.ts`
 
 ---
 
@@ -12,15 +12,13 @@
 src/core/shared/
 ├── pip-types.ts                  # PyPI 타입 정의 (shared-types.md 참조)
 ├── pypi-utils.ts                 # PyPI 다운로드 URL 조회
+├── pip-simple-api-client.ts      # PyPI Simple API 파싱
 ├── pip-tags.ts                   # PEP 425 태그 생성/매칭
 ├── pip-wheel.ts                  # Wheel 파일 파싱/선택
 ├── pip-cache.ts                  # PyPI 메타데이터 캐시
 ├── pip-backtracking-resolver.ts  # 백트래킹 Resolver
 ├── pip-candidate.ts              # 후보 평가기
 └── pip-provider.ts               # resolvelib Provider 구현
-
-src/core/resolver/
-└── pip-simple-api.ts             # PyPI Simple API 파싱
 ```
 
 ---
@@ -449,7 +447,7 @@ await clearAllCache();
 
 ---
 
-## PyPI Simple API (`pip-simple-api.ts`)
+## PyPI Simple API (`pip-simple-api-client.ts`)
 
 PEP 503 Simple Repository API 파싱 유틸리티
 
@@ -458,7 +456,7 @@ PEP 503 Simple Repository API 파싱 유틸리티
 > - Simple API: ~5KB (버전/파일 목록만)
 
 ### 위치
-`src/core/resolver/pip-simple-api.ts`
+`src/core/shared/pip-simple-api-client.ts`
 
 ### 주요 함수
 
@@ -515,7 +513,7 @@ interface SimpleApiOptions {
 ### 사용 예시
 
 ```typescript
-import { fetchVersionsFromSimpleApi, extractVersionFromFilename, fetchPackageFiles } from './pip-simple-api';
+import { fetchVersionsFromSimpleApi, extractVersionFromFilename, fetchPackageFiles } from './pip-simple-api-client';
 
 // 버전 목록 가져오기
 const versions = await fetchVersionsFromSimpleApi('requests');

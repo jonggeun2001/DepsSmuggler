@@ -1,6 +1,6 @@
+import axios from 'axios';
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { getPipDownloader, PipDownloader } from './pip';
-import axios from 'axios';
 
 // axios 모킹
 vi.mock('axios', () => {
@@ -17,7 +17,7 @@ vi.mock('axios', () => {
 });
 
 // Simple API 모킹
-vi.mock('../resolver/pip-simple-api', () => ({
+vi.mock('../shared/pip-simple-api-client', () => ({
   fetchPackageFiles: vi.fn(),
   extractVersionFromFilename: vi.fn(),
   findLatestVersion: vi.fn(),
@@ -151,7 +151,7 @@ describe('PipDownloader 클래스 메서드 테스트 (모킹)', () => {
     });
 
     it('Simple API로 버전 목록 조회 성공 (indexUrl 지정)', async () => {
-      const { fetchPackageFiles, extractVersionFromFilename } = await import('../resolver/pip-simple-api');
+      const { fetchPackageFiles, extractVersionFromFilename } = await import('../shared/pip-simple-api-client');
 
       vi.mocked(fetchPackageFiles).mockResolvedValueOnce([
         { filename: 'requests-3.0.0.tar.gz', url: 'http://example.com/requests-3.0.0.tar.gz', yanked: false },
@@ -985,12 +985,6 @@ describe('PipDownloader downloadPackage', () => {
         ],
       },
     });
-
-    const packageInfo: PackageInfo = {
-      type: 'pip',
-      name: 'test',
-      version: '1.0.0',
-    };
 
     // downloadPackage는 실제 axios 호출이 필요하므로 통합 테스트로 이동
     // 여기서는 진행률 콜백 구조만 검증
