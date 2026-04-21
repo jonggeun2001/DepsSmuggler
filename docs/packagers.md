@@ -54,7 +54,7 @@ interface ArchiveProgress {
   percentage: number;
 }
 
-interface PackageManifest {
+interface ArchivePackageManifest {
   version: string;
   createdAt: string;
   packages: PackageInfo[];
@@ -63,7 +63,8 @@ interface PackageManifest {
 }
 ```
 
-`PackageManifest`의 canonical 정의는 `src/types/manifest/package-manifest.ts`에 두고, `archive-packager.ts`는 해당 타입을 재사용합니다.
+archive 전용 canonical 정의는 `src/types/manifest/package-manifest.ts`의 `ArchivePackageManifest`에 두고, `archive-packager.ts`는 해당 타입을 재사용합니다.
+`src/types`의 공개 `PackageManifest`는 기존 packaging contract를 유지하는 compatibility surface입니다.
 
 ### 사용 예시
 ```typescript

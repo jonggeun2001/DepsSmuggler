@@ -47,10 +47,22 @@ describe('Phase 2 type module structure', () => {
     expect(shimSource).toContain("export type { PipTargetPlatform } from './platform/pip-target-platform';");
   });
 
-  it('archive-packager는 local PackageManifest 선언 대신 canonical type을 사용해야 한다', () => {
+  it('public PackageManifest surface는 legacy contract를 유지해야 한다', () => {
+    const manifestSource = readFile('src/types/manifest/package-manifest.ts');
+
+    expect(manifestSource).toContain('export interface PackageManifest');
+    expect(manifestSource).toContain('totalPackages: number;');
+    expect(manifestSource).toContain("format: 'archive' | 'withScript';");
+    expect(manifestSource).toContain('export interface ArchivePackageManifest');
+    expect(manifestSource).toContain('fileCount: number;');
+    expect(manifestSource).toContain('version: string;');
+  });
+
+  it('archive-packager는 archive 전용 canonical manifest type을 사용해야 한다', () => {
     const archivePackagerSource = readFile('src/core/packager/archive-packager.ts');
 
     expect(archivePackagerSource).not.toContain('export interface PackageManifest');
-    expect(archivePackagerSource).toContain("import type { PackageManifest } from '../../types/manifest/package-manifest';");
+    expect(archivePackagerSource).toContain("import type { ArchivePackageManifest } from '../../types/manifest/package-manifest';");
+    expect(archivePackagerSource).toContain('ArchivePackageManifest as PackageManifest');
   });
 });
