@@ -3,10 +3,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CacheManager,
   ArtifactCacheManager,
   getCacheManager,
   initializeCacheManager,
-} from './shared/cache/artifact-cache';
+} from './cache-manager';
 import { sanitizeCacheKey } from './shared/filename-utils';
 
 // fs-extra 모킹
@@ -44,6 +45,10 @@ const createCacheKeyForTest = (packageInfo: {
 };
 
 describe('cacheManager', () => {
+  it('CacheManager shim은 ArtifactCacheManager를 re-export한다', () => {
+    expect(CacheManager).toBe(ArtifactCacheManager);
+  });
+
   describe('getCacheManager', () => {
     it('싱글톤 인스턴스 반환', () => {
       const instance1 = getCacheManager();

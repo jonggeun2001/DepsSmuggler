@@ -3,4 +3,4 @@ export {
   MavenDedupeIndex,
   MavenDedupeIndex as CacheManager,
   DependencyResolutionSkipper,
-} from '../downloaders/maven/maven-dedupe-index';
+} from './maven-dedupe-index';

@@ -11,7 +11,7 @@ import {
   SkipResult,
   coordinateToKey,
   coordinateToString,
-} from '../../shared/maven-types';
+} from './maven-types';
 
 /**
  * 좌표 관리자 - 노드의 BF 좌표를 추적

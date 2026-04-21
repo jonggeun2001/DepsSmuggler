@@ -171,7 +171,7 @@ export {
   MavenDedupeIndex,
   CacheManager,
   DependencyResolutionSkipper,
-} from '../downloaders/maven/maven-dedupe-index';
+} from './maven-dedupe-index';
 
 // npm 타입 (npm-types.ts)
 export type {
