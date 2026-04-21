@@ -32,6 +32,8 @@ depssmuggler/
 │   ├── cli/
 │   │   ├── index.ts
 │   │   └── commands/
+│   │       ├── download.ts
+│   │       └── download-runner.ts
 │   ├── core/
 │   │   ├── downloaders/
 │   │   ├── downloaders/lang-shared/
@@ -42,7 +44,6 @@ depssmuggler/
 │   │   ├── mailer/
 │   │   ├── shared/
 │   │   ├── config.ts
-│   │   ├── download-manager.ts
 │   │   └── cache-manager.ts      # compatibility shim → shared/cache/artifact-cache.ts
 │   ├── types/
 │   └── utils/

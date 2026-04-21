@@ -2,7 +2,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import cliProgress from 'cli-progress';
 import * as fs from 'fs-extra';
-import { getDownloadManager, OverallProgress } from '../../core/download-manager';
+import { DownloadManager, OverallProgress } from './download-runner';
 import { getArchivePackager, ArchiveFormat } from '../../core/packager/archive-packager';
 import { getScriptGenerator } from '../../core/packager/script-generator';
 import { DownloadPackage, resolveAllDependencies } from '../../core/shared';
@@ -170,7 +170,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
     console.log(chalk.cyan(`동시 다운로드: ${options.concurrency}개\n`));
 
     // 다운로드 매니저 설정
-    const downloadManager = getDownloadManager();
+    const downloadManager = new DownloadManager();
     downloadManager.reset();
     downloadManager.addToQueue(packages);
 

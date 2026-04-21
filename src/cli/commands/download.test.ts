@@ -47,13 +47,15 @@ vi.mock('cli-progress', () => ({
   },
 }));
 
-vi.mock('../../core/download-manager', () => ({
-  getDownloadManager: vi.fn(() => ({
-    reset,
-    addToQueue,
-    on,
-    startDownload,
-  })),
+vi.mock('./download-runner', () => ({
+  DownloadManager: vi.fn(function DownloadManagerMock() {
+    return {
+      reset,
+      addToQueue,
+      on,
+      startDownload,
+    };
+  }),
 }));
 
 vi.mock('../../core/packager/archive-packager', () => ({
