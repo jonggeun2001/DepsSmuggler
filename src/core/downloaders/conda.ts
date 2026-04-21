@@ -1,6 +1,4 @@
-import * as path from 'path';
 import axios, { AxiosInstance } from 'axios';
-import * as fs from 'fs-extra';
 import {
   IDownloader,
   PackageInfo,
@@ -17,6 +15,7 @@ import {
   CondaSearchResult,
   CondaPackageFile,
 } from '../shared/conda-types';
+import { BaseLanguageDownloader } from './lang-shared/base-language-downloader';
 import { verifyFileChecksum } from '../shared/integrity/checksum';
 
 // CondaPackageInfo는 downloader 전용 (files, versions 등 추가 필드 포함)
@@ -36,7 +35,7 @@ interface CondaPackageInfo {
 // 지원 채널
 type CondaChannel = 'conda-forge' | 'main' | 'anaconda' | 'defaults' | string;
 
-export class CondaDownloader implements IDownloader {
+export class CondaDownloader extends BaseLanguageDownloader implements IDownloader {
   readonly type = 'conda' as const;
   private client: AxiosInstance;
   private readonly apiUrl = 'https://api.anaconda.org';
@@ -46,6 +45,7 @@ export class CondaDownloader implements IDownloader {
   private repodataCache: Map<string, RepoData> = new Map();
 
   constructor() {
+    super();
     this.client = axios.create({
       timeout: 600000, // 10분
       headers: {
@@ -61,8 +61,9 @@ export class CondaDownloader implements IDownloader {
     const cacheKey = `${channel}/${subdir}`;
 
     // 메모리 캐시 확인 (세션 내 재사용)
-    if (this.repodataCache.has(cacheKey)) {
-      return this.repodataCache.get(cacheKey)!;
+    const cached = this.repodataCache.get(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     // 파일 시스템 캐시 + HTTP 조건부 요청 사용
@@ -93,7 +94,7 @@ export class CondaDownloader implements IDownloader {
     repodata: RepoData,
     name: string,
     version: string,
-    subdir: string
+    _subdir: string
   ): { filename: string; pkg: RepoDataPackage } | null {
     const normalizedName = name.toLowerCase();
 
@@ -369,78 +370,26 @@ export class CondaDownloader implements IDownloader {
         throw new Error(`다운로드 URL을 찾을 수 없습니다: ${info.name}@${info.version}`);
       }
 
-      // 파일명 추출
-      const fileName = path.basename(new URL(downloadUrl).pathname);
-      const filePath = path.join(destPath, fileName);
-
-      // 디렉토리 생성
-      await fs.ensureDir(destPath);
-
       logger.info('Conda 패키지 다운로드 시작', {
         name: info.name,
         version: info.version,
         url: downloadUrl,
-        filePath,
       });
 
-      // 파일 다운로드
-      const response = await axios({
-        method: 'GET',
-        url: downloadUrl,
-        responseType: 'stream',
-        timeout: 300000,
-      });
-
-      const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
-      let downloadedBytes = 0;
-      let lastBytes = 0;
-      let lastTime = Date.now();
-      let currentSpeed = 0;
-
-      const writer = fs.createWriteStream(filePath);
-
-      response.data.on('data', (chunk: Buffer) => {
-        downloadedBytes += chunk.length;
-
-        // 속도 계산 (0.3초마다)
-        const now = Date.now();
-        const elapsed = (now - lastTime) / 1000;
-        if (elapsed >= 0.3) {
-          currentSpeed = (downloadedBytes - lastBytes) / elapsed;
-          lastBytes = downloadedBytes;
-          lastTime = now;
-        }
-
-        if (onProgress) {
-          onProgress({
-            itemId: `${info.name}@${info.version}`,
-            progress: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0,
-            downloadedBytes,
-            totalBytes,
-            speed: currentSpeed,
-          });
-        }
-      });
-
-      response.data.pipe(writer);
-
-      await new Promise<void>((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
-
-      // 체크섬 검증
-      if (packageInfo.metadata?.checksum?.md5) {
-        const isValid = await this.verifyChecksum(
-          filePath,
-          packageInfo.metadata.checksum.md5,
-          'md5'
-        );
-        if (!isValid) {
-          await fs.remove(filePath);
-          throw new Error('체크섬 검증 실패');
-        }
-      }
+      const expectedMd5 = packageInfo.metadata?.checksum?.md5;
+      const filePath = await this.downloadArtifact(
+        destPath,
+        {
+          downloadUrl,
+          itemId: `${info.name}@${info.version}`,
+          timeoutMs: 300000,
+          verifyFile: expectedMd5
+            ? (pathToVerify) => this.verifyChecksum(pathToVerify, expectedMd5, 'md5')
+            : undefined,
+          verificationFailureMessage: expectedMd5 ? '체크섬 검증 실패' : undefined,
+        },
+        onProgress
+      );
 
       logger.info('Conda 패키지 다운로드 완료', {
         name: info.name,

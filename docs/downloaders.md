@@ -4,6 +4,7 @@
 - 목적: 각 패키지 관리자별 패키지 검색 및 다운로드 구현
 - 위치: `src/core/downloaders/`
 - 공통 체크섬 검증은 `src/core/shared/integrity/checksum.ts`를 통해 공유한다. `pip`, `conda`, `maven`, Docker blob 다운로드, 캐시 검증, OS GPG verifier가 이 유틸리티를 재사용한다.
+- Phase 6부터 `src/core/downloaders/lang-shared/base-language-downloader.ts`가 언어 패키지 공통 다운로드 레이어를 제공한다. 현재 `pip`, `conda`, `npm`이 스트림 저장, 진행률 계산, 파일명 정규화, 검증 실패 시 정리 로직을 공유하고, `maven`은 후속 slice에서 정렬한다.
 - Phase 4부터 downloader가 resolver 구현에 직접 기대지 않도록 `src/core/ports/package-metadata-port.ts`, `src/core/ports/package-fetch-port.ts` 경계를 기준으로 점진적으로 정리한다.
 
 ---
@@ -14,6 +15,7 @@
 - 목적: PyPI 패키지 검색 및 다운로드
 - 위치: `src/core/downloaders/pip.ts`
 - 커스텀 인덱스용 Simple API 조회는 `src/core/shared/pip-simple-api-client.ts`를 재사용한다.
+- 파일 저장과 진행률 이벤트 생성은 `BaseLanguageDownloader`가 담당하고, `PipDownloader`는 release 선택과 SHA256 검증 기준을 제공한다.
 
 ### 클래스 구조
 
@@ -74,6 +76,7 @@ const result = await downloader.downloadPackage('numpy', '1.26.0', '/tmp/downloa
 ### 개요
 - 목적: Anaconda/Conda-forge 패키지 검색 및 다운로드
 - 위치: `src/core/downloaders/conda.ts`
+- 파일 저장과 진행률 이벤트 생성은 `BaseLanguageDownloader`가 담당하고, `CondaDownloader`는 repodata 기반 파일 선택과 MD5/SHA256 검증 기준을 제공한다.
 
 ### 클래스 구조
 
@@ -202,6 +205,7 @@ const valid = await downloader.verifyChecksum(result.filePath, result.sha256);
 ### 개요
 - 목적: Maven Central 아티팩트 검색 및 다운로드
 - 위치: `src/core/downloaders/maven.ts`
+- 현재는 jar/pom/checksum을 함께 내려받는 Maven 전용 흐름을 유지한다. 공통 artifact 저장 로직 정리는 후속 Phase 6 slice에서 진행한다.
 
 ### 클래스 구조
 
@@ -580,6 +584,7 @@ const versions = await downloader.getVersions('nginx');
 - 목적: npm 패키지 검색 및 다운로드
 - 위치: `src/core/downloaders/npm.ts`
 - 버전 스펙 해석과 packument 조회는 `src/core/shared/npm-version-resolver.ts`를 재사용한다.
+- tarball 저장과 진행률 이벤트 생성은 `BaseLanguageDownloader`가 담당하고, `NpmDownloader`는 packument 해석과 integrity/sha1 검증 기준을 제공한다.
 
 ### 클래스 구조
 

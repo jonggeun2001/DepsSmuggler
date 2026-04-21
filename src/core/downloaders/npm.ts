@@ -6,7 +6,6 @@
  */
 
 import * as crypto from 'crypto';
-import * as path from 'path';
 import axios, { AxiosInstance } from 'axios';
 import * as fs from 'fs-extra';
 import * as ssri from 'ssri';
@@ -15,6 +14,7 @@ import {
   IDownloader,
   DownloadProgressEvent,
 } from '../../types';
+import { BaseLanguageDownloader } from './lang-shared/base-language-downloader';
 import logger from '../../utils/logger';
 import { NPM_CONSTANTS } from '../constants/npm';
 import { clearNpmCache } from '../shared/npm-cache';
@@ -24,12 +24,11 @@ import {
   NpmSearchResult,
 } from '../shared/npm-types';
 import { NpmVersionResolver } from '../shared/npm-version-resolver';
-import { sanitizePath } from '../shared/path-utils';
 
 /**
  * npm 다운로더 클래스
  */
-export class NpmDownloader implements IDownloader {
+export class NpmDownloader extends BaseLanguageDownloader implements IDownloader {
   readonly type = 'npm' as const;
   private client: AxiosInstance;
   private readonly registryUrl: string;
@@ -40,6 +39,7 @@ export class NpmDownloader implements IDownloader {
     registryUrl = NPM_CONSTANTS.DEFAULT_REGISTRY_URL,
     searchUrl = NPM_CONSTANTS.DEFAULT_SEARCH_URL
   ) {
+    super();
     this.registryUrl = registryUrl;
     this.searchUrl = searchUrl;
     this.client = axios.create({
@@ -133,7 +133,6 @@ export class NpmDownloader implements IDownloader {
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string> {
     try {
-      // 메타데이터에서 다운로드 URL 획득
       const packageInfo = await this.getPackageMetadata(info.name, info.version);
       const downloadUrl = packageInfo.metadata?.downloadUrl;
 
@@ -141,77 +140,27 @@ export class NpmDownloader implements IDownloader {
         throw new Error(`다운로드 URL을 찾을 수 없습니다: ${info.name}@${info.version}`);
       }
 
-      // 파일명 추출 (경로 조작 방지를 위해 정규화)
-      const rawFileName = path.basename(new URL(downloadUrl).pathname);
-      const fileName = sanitizePath(rawFileName, /[^a-zA-Z0-9._-]/g);
-      const filePath = path.join(destPath, fileName);
-
-      // 디렉토리 생성
-      await fs.ensureDir(destPath);
-
-      // 파일 다운로드
-      const response = await axios({
-        method: 'GET',
-        url: downloadUrl,
-        responseType: 'stream',
-        timeout: NPM_CONSTANTS.DOWNLOAD_TIMEOUT_MS,
-      });
-
-      const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
-      let downloadedBytes = 0;
-      let lastBytes = 0;
-      let lastTime = Date.now();
-      let currentSpeed = 0;
-
-      const writer = fs.createWriteStream(filePath);
-
-      response.data.on('data', (chunk: Buffer) => {
-        downloadedBytes += chunk.length;
-
-        // 속도 계산 (0.3초마다)
-        const now = Date.now();
-        const elapsed = (now - lastTime) / 1000;
-        if (elapsed >= 0.3) {
-          currentSpeed = (downloadedBytes - lastBytes) / elapsed;
-          lastBytes = downloadedBytes;
-          lastTime = now;
-        }
-
-        if (onProgress) {
-          onProgress({
-            itemId: `${info.name}@${info.version}`,
-            progress: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0,
-            downloadedBytes,
-            totalBytes,
-            speed: currentSpeed,
-          });
-        }
-      });
-
-      response.data.pipe(writer);
-
-      await new Promise<void>((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
-
-      // 체크섬 검증
       const expectedIntegrity = packageInfo.metadata?.checksum?.sha512;
       const expectedSha1 = packageInfo.metadata?.checksum?.sha1;
-
-      if (expectedIntegrity) {
-        const isValid = await this.verifyIntegrity(filePath, expectedIntegrity);
-        if (!isValid) {
-          await fs.remove(filePath);
-          throw new Error('무결성 검증 실패 (integrity)');
-        }
-      } else if (expectedSha1) {
-        const isValid = await this.verifyShasum(filePath, expectedSha1);
-        if (!isValid) {
-          await fs.remove(filePath);
-          throw new Error('체크섬 검증 실패 (sha1)');
-        }
-      }
+      const filePath = await this.downloadArtifact(
+        destPath,
+        {
+          downloadUrl,
+          itemId: `${info.name}@${info.version}`,
+          timeoutMs: NPM_CONSTANTS.DOWNLOAD_TIMEOUT_MS,
+          verifyFile: expectedIntegrity
+            ? (pathToVerify) => this.verifyIntegrity(pathToVerify, expectedIntegrity)
+            : expectedSha1
+              ? (pathToVerify) => this.verifyShasum(pathToVerify, expectedSha1)
+              : undefined,
+          verificationFailureMessage: expectedIntegrity
+            ? '무결성 검증 실패 (integrity)'
+            : expectedSha1
+              ? '체크섬 검증 실패 (sha1)'
+              : undefined,
+        },
+        onProgress
+      );
 
       logger.info('npm 패키지 다운로드 완료', {
         name: info.name,
@@ -240,68 +189,19 @@ export class NpmDownloader implements IDownloader {
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string> {
     try {
-      // 파일명 추출 (경로 조작 방지를 위해 정규화)
-      const rawFileName = path.basename(new URL(tarballUrl).pathname);
-      const fileName = sanitizePath(rawFileName, /[^a-zA-Z0-9._-]/g);
-      const filePath = path.join(destPath, fileName);
-
-      await fs.ensureDir(destPath);
-
-      const response = await axios({
-        method: 'GET',
-        url: tarballUrl,
-        responseType: 'stream',
-        timeout: NPM_CONSTANTS.DOWNLOAD_TIMEOUT_MS,
-      });
-
-      const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
-      let downloadedBytes = 0;
-      let lastBytes = 0;
-      let lastTime = Date.now();
-      let currentSpeed = 0;
-
-      const writer = fs.createWriteStream(filePath);
-
-      response.data.on('data', (chunk: Buffer) => {
-        downloadedBytes += chunk.length;
-
-        // 속도 계산 (0.3초마다)
-        const now = Date.now();
-        const elapsed = (now - lastTime) / 1000;
-        if (elapsed >= 0.3) {
-          currentSpeed = (downloadedBytes - lastBytes) / elapsed;
-          lastBytes = downloadedBytes;
-          lastTime = now;
-        }
-
-        if (onProgress) {
-          onProgress({
-            itemId: tarballUrl,
-            progress: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0,
-            downloadedBytes,
-            totalBytes,
-            speed: currentSpeed,
-          });
-        }
-      });
-
-      response.data.pipe(writer);
-
-      await new Promise<void>((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
-
-      // integrity 검증
-      if (integrity) {
-        const isValid = await this.verifyIntegrity(filePath, integrity);
-        if (!isValid) {
-          await fs.remove(filePath);
-          throw new Error('무결성 검증 실패');
-        }
-      }
-
-      return filePath;
+      return await this.downloadArtifact(
+        destPath,
+        {
+          downloadUrl: tarballUrl,
+          itemId: tarballUrl,
+          timeoutMs: NPM_CONSTANTS.DOWNLOAD_TIMEOUT_MS,
+          verifyFile: integrity
+            ? (pathToVerify) => this.verifyIntegrity(pathToVerify, integrity)
+            : undefined,
+          verificationFailureMessage: integrity ? '무결성 검증 실패' : undefined,
+        },
+        onProgress
+      );
     } catch (error) {
       logger.error('tarball 다운로드 실패', { tarballUrl, error });
       throw error;

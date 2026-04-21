@@ -1,6 +1,5 @@
-import * as path from 'path';
+/* eslint-disable import/order */
 import axios, { AxiosInstance } from 'axios';
-import * as fs from 'fs-extra';
 import {
   IDownloader,
   PackageInfo,
@@ -8,10 +7,10 @@ import {
   DownloadProgressEvent,
   Architecture,
 } from '../../types';
-import logger from '../../utils/logger';
 import { compareVersions } from '../shared';
+import { BaseLanguageDownloader } from './lang-shared/base-language-downloader';
+import logger from '../../utils/logger';
 import { verifyFileChecksum } from '../shared/integrity/checksum';
-import { sanitizePath } from '../shared/path-utils';
 import {
   fetchPackageFiles,
   extractVersionFromFilename,
@@ -23,14 +22,16 @@ import {
   PyPIResponse,
 } from '../shared/pip-types';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
+/* eslint-enable import/order */
 
-export class PipDownloader implements IDownloader {
+export class PipDownloader extends BaseLanguageDownloader implements IDownloader {
   readonly type = 'pip' as const;
   private client: AxiosInstance;
   private readonly baseUrl = 'https://pypi.org/pypi';
   private pipTargetPlatform: PipTargetPlatform | null = null;
 
   constructor() {
+    super();
     this.client = axios.create({
       baseURL: this.baseUrl,
       timeout: 30000,
@@ -250,71 +251,20 @@ export class PipDownloader implements IDownloader {
         throw new Error(`다운로드 URL을 찾을 수 없습니다: ${info.name}@${info.version}`);
       }
 
-      // 파일명 추출 (경로 조작 방지를 위해 정규화)
-      const rawFileName = path.basename(new URL(downloadUrl).pathname);
-      const fileName = sanitizePath(rawFileName, /[^a-zA-Z0-9._-]/g);
-      const filePath = path.join(destPath, fileName);
-
-      // 디렉토리 생성
-      await fs.ensureDir(destPath);
-
-      // 파일 다운로드
-      const response = await axios({
-        method: 'GET',
-        url: downloadUrl,
-        responseType: 'stream',
-        timeout: 300000, // 5분
-      });
-
-      const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
-      let downloadedBytes = 0;
-      let lastBytes = 0;
-      let lastTime = Date.now();
-      let currentSpeed = 0;
-
-      const writer = fs.createWriteStream(filePath);
-
-      response.data.on('data', (chunk: Buffer) => {
-        downloadedBytes += chunk.length;
-
-        // 속도 계산 (0.3초마다)
-        const now = Date.now();
-        const elapsed = (now - lastTime) / 1000;
-        if (elapsed >= 0.3) {
-          currentSpeed = (downloadedBytes - lastBytes) / elapsed;
-          lastBytes = downloadedBytes;
-          lastTime = now;
-        }
-
-        if (onProgress) {
-          onProgress({
-            itemId: `${info.name}@${info.version}`,
-            progress: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0,
-            downloadedBytes,
-            totalBytes,
-            speed: currentSpeed,
-          });
-        }
-      });
-
-      response.data.pipe(writer);
-
-      await new Promise<void>((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
-
-      // 체크섬 검증
-      if (packageInfo.metadata?.checksum?.sha256) {
-        const isValid = await this.verifyChecksum(
-          filePath,
-          packageInfo.metadata.checksum.sha256
-        );
-        if (!isValid) {
-          await fs.remove(filePath);
-          throw new Error('체크섬 검증 실패');
-        }
-      }
+      const expectedSha256 = packageInfo.metadata?.checksum?.sha256;
+      const filePath = await this.downloadArtifact(
+        destPath,
+        {
+          downloadUrl,
+          itemId: `${info.name}@${info.version}`,
+          timeoutMs: 300000,
+          verifyFile: expectedSha256
+            ? (pathToVerify) => this.verifyChecksum(pathToVerify, expectedSha256)
+            : undefined,
+          verificationFailureMessage: expectedSha256 ? '체크섬 검증 실패' : undefined,
+        },
+        onProgress
+      );
 
       logger.info('패키지 다운로드 완료', {
         name: info.name,
