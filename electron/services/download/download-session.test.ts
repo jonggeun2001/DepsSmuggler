@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { createDownloadSessionRunner } from './download-session';
 
@@ -61,7 +62,7 @@ describe('createDownloadSessionRunner', () => {
       }
     );
 
-    expect(ensureDir).toHaveBeenCalledWith('/tmp/out/packages');
+    expect(ensureDir).toHaveBeenCalledWith(path.join('/tmp/out', 'packages'));
     expect(createLimiter).toHaveBeenCalledWith(4);
     expect(limit).toHaveBeenCalledTimes(2);
     expect(deliveryPipeline.finalizeDownload).toHaveBeenCalledWith(
