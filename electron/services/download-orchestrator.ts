@@ -1,13 +1,11 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
 import pLimit from 'p-limit';
-import { createScopedLogger } from '../utils/logger';
-import { generateInstallScripts } from '../../src/core/shared';
-import type { DownloadOptions, DownloadPackage } from '../../src/core/shared';
-import { getArchivePackager } from '../../src/core/packager/archive-packager';
-import { getFileSplitter } from '../../src/core/packager/file-splitter';
-import { initializeEmailSender } from '../../src/core/mailer/email-sender';
-import type { PackageInfo } from '../../src/types';
+import {
+  bindSessionProgressEmitter,
+  createDownloadSessionRegistry,
+  createExecutionState,
+} from './download/session-registry';
 import {
   createDownloadPackageRouter,
   type DownloadExecutionState,
@@ -18,17 +16,17 @@ import {
   createDownloadProgressEmitter,
   type DownloadProgressEmitter,
 } from './download-progress';
+import { initializeEmailSender } from '../../src/core/mailer/email-sender';
+import { getArchivePackager } from '../../src/core/packager/archive-packager';
+import { getFileSplitter } from '../../src/core/packager/file-splitter';
+import { generateInstallScripts } from '../../src/core/shared';
+import { createScopedLogger } from '../utils/logger';
+import type { DownloadOptions, DownloadPackage } from '../../src/core/shared';
+import type { PackageInfo } from '../../src/types';
 
 const log = createScopedLogger('DownloadOrchestrator');
 
 type Limiter = <T>(task: () => Promise<T>) => Promise<T>;
-
-interface DownloadSessionState {
-  sessionId: number;
-  cancelled: boolean;
-  paused: boolean;
-  abortController: AbortController;
-}
 
 export interface DownloadOrchestratorDeps {
   getMainWindow: () => Electron.BrowserWindow | null;
@@ -91,23 +89,13 @@ export function createDownloadOrchestrator(
 
   const progressEmitter = createProgressEmitter(deps.getMainWindow);
   const packageRouter = createPackageRouter();
-
-  let activeSession: DownloadSessionState | null = null;
-  let lastSessionId = 0;
+  const sessionRegistry = createDownloadSessionRegistry();
 
   return {
     async startDownload(data) {
-      const sessionId = data.sessionId ?? lastSessionId + 1;
-      lastSessionId = Math.max(lastSessionId, sessionId);
-      const sessionState: DownloadSessionState = {
-        sessionId,
-        cancelled: false,
-        paused: false,
-        abortController: new AbortController(),
-      };
-      activeSession = sessionState;
-      const state = createExecutionState(sessionState);
-      const sessionProgressEmitter = createSessionProgressEmitter(sessionId);
+      const session = sessionRegistry.createSession(data.sessionId);
+      const state = createExecutionState(session);
+      const sessionProgressEmitter = bindSessionProgressEmitter(progressEmitter, session.sessionId);
 
       sessionProgressEmitter.emitDownloadStatus({
         phase: 'downloading',
@@ -119,24 +107,17 @@ export function createDownloadOrchestrator(
     },
 
     async pauseDownload() {
-      if (activeSession) {
-        activeSession.paused = true;
-      }
+      sessionRegistry.pauseActiveSession();
       return { success: true };
     },
 
     async resumeDownload() {
-      if (activeSession) {
-        activeSession.paused = false;
-      }
+      sessionRegistry.resumeActiveSession();
       return { success: true };
     },
 
     async cancelDownload() {
-      if (activeSession) {
-        activeSession.cancelled = true;
-        activeSession.abortController.abort();
-      }
+      sessionRegistry.cancelActiveSession();
       progressEmitter.clearAllPackageProgress();
       return { success: true };
     },
@@ -201,60 +182,6 @@ export function createDownloadOrchestrator(
       }
     },
   };
-
-  function createExecutionState(session: DownloadSessionState): DownloadExecutionState {
-    return {
-      isCancelled: () => session.cancelled,
-      isPaused: () => session.paused,
-      waitWhilePaused: async () => {
-        while (session.paused && !session.cancelled) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-      },
-      get signal() {
-        return session.abortController.signal;
-      },
-    };
-  }
-
-  function createSessionProgressEmitter(sessionId: number): DownloadProgressEmitter {
-    return {
-      emitDownloadStatus(payload) {
-        progressEmitter.emitDownloadStatus({
-          ...payload,
-          sessionId,
-        });
-      },
-      emitPackageProgress(packageId, payload, force = false) {
-        progressEmitter.emitPackageProgress(
-          packageId,
-          {
-            ...payload,
-            sessionId,
-          },
-          force
-        );
-      },
-      clearPackageProgress(packageId) {
-        progressEmitter.clearPackageProgress(packageId);
-      },
-      clearAllPackageProgress() {
-        progressEmitter.clearAllPackageProgress();
-      },
-      emitAllComplete(payload) {
-        progressEmitter.emitAllComplete({
-          ...payload,
-          sessionId,
-        });
-      },
-      emitOSProgress(progress) {
-        progressEmitter.emitOSProgress(progress);
-      },
-      emitOSResolveDependenciesProgress(payload) {
-        progressEmitter.emitOSResolveDependenciesProgress(payload);
-      },
-    };
-  }
 
   async function runDownload(data: {
     sessionId?: number;
