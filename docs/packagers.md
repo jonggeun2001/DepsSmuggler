@@ -63,6 +63,8 @@ interface PackageManifest {
 }
 ```
 
+`PackageManifest`의 canonical 정의는 `src/types/manifest/package-manifest.ts`에 두고, `archive-packager.ts`는 해당 타입을 재사용합니다.
+
 ### 사용 예시
 ```typescript
 import { getArchivePackager } from './core/packager/archive-packager';

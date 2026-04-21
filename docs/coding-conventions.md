@@ -217,7 +217,7 @@ src/
 │   └── mailer/         # 이메일 발송
 ├── cli/                # CLI 진입점
 │   └── commands/       # CLI 명령어
-├── types/              # 타입 정의
+├── types/              # 타입 정의 (barrel + 하위 canonical module)
 └── utils/              # 유틸리티
 electron/
 ├── main.ts             # Electron 메인 프로세스

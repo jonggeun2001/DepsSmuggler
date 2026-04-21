@@ -18,7 +18,7 @@ import {
 } from '../shared/pip-types';
 import { compareVersions } from '../shared';
 import { sanitizePath } from '../shared/path-utils';
-import type { PipTargetPlatform } from '../../types/pip-target-platform';
+import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 import {
   fetchPackageFiles,
   extractVersionFromFilename,

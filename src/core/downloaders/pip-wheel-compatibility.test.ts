@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { PipDownloader } from './pip';
-import type { PipTargetPlatform } from '../../types/pip-target-platform';
+import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 import type { PyPIRelease } from '../shared/pip-types';
 
 describe('PipDownloader wheel 호환성', () => {
