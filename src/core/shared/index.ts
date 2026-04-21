@@ -201,6 +201,7 @@ export type {
   PackumentCacheEntry,
   VersionCacheKey,
 } from './npm-types';
+export { NpmVersionResolver } from './npm-version-resolver';
 
 // 검색 유틸리티 (search-utils.ts)
 export {

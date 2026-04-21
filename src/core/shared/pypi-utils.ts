@@ -1,7 +1,7 @@
 // PyPI 관련 유틸리티 함수 (PEP 425 기반 태그 우선순위 구현)
 import * as https from 'https';
+import { fetchPackageFiles } from './pip-simple-api-client';
 import type { DownloadUrlResult } from './types';
-import { fetchPackageFiles } from '../resolver/pip-simple-api';
 
 /**
  * Wheel 태그 파싱 결과
