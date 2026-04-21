@@ -5,6 +5,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { GPGVerifier, type VerificationResult } from './gpg-verifier';
+import { getDownloadedFileKey } from './package-file-utils';
 import type {
   OSPackageInfo,
   Repository,
@@ -14,13 +16,11 @@ import type {
   OSDownloadError,
   OSErrorAction,
 } from './types';
-import { GPGVerifier, type VerificationResult } from './gpg-verifier';
-import { getDownloadedFileKey } from './package-file-utils';
 
 /**
  * 다운로드 결과
  */
-export interface DownloadResult {
+export interface OSPackageDownloadResult {
   /** 성공 여부 */
   success: boolean;
   /** 저장된 파일 경로 */
@@ -110,7 +110,7 @@ export abstract class BaseOSDownloader {
   /**
    * 단일 패키지 다운로드
    */
-  async downloadPackage(pkg: OSPackageInfo): Promise<DownloadResult> {
+  async downloadPackage(pkg: OSPackageInfo): Promise<OSPackageDownloadResult> {
     if (this.options.abortSignal?.aborted) {
       return {
         success: false,
@@ -283,7 +283,10 @@ export abstract class BaseOSDownloader {
     const processNext = async (): Promise<void> => {
       if (queue.length === 0) return;
 
-      const pkg = queue.shift()!;
+      const pkg = queue.shift();
+      if (!pkg) {
+        return;
+      }
       const result = await this.downloadPackage(pkg);
 
       if (result.success) {
@@ -292,7 +295,7 @@ export abstract class BaseOSDownloader {
           downloadedFiles.set(getDownloadedFileKey(pkg), result.filePath);
         }
       } else {
-        failed.push({ package: pkg, error: result.error! });
+        failed.push({ package: pkg, error: result.error ?? new Error('Download failed') });
       }
 
       // 진행률 업데이트

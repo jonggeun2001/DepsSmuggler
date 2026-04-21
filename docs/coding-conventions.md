@@ -94,7 +94,7 @@ if (isUserConfig(data)) {
 ```typescript
 // Good: 테스트에서 private 멤버 접근 시 Testable 인터페이스 사용
 interface DownloadManagerTestable {
-  items: Map<string, DownloadItem>;
+  items: Map<string, DownloadManagerItem>;
   isRunning: boolean;
   queue: PQueue;
 }

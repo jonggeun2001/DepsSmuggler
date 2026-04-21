@@ -29,7 +29,7 @@ async function downloadFile(
   url: string,
   destPath: string,
   onProgress: (downloaded: number, total: number) => void,
-  options?: DownloadOptions
+  options?: FileDownloadOptions
 ): Promise<void>
 ```
 
@@ -38,10 +38,10 @@ async function downloadFile(
 - AbortSignal을 통한 다운로드 취소
 - shouldPause 콜백을 통한 일시정지/재개
 
-### DownloadOptions
+### FileDownloadOptions
 
 ```typescript
-interface DownloadOptions {
+interface FileDownloadOptions {
   signal?: AbortSignal;           // 취소 시그널 (AbortController.signal)
   shouldPause?: () => boolean;    // 일시정지 여부 콜백 (true면 pause)
 }

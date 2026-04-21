@@ -19,9 +19,13 @@ describe('Phase 2 type module structure', () => {
       'src/types/package-manager/package-manager.ts',
       'src/types/packaging.ts',
       'src/types/platform/architecture.ts',
+      'src/types/platform/os-target.ts',
       'src/types/platform/pip-target-platform.ts',
       'src/types/resolver/dependency-graph.ts',
+      'src/types/download/error.ts',
       'src/types/download/item.ts',
+      'src/types/download/options.ts',
+      'src/types/download/progress.ts',
       'src/types/download/result.ts',
     ];
 
@@ -37,6 +41,9 @@ describe('Phase 2 type module structure', () => {
     expect(indexSource).not.toContain('export type ');
     expect(indexSource).toContain("export * from './package-manager/package-manager';");
     expect(indexSource).toContain("export * from './manifest/package-manifest';");
+    expect(indexSource).toContain("export * from './download/options';");
+    expect(indexSource).toContain("export * from './download/progress';");
+    expect(indexSource).toContain("export * from './platform/os-target';");
     expect(indexSource).toContain("export * from './platform/pip-target-platform';");
   });
 
@@ -64,5 +71,14 @@ describe('Phase 2 type module structure', () => {
     expect(archivePackagerSource).not.toContain('export interface PackageManifest');
     expect(archivePackagerSource).toContain("import type { ArchivePackageManifest } from '../../types/manifest/package-manifest';");
     expect(archivePackagerSource).toContain('ArchivePackageManifest as PackageManifest');
+  });
+
+  it('shared download options/progress는 canonical download type module을 재사용해야 한다', () => {
+    const sharedTypesSource = readFile('src/core/shared/types.ts');
+
+    expect(sharedTypesSource).toContain("from '../../types/download/options';");
+    expect(sharedTypesSource).toContain("from '../../types/download/progress';");
+    expect(sharedTypesSource).toContain('export type DownloadOptions = CanonicalDownloadOptions;');
+    expect(sharedTypesSource).toContain('export type DownloadProgress = CanonicalDownloadProgress;');
   });
 });

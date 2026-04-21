@@ -10,12 +10,12 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import type {
-  DownloadStatus,
+  DownloadStoreStatus,
   LogEntry,
 } from '../../stores/download-store';
 import type { ReactNode } from 'react';
 
-export const statusIcons: Record<DownloadStatus, ReactNode> = {
+export const statusIcons: Record<DownloadStoreStatus, ReactNode> = {
   pending: <ClockCircleOutlined style={{ color: '#8c8c8c' }} />,
   downloading: <LoadingOutlined spin style={{ color: '#1890ff' }} />,
   completed: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
@@ -25,7 +25,7 @@ export const statusIcons: Record<DownloadStatus, ReactNode> = {
   paused: <PauseOutlined style={{ color: '#1890ff' }} />,
 };
 
-export const statusLabels: Record<DownloadStatus, string> = {
+export const statusLabels: Record<DownloadStoreStatus, string> = {
   pending: '대기',
   downloading: '다운로드 중',
   completed: '완료',
@@ -35,7 +35,7 @@ export const statusLabels: Record<DownloadStatus, string> = {
   paused: '일시정지',
 };
 
-export const statusColors: Record<DownloadStatus, string> = {
+export const statusColors: Record<DownloadStoreStatus, string> = {
   pending: 'default',
   downloading: 'processing',
   completed: 'success',

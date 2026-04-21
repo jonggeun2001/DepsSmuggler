@@ -11,7 +11,7 @@ import { Alert, Button, Card, Col, Divider, Result, Row, Statistic, Typography }
 import { DownloadItemsTable } from './DownloadItemsTable';
 import { DownloadLogsCard } from './DownloadLogsCard';
 import type { HistoryDeliveryResult } from '../../../../types';
-import type { DownloadItem, LogEntry } from '../../../stores/download-store';
+import type { DownloadStoreItem, LogEntry } from '../../../stores/download-store';
 
 const { Text, Paragraph } = Typography;
 
@@ -28,9 +28,9 @@ interface DownloadOutcomeViewProps {
   completedArtifactPaths: string[];
   completedDeliveryResult?: HistoryDeliveryResult;
   completedError: string;
-  downloadItems: DownloadItem[];
+  downloadItems: DownloadStoreItem[];
   logs: LogEntry[];
-  onRetry: (item: DownloadItem) => void;
+  onRetry: (item: DownloadStoreItem) => void;
   onRestartDownload: () => Promise<void> | void;
   onOpenFolder: () => Promise<void> | void;
   onComplete: () => void;

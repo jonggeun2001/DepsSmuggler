@@ -1,7 +1,14 @@
 import { create } from 'zustand';
 
 // 다운로드 상태
-export type DownloadStatus = 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'skipped' | 'paused';
+export type DownloadStoreStatus =
+  | 'pending'
+  | 'downloading'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'skipped'
+  | 'paused';
 
 // 패키징 상태
 export type PackagingStatus = 'idle' | 'packaging' | 'completed' | 'failed';
@@ -16,13 +23,13 @@ export interface LogEntry {
 }
 
 // 다운로드 아이템
-export interface DownloadItem {
+export interface DownloadStoreItem {
   id: string;
   name: string;
   version: string;
   type?: string;
   arch?: string;
-  status: DownloadStatus;
+  status: DownloadStoreStatus;
   progress: number;
   downloadedBytes: number;
   totalBytes: number;
@@ -49,7 +56,7 @@ export interface DownloadItem {
 
 // 다운로드 상태
 interface DownloadState {
-  items: DownloadItem[];
+  items: DownloadStoreItem[];
   isDownloading: boolean;
   isPaused: boolean;
   outputPath: string;
@@ -62,9 +69,9 @@ interface DownloadState {
   depsResolved: boolean;
 
   // Actions
-  setItems: (items: DownloadItem[]) => void;
-  updateItem: (id: string, updates: Partial<DownloadItem>) => void;
-  updateItemsBatch: (updates: Map<string, Partial<DownloadItem>>) => void;
+  setItems: (items: DownloadStoreItem[]) => void;
+  updateItem: (id: string, updates: Partial<DownloadStoreItem>) => void;
+  updateItemsBatch: (updates: Map<string, Partial<DownloadStoreItem>>) => void;
   addLogsBatch: (logs: Array<{ level: LogEntry['level']; message: string; details?: string }>) => void;
   setIsDownloading: (isDownloading: boolean) => void;
   setIsPaused: (isPaused: boolean) => void;
@@ -87,7 +94,7 @@ const generateLogId = (): string => {
   return `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
-export const useDownloadStore = create<DownloadState>()((set, get) => ({
+export const useDownloadStore = create<DownloadState>()((set) => ({
   items: [],
   isDownloading: false,
   isPaused: false,
@@ -168,7 +175,7 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
   skipItem: (id) =>
     set((state) => ({
       items: state.items.map((item) =>
-        item.id === id ? { ...item, status: 'skipped' as DownloadStatus } : item
+        item.id === id ? { ...item, status: 'skipped' as DownloadStoreStatus } : item
       ),
     })),
 
@@ -176,7 +183,7 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
     set((state) => ({
       items: state.items.map((item) =>
         item.id === id
-          ? { ...item, status: 'pending' as DownloadStatus, progress: 0, error: undefined }
+          ? { ...item, status: 'pending' as DownloadStoreStatus, progress: 0, error: undefined }
           : item
       ),
     })),

@@ -5,8 +5,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useCartStore } from '../../../stores/cart-store';
 import {
   useDownloadStore,
-  type DownloadItem,
-  type DownloadStatus,
+  type DownloadStoreItem,
+  type DownloadStoreStatus,
 } from '../../../stores/download-store';
 import { useHistoryStore } from '../../../stores/history-store';
 import { useSettingsStore } from '../../../stores/settings-store';
@@ -125,14 +125,14 @@ export function useDownloadPageController() {
   const outcomeRestartInFlightRef = useRef(false);
   const dependencyResolutionBypassedRef = useRef(false);
   const previousIncludeDependenciesRef = useRef(includeDependencies);
-  const downloadItemsRef = useRef<DownloadItem[]>([]);
+  const downloadItemsRef = useRef<DownloadStoreItem[]>([]);
   const cartSnapshotRef = useRef<typeof cartItems>([]);
   const historySettingsSnapshotRef = useRef<HistorySettings | null>(null);
   const historyTrackedItemIdsRef = useRef<Set<string> | null>(null);
   const downloadSessionIdRef = useRef(0);
   const activeDownloadSessionRef = useRef<DownloadSessionSnapshot | null>(null);
   const provisionalDownloadSessionRef = useRef<ProvisionalDownloadSession | null>(null);
-  const pendingUpdatesRef = useRef<Map<string, Partial<DownloadItem>>>(new Map());
+  const pendingUpdatesRef = useRef<Map<string, Partial<DownloadStoreItem>>>(new Map());
   const pendingLogsRef = useRef<Array<{ level: 'info' | 'warn' | 'error' | 'success'; message: string; details?: string }>>([]);
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSpeedCalcRef = useRef<{ time: number; bytes: number }>({ time: 0, bytes: 0 });
@@ -450,7 +450,7 @@ export function useDownloadPageController() {
     data: AllCompleteData,
     completionSessionSnapshot: DownloadSessionSnapshot | null,
     handlers: {
-      updatePackage: (packageId: string, update: Partial<DownloadItem>) => void;
+      updatePackage: (packageId: string, update: Partial<DownloadStoreItem>) => void;
       logMessage: (
         level: 'info' | 'warn' | 'error' | 'success',
         messageText: string,
@@ -608,7 +608,7 @@ export function useDownloadPageController() {
       batchTimerRef.current = null;
     };
 
-    const scheduleBatchUpdate = (packageId: string, update: Partial<DownloadItem>) => {
+    const scheduleBatchUpdate = (packageId: string, update: Partial<DownloadStoreItem>) => {
       pendingUpdatesRef.current.set(packageId, update);
       if (batchTimerRef.current === null) {
         batchTimerRef.current = setTimeout(flushPendingUpdates, downloadRenderInterval);
@@ -752,7 +752,7 @@ export function useDownloadPageController() {
         });
       }
 
-      const newItems: DownloadItem[] = allPackages.map((pkg) => {
+      const newItems: DownloadStoreItem[] = allPackages.map((pkg) => {
         const depInfo = dependencyMap.get(pkg.id);
         const isOriginal = originalIds.has(pkg.id);
 
@@ -761,7 +761,7 @@ export function useDownloadPageController() {
           name: pkg.name,
           version: pkg.version,
           type: pkg.type,
-          status: 'pending' as DownloadStatus,
+          status: 'pending' as DownloadStoreStatus,
           progress: 0,
           downloadedBytes: 0,
           totalBytes: 0,
@@ -1030,7 +1030,7 @@ export function useDownloadPageController() {
         });
       }
 
-      const newItems: DownloadItem[] = data.allPackages.map((pkg) => {
+      const newItems: DownloadStoreItem[] = data.allPackages.map((pkg) => {
         const pkgKey = `${pkg.name}-${pkg.version}`;
         const depInfo = dependencyMap.get(pkgKey);
         const isOriginal = originalNames.has(pkgKey);
@@ -1040,7 +1040,7 @@ export function useDownloadPageController() {
           name: pkg.name,
           version: pkg.version,
           type: pkg.type,
-          status: 'pending' as DownloadStatus,
+          status: 'pending' as DownloadStoreStatus,
           progress: 0,
           downloadedBytes: 0,
           totalBytes: pkg.size || 0,
@@ -1371,7 +1371,7 @@ export function useDownloadPageController() {
     });
   }, [addLog, downloadItems, setIsDownloading, setIsPaused, setPackagingStatus, updateItem]);
 
-  const executeRetryDownload = useCallback(async (item: DownloadItem) => {
+  const executeRetryDownload = useCallback(async (item: DownloadStoreItem) => {
     if (!window.electronAPI?.download?.start) {
       addLog('error', '다운로드 API를 사용할 수 없습니다');
       return;

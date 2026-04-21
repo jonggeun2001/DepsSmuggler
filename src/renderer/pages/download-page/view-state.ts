@@ -1,6 +1,6 @@
 import type { HistoryDeliveryResult } from '../../../types';
 import type {
-  DownloadItem,
+  DownloadStoreItem,
   PackagingStatus,
 } from '../../stores/download-store';
 
@@ -64,7 +64,7 @@ export function deriveDownloadPageMode(input: DeriveDownloadPageModeInput): Down
   return 'active';
 }
 
-export function getDownloadCounts(items: DownloadItem[]) {
+export function getDownloadCounts(items: DownloadStoreItem[]) {
   const completedCount = items.filter((item) => item.status === 'completed').length;
   const failedCount = items.filter((item) => item.status === 'failed').length;
   const skippedCount = items.filter((item) => item.status === 'skipped').length;

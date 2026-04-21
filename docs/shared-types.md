@@ -2,7 +2,7 @@
 
 ## 개요
 - 목적: 모든 모듈에서 공통으로 사용하는 타입 정의
-- 위치: `src/core/shared/types.ts`, `*-types.ts`
+- 위치: `src/core/shared/types.ts`, `src/types/download/*.ts`, `src/types/platform/*.ts`, `*-types.ts`
 
 ---
 
@@ -40,6 +40,9 @@ interface DownloadPackage {
 
 다운로드 옵션
 
+- canonical 정의: `src/types/download/options.ts`
+- `src/core/shared/types.ts`는 위 canonical 모듈을 그대로 re-export 하는 shim입니다.
+
 ```typescript
 interface DownloadOptions {
   outputDir: string;                       // 출력 디렉토리
@@ -50,6 +53,10 @@ interface DownloadOptions {
   includeDependencies?: boolean;           // false면 의존성 해결 단계를 생략하고 원본만 사용
   pythonVersion?: string;                  // Python 버전 (pip/conda용)
   concurrency?: number;                    // 동시 다운로드 수 (기본: 3)
+  deliveryMethod?: 'local' | 'email';
+  email?: { to: string; from?: string; subject?: string };
+  fileSplit?: { enabled: boolean; maxSizeMB: number };
+  smtp?: { host: string; port: number; user?: string; password?: string; from?: string; secure?: boolean };
 }
 ```
 
@@ -57,14 +64,28 @@ interface DownloadOptions {
 
 다운로드 진행 상태
 
+- canonical 정의: `src/types/download/progress.ts`
+
 ```typescript
 interface DownloadProgress {
   packageId: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed';
+  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'paused';
   progress: number;         // 0-100
   downloadedBytes: number;
   totalBytes: number;
   speed: number;            // bytes/sec
+  error?: string;
+}
+```
+
+### DownloadPackageResult
+
+개별 패키지 다운로드 처리 결과
+
+```typescript
+interface DownloadPackageResult {
+  id: string;
+  success: boolean;
   error?: string;
 }
 ```

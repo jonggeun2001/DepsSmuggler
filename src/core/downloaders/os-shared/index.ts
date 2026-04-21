@@ -5,7 +5,7 @@
 
 // Base classes
 export { BaseOSDownloader } from './base-downloader';
-export type { BaseDownloaderOptions, DownloadResult } from './base-downloader';
+export type { BaseDownloaderOptions, OSPackageDownloadResult } from './base-downloader';
 export { BaseOSDependencyResolver } from './base-resolver';
 export type { DependencyResolverOptions, PackageMetadataCache } from './base-resolver';
 

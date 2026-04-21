@@ -1,77 +1,71 @@
-import PQueue from 'p-queue';
 import { EventEmitter } from 'eventemitter3';
-import * as path from 'path';
 import * as fs from 'fs-extra';
-import {
+import PQueue from 'p-queue';
+import logger from '../utils/logger';
+import { DOWNLOAD_CONSTANTS } from './constants/download';
+// 다운로더 가져오기
+import { getCondaDownloader } from './downloaders/conda';
+import { getDockerDownloader } from './downloaders/docker';
+import { getMavenDownloader } from './downloaders/maven';
+import { getNpmDownloader } from './downloaders/npm';
+import { getPipDownloader } from './downloaders/pip';
+import { SpeedCalculator } from './speed-calculator';
+import type {
   PackageInfo,
   PackageType,
   DownloadProgressEvent,
   IDownloader,
+  DownloadItem as CanonicalDownloadItem,
+  DownloadStatus as CanonicalDownloadStatus,
 } from '../types';
-import logger from '../utils/logger';
-import { DOWNLOAD_CONSTANTS } from './constants/download';
-import { SpeedCalculator } from './speed-calculator';
-
-// 다운로더 가져오기
-import { getPipDownloader } from './downloaders/pip';
-import { getCondaDownloader } from './downloaders/conda';
-import { getMavenDownloader } from './downloaders/maven';
-import { getDockerDownloader } from './downloaders/docker';
-import { getNpmDownloader } from './downloaders/npm';
 
 // 다운로드 아이템 상태
-export type DownloadItemStatus =
-  | 'pending'
-  | 'downloading'
-  | 'completed'
-  | 'failed'
-  | 'skipped'
-  | 'cancelled';
+export type DownloadManagerItemStatus = CanonicalDownloadStatus;
 
 // 다운로드 아이템
-export interface DownloadItem {
-  id: string;
-  package: PackageInfo;
-  status: DownloadItemStatus;
-  progress: number;
+export interface DownloadManagerItem extends CanonicalDownloadItem {
   downloadedBytes: number;
   totalBytes: number;
   speed: number;
-  filePath?: string;
-  error?: string;
   retryCount: number;
 }
 
 // 다운로드 결과
-export interface DownloadResult {
+export interface DownloadManagerResult {
   success: boolean;
-  items: DownloadItem[];
+  items: DownloadManagerItem[];
   totalSize: number;
   duration: number;
   outputPath: string;
 }
 
 // 다운로드 옵션
-export interface DownloadOptions {
+export interface DownloadManagerOptions {
   outputPath: string;
   concurrency?: number;
   maxRetries?: number;
   onUserDecision?: (
-    item: DownloadItem,
+    item: DownloadManagerItem,
     error: Error
   ) => Promise<'retry' | 'skip' | 'cancel'>;
 }
 
 // 이벤트 타입
 export interface DownloadManagerEvents {
-  progress: (item: DownloadItem, overall: OverallProgress) => void;
-  itemStart: (item: DownloadItem) => void;
-  itemComplete: (item: DownloadItem) => void;
-  itemFailed: (item: DownloadItem, error: Error) => void;
-  itemSkipped: (item: DownloadItem) => void;
-  allComplete: (result: DownloadResult) => void;
+  progress: (item: DownloadManagerItem, overall: OverallProgress) => void;
+  itemStart: (item: DownloadManagerItem) => void;
+  itemComplete: (item: DownloadManagerItem) => void;
+  itemFailed: (item: DownloadManagerItem, error: Error) => void;
+  itemSkipped: (item: DownloadManagerItem) => void;
+  allComplete: (result: DownloadManagerResult) => void;
   cancelled: () => void;
 }
+
+// Backward-compatible aliases while callers migrate to explicit manager types.
+export type DownloadItemStatus = DownloadManagerItemStatus;
+export type DownloadItem = DownloadManagerItem;
+export type DownloadOptions = DownloadManagerOptions;
+export type DownloadResult = DownloadManagerResult;
 
 // 전체 진행률
 export interface OverallProgress {
@@ -93,12 +87,12 @@ const generateId = (): string => {
 
 export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
   private queue: PQueue;
-  private items: Map<string, DownloadItem> = new Map();
+  private items: Map<string, DownloadManagerItem> = new Map();
   private downloaders: Map<PackageType, IDownloader> = new Map();
   private isRunning = false;
   private isCancelled = false;
   private startTime = 0;
-  private options: DownloadOptions = { outputPath: '' };
+  private options: DownloadManagerOptions = { outputPath: '' };
   private speedCalculator = new SpeedCalculator();
 
   constructor() {
@@ -125,7 +119,7 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
   addToQueue(packages: PackageInfo[]): void {
     for (const pkg of packages) {
       const id = generateId();
-      const item: DownloadItem = {
+      const item: DownloadManagerItem = {
         id,
         package: pkg,
         status: 'pending',
@@ -144,7 +138,7 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
   /**
    * 다운로드 시작
    */
-  async startDownload(options: DownloadOptions): Promise<DownloadResult> {
+  async startDownload(options: DownloadManagerOptions): Promise<DownloadManagerResult> {
     if (this.isRunning) {
       throw new Error('다운로드가 이미 진행 중입니다');
     }
@@ -409,7 +403,7 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
   /**
    * 결과 생성
    */
-  private createResult(): DownloadResult {
+  private createResult(): DownloadManagerResult {
     const items = Array.from(this.items.values());
     const totalSize = items.reduce(
       (sum, item) => sum + (item.downloadedBytes || 0),
@@ -468,7 +462,7 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
   /**
    * 아이템 목록 조회
    */
-  getItems(): DownloadItem[] {
+  getItems(): DownloadManagerItem[] {
     return Array.from(this.items.values());
   }
 
