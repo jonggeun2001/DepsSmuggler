@@ -285,6 +285,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       setImmediate(() => {
         mockStream.emit('data', Buffer.from('test data'));
         mockStream.emit('end');
+        mockStream.emit('close');
       });
 
       await addPromise;
@@ -315,6 +316,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       setImmediate(() => {
         mockStream.emit('data', Buffer.from('test data'));
         mockStream.emit('end');
+        mockStream.emit('close');
       });
 
       await expect(addPromise).rejects.toThrow('disk full');
@@ -377,6 +379,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       setImmediate(() => {
         mockStream.emit('data', Buffer.from('test'));
         mockStream.emit('end');
+        mockStream.emit('close');
       });
 
       const result = await resultPromise;
@@ -526,6 +529,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       setImmediate(() => {
         mockStream.emit('data', Buffer.from('test'));
         mockStream.emit('end');
+        mockStream.emit('close');
       });
 
       await expect(resultPromise).resolves.toBeNull();
@@ -566,6 +570,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       setImmediate(() => {
         mockStream.emit('data', Buffer.from('data'));
         mockStream.emit('end');
+        mockStream.emit('close');
       });
 
       await addPromise;
