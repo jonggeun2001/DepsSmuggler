@@ -1,10 +1,13 @@
 import { EventEmitter } from 'eventemitter3';
 import * as fs from 'fs-extra';
 import PQueue from 'p-queue';
-import logger from '../utils/logger';
-import { DOWNLOAD_CONSTANTS } from './constants/download';
-import { createRegisteredDownloader, getRegisteredDownloaderTypes } from './downloaders/registry';
-import { SpeedCalculator } from './speed-calculator';
+import { DOWNLOAD_CONSTANTS } from '../../core/constants/download';
+import {
+  createRegisteredDownloader,
+  getRegisteredDownloaderTypes,
+} from '../../core/downloaders/registry';
+import { SpeedCalculator } from '../../core/speed-calculator';
+import logger from '../../utils/logger';
 import type {
   PackageInfo,
   PackageType,
@@ -12,7 +15,7 @@ import type {
   IDownloader,
   DownloadItem as CanonicalDownloadItem,
   DownloadStatus as CanonicalDownloadStatus,
-} from '../types';
+} from '../../types';
 
 // 다운로드 아이템 상태
 export type DownloadManagerItemStatus = CanonicalDownloadStatus;

@@ -11,9 +11,9 @@ import {
   type DownloadManagerItem,
   type DownloadManagerOptions,
   type DownloadManagerResult,
-} from './download-manager';
-import { IDownloader, PackageType, DownloadProgressEvent } from '../types';
-import { SpeedCalculator } from './speed-calculator';
+} from './download-runner';
+import { SpeedCalculator } from '../../core/speed-calculator';
+import { IDownloader, PackageType, DownloadProgressEvent } from '../../types';
 
 /**
  * 테스트용 DownloadManager 인터페이스
@@ -754,7 +754,7 @@ describe('DownloadManager 단위 테스트', () => {
 
   describe('getDownloadManager 싱글톤', () => {
     it('싱글톤 인스턴스 반환', async () => {
-      const { getDownloadManager } = await import('./download-manager');
+      const { getDownloadManager } = await import('./download-runner');
 
       const instance1 = getDownloadManager();
       const instance2 = getDownloadManager();
