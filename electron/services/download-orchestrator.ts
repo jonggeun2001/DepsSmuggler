@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
 import pLimit from 'p-limit';
+import { createDeliveryPipeline } from './download/delivery-pipeline';
 import {
   bindSessionProgressEmitter,
   createDownloadSessionRegistry,
@@ -90,6 +91,13 @@ export function createDownloadOrchestrator(
   const progressEmitter = createProgressEmitter(deps.getMainWindow);
   const packageRouter = createPackageRouter();
   const sessionRegistry = createDownloadSessionRegistry();
+  const deliveryPipeline = createDeliveryPipeline({
+    archivePackager,
+    generateInstallScripts: installScripts,
+    initializeEmailSender: emailSenderFactory,
+    getFileSplitter: fileSplitterFactory,
+    stat,
+  });
 
   return {
     async startDownload(data) {
@@ -189,7 +197,7 @@ export function createDownloadOrchestrator(
     options: DownloadOptions;
   }, sessionProgressEmitter: DownloadProgressEmitter, state: DownloadExecutionState): Promise<void> {
     const { packages, options } = data;
-    const { outputDir, outputFormat, includeScripts, concurrency = 3 } = options;
+    const { outputDir, concurrency = 3 } = options;
     const packagesDir = path.join(outputDir, 'packages');
     const limit = createLimiter(concurrency);
     const emitCancelledCompletion = (
@@ -202,17 +210,6 @@ export function createDownloadOrchestrator(
         outputPath: currentOutputPath,
         artifactPaths: currentArtifactPaths,
       });
-    };
-    const shouldStopForCancellation = (
-      currentOutputPath: string,
-      currentArtifactPaths?: string[]
-    ): boolean => {
-      if (!state.isCancelled()) {
-        return false;
-      }
-
-      emitCancelledCompletion(currentOutputPath, currentArtifactPaths);
-      return true;
     };
 
     try {
@@ -242,131 +239,18 @@ export function createDownloadOrchestrator(
       const deliveredPackages = packages.filter((pkg) => successfulPackageIds.has(pkg.id));
       const packageInfos = deliveredPackages.map(toPackageInfo);
       const failedDownloadCount = results.filter((result) => !result.success).length;
-      let finalOutputPath = outputDir;
-      let artifactPaths: string[] = [];
-      let deliveryResult:
-        | {
-            emailSent: boolean;
-            emailsSent?: number;
-            attachmentsSent?: number;
-            splitApplied?: boolean;
-            error?: string;
-          }
-        | undefined;
-      const deliveryMethod = options.deliveryMethod || 'local';
-
-      if (successfulPackageIds.size === 0) {
-        sessionProgressEmitter.emitAllComplete({
-          success: false,
-          outputPath: outputDir,
-          deliveryMethod,
-          error: '다운로드에 성공한 패키지가 없습니다.',
-          results,
-        });
-        return;
-      }
-
-      if (includeScripts) {
-        try {
-          installScripts(outputDir, deliveredPackages);
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          sessionProgressEmitter.emitAllComplete({
-            success: false,
-            outputPath: outputDir,
-            error: errorMessage,
-            results,
-          });
-          return;
-        }
-      }
-
-      if (outputFormat !== 'zip' && outputFormat !== 'tar.gz') {
-        sessionProgressEmitter.emitAllComplete({
-          success: false,
-          outputPath: outputDir,
-          error: `지원하지 않는 출력 형식입니다: ${String(outputFormat)}`,
-          results,
-        });
-        return;
-      }
-
-      if (shouldStopForCancellation(finalOutputPath, artifactPaths)) {
-        return;
-      }
-
-      try {
-        sessionProgressEmitter.emitDownloadStatus({
-          phase: 'packaging',
-          message: `${outputFormat.toUpperCase()} 패키징 중...`,
-        });
-        const archivePath = `${outputDir}.${outputFormat === 'zip' ? 'zip' : 'tar.gz'}`;
-        finalOutputPath = await archivePackager.createArchiveFromDirectory(
-          outputDir,
-          archivePath,
-          packageInfos,
-          {
-            format: outputFormat,
-            includeManifest: true,
-            includeReadme: true,
-          }
-        );
-        artifactPaths = [finalOutputPath];
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        sessionProgressEmitter.emitAllComplete({
-          success: false,
-          outputPath: outputDir,
-          error: errorMessage,
-          results,
-        });
-        return;
-      }
-
-      if (shouldStopForCancellation(finalOutputPath, artifactPaths)) {
-        return;
-      }
-
-      if (deliveryMethod === 'email') {
-        const emailOutcome = await deliverByEmail({
-          options,
-          packageInfos,
-          results,
-          finalOutputPath,
-          artifactPaths,
-          failedDownloadCount,
-          isCancelled: () => state.isCancelled(),
-          progressEmitter: sessionProgressEmitter,
-        });
-
-        if (!emailOutcome.success) {
-          sessionProgressEmitter.emitAllComplete(emailOutcome.completionPayload);
-          return;
-        }
-
-        finalOutputPath = emailOutcome.finalOutputPath;
-        artifactPaths = emailOutcome.artifactPaths;
-        deliveryResult = emailOutcome.deliveryResult;
-      }
-
-      if (
-        !deliveryResult?.emailSent &&
-        shouldStopForCancellation(
-          finalOutputPath,
-          artifactPaths.length > 0 ? artifactPaths : [finalOutputPath]
-        )
-      ) {
-        return;
-      }
-
-      sessionProgressEmitter.emitAllComplete({
-        success: true,
-        outputPath: finalOutputPath,
-        artifactPaths: artifactPaths.length > 0 ? artifactPaths : [finalOutputPath],
-        deliveryMethod,
-        deliveryResult,
+      const completionPayload = await deliveryPipeline.finalizeDownload({
+        outputDir,
+        options,
+        deliveredPackages,
+        packageInfos,
         results,
+        failedDownloadCount,
+        progressEmitter: sessionProgressEmitter,
+        isCancelled: () => state.isCancelled(),
       });
+
+      sessionProgressEmitter.emitAllComplete(completionPayload);
     } catch (error) {
       sessionProgressEmitter.emitAllComplete({
         success: false,
@@ -376,281 +260,6 @@ export function createDownloadOrchestrator(
     }
   }
 
-  async function deliverByEmail(params: {
-    options: DownloadOptions;
-    packageInfos: PackageInfo[];
-    results: DownloadPackageResult[];
-    finalOutputPath: string;
-    artifactPaths: string[];
-    failedDownloadCount: number;
-    isCancelled: () => boolean;
-    progressEmitter: DownloadProgressEmitter;
-  }): Promise<
-    | {
-        success: true;
-        finalOutputPath: string;
-        artifactPaths: string[];
-        deliveryResult: {
-          emailSent: true;
-          emailsSent?: number;
-          attachmentsSent?: number;
-          splitApplied: boolean;
-        };
-      }
-    | {
-        success: false;
-        completionPayload: Record<string, unknown>;
-      }
-  > {
-    const { options, packageInfos, results, failedDownloadCount, isCancelled, progressEmitter } = params;
-    let { finalOutputPath, artifactPaths } = params;
-    const smtpOptions = options.smtp;
-    const emailOptions = options.email;
-    const deliveryMethod = options.deliveryMethod || 'local';
-    const effectiveFrom = emailOptions?.from || smtpOptions?.from || smtpOptions?.user;
-
-    if (!smtpOptions?.host || !smtpOptions.port || !emailOptions?.to) {
-      return {
-        success: false,
-        completionPayload: {
-          success: false,
-          outputPath: finalOutputPath,
-          artifactPaths: artifactPaths.length > 0 ? artifactPaths : [finalOutputPath],
-          deliveryMethod,
-          deliveryResult: {
-            emailSent: false,
-            splitApplied: false,
-            error: '이메일 전달에 필요한 SMTP 또는 수신자 설정이 없습니다',
-          },
-          error: '이메일 전달에 필요한 SMTP 또는 수신자 설정이 없습니다',
-          results,
-        },
-      };
-    }
-
-    if (!effectiveFrom) {
-      return {
-        success: false,
-        completionPayload: {
-          success: false,
-          outputPath: finalOutputPath,
-          artifactPaths: artifactPaths.length > 0 ? artifactPaths : [finalOutputPath],
-          deliveryMethod,
-          deliveryResult: {
-            emailSent: false,
-            splitApplied: false,
-            error:
-              '이메일 전달에 필요한 발신자 설정이 없습니다. SMTP 발신자 또는 로그인 사용자를 설정하세요.',
-          },
-          error:
-            '이메일 전달에 필요한 발신자 설정이 없습니다. SMTP 발신자 또는 로그인 사용자를 설정하세요.',
-          results,
-        },
-      };
-    }
-
-    const maxAttachmentSizeBytes = (options.fileSplit?.maxSizeMB ?? 25) * 1024 * 1024;
-    let attachments = artifactPaths.length > 0 ? [...artifactPaths] : [finalOutputPath];
-    let splitApplied = false;
-    const getCurrentArtifacts = () =>
-      attachments.length > 0 ? attachments : artifactPaths.length > 0 ? artifactPaths : [finalOutputPath];
-    const getCancelledOutcome = (deliveryResult?: {
-      emailSent: boolean;
-      emailsSent?: number;
-      attachmentsSent?: number;
-      splitApplied?: boolean;
-      error?: string;
-    }) => {
-      if (!isCancelled()) {
-        return null;
-      }
-
-      return {
-        success: false as const,
-        completionPayload: {
-          success: false,
-          cancelled: true,
-          outputPath: finalOutputPath,
-          artifactPaths: getCurrentArtifacts(),
-          deliveryMethod,
-          deliveryResult,
-          results,
-        },
-      };
-    };
-
-    progressEmitter.emitDownloadStatus({
-      phase: 'packaging',
-      message: '이메일 전달 준비 중...',
-    });
-
-    try {
-      const cancelledBeforeStat = getCancelledOutcome();
-      if (cancelledBeforeStat) {
-        return cancelledBeforeStat;
-      }
-
-      const archiveStat = await (deps.stat ?? fse.stat.bind(fse))(finalOutputPath);
-      const cancelledAfterStat = getCancelledOutcome();
-      if (cancelledAfterStat) {
-        return cancelledAfterStat;
-      }
-
-      if (archiveStat.size > maxAttachmentSizeBytes) {
-        if (!options.fileSplit?.enabled) {
-          return {
-            success: false,
-            completionPayload: {
-              success: false,
-              outputPath: finalOutputPath,
-              artifactPaths: [finalOutputPath],
-              deliveryMethod,
-              deliveryResult: {
-                emailSent: false,
-                splitApplied: false,
-                error: '첨부 파일 크기가 제한을 초과했습니다. 파일 분할을 활성화하세요.',
-              },
-              error: '첨부 파일 크기가 제한을 초과했습니다. 파일 분할을 활성화하세요.',
-              results,
-            },
-          };
-        }
-
-        const splitter = fileSplitterFactory();
-        const splitResult = await splitter.splitFile(finalOutputPath, {
-          maxSizeMB: options.fileSplit.maxSizeMB,
-          generateMergeScripts: true,
-        });
-        attachments = collectSplitArtifacts(splitResult);
-        artifactPaths = attachments;
-        finalOutputPath = attachments[0] || finalOutputPath;
-        splitApplied = true;
-      }
-
-      const cancelledBeforeEmailSetup = getCancelledOutcome();
-      if (cancelledBeforeEmailSetup) {
-        return cancelledBeforeEmailSetup;
-      }
-
-      const emailSender = emailSenderFactory(
-        {
-          host: smtpOptions.host,
-          port: smtpOptions.port,
-          secure: smtpOptions.secure ?? smtpOptions.port === 465,
-          auth: smtpOptions.user
-            ? {
-                user: smtpOptions.user,
-                pass: smtpOptions.password || '',
-              }
-            : undefined,
-          from: effectiveFrom,
-        },
-        maxAttachmentSizeBytes
-      );
-
-      const cancelledBeforeSend = getCancelledOutcome();
-      if (cancelledBeforeSend) {
-        return cancelledBeforeSend;
-      }
-
-      const emailSendResult = await emailSender.sendEmail({
-        to: emailOptions.to,
-        subject:
-          emailOptions.subject || `DepsSmuggler 패키지 전달 (${packageInfos.length}개 패키지)`,
-        body: [
-          splitApplied
-            ? '첨부 용량 제한에 맞춰 파일을 분할해 전달했습니다.'
-            : '다운로드된 패키지 아카이브를 전달합니다.',
-          failedDownloadCount > 0
-            ? `다운로드 실패한 ${failedDownloadCount}개 패키지는 이번 전달에서 제외되었습니다.`
-            : '',
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        attachments: getCurrentArtifacts(),
-        packages: packageInfos,
-      });
-
-      const cancelledAfterSend = getCancelledOutcome({
-        emailSent: emailSendResult.success,
-        emailsSent: emailSendResult.emailsSent,
-        attachmentsSent: emailSendResult.attachmentsSent,
-        splitApplied: emailSendResult.splitApplied ?? splitApplied,
-        error: emailSendResult.success ? undefined : emailSendResult.error,
-      });
-      if (cancelledAfterSend) {
-        return cancelledAfterSend;
-      }
-
-      if (!emailSendResult.success) {
-        const errorMessage = emailSendResult.error || '이메일 전달에 실패했습니다';
-        return {
-          success: false,
-          completionPayload: {
-            success: false,
-            outputPath: finalOutputPath,
-            artifactPaths: attachments,
-            deliveryMethod,
-            deliveryResult: {
-              emailSent: false,
-              emailsSent: emailSendResult.emailsSent,
-              attachmentsSent: emailSendResult.attachmentsSent,
-              splitApplied,
-              error: errorMessage,
-            },
-            error: errorMessage,
-            results,
-          },
-        };
-      }
-
-      return {
-        success: true,
-        finalOutputPath,
-        artifactPaths: attachments,
-        deliveryResult: {
-          emailSent: true,
-          emailsSent: emailSendResult.emailsSent,
-          attachmentsSent: emailSendResult.attachmentsSent,
-          splitApplied,
-        },
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      return {
-        success: false,
-        completionPayload: {
-          success: false,
-          outputPath: finalOutputPath,
-          artifactPaths: artifactPaths.length > 0 ? artifactPaths : [finalOutputPath],
-          deliveryMethod,
-          deliveryResult: {
-            emailSent: false,
-            splitApplied,
-            error: errorMessage,
-          },
-          error: errorMessage,
-          results,
-        },
-      };
-    }
-  }
-}
-
-function collectSplitArtifacts(splitResult: {
-  parts: string[];
-  metadataPath?: string;
-  mergeScripts?: {
-    bash?: string;
-    powershell?: string;
-  };
-}): string[] {
-  return [
-    ...splitResult.parts,
-    splitResult.metadataPath,
-    splitResult.mergeScripts?.bash,
-    splitResult.mergeScripts?.powershell,
-  ].filter((value): value is string => Boolean(value));
 }
 
 function toPackageInfo(pkg: DownloadPackage): PackageInfo {
