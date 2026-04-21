@@ -119,7 +119,7 @@ buildMavenClassifier('macos', 'arm64');    // 'osx-aarch_64'
 
 Maven POM 캐싱 (메모리 + 디스크)
 
-MavenResolver와 MavenDownloader가 공유하여 중복 API 호출을 방지합니다.
+MavenResolver와 MavenDownloader가 공유하여 중복 API 호출을 방지합니다. Phase 6 기준으로 메모리 캐시와 중복 요청 관리는 `CacheStore<PomCacheEntry>` 어댑터로 통합하고, 디스크 캐시 디렉토리 구조는 Maven 전용 포맷을 유지합니다.
 
 ### 주요 함수
 
@@ -170,7 +170,11 @@ interface MavenCacheResult {
 ```typescript
 interface MavenCacheStats {
   memoryEntries: number;   // 메모리 캐시 항목 수
+  diskEntries: number;     // 디스크 캐시 파일 수
   pendingRequests: number; // 진행 중인 요청 수
+  oldestEntry: number | null;
+  newestEntry: number | null;
+  diskSize: number;
 }
 ```
 
@@ -182,8 +186,8 @@ interface MavenCacheStats {
 │   └── springframework/
 │       └── spring-core/
 │           └── 5.3.0/
-│               ├── pom.xml
-│               └── meta.json
+│               ├── spring-core-5.3.0.pom
+│               └── cache-meta.json
 └── com/
     └── ...
 ```
