@@ -10,7 +10,7 @@
 import axios from 'axios';
 import * as path from 'path';
 import logger from '../../utils/logger';
-import { createDiskCache, CacheManager } from '../shared/cache-manager';
+import { createDiskCache, CacheStore } from '../shared/cache/cache-store';
 import { getConfigManager } from '../config';
 
 /**
@@ -47,12 +47,12 @@ export interface WheelInfo {
 // 캐시 관리자
 // ============================================================================
 
-let simpleApiCache: CacheManager<SimpleApiPackageFile[]> | null = null;
+let simpleApiCache: CacheStore<SimpleApiPackageFile[]> | null = null;
 
 /**
  * Simple API 캐시 초기화
  */
-function getSimpleApiCache(): CacheManager<SimpleApiPackageFile[]> {
+function getSimpleApiCache(): CacheStore<SimpleApiPackageFile[]> {
   if (!simpleApiCache) {
     const configManager = getConfigManager();
     const cachePath = path.join(configManager.getCacheDir(), 'pip-simple');

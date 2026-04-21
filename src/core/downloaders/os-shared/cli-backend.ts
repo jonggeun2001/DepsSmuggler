@@ -8,7 +8,7 @@ import { AptDependencyResolver } from '../../resolver/apt-resolver';
 import { ApkDependencyResolver } from '../../resolver/apk-resolver';
 import { YumDependencyResolver } from '../../resolver/yum-resolver';
 import { OSArchivePackager } from './archive-packager';
-import { OSCacheManager } from './cache-manager';
+import { OsPackageCache } from './cache-manager';
 import { getDownloadedFileKey } from './package-file-utils';
 import { OSRepoPackager } from './repo-packager';
 import { OSScriptGenerator } from './script-generator';
@@ -211,8 +211,8 @@ function getActiveRepositories(distribution: OSDistribution): Repository[] {
   return [...distribution.defaultRepos, ...distribution.extendedRepos].filter((repo) => repo.enabled);
 }
 
-function createCacheManager(directory: string, enabled: boolean): OSCacheManager {
-  return new OSCacheManager({
+function createCacheManager(directory: string, enabled: boolean): OsPackageCache {
+  return new OsPackageCache({
     type: enabled ? 'persistent' : 'none',
     directory,
   });
@@ -221,7 +221,7 @@ function createCacheManager(directory: string, enabled: boolean): OSCacheManager
 function createResolver(
   distribution: OSDistribution,
   architecture: OSArchitecture,
-  cacheManager: OSCacheManager
+  cacheManager: OsPackageCache
 ): ResolverSearchable {
   const options = {
     distribution,

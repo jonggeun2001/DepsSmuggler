@@ -5,7 +5,7 @@
 
 import type { OSPackageInfo, PackageDependency, Repository, OSPackageSearchResult } from '../downloaders/os-shared/types';
 import { BaseOSDependencyResolver, type DependencyResolverOptions } from '../downloaders/os-shared/base-resolver';
-import { OSCacheManager } from '../downloaders/os-shared/cache-manager';
+import { OsPackageCache } from '../downloaders/os-shared/cache-manager';
 import { AptMetadataParser } from '../downloaders/apt';
 import { isArchitectureCompatible } from '../downloaders/os-shared/repositories';
 import { searchPackagesCommon, createResolverFactory } from './os-resolver-utils';
@@ -50,7 +50,7 @@ export class AptDependencyResolver extends BaseOSDependencyResolver {
 
           const key = `${repo.id}-${component}`;
           this.parsers.set(key, parser);
-          const cacheKey = OSCacheManager.createKey(
+          const cacheKey = OsPackageCache.createKey(
             'apt',
             {
               ...repo,

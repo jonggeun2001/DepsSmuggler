@@ -2,7 +2,11 @@ import * as crypto from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CacheManager, getCacheManager, initializeCacheManager } from './cache-manager';
+import {
+  ArtifactCacheManager,
+  getCacheManager,
+  initializeCacheManager,
+} from './shared/cache/artifact-cache';
 import { sanitizeCacheKey } from './shared/filename-utils';
 
 // fs-extra 모킹
@@ -56,13 +60,13 @@ describe('cacheManager', () => {
   });
 });
 
-describe('CacheManager 클래스', () => {
-  let cacheManager: CacheManager;
+describe('ArtifactCacheManager 클래스', () => {
+  let cacheManager: ArtifactCacheManager;
   let testCacheDir: string;
 
   beforeEach(() => {
     testCacheDir = path.join(os.tmpdir(), `cache-test-${Date.now()}`);
-    cacheManager = new CacheManager({
+    cacheManager = new ArtifactCacheManager({
       cacheDir: testCacheDir,
       maxSizeGB: 1,
       enabled: true,
@@ -71,12 +75,12 @@ describe('CacheManager 클래스', () => {
 
   describe('생성자 및 기본 설정', () => {
     it('기본 옵션으로 인스턴스 생성', () => {
-      const manager = new CacheManager();
+      const manager = new ArtifactCacheManager();
       expect(manager.isEnabled()).toBe(true);
     });
 
     it('사용자 정의 옵션으로 인스턴스 생성', () => {
-      const manager = new CacheManager({
+      const manager = new ArtifactCacheManager({
         cacheDir: '/custom/path',
         maxSizeGB: 5,
         enabled: false,
@@ -113,7 +117,7 @@ describe('CacheManager 클래스', () => {
       const fs = await import('fs-extra');
       vi.clearAllMocks();
 
-      const disabledManager = new CacheManager({
+      const disabledManager = new ArtifactCacheManager({
         cacheDir: testCacheDir,
         enabled: false,
       });
@@ -216,7 +220,7 @@ describe('CacheManager 클래스', () => {
 });
 
 // 매니페스트 로드 및 캐시 조작 테스트
-describe('CacheManager 매니페스트 및 캐시 조작', () => {
+describe('ArtifactCacheManager 매니페스트 및 캐시 조작', () => {
   let testCacheDir: string;
 
   beforeEach(() => {
@@ -237,7 +241,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       vi.mocked(fs.pathExists).mockResolvedValue(true as never);
       vi.mocked(fs.readJson).mockResolvedValue(existingManifest as never);
 
-      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      const manager = new ArtifactCacheManager({ cacheDir: testCacheDir, enabled: true });
       await manager.initialize();
 
       const size = await manager.getCacheSize();
@@ -250,7 +254,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       vi.mocked(fs.pathExists).mockResolvedValue(true as never);
       vi.mocked(fs.readJson).mockRejectedValue(new Error('JSON parse error') as never);
 
-      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      const manager = new ArtifactCacheManager({ cacheDir: testCacheDir, enabled: true });
       await manager.initialize();
 
       const size = await manager.getCacheSize();
@@ -269,7 +273,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       vi.mocked(fs.pathExists).mockResolvedValue(false as never);
       vi.mocked(fs.stat).mockResolvedValue({ size: 2000 } as never);
 
-      const manager = new CacheManager({
+      const manager = new ArtifactCacheManager({
         cacheDir: testCacheDir,
         maxSizeGB: 1,
         enabled: true,
@@ -304,7 +308,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       vi.mocked(fs.stat).mockResolvedValue({ size: 2000 } as never);
       vi.mocked(fs.writeJson).mockRejectedValueOnce(new Error('disk full') as never);
 
-      const manager = new CacheManager({
+      const manager = new ArtifactCacheManager({
         cacheDir: testCacheDir,
         maxSizeGB: 1,
         enabled: true,
@@ -365,7 +369,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       const mockStream = new EventEmitter();
       vi.mocked(fs.createReadStream).mockReturnValue(mockStream as never);
 
-      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      const manager = new ArtifactCacheManager({ cacheDir: testCacheDir, enabled: true });
       await manager.initialize();
 
       // getCachedFile 호출
@@ -417,7 +421,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       });
       vi.mocked(fs.readJson).mockResolvedValue(existingManifest as never);
 
-      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      const manager = new ArtifactCacheManager({ cacheDir: testCacheDir, enabled: true });
       await manager.initialize();
 
       const result = await manager.getCachedFile({
@@ -467,7 +471,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       const mockStream = new EventEmitter();
       vi.mocked(fs.createReadStream).mockReturnValue(mockStream as never);
 
-      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      const manager = new ArtifactCacheManager({ cacheDir: testCacheDir, enabled: true });
       await manager.initialize();
 
       // getCachedFile 호출 (캐시 미스 - 키가 맞지 않음)
@@ -521,7 +525,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       const mockStream = new EventEmitter();
       vi.mocked(fs.createReadStream).mockReturnValue(mockStream as never);
 
-      const manager = new CacheManager({ cacheDir: testCacheDir, enabled: true });
+      const manager = new ArtifactCacheManager({ cacheDir: testCacheDir, enabled: true });
       await manager.initialize();
 
       const resultPromise = manager.getCachedFile(packageInfo);
@@ -547,7 +551,7 @@ describe('CacheManager 매니페스트 및 캐시 조작', () => {
       // 매우 작은 캐시 크기로 설정 (10KB)
       const smallMaxSizeGB = 0.00001; // 약 10KB
 
-      const manager = new CacheManager({
+      const manager = new ArtifactCacheManager({
         cacheDir: testCacheDir,
         maxSizeGB: smallMaxSizeGB,
         enabled: true,

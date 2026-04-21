@@ -2,7 +2,7 @@
  * PyPI 패키지 메타데이터 캐시 관리
  * 메모리 + 디스크 캐시로 중복 네트워크 요청 방지
  *
- * CacheManager를 사용하여 메모리 캐싱 로직 통합
+ * CacheStore를 사용하여 메모리 캐싱 로직 통합
  * 디스크 캐시는 기존 형식 유지 (호환성)
  */
 
@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as os from 'os';
 import axios from 'axios';
 import logger from '../../utils/logger';
-import { CacheManager, createMemoryCache, CacheEntry } from './cache-manager';
+import { createMemoryCache } from './cache/cache-store';
 import { DEFAULT_MEMORY_TTL_MS, DEFAULT_DISK_TTL_MS } from './cache-utils';
 
 /**
@@ -188,7 +188,7 @@ export async function fetchPackageMetadata(
   const cacheKey = getCacheKey(packageName, version);
   const cachePath = getCachePath(cacheDir, packageName, version);
 
-  // 1. 메모리 캐시 확인 (CacheManager 사용)
+  // 1. 메모리 캐시 확인 (CacheStore 사용)
   if (useMemoryCache && !forceRefresh) {
     const memoryCached = memCacheManager.get(cacheKey);
     if (memoryCached) {
@@ -225,7 +225,7 @@ export async function fetchPackageMetadata(
     }
   }
 
-  // 3. CacheManager의 dedupeFetch 사용 (중복 요청 방지)
+  // 3. CacheStore의 dedupeFetch 사용 (중복 요청 방지)
   try {
     const result = await memCacheManager.getOrFetch(
       cacheKey,
@@ -418,7 +418,7 @@ export function pruneExpiredCache(cacheDir: string = getDefaultCacheDir()): numb
 // 하위 호환성을 위한 export (deprecated)
 // ============================================================================
 
-/** @deprecated CacheManager로 이전됨 */
+/** @deprecated CacheStore로 이전됨 */
 export const memoryCache = {
   get size() {
     return memCacheManager.size;
@@ -428,7 +428,7 @@ export const memoryCache = {
   },
 };
 
-/** @deprecated CacheManager로 이전됨 */
+/** @deprecated CacheStore로 이전됨 */
 export const pendingRequests = {
   get: () => undefined,
   set: () => {},

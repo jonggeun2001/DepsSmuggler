@@ -25,7 +25,7 @@ export interface OSCacheConfig {
 /**
  * 캐시 엔트리
  */
-interface CacheEntry {
+interface OsPackageCacheEntry {
   /** 저장된 데이터 */
   data: unknown;
   /** 저장 시간 (Unix timestamp) */
@@ -88,9 +88,9 @@ const VALID_DATA_TYPES = new Set([
 /**
  * OS 캐시 관리자
  */
-export class OSCacheManager {
+export class OsPackageCache {
   private config: OSCacheConfig;
-  private memoryCache: Map<string, CacheEntry> = new Map();
+  private memoryCache: Map<string, OsPackageCacheEntry> = new Map();
   private stats = { hits: 0, misses: 0 };
 
   constructor(config: Partial<OSCacheConfig> = {}) {
@@ -164,7 +164,7 @@ export class OSCacheManager {
     }
 
     const size = this.estimateSize(data);
-    const entry: CacheEntry = {
+    const entry: OsPackageCacheEntry = {
       data,
       timestamp: Date.now(),
       size,
@@ -238,7 +238,7 @@ export class OSCacheManager {
   /**
    * 만료 여부 확인
    */
-  private isExpired(entry: CacheEntry): boolean {
+  private isExpired(entry: OsPackageCacheEntry): boolean {
     const age = (Date.now() - entry.timestamp) / 1000;
     return age > this.config.ttl;
   }
@@ -360,7 +360,7 @@ export class OSCacheManager {
   /**
    * 디스크에서 읽기
    */
-  private async readFromDisk(key: string): Promise<CacheEntry | null> {
+  private async readFromDisk(key: string): Promise<OsPackageCacheEntry | null> {
     if (!this.config.directory) return null;
 
     const filePath = path.join(this.config.directory, this.keyToFilename(key));
@@ -371,7 +371,7 @@ export class OSCacheManager {
       }
 
       const content = fs.readFileSync(filePath, 'utf-8');
-      return JSON.parse(content) as CacheEntry;
+      return JSON.parse(content) as OsPackageCacheEntry;
     } catch {
       return null;
     }
@@ -380,7 +380,7 @@ export class OSCacheManager {
   /**
    * 디스크에 쓰기
    */
-  private async writeToDisk(key: string, entry: CacheEntry): Promise<void> {
+  private async writeToDisk(key: string, entry: OsPackageCacheEntry): Promise<void> {
     if (!this.config.directory) return;
 
     const filePath = path.join(this.config.directory, this.keyToFilename(key));
@@ -445,7 +445,7 @@ export class OSCacheManager {
         const filePath = path.join(this.config.directory, file);
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
-          const entry = JSON.parse(content) as CacheEntry;
+          const entry = JSON.parse(content) as OsPackageCacheEntry;
 
           // 만료된 항목은 건너뛰기
           if (this.isExpired(entry)) {
@@ -492,3 +492,5 @@ export class OSCacheManager {
     }
   }
 }
+
+export { OsPackageCache as OSCacheManager };

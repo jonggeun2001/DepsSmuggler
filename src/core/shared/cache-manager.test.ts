@@ -1,16 +1,16 @@
 /**
- * CacheManager 단위 테스트
+ * CacheStore 단위 테스트
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { CacheManager, createMemoryCache, createDiskCache } from './cache-manager';
+import { CacheStore, createMemoryCache, createDiskCache } from './cache/cache-store';
 
-describe('CacheManager', () => {
+describe('CacheStore', () => {
   describe('메모리 캐시', () => {
-    let cache: CacheManager<string>;
+    let cache: CacheStore<string>;
 
     beforeEach(() => {
       cache = createMemoryCache<string>('test', 5000); // 5초 TTL
@@ -77,7 +77,7 @@ describe('CacheManager', () => {
   });
 
   describe('통계', () => {
-    let cache: CacheManager<string>;
+    let cache: CacheStore<string>;
 
     beforeEach(() => {
       cache = createMemoryCache<string>('test', 5000);
@@ -101,7 +101,7 @@ describe('CacheManager', () => {
   });
 
   describe('getOrFetch', () => {
-    let cache: CacheManager<string>;
+    let cache: CacheStore<string>;
 
     beforeEach(() => {
       cache = createMemoryCache<string>('test', 5000);
@@ -182,7 +182,7 @@ describe('CacheManager', () => {
   });
 
   describe('순회', () => {
-    let cache: CacheManager<string>;
+    let cache: CacheStore<string>;
 
     beforeEach(() => {
       cache = createMemoryCache<string>('test', 5000);
@@ -217,7 +217,7 @@ describe('CacheManager', () => {
 
   describe('디스크 캐시', () => {
     const testDir = path.join(os.tmpdir(), 'cache-manager-test-' + Date.now());
-    let cache: CacheManager<{ name: string; value: number }>;
+    let cache: CacheStore<{ name: string; value: number }>;
 
     beforeEach(() => {
       cache = createDiskCache<{ name: string; value: number }>(
@@ -277,7 +277,7 @@ describe('CacheManager', () => {
       nested: { a: number; b: string };
     }
 
-    let cache: CacheManager<TestData>;
+    let cache: CacheStore<TestData>;
 
     beforeEach(() => {
       cache = createMemoryCache<TestData>('complex', 5000);

@@ -2,7 +2,7 @@
 
 ## 개요
 - 목적: 모든 캐시 모듈에서 공통으로 사용하는 캐시 관련 유틸리티
-- 위치: `src/core/shared/cache-utils.ts`, `cache-manager.ts`
+- 위치: `src/core/shared/cache-utils.ts`, `src/core/shared/cache/cache-store.ts`, `src/core/shared/cache/artifact-cache.ts`
 
 ---
 
@@ -11,7 +11,10 @@
 ```
 src/core/shared/
 ├── cache-utils.ts     # 캐시 공통 유틸리티
-├── cache-manager.ts   # 범용 캐시 매니저
+├── cache-manager.ts   # compatibility shim
+├── cache/
+│   ├── cache-store.ts     # 범용 CacheStore
+│   └── artifact-cache.ts  # 다운로드 아티팩트 캐시
 ├── pip-cache.ts       # PyPI 캐시 (shared-pip.md 참조)
 ├── npm-cache.ts       # npm 캐시 (shared-npm.md 참조)
 ├── maven-cache.ts     # Maven 캐시 (shared-maven.md 참조)
@@ -161,15 +164,15 @@ const metadata = await pendingRequests.execute(
 
 ---
 
-## 범용 캐시 매니저 (`cache-manager.ts`)
+## 범용 캐시 저장소 (`cache/cache-store.ts`)
 
-범용 캐시 관리 클래스입니다.
+범용 캐시 저장소 클래스입니다.
 
-### CacheManager
+### CacheStore
 
 ```typescript
-class CacheManager<T> {
-  constructor(options: CacheManagerOptions);
+class CacheStore<T> {
+  constructor(options: CacheStoreOptions);
 
   // 캐시 조회
   get(key: string): T | null;
@@ -191,10 +194,10 @@ class CacheManager<T> {
 }
 ```
 
-### CacheManagerOptions
+### CacheStoreOptions
 
 ```typescript
-interface CacheManagerOptions {
+interface CacheStoreOptions {
   /** 기본 TTL (ms) */
   defaultTtl?: number;
   /** 최대 항목 수 */
