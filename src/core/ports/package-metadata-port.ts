@@ -37,6 +37,7 @@ export interface PackageMetadataRequest {
   registryUrl?: string;
   indexUrl?: string;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
   metadata?: Record<string, unknown>;
 }
 
