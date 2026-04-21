@@ -4,13 +4,13 @@
  * 메모리 캐시 + 디스크 캐시 지원
  */
 
-import axios, { AxiosInstance } from 'axios';
-import * as fs from 'fs-extra';
-import * as path from 'path';
 import * as os from 'os';
+import * as path from 'path';
+import axios, { AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
-import logger from '../../utils/logger';
+import * as fs from 'fs-extra';
 import { PomProject, PomCacheEntry, MavenCoordinate, coordinateToString } from './maven-types';
+import logger from '../../utils/logger';
 
 /** 기본 메모리 TTL: 5분 */
 const DEFAULT_MEMORY_TTL = 5 * 60 * 1000;
@@ -265,9 +265,7 @@ export async function fetchPom(
 
       // 디스크 캐시 저장
       if (useDiskCache) {
-        writeToDiskCache(coordinate, pomContent, entry, cacheDir).catch(() => {
-          // 디스크 캐시 저장 실패는 무시
-        });
+        await writeToDiskCache(coordinate, pomContent, entry, cacheDir);
       }
 
       logger.debug('Maven POM 조회 완료', {

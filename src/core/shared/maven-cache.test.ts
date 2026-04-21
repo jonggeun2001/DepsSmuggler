@@ -2,23 +2,22 @@
  * maven-cache.ts 단위 테스트
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as os from 'os';
+import * as path from 'path';
 import axios from 'axios';
 import * as fs from 'fs-extra';
-import * as path from 'path';
-import * as os from 'os';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   fetchPom,
   fetchPomWithCacheInfo,
   fetchPomsParallel,
-  prefetchPomsParallel,
   clearMemoryCache,
   clearDiskCache,
   getMavenCacheStats,
   isPomCached,
   getPomFromCache,
 } from './maven-cache';
-import { MavenCoordinate, PomProject } from './maven-types';
+import { MavenCoordinate } from './maven-types';
 
 // axios 모킹
 vi.mock('axios');
@@ -332,9 +331,6 @@ describe('maven-cache', () => {
 
       // 첫 번째 요청 - 네트워크에서 가져오고 디스크에 저장
       await fetchPom(coord, { useDiskCache: true, cacheDir: testCacheDir });
-
-      // 디스크 캐시 저장은 비동기로 진행되므로 대기
-      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // 메모리 캐시 클리어
       clearMemoryCache();
