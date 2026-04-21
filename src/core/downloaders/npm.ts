@@ -142,7 +142,7 @@ export class NpmDownloader extends BaseLanguageDownloader implements IDownloader
 
       const expectedIntegrity = packageInfo.metadata?.checksum?.sha512;
       const expectedSha1 = packageInfo.metadata?.checksum?.sha1;
-      const filePath = await this.downloadArtifact(
+      const filePath = await this.downloadArtifactFile(
         destPath,
         {
           downloadUrl,
@@ -189,7 +189,7 @@ export class NpmDownloader extends BaseLanguageDownloader implements IDownloader
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string> {
     try {
-      return await this.downloadArtifact(
+      return await this.downloadArtifactFile(
         destPath,
         {
           downloadUrl: tarballUrl,

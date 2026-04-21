@@ -20,7 +20,7 @@ class TestLanguageDownloader extends BaseLanguageDownloader {
     plan: LanguageArtifactDownloadPlan,
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string> {
-    return this.downloadArtifact(destPath, plan, onProgress);
+    return this.downloadArtifactFile(destPath, plan, onProgress);
   }
 }
 
@@ -93,5 +93,32 @@ describe('BaseLanguageDownloader', () => {
     await expect(downloadPromise).rejects.toThrow('검증 실패');
     const files = await fs.readdir(tempDir);
     expect(files).toHaveLength(0);
+  });
+
+  it('relativeFilePath가 주어지면 중첩 디렉토리 구조로 저장해야 함', async () => {
+    const stream = new PassThrough();
+    vi.mocked(axios).mockResolvedValue({
+      headers: { 'content-length': '4' },
+      data: stream,
+    } as never);
+
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-lang-base-'));
+    tempPaths.push(tempDir);
+
+    const downloadPromise = downloader.downloadFromPlan(tempDir, {
+      downloadUrl: 'https://repo1.maven.org/maven2/com/example/demo/demo-1.0.0.jar',
+      itemId: 'com.example:demo@1.0.0',
+      timeoutMs: 1000,
+      relativeFilePath: 'com/example/demo/1.0.0/demo-1.0.0.jar',
+    });
+
+    stream.write(Buffer.from('test'));
+    stream.end();
+
+    const filePath = await downloadPromise;
+    expect(filePath).toBe(
+      path.join(tempDir, 'com', 'example', 'demo', '1.0.0', 'demo-1.0.0.jar')
+    );
+    expect(await fs.readFile(filePath, 'utf8')).toBe('test');
   });
 });

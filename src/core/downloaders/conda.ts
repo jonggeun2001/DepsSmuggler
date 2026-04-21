@@ -377,7 +377,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
       });
 
       const expectedMd5 = packageInfo.metadata?.checksum?.md5;
-      const filePath = await this.downloadArtifact(
+      const filePath = await this.downloadArtifactFile(
         destPath,
         {
           downloadUrl,

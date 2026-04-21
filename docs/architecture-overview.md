@@ -107,7 +107,7 @@ depssmuggler/
 | 영역 | 현재 구현 위치 | 비고 |
 |------|----------------|------|
 | 일반 다운로드 | `src/core/downloaders/*.ts` | `pip`, `conda`, `maven`, `npm`, `docker`, `yum`, `apt`, `apk` |
-| 언어 downloader 공용 레이어 | `src/core/downloaders/lang-shared/*` | 현재 `pip`, `conda`, `npm`이 공통 artifact 저장 로직을 재사용 |
+| 언어 downloader 공용 레이어 | `src/core/downloaders/lang-shared/*` | 현재 `pip`, `conda`, `npm`, `maven`이 공통 artifact 저장 로직을 재사용 |
 | OS 공용 기능 | `src/core/downloaders/os-shared/*` | 저장소 프리셋, GPG, 로컬 repo 패키징 |
 | Core 경계 포트 | `src/core/ports/*` | package metadata 조회, package fetch 스트림 |
 | 의존성 해결 | `src/core/resolver/*.ts` | `pip`, `conda`, `maven`, `npm`, `yum`, `apt`, `apk` |
