@@ -95,6 +95,7 @@ console.log(result);
 repodata.json 캐싱 및 조회 시스템 (**디스크 캐시 전용** - 메모리 캐시 미사용)
 
 > **참고**: Conda repodata.json 파일은 350MB+ 크기이므로 메모리 캐시를 사용하지 않고 디스크 캐시만 사용합니다.
+> Phase 6 기준으로 동시 동일 요청 dedupe만 `CacheStore` 기반 메모리 어댑터를 사용하고, payload 자체는 디스크 포맷만 유지합니다.
 
 ### 다운로드 진행 상황 로깅
 
