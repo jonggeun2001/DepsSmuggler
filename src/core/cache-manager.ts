@@ -3,13 +3,14 @@
  * 다운로드한 패키지를 로컬 캐시에 저장하여 재사용
  */
 
-import * as fs from 'fs-extra';
-import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs-extra';
 import { PackageInfo } from '../types';
 import logger from '../utils/logger';
 import { sanitizeCacheKey } from './shared/filename-utils';
+import { calculateFileChecksum, verifyFileChecksum } from './shared/integrity/checksum';
 
 export interface CacheOptions {
   cacheDir?: string;
@@ -306,14 +307,7 @@ export class CacheManager {
    * 체크섬 계산
    */
   private async calculateChecksum(filePath: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const hash = crypto.createHash('sha256');
-      const stream = fs.createReadStream(filePath);
-
-      stream.on('data', (data) => hash.update(data));
-      stream.on('end', () => resolve(hash.digest('hex')));
-      stream.on('error', reject);
-    });
+    return calculateFileChecksum(filePath, 'sha256');
   }
 
   /**
@@ -321,8 +315,7 @@ export class CacheManager {
    */
   private async verifyChecksum(filePath: string, expectedChecksum: string): Promise<boolean> {
     try {
-      const actualChecksum = await this.calculateChecksum(filePath);
-      return actualChecksum === expectedChecksum;
+      return await verifyFileChecksum(filePath, expectedChecksum, 'sha256');
     } catch {
       return false;
     }

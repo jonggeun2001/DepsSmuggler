@@ -1,7 +1,6 @@
+import * as path from 'path';
 import axios, { AxiosInstance } from 'axios';
 import * as fs from 'fs-extra';
-import * as path from 'path';
-import * as crypto from 'crypto';
 import {
   IDownloader,
   PackageInfo,
@@ -11,20 +10,19 @@ import {
 } from '../../types';
 import logger from '../../utils/logger';
 import {
-  PyPIRelease,
-  PyPIInfo,
-  PyPIResponse,
-  PyPISearchResult,
-} from '../shared/pip-types';
-import { compareVersions } from '../shared';
-import { sanitizePath } from '../shared/path-utils';
-import type { PipTargetPlatform } from '../../types/pip-target-platform';
-import {
   fetchPackageFiles,
   extractVersionFromFilename,
   findLatestVersion as findLatestVersionFromSimpleApi,
   SimpleApiPackageFile,
 } from '../resolver/pip-simple-api';
+import { compareVersions } from '../shared';
+import { verifyFileChecksum } from '../shared/integrity/checksum';
+import { sanitizePath } from '../shared/path-utils';
+import {
+  PyPIRelease,
+  PyPIResponse,
+} from '../shared/pip-types';
+import type { PipTargetPlatform } from '../../types/pip-target-platform';
 
 export class PipDownloader implements IDownloader {
   readonly type = 'pip' as const;
@@ -340,17 +338,7 @@ export class PipDownloader implements IDownloader {
    * 체크섬 검증
    */
   async verifyChecksum(filePath: string, expected: string): Promise<boolean> {
-    return new Promise((resolve, reject) => {
-      const hash = crypto.createHash('sha256');
-      const stream = fs.createReadStream(filePath);
-
-      stream.on('data', (data) => hash.update(data));
-      stream.on('end', () => {
-        const actual = hash.digest('hex').toLowerCase();
-        resolve(actual === expected.toLowerCase());
-      });
-      stream.on('error', reject);
-    });
+    return verifyFileChecksum(filePath, expected, 'sha256');
   }
 
   /**

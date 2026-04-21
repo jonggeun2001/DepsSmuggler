@@ -1,6 +1,5 @@
-import * as fsNative from 'fs';
-import * as crypto from 'crypto';
 import { Architecture } from '../../types';
+import { calculateFileChecksum } from '../shared/integrity/checksum';
 
 /**
  * Docker 플랫폼 정보 인터페이스
@@ -148,12 +147,5 @@ export function parseImageName(name: string): [string, string] {
  * 파일의 SHA256 해시 계산
  */
 export function calculateSha256(filePath: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const hash = crypto.createHash('sha256');
-    const stream = fsNative.createReadStream(filePath);
-
-    stream.on('data', (data) => hash.update(data));
-    stream.on('end', () => resolve(hash.digest('hex')));
-    stream.on('error', reject);
-  });
+  return calculateFileChecksum(filePath, 'sha256');
 }
