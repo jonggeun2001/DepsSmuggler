@@ -5,15 +5,18 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import * as os from 'os';
+import * as path from 'path';
 import axios, { AxiosResponse } from 'axios';
 import * as fzstd from 'fzstd';
-import logger from '../../utils/logger';
+import { createMemoryCache } from './cache/cache-store';
 import { RepoData } from './conda-types';
+import logger from '../../utils/logger';
 
 /** DepsSmuggler용 기본 TTL: 24시간 (폐쇄망 전달 목적이므로 길게 설정) */
 const DEFAULT_MAX_AGE = 86400; // 24시간
+const REQUEST_DEDUPE_TTL_MS = 1000;
+const repodataRequestCache = createMemoryCache<CacheResult>('Conda repodata request', REQUEST_DEDUPE_TTL_MS);
 
 /**
  * 캐시 메타데이터
@@ -68,6 +71,17 @@ function getCachePaths(cacheDir: string, channel: string, subdir: string): {
     dataPath: path.join(channelDir, 'repodata.json'),
     metaPath: path.join(channelDir, 'repodata.meta.json'),
   };
+}
+
+function getRequestKey(
+  baseUrl: string,
+  cacheDir: string,
+  channel: string,
+  subdir: string,
+  useCache: boolean,
+  forceRefresh: boolean
+): string {
+  return `${baseUrl}:${cacheDir}:${channel}:${subdir}:${useCache ? 'cache' : 'nocache'}:${forceRefresh ? 'refresh' : 'normal'}`;
 }
 
 /**
@@ -223,156 +237,161 @@ export async function fetchRepodata(
     }
   }
 
-  // 2. HTTP 요청 준비
-  const urls = [
-    { url: `${baseUrl}/${channel}/${subdir}/repodata.json.zst`, compressed: true },
-    { url: `${baseUrl}/${channel}/${subdir}/current_repodata.json`, compressed: false },
-    { url: `${baseUrl}/${channel}/${subdir}/repodata.json`, compressed: false },
-  ];
+  const requestKey = getRequestKey(baseUrl, cacheDir, channel, subdir, useCache, forceRefresh);
+  const result = await repodataRequestCache.dedupeFetch(requestKey, async () => {
+    // 2. HTTP 요청 준비
+    const urls = [
+      { url: `${baseUrl}/${channel}/${subdir}/repodata.json.zst`, compressed: true },
+      { url: `${baseUrl}/${channel}/${subdir}/current_repodata.json`, compressed: false },
+      { url: `${baseUrl}/${channel}/${subdir}/repodata.json`, compressed: false },
+    ];
 
-  // 기존 캐시 메타데이터 (조건부 요청용)
-  const existingMeta = useCache ? readCacheMeta(metaPath) : null;
+    // 기존 캐시 메타데이터 (조건부 요청용)
+    const existingMeta = useCache ? readCacheMeta(metaPath) : null;
 
-  for (const { url, compressed } of urls) {
-    try {
-      // 조건부 요청 헤더 설정
-      const headers: Record<string, string> = {
-        'User-Agent': 'DepsSmuggler/1.0',
-      };
+    for (const { url, compressed } of urls) {
+      try {
+        // 조건부 요청 헤더 설정
+        const headers: Record<string, string> = {
+          'User-Agent': 'DepsSmuggler/1.0',
+        };
 
-      if (existingMeta && existingMeta.url === url && !forceRefresh) {
-        if (existingMeta.etag) {
-          headers['If-None-Match'] = existingMeta.etag;
-        }
-        if (existingMeta.lastModified) {
-          headers['If-Modified-Since'] = existingMeta.lastModified;
-        }
-      }
-
-      const startTime = Date.now();
-      logger.info(`repodata 다운로드 시작: ${channel}/${subdir}`, {
-        url,
-        compressed,
-        conditional: !!(headers['If-None-Match'] || headers['If-Modified-Since']),
-      });
-
-      let lastLoggedPercent = 0;
-      const response = await axios.get(url, {
-        responseType: compressed ? 'arraybuffer' : 'json',
-        headers,
-        timeout,
-        validateStatus: (status) => status === 200 || status === 304,
-        onDownloadProgress: (progressEvent) => {
-          const { loaded, total } = progressEvent;
-          if (total) {
-            const percent = Math.floor((loaded / total) * 100);
-            // 20% 단위로 로그 출력 (너무 많은 로그 방지)
-            if (percent >= lastLoggedPercent + 20) {
-              lastLoggedPercent = percent;
-              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-              const loadedMB = (loaded / 1024 / 1024).toFixed(1);
-              const totalMB = (total / 1024 / 1024).toFixed(1);
-              logger.info(`repodata 다운로드 중: ${channel}/${subdir} (${loadedMB}MB / ${totalMB}MB, ${percent}%, ${elapsed}초)`);
-            }
+        if (existingMeta && existingMeta.url === url && !forceRefresh) {
+          if (existingMeta.etag) {
+            headers['If-None-Match'] = existingMeta.etag;
           }
-        },
-      });
+          if (existingMeta.lastModified) {
+            headers['If-Modified-Since'] = existingMeta.lastModified;
+          }
+        }
 
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      logger.info(`repodata 다운로드 완료: ${channel}/${subdir} (${elapsed}초)`);
+        const startTime = Date.now();
+        logger.info(`repodata 다운로드 시작: ${channel}/${subdir}`, {
+          url,
+          compressed,
+          conditional: !!(headers['If-None-Match'] || headers['If-Modified-Since']),
+        });
 
-      // 304 Not Modified - 캐시 유효 (디스크에서 읽기)
-      if (response.status === 304) {
-        const cachedData = readCacheData(dataPath);
-        if (cachedData && existingMeta) {
-          // 캐시 시간 갱신
-          const { maxAge } = extractCacheHeaders(response);
-          const updatedMeta: RepodataCacheMeta = {
-            ...existingMeta,
-            maxAge,
-            cachedAt: Date.now(),
-          };
-          writeCacheMeta(metaPath, updatedMeta);
+        let lastLoggedPercent = 0;
+        const response = await axios.get(url, {
+          responseType: compressed ? 'arraybuffer' : 'json',
+          headers,
+          timeout,
+          validateStatus: (status) => status === 200 || status === 304,
+          onDownloadProgress: (progressEvent) => {
+            const { loaded, total } = progressEvent;
+            if (total) {
+              const percent = Math.floor((loaded / total) * 100);
+              // 20% 단위로 로그 출력 (너무 많은 로그 방지)
+              if (percent >= lastLoggedPercent + 20) {
+                lastLoggedPercent = percent;
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                const loadedMB = (loaded / 1024 / 1024).toFixed(1);
+                const totalMB = (total / 1024 / 1024).toFixed(1);
+                logger.info(`repodata 다운로드 중: ${channel}/${subdir} (${loadedMB}MB / ${totalMB}MB, ${percent}%, ${elapsed}초)`);
+              }
+            }
+          },
+        });
 
-          logger.info('캐시 유효 (304 Not Modified)', {
-            url,
-            packages: existingMeta.packageCount,
-          });
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        logger.info(`repodata 다운로드 완료: ${channel}/${subdir} (${elapsed}초)`);
 
-          return {
-            data: cachedData,
-            fromCache: true,
-            meta: updatedMeta,
-          };
+        // 304 Not Modified - 캐시 유효 (디스크에서 읽기)
+        if (response.status === 304) {
+          const cachedData = readCacheData(dataPath);
+          if (cachedData && existingMeta) {
+            // 캐시 시간 갱신
+            const { maxAge } = extractCacheHeaders(response);
+            const updatedMeta: RepodataCacheMeta = {
+              ...existingMeta,
+              maxAge,
+              cachedAt: Date.now(),
+            };
+            writeCacheMeta(metaPath, updatedMeta);
+
+            logger.info('캐시 유효 (304 Not Modified)', {
+              url,
+              packages: existingMeta.packageCount,
+            });
+
+            return {
+              data: cachedData,
+              fromCache: true,
+              meta: updatedMeta,
+            };
+          }
+        }
+
+        // 200 OK - 새 데이터
+        let repodata: RepoData;
+        let fileSize: number;
+
+        if (compressed) {
+          const compressedData = new Uint8Array(response.data);
+          const decompressedData = fzstd.decompress(compressedData);
+          const jsonString = new TextDecoder().decode(decompressedData);
+          repodata = JSON.parse(jsonString) as RepoData;
+          fileSize = compressedData.length;
+        } else {
+          repodata = response.data as RepoData;
+          fileSize = JSON.stringify(repodata).length;
+        }
+
+        // 패키지 수 계산
+        const packageCount =
+          Object.keys(repodata.packages || {}).length +
+          Object.keys(repodata['packages.conda'] || {}).length;
+
+        // 캐시 헤더 추출
+        const { etag, lastModified, maxAge } = extractCacheHeaders(response);
+
+        // 메타데이터 생성
+        const meta: RepodataCacheMeta = {
+          url,
+          etag,
+          lastModified,
+          maxAge,
+          cachedAt: Date.now(),
+          fileSize,
+          packageCount,
+          compressed,
+        };
+
+        // 캐시 저장 (디스크만)
+        if (useCache) {
+          writeCacheData(dataPath, repodata);
+          writeCacheMeta(metaPath, meta);
+        }
+
+        logger.info('repodata 가져오기 성공', {
+          url,
+          packages: packageCount,
+          compressed,
+          fileSize,
+          cached: useCache,
+        });
+
+        return {
+          data: repodata,
+          fromCache: false,
+          meta,
+        };
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+          logger.debug('repodata URL 없음, 다음 URL 시도', { url });
+        } else {
+          logger.warn('repodata 가져오기 실패, 다음 URL 시도', { url, error });
         }
       }
-
-      // 200 OK - 새 데이터
-      let repodata: RepoData;
-      let fileSize: number;
-
-      if (compressed) {
-        const compressedData = new Uint8Array(response.data);
-        const decompressedData = fzstd.decompress(compressedData);
-        const jsonString = new TextDecoder().decode(decompressedData);
-        repodata = JSON.parse(jsonString) as RepoData;
-        fileSize = compressedData.length;
-      } else {
-        repodata = response.data as RepoData;
-        fileSize = JSON.stringify(repodata).length;
-      }
-
-      // 패키지 수 계산
-      const packageCount =
-        Object.keys(repodata.packages || {}).length +
-        Object.keys(repodata['packages.conda'] || {}).length;
-
-      // 캐시 헤더 추출
-      const { etag, lastModified, maxAge } = extractCacheHeaders(response);
-
-      // 메타데이터 생성
-      const meta: RepodataCacheMeta = {
-        url,
-        etag,
-        lastModified,
-        maxAge,
-        cachedAt: Date.now(),
-        fileSize,
-        packageCount,
-        compressed,
-      };
-
-      // 캐시 저장 (디스크만)
-      if (useCache) {
-        writeCacheData(dataPath, repodata);
-        writeCacheMeta(metaPath, meta);
-      }
-
-      logger.info('repodata 가져오기 성공', {
-        url,
-        packages: packageCount,
-        compressed,
-        fileSize,
-        cached: useCache,
-      });
-
-      return {
-        data: repodata,
-        fromCache: false,
-        meta,
-      };
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        logger.debug('repodata URL 없음, 다음 URL 시도', { url });
-      } else {
-        logger.warn('repodata 가져오기 실패, 다음 URL 시도', { url, error });
-      }
-      continue;
     }
-  }
 
-  logger.error('모든 repodata URL 실패', { channel, subdir });
-  return null;
+    logger.error('모든 repodata URL 실패', { channel, subdir });
+    return null;
+  });
+
+  repodataRequestCache.delete(requestKey);
+  return result;
 }
 
 /**

@@ -218,6 +218,8 @@ interface CacheStoreOptions {
 | Maven | O | O | 메모리 5분, 디스크 24시간 | [shared-maven.md](./shared-maven.md) |
 | Conda | X | O | HTTP Cache-Control 기반 | [shared-conda.md](./shared-conda.md) |
 
+Conda는 repodata payload를 메모리에 보존하지 않지만, 같은 채널/subdir 요청이 겹칠 때는 `CacheStore` 기반 request dedupe를 사용합니다.
+
 Maven 메모리 캐시와 중복 요청 관리는 `CacheStore<PomCacheEntry>` 어댑터로 통합되고, 디스크 캐시만 Maven 전용 파일 구조를 유지합니다.
 
 ---
