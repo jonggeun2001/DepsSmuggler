@@ -182,6 +182,29 @@ describe('maven-cache', () => {
       // API는 1회만 호출
       expect(mockGet).toHaveBeenCalledTimes(1);
     });
+
+    it('memoryTtl이 다른 동시 요청도 동일한 네트워크 요청을 공유해야 함', async () => {
+      const coord: MavenCoordinate = {
+        groupId: 'org.apache.commons',
+        artifactId: 'commons-lang3',
+        version: '3.12.0',
+      };
+      const mockPomXml = createMockPom(coord.groupId, coord.artifactId, coord.version);
+
+      mockGet.mockImplementation(
+        () =>
+          new Promise((resolve) => setTimeout(() => resolve({ data: mockPomXml }), 50))
+      );
+
+      const [first, second] = await Promise.all([
+        fetchPom(coord, { useDiskCache: false, memoryTtl: 60_000 }),
+        fetchPom(coord, { useDiskCache: false, memoryTtl: 300_000 }),
+      ]);
+
+      expect(first.groupId).toBe('org.apache.commons');
+      expect(second.groupId).toBe('org.apache.commons');
+      expect(mockGet).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('fetchPomsParallel', () => {
@@ -277,6 +300,21 @@ describe('maven-cache', () => {
       await fetchPom(coord, { useDiskCache: false });
 
       expect(isPomCached(coord)).toBe(true);
+    });
+
+    it('custom memoryTtl로 적재한 항목도 기본 helper에서 관찰해야 함', async () => {
+      const coord: MavenCoordinate = {
+        groupId: 'org.springframework',
+        artifactId: 'spring-context',
+        version: '5.3.0',
+      };
+      const mockPomXml = createMockPom(coord.groupId, coord.artifactId, coord.version);
+      mockGet.mockResolvedValueOnce({ data: mockPomXml });
+
+      await fetchPom(coord, { useDiskCache: false, memoryTtl: 60_000 });
+
+      expect(isPomCached(coord)).toBe(true);
+      expect(getPomFromCache(coord)?.artifactId).toBe('spring-context');
     });
   });
 

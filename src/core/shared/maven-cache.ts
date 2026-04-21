@@ -9,7 +9,7 @@ import * as path from 'path';
 import axios, { AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
 import * as fs from 'fs-extra';
-import { createMemoryCache, type CacheStore } from './cache/cache-store';
+import { createMemoryCache } from './cache/cache-store';
 import { PomProject, PomCacheEntry, MavenCoordinate, coordinateToString } from './maven-types';
 import logger from '../../utils/logger';
 
@@ -27,8 +27,8 @@ const DEFAULT_CACHE_DIR = path.join(os.homedir(), '.depssmuggler', 'cache', 'mav
 
 /** 병렬 조회 배치 크기 */
 const DEFAULT_BATCH_SIZE = 5;
-
-const memoryStores: Map<number, CacheStore<PomCacheEntry>> = new Map();
+const MEMORY_STORE_TTL = Number.MAX_SAFE_INTEGER;
+const memoryStore = createMemoryCache<PomCacheEntry>('Maven POM', MEMORY_STORE_TTL);
 
 /**
  * XML 파서 (싱글톤)
@@ -61,17 +61,6 @@ function getClient(repoUrl: string = DEFAULT_REPO_URL): AxiosInstance {
 
 function getCacheKey(coordinate: MavenCoordinate, repoUrl: string): string {
   return `${repoUrl}:${coordinateToString(coordinate)}`;
-}
-
-function getMemoryStore(memoryTtl: number = DEFAULT_MEMORY_TTL): CacheStore<PomCacheEntry> {
-  const existing = memoryStores.get(memoryTtl);
-  if (existing) {
-    return existing;
-  }
-
-  const store = createMemoryCache<PomCacheEntry>('Maven POM', memoryTtl);
-  memoryStores.set(memoryTtl, store);
-  return store;
 }
 
 /**
@@ -217,12 +206,12 @@ export async function fetchPom(
   } = options;
 
   const cacheKey = getCacheKey(coordinate, repoUrl);
-  const memoryStore = getMemoryStore(memoryTtl);
+  const now = Date.now();
 
   // 1. 메모리 캐시 확인
   if (!forceRefresh) {
     const cached = memoryStore.get(cacheKey);
-    if (cached) {
+    if (cached && now - cached.fetchedAt < memoryTtl) {
       logger.debug('Maven 메모리 캐시 히트', { coordinate: coordinateToString(coordinate) });
       return cached.pom;
     }
@@ -307,12 +296,12 @@ export async function fetchPomWithCacheInfo(
   } = options;
 
   const cacheKey = getCacheKey(coordinate, repoUrl);
-  const memoryStore = getMemoryStore(memoryTtl);
+  const now = Date.now();
 
   // 메모리 캐시 확인
   if (!forceRefresh) {
     const cached = memoryStore.get(cacheKey);
-    if (cached) {
+    if (cached && now - cached.fetchedAt < memoryTtl) {
       return { pom: cached.pom, fromCache: 'memory' };
     }
   }
@@ -409,9 +398,7 @@ export function prefetchPomsParallel(
   const {
     batchSize = DEFAULT_BATCH_SIZE,
     repoUrl = DEFAULT_REPO_URL,
-    memoryTtl = DEFAULT_MEMORY_TTL,
   } = options;
-  const memoryStore = getMemoryStore(memoryTtl);
 
   // 이미 메모리 캐시된 것 제외. 진행 중인 요청은 CacheStore가 dedupe한다.
   const toFetch = coordinates.filter((coord) => {
@@ -435,12 +422,8 @@ export function prefetchPomsParallel(
  * 메모리 캐시 초기화
  */
 export function clearMemoryCache(): void {
-  let size = 0;
-  for (const store of memoryStores.values()) {
-    size += store.getStats().memoryEntries;
-    store.clear();
-  }
-  memoryStores.clear();
+  const size = memoryStore.getStats().memoryEntries;
+  memoryStore.clear();
   logger.info('Maven 메모리 캐시 초기화', { clearedEntries: size });
 }
 
@@ -467,9 +450,7 @@ export function invalidatePom(
   repoUrl: string = DEFAULT_REPO_URL
 ): void {
   const cacheKey = getCacheKey(coordinate, repoUrl);
-  for (const store of memoryStores.values()) {
-    store.delete(cacheKey);
-  }
+  memoryStore.delete(cacheKey);
 }
 
 /**
@@ -510,30 +491,16 @@ function getDirectoryStatsSync(dirPath: string): { size: number; fileCount: numb
 }
 
 export function getMavenCacheStats(): MavenCacheStats {
-  let oldest: number | null = null;
-  let newest: number | null = null;
-  let memoryEntries = 0;
-  let pendingRequests = 0;
-
-  for (const store of memoryStores.values()) {
-    const stats = store.getStats();
-    memoryEntries += stats.memoryEntries;
-    pendingRequests += stats.pendingRequests;
-
-    if (stats.oldestEntry !== null && (oldest === null || stats.oldestEntry < oldest)) {
-      oldest = stats.oldestEntry;
-    }
-    if (stats.newestEntry !== null && (newest === null || stats.newestEntry > newest)) {
-      newest = stats.newestEntry;
-    }
-  }
+  const memoryStats = memoryStore.getStats();
+  const oldest = memoryStats.oldestEntry;
+  const newest = memoryStats.newestEntry;
 
   const diskStats = getDirectoryStatsSync(DEFAULT_CACHE_DIR);
 
   return {
-    memoryEntries,
+    memoryEntries: memoryStats.memoryEntries,
     diskEntries: diskStats.fileCount,
-    pendingRequests,
+    pendingRequests: memoryStats.pendingRequests,
     oldestEntry: oldest,
     newestEntry: newest,
     diskSize: diskStats.size,
@@ -544,7 +511,15 @@ export function getMavenCacheStats(): MavenCacheStats {
  * 만료된 메모리 캐시 정리
  */
 export function pruneExpiredMemoryCache(ttl: number = DEFAULT_MEMORY_TTL): number {
-  const pruned = getMemoryStore(ttl).prune();
+  const now = Date.now();
+  let pruned = 0;
+
+  memoryStore.forEach((entry, key) => {
+    if (now - entry.fetchedAt >= ttl) {
+      memoryStore.delete(key);
+      pruned++;
+    }
+  });
 
   if (pruned > 0) {
     logger.info('Maven 만료된 캐시 정리', { pruned });
@@ -561,7 +536,7 @@ export function getPomFromCache(
   repoUrl: string = DEFAULT_REPO_URL
 ): PomProject | null {
   const cacheKey = getCacheKey(coordinate, repoUrl);
-  const cached = getMemoryStore(DEFAULT_MEMORY_TTL).get(cacheKey);
+  const cached = memoryStore.get(cacheKey);
   return cached?.pom ?? null;
 }
 
@@ -574,5 +549,7 @@ export function isPomCached(
   ttl: number = DEFAULT_MEMORY_TTL
 ): boolean {
   const cacheKey = getCacheKey(coordinate, repoUrl);
-  return getMemoryStore(ttl).has(cacheKey);
+  const cached = memoryStore.get(cacheKey);
+  if (!cached) return false;
+  return Date.now() - cached.fetchedAt < ttl;
 }
