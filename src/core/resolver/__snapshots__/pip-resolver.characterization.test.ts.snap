@@ -1,0 +1,225 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`PipResolver characterization > conflicts fixture의 그래프를 고정한다 1`] = `
+{
+  "conflicts": [
+    {
+      "packageName": "urllib3",
+      "resolvedVersion": "2.2.1",
+      "type": "version",
+      "versions": [
+        "<1.0",
+        "2.2.1",
+      ],
+    },
+  ],
+  "flatList": [
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "rootpkg",
+      "version": "1.0.0",
+    },
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "urllib3",
+      "version": "2.2.1",
+    },
+  ],
+  "root": {
+    "dependencies": [
+      {
+        "dependencies": [],
+        "filename": null,
+        "indexUrl": null,
+        "name": "urllib3",
+        "version": "2.2.1",
+      },
+    ],
+    "filename": null,
+    "indexUrl": null,
+    "name": "rootpkg",
+    "version": "1.0.0",
+  },
+}
+`;
+
+exports[`PipResolver characterization > extras fixture의 그래프를 고정한다 1`] = `
+{
+  "conflicts": [],
+  "flatList": [
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "anyio",
+      "version": "4.4.0",
+    },
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "httpx_auth",
+      "version": "0.20.0",
+    },
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "httpx",
+      "version": "0.27.0",
+    },
+  ],
+  "root": {
+    "dependencies": [
+      {
+        "dependencies": [],
+        "filename": null,
+        "indexUrl": null,
+        "name": "anyio",
+        "version": "4.4.0",
+      },
+      {
+        "dependencies": [],
+        "filename": null,
+        "indexUrl": null,
+        "name": "httpx_auth",
+        "version": "0.20.0",
+      },
+    ],
+    "filename": null,
+    "indexUrl": null,
+    "name": "httpx",
+    "version": "0.27.0",
+  },
+}
+`;
+
+exports[`PipResolver characterization > markers fixture의 그래프를 고정한다 1`] = `
+{
+  "conflicts": [],
+  "flatList": [
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "uvicorn",
+      "version": "0.30.0",
+    },
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "uvloop",
+      "version": "0.19.0",
+    },
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "watchfiles",
+      "version": "0.22.0",
+    },
+  ],
+  "root": {
+    "dependencies": [
+      {
+        "dependencies": [],
+        "filename": null,
+        "indexUrl": null,
+        "name": "uvloop",
+        "version": "0.19.0",
+      },
+      {
+        "dependencies": [],
+        "filename": null,
+        "indexUrl": null,
+        "name": "watchfiles",
+        "version": "0.22.0",
+      },
+    ],
+    "filename": null,
+    "indexUrl": null,
+    "name": "uvicorn",
+    "version": "0.30.0",
+  },
+}
+`;
+
+exports[`PipResolver characterization > simple fixture의 그래프를 고정한다 1`] = `
+{
+  "conflicts": [],
+  "flatList": [
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "certifi",
+      "version": "2024.2.2",
+    },
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "requests",
+      "version": "2.32.0",
+    },
+    {
+      "filename": null,
+      "indexUrl": null,
+      "name": "urllib3",
+      "version": "2.1.0",
+    },
+  ],
+  "root": {
+    "dependencies": [
+      {
+        "dependencies": [],
+        "filename": null,
+        "indexUrl": null,
+        "name": "certifi",
+        "version": "2024.2.2",
+      },
+      {
+        "dependencies": [],
+        "filename": null,
+        "indexUrl": null,
+        "name": "urllib3",
+        "version": "2.1.0",
+      },
+    ],
+    "filename": null,
+    "indexUrl": null,
+    "name": "requests",
+    "version": "2.32.0",
+  },
+}
+`;
+
+exports[`PipResolver characterization > wheel-tags fixture의 그래프를 고정한다 1`] = `
+{
+  "conflicts": [],
+  "flatList": [
+    {
+      "filename": "numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.whl",
+      "indexUrl": "https://packages.example.com/simple",
+      "name": "numpy",
+      "version": "1.26.4",
+    },
+    {
+      "filename": "typing_extensions-4.12.2-py3-none-any.whl",
+      "indexUrl": "https://packages.example.com/simple",
+      "name": "typing_extensions",
+      "version": "4.12.2",
+    },
+  ],
+  "root": {
+    "dependencies": [
+      {
+        "dependencies": [],
+        "filename": "typing_extensions-4.12.2-py3-none-any.whl",
+        "indexUrl": "https://packages.example.com/simple",
+        "name": "typing_extensions",
+        "version": "4.12.2",
+      },
+    ],
+    "filename": "numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.whl",
+    "indexUrl": "https://packages.example.com/simple",
+    "name": "numpy",
+    "version": "1.26.4",
+  },
+}
+`;

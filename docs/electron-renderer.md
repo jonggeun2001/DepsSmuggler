@@ -137,6 +137,7 @@
 - `src/renderer/pages/settings/` 아래 `DeliverySettingsSection`, `CacheSettingsSection`, `UpdateSettingsSection`, `use-settings-form-actions.ts`가 `SettingsPage`의 세부 책임을 분리합니다.
 - SMTP 테스트 버튼은 `testSmtpConnection` IPC가 있으면 실제 연결 테스트를 실행하고, 브라우저 개발 환경에서는 시뮬레이션, IPC가 빠진 Electron 빌드에서는 경고와 비활성화 상태를 노출합니다.
 - 히스토리 store는 `window.electronAPI.history.*`를 통해 `~/.depssmuggler/history.json`과 직접 동기화되며, renderer localStorage persist를 source of truth로 사용하지 않습니다.
+- 다운로드 화면 오케스트레이션은 `use-download-page-controller.test.tsx`에서 jsdom + mocked `window.electronAPI` 조합으로 시작/일시정지/재개/취소/완료/오류 시나리오를 회귀 고정합니다.
 
 ## 사용자 흐름
 

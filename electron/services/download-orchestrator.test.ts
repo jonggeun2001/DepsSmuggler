@@ -19,6 +19,183 @@ describe('createDownloadOrchestrator', () => {
     ),
   });
 
+  it('여러 패키지 매니저 결과를 모두 PackageInfo로 변환해 패키징한다', async () => {
+    const { createDownloadOrchestrator } = await import('./download-orchestrator');
+
+    const packages = [
+      { id: 'pip-1', type: 'pip', name: 'requests', version: '2.32.0' },
+      { id: 'conda-1', type: 'conda', name: 'numpy', version: '1.26.4', arch: 'linux-64' },
+      { id: 'maven-1', type: 'maven', name: 'org.junit:junit-bom', version: '5.10.2' },
+      { id: 'npm-1', type: 'npm', name: 'vite', version: '7.3.2' },
+      { id: 'yum-1', type: 'yum', name: 'bash', version: '5.2.26' },
+      { id: 'apt-1', type: 'apt', name: 'curl', version: '8.5.0' },
+      { id: 'apk-1', type: 'apk', name: 'busybox', version: '1.36.1-r20' },
+      { id: 'docker-1', type: 'docker', name: 'nginx', version: '1.27.0' },
+    ] as const;
+    const router = {
+      downloadPackage: vi.fn().mockImplementation(async (pkg: { id: string }) => ({
+        id: pkg.id,
+        success: true,
+      })),
+    };
+    const progressEmitter = {
+      emitDownloadStatus: vi.fn(),
+      emitAllComplete: vi.fn(),
+    };
+    const archivePackager = createArchivePackagerMock();
+
+    const orchestrator = createDownloadOrchestrator({
+      getMainWindow: () => null,
+      ensureDir: vi.fn().mockResolvedValue(undefined),
+      scheduleTask: async (task: () => Promise<void>) => {
+        await task();
+      },
+      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createPackageRouter: () => router,
+      createProgressEmitter: () => progressEmitter as never,
+      archivePackager,
+      generateInstallScripts: vi.fn(),
+    });
+
+    await orchestrator.startDownload({
+      sessionId: 12,
+      packages: [...packages],
+      options: {
+        outputDir: '/tmp/out',
+        outputFormat: 'tar.gz',
+        includeScripts: false,
+        concurrency: 2,
+      },
+    });
+
+    expect(router.downloadPackage).toHaveBeenCalledTimes(packages.length);
+    expect(archivePackager.createArchiveFromDirectory).toHaveBeenCalledWith(
+      '/tmp/out',
+      '/tmp/out.tar.gz',
+      packages.map((pkg) =>
+        expect.objectContaining({
+          type: pkg.type,
+          name: pkg.name,
+          version: pkg.version,
+        })
+      ),
+      expect.objectContaining({
+        format: 'tar.gz',
+      })
+    );
+  });
+
+  it('설정된 concurrency로 limiter를 만들고 각 패키지를 limiter 경유로 내려받는다', async () => {
+    const { createDownloadOrchestrator } = await import('./download-orchestrator');
+
+    const limiterCalls: number[] = [];
+    const limit = vi.fn(async (task: () => Promise<unknown>) => task());
+    const createLimiter = vi.fn((concurrency: number) => {
+      limiterCalls.push(concurrency);
+      return limit;
+    });
+    const router = {
+      downloadPackage: vi.fn().mockImplementation(async (pkg: { id: string }) => ({
+        id: pkg.id,
+        success: true,
+      })),
+    };
+
+    const orchestrator = createDownloadOrchestrator({
+      getMainWindow: () => null,
+      ensureDir: vi.fn().mockResolvedValue(undefined),
+      scheduleTask: async (task: () => Promise<void>) => {
+        await task();
+      },
+      createLimiter,
+      createPackageRouter: () => router,
+      createProgressEmitter: () => ({
+        emitDownloadStatus: vi.fn(),
+        emitAllComplete: vi.fn(),
+      }) as never,
+      archivePackager: createArchivePackagerMock() as never,
+      generateInstallScripts: vi.fn(),
+    });
+
+    await orchestrator.startDownload({
+      sessionId: 13,
+      packages: [
+        { id: 'pip-1', type: 'pip', name: 'requests', version: '2.32.0' },
+        { id: 'npm-1', type: 'npm', name: 'vite', version: '7.3.2' },
+        { id: 'docker-1', type: 'docker', name: 'nginx', version: '1.27.0' },
+      ],
+      options: {
+        outputDir: '/tmp/out',
+        outputFormat: 'zip',
+        includeScripts: false,
+        concurrency: 4,
+      },
+    });
+
+    expect(limiterCalls).toEqual([4]);
+    expect(limit).toHaveBeenCalledTimes(3);
+    expect(router.downloadPackage).toHaveBeenCalledTimes(3);
+  });
+
+  it('다운로드 시작부터 패키징 완료까지 진행률 이벤트 순서를 유지한다', async () => {
+    const { createDownloadOrchestrator } = await import('./download-orchestrator');
+
+    const progressEmitter = {
+      emitDownloadStatus: vi.fn(),
+      emitAllComplete: vi.fn(),
+    };
+    const orchestrator = createDownloadOrchestrator({
+      getMainWindow: () => null,
+      ensureDir: vi.fn().mockResolvedValue(undefined),
+      scheduleTask: async (task: () => Promise<void>) => {
+        await task();
+      },
+      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createPackageRouter: () => ({
+        downloadPackage: vi.fn().mockResolvedValue({
+          id: 'pip-requests-2.32.0',
+          success: true,
+        }),
+      }),
+      createProgressEmitter: () => progressEmitter as never,
+      archivePackager: createArchivePackagerMock() as never,
+      generateInstallScripts: vi.fn(),
+    });
+
+    await orchestrator.startDownload({
+      sessionId: 14,
+      packages: [
+        { id: 'pip-requests-2.32.0', type: 'pip', name: 'requests', version: '2.32.0' },
+      ],
+      options: {
+        outputDir: '/tmp/out',
+        outputFormat: 'zip',
+        includeScripts: false,
+        concurrency: 1,
+      },
+    });
+
+    expect(progressEmitter.emitDownloadStatus.mock.calls.map(([payload]) => payload)).toEqual([
+      expect.objectContaining({
+        sessionId: 14,
+        phase: 'downloading',
+        message: '다운로드 중...',
+      }),
+      expect.objectContaining({
+        sessionId: 14,
+        phase: 'packaging',
+        message: 'ZIP 패키징 중...',
+      }),
+    ]);
+    expect(progressEmitter.emitAllComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 14,
+        success: true,
+        outputPath: '/tmp/out.zip',
+      })
+    );
+  });
+
   it('성공한 패키지만 패키징 대상으로 모아 완료 이벤트를 만든다', async () => {
     const { createDownloadOrchestrator } = await import('./download-orchestrator');
 

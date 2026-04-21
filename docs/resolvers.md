@@ -99,6 +99,18 @@ PEP 508 환경 마커를 평가하여 플랫폼별 의존성 필터링:
 - implementation_name // 구현체 (예: 'cpython')
 ```
 
+### Characterization 회귀 고정
+
+`src/core/resolver/pip-resolver.characterization.test.ts`는 `resolveDependencies` 결과를 fixture별 JSON snapshot으로 고정합니다. 현재 유지하는 fixture는 다음 5종입니다.
+
+- `simple`: 기본 PyPI 의존성 트리
+- `extras`: extra marker가 켜진 의존성 포함 여부
+- `conflicts`: 버전 제약 충돌 시 fallback과 conflict 기록
+- `markers`: `sys_platform` / `platform_machine` 조건 필터링
+- `wheel-tags`: Simple API + wheel tag 선택 + `pythonVersion`/platform 매칭
+
+이 테스트는 BFS 트리 구조, flat list, conflict 목록을 함께 비교해 이후 구조 리팩터링에서 resolver 결과가 바뀌지 않았는지 확인하는 회귀 게이트 역할을 합니다.
+
 ### 사용 예시
 ```typescript
 import { getPipResolver } from './core/resolver/pip-resolver';
