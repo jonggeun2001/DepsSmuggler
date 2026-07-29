@@ -9,7 +9,7 @@ import {
 import logger from '../../utils/logger';
 import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
 import {
-  compareVersions,
+  comparePep440Versions,
   isPrereleaseVersion,
   isVersionCompatible,
   flattenDependencyTree,
@@ -73,7 +73,7 @@ type PipResolverTargetPlatform = Omit<PipTargetPlatform, 'os'> & {
 function explicitlyRequestsPrerelease(versionSpec?: string): boolean {
   return Boolean(
     versionSpec &&
-      /\d(?:[._-]?\d)*(?:[._-]?(?:a|b|rc|alpha|beta|pre|preview|dev)\d*)/i.test(
+      /\d(?:[._-]?\d)*(?:[._-]?(?:a|b|c|rc|alpha|beta|pre|preview|dev)\d*)/i.test(
         versionSpec,
       ),
   );
@@ -92,7 +92,7 @@ function comparePipVersionsDescending(
     }
   }
 
-  return compareVersions(rightVersion, leftVersion);
+  return comparePep440Versions(rightVersion, leftVersion);
 }
 
 function getSimpleApiChecksum(

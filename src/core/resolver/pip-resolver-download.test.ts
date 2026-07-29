@@ -156,6 +156,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         filename: 'demo-2.0rc1-py3-none-any.whl',
         url: 'https://index.example/demo-2.0rc1.whl',
       },
+      {
+        filename: 'demo-2.0rc2-py3-none-any.whl',
+        url: 'https://index.example/demo-2.0rc2.whl',
+      },
     ]);
     simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
@@ -169,10 +173,31 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
       },
     );
 
-    expect(result.root.package.version).toBe('2.0rc1');
+    expect(result.root.package.version).toBe('2.0rc2');
   });
 
-  it('프리릴리스가 명시된 제약은 Simple API의 최신 프리릴리스를 허용한다', async () => {
+  it('프리릴리스가 명시된 제약에서도 같은 릴리스의 final을 우선한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-3.0rc1-py3-none-any.whl',
+        url: 'https://index.example/demo-3.0rc1.whl',
+      },
+      {
+        filename: 'demo-3.0-py3-none-any.whl',
+        url: 'https://index.example/demo-3.0.whl',
+      },
+    ]);
+
+    const version = await (new PipResolver() as any).getLatestVersion(
+      'demo',
+      '>=2.0rc1',
+      'https://index.example/simple',
+    );
+
+    expect(version).toBe('3.0');
+  });
+
+  it('c 프리릴리스 별칭이 명시된 제약은 더 높은 프리릴리스를 허용한다', async () => {
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
       {
         filename: 'demo-2.0-py3-none-any.whl',
@@ -186,11 +211,32 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
 
     const version = await (new PipResolver() as any).getLatestVersion(
       'demo',
-      '>=2.0rc1',
+      '>=2.0c1',
       'https://index.example/simple',
     );
 
     expect(version).toBe('3.0rc1');
+  });
+
+  it('Simple API latest는 final보다 post release를 우선한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-2.0-py3-none-any.whl',
+        url: 'https://index.example/demo-2.0.whl',
+      },
+      {
+        filename: 'demo-2.0.post1-py3-none-any.whl',
+        url: 'https://index.example/demo-2.0.post1.whl',
+      },
+    ]);
+
+    const version = await (new PipResolver() as any).getLatestVersion(
+      'demo',
+      undefined,
+      'https://index.example/simple',
+    );
+
+    expect(version).toBe('2.0.post1');
   });
 
   it('PyPI JSON에서 선택한 대상 wheel URL과 체크섬을 다운로드한다', async () => {

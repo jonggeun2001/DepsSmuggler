@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   compareVersions,
+  comparePep440Versions,
   isVersionCompatible,
   isPrereleaseVersion,
   sortVersionsDescending,
@@ -10,7 +11,7 @@ import {
 
 describe('version-utils', () => {
   describe('isPrereleaseVersion', () => {
-    it.each(['2.0rc1', '2.0b2', '2.0.dev3'])(
+    it.each(['2.0rc1', '2.0c1', '2.0b2', '2.0.dev3'])(
       '%s를 프리릴리스로 판별한다',
       (version) => {
         expect(isPrereleaseVersion(version)).toBe(true);
@@ -23,6 +24,24 @@ describe('version-utils', () => {
         expect(isPrereleaseVersion(version)).toBe(false);
       },
     );
+  });
+
+  describe('comparePep440Versions', () => {
+    it('prerelease, final, post release 순서를 비교한다', () => {
+      expect(
+        comparePep440Versions('2.0rc2', '2.0rc1'),
+      ).toBeGreaterThan(0);
+      expect(
+        comparePep440Versions('2.0', '2.0rc2'),
+      ).toBeGreaterThan(0);
+      expect(
+        comparePep440Versions('2.0.post1', '2.0'),
+      ).toBeGreaterThan(0);
+    });
+
+    it('c 별칭을 rc와 같은 prerelease로 비교한다', () => {
+      expect(comparePep440Versions('2.0c1', '2.0rc1')).toBe(0);
+    });
   });
 
   describe('compareVersions', () => {

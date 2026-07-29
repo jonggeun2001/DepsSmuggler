@@ -181,7 +181,10 @@ export function isPrereleaseVersion(version: string): boolean {
   );
 }
 
-function compareMatchableVersions(a: string, b: string): number {
+export function comparePep440Versions(
+  a: string,
+  b: string,
+): number {
   const parsedA = parseMatchableVersion(a);
   const parsedB = parseMatchableVersion(b);
   if (!parsedA || !parsedB) {
@@ -237,7 +240,7 @@ function matchesExclusiveGreaterThan(
   version: string,
   target: string,
 ): boolean {
-  if (compareMatchableVersions(version, target) <= 0) {
+  if (comparePep440Versions(version, target) <= 0) {
     return false;
   }
 
@@ -270,7 +273,7 @@ function matchesExclusiveLessThan(
   version: string,
   target: string,
 ): boolean {
-  if (compareMatchableVersions(version, target) >= 0) {
+  if (comparePep440Versions(version, target) >= 0) {
     return false;
   }
 
@@ -356,11 +359,11 @@ function checkSingleCondition(version: string, condition: string): boolean {
 
   if (condition.startsWith('>=')) {
     const target = condition.slice(2).trim();
-    return compareMatchableVersions(version, target) >= 0;
+    return comparePep440Versions(version, target) >= 0;
   }
   if (condition.startsWith('<=')) {
     const target = condition.slice(2).trim();
-    return compareMatchableVersions(version, target) <= 0;
+    return comparePep440Versions(version, target) <= 0;
   }
   if (condition.startsWith('!=')) {
     const target = condition.slice(2).trim();
@@ -385,7 +388,7 @@ function checkSingleCondition(version: string, condition: string): boolean {
       ? `${parsedBase.epoch ? `${parsedBase.epoch}!` : ''}${releasePrefix.join('.')}`
       : base.split('.').slice(0, -1).join('.');
     return (
-      compareMatchableVersions(version, base) >= 0 &&
+      comparePep440Versions(version, base) >= 0 &&
       matchesWildcardVersion(version, `${prefix}.*`)
     );
   }
