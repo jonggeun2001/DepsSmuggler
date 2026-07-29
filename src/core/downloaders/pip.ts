@@ -243,9 +243,18 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
       // indexUrl 추출 (metadata에 있을 수 있음)
       const indexUrl = info.metadata?.indexUrl as string | undefined;
 
-      // 메타데이터 조회하여 다운로드 URL 획득
-      const packageInfo = await this.getPackageMetadata(info.name, info.version, indexUrl);
-      const downloadUrl = packageInfo.metadata?.downloadUrl;
+      // resolver가 선택한 URL이 있으면 그대로 사용하고, 없을 때만 재조회
+      let packageInfo = info;
+      let downloadUrl = info.metadata?.downloadUrl;
+
+      if (!downloadUrl) {
+        packageInfo = await this.getPackageMetadata(
+          info.name,
+          info.version,
+          indexUrl
+        );
+        downloadUrl = packageInfo.metadata?.downloadUrl;
+      }
 
       if (!downloadUrl) {
         throw new Error(`다운로드 URL을 찾을 수 없습니다: ${info.name}@${info.version}`);

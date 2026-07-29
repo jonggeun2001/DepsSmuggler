@@ -946,6 +946,54 @@ describe('PipDownloader downloadPackage', () => {
     vi.restoreAllMocks();
   });
 
+  it('resolver가 제공한 URL을 메타데이터 재조회 없이 다운로드한다', async () => {
+    const getMetadata = vi
+      .spyOn(downloader, 'getPackageMetadata')
+      .mockResolvedValue({
+        type: 'pip',
+        name: 'demo',
+        version: '1.0.0',
+        metadata: {
+          downloadUrl: 'https://files.example/unexpected.whl',
+        },
+      });
+    const verifyChecksum = vi
+      .spyOn(downloader, 'verifyChecksum')
+      .mockResolvedValue(true);
+    const downloadArtifactFile = vi
+      .spyOn(downloader as any, 'downloadArtifactFile')
+      .mockResolvedValue('/tmp/test/demo-cp312.whl');
+
+    await downloader.downloadPackage(
+      {
+        type: 'pip',
+        name: 'demo',
+        version: '1.0.0',
+        metadata: {
+          downloadUrl: 'https://files.example/demo-cp312.whl',
+          checksum: { sha256: 'resolved-sha' },
+        },
+      },
+      '/tmp/test',
+    );
+
+    expect(getMetadata).not.toHaveBeenCalled();
+    expect(downloadArtifactFile).toHaveBeenCalledWith(
+      '/tmp/test',
+      expect.objectContaining({
+        downloadUrl: 'https://files.example/demo-cp312.whl',
+      }),
+      undefined,
+    );
+
+    const artifactOptions = downloadArtifactFile.mock.calls[0][1];
+    await artifactOptions.verifyFile('/tmp/test/demo-cp312.whl');
+    expect(verifyChecksum).toHaveBeenCalledWith(
+      '/tmp/test/demo-cp312.whl',
+      'resolved-sha',
+    );
+  });
+
   it('다운로드 URL이 없으면 에러 발생', async () => {
     // getPackageMetadata가 downloadUrl 없이 반환하도록 모킹
     mockClient.get.mockResolvedValueOnce({
