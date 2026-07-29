@@ -169,7 +169,7 @@ export class PipResolver implements IResolver {
 
       // 해결된 패키지 저장 (캐시키 → 노드)
       const resolvedNodes: Map<string, DependencyNode> = new Map();
-      // 동일 패키지에 대해 이미 평가한 extra 집합
+      // 동일 패키지에 대해 이미 평가한 기본/extra 컨텍스트 집합
       const resolvedExtras: Map<string, Set<string>> = new Map();
       // 부모-자식 관계 저장 (부모캐시키 → 자식캐시키[])
       const parentChildMap: Map<string, string[]> = new Map();
@@ -206,7 +206,10 @@ export class PipResolver implements IResolver {
         const { packageInfo, requiresDist, actualVersion } = fetchResult;
         const cacheKey = `${name.toLowerCase()}@${actualVersion}`;
 
-        const incomingExtras = ext ?? [];
+        // extra 패키지도 기본 의존성과 선택한 extra 의존성을 함께 가진다.
+        const incomingExtras = Array.from(
+          new Set(['', ...(ext ?? [])]),
+        );
 
         // 이미 해결된 패키지는 새 extra가 있을 때만 의존성을 다시 평가
         if (resolvedNodes.has(cacheKey)) {
@@ -298,7 +301,11 @@ export class PipResolver implements IResolver {
               const depCacheKey = `${dep.name.toLowerCase()}@${depVersion}`;
               // 아직 해결되지 않은 패키지만 큐에 추가
               const processedDepExtras = resolvedExtras.get(depCacheKey);
-              const hasNewExtras = (dep.extras ?? []).some(
+              const dependencyExtraContexts = [
+                '',
+                ...(dep.extras ?? []),
+              ];
+              const hasNewExtras = dependencyExtraContexts.some(
                 (extra) => !processedDepExtras?.has(extra),
               );
               if (
@@ -669,33 +676,80 @@ export class PipResolver implements IResolver {
               (!versionSpec ||
                 isVersionCompatible(candidateVersion, versionSpec)),
           )
-          .filter(([, releases]) => {
-            const candidates = releases
-              .filter(
-                (release) =>
-                  !(release as PyPIRelease & { yanked?: boolean })
-                    .yanked,
-              )
-              .map((release) => ({
-                ...release,
-                requires_python:
-                  release.requires_python ??
-                  data.info.requires_python,
-              }));
-            return this.selectBestWheel(candidates) !== null;
-          })
-          .map(([candidateVersion]) => candidateVersion);
+          .sort(([leftVersion], [rightVersion]) =>
+            compareVersions(rightVersion, leftVersion),
+          );
 
-        if (compatibleVersions.length === 0) {
-          return null;
+        for (const [candidateVersion, releases] of compatibleVersions) {
+          const candidates = releases.filter(
+            (release) =>
+              !(release as PyPIRelease & { yanked?: boolean }).yanked,
+          );
+          const selectedFile = this.selectBestWheel(candidates);
+          if (!selectedFile) {
+            continue;
+          }
+
+          if (
+            !this.pythonVersion ||
+            Boolean(selectedFile.requires_python)
+          ) {
+            return candidateVersion;
+          }
+
+          if (candidateVersion === data.info.version) {
+            const latestCandidates = candidates.map((release) => ({
+              ...release,
+              requires_python:
+                release.requires_python ??
+                data.info.requires_python,
+            }));
+            if (this.selectBestWheel(latestCandidates)) {
+              return candidateVersion;
+            }
+            continue;
+          }
+
+          // 전역 info는 최신 릴리스 정보이므로 과거 릴리스에 재사용하지 않는다.
+          const exactResult = await fetchPackageMetadata(
+            name,
+            candidateVersion,
+            this.cacheOptions,
+          );
+          if (!exactResult) {
+            continue;
+          }
+          const exactFiles =
+            exactResult.data.urls?.length
+              ? exactResult.data.urls
+              : candidates;
+          const exactCandidates = exactFiles
+            .filter(
+              (release) =>
+                !(release as PyPIRelease & { yanked?: boolean })
+                  .yanked,
+            )
+            .map((release) => ({
+              ...release,
+              requires_python:
+                release.requires_python ??
+                exactResult.data.info.requires_python,
+            }));
+          if (this.selectBestWheel(exactCandidates)) {
+            return candidateVersion;
+          }
         }
 
-        return compatibleVersions.sort((a, b) =>
-          compareVersions(b, a),
-        )[0];
+        return null;
       }
-    } catch {
-      return null;
+    } catch (error) {
+      logger.warn('pip 버전 조회 실패', {
+        name,
+        versionSpec,
+        indexUrl,
+        error,
+      });
+      throw error;
     }
   }
 

@@ -429,4 +429,82 @@ describe('CondaResolver 대상 아티팩트 선택', () => {
       filename: 'blas-1.0-h123_openblas.conda',
     });
   });
+
+  it('여러 부모가 요구한 서로 다른 Conda build 아티팩트를 모두 보존한다', async () => {
+    const resolver = new CondaResolver();
+    const processor = (
+      resolver as unknown as {
+        repoDataProcessor: {
+          getRepoData: (
+            channel: string,
+            subdir: string,
+          ) => Promise<Record<string, unknown>>;
+        };
+      }
+    ).repoDataProcessor;
+
+    vi.spyOn(processor, 'getRepoData').mockResolvedValue({
+      info: { subdir: 'linux-64' },
+      packages: {
+        'demo-1.0.0-linux-64.conda': {
+          name: 'demo',
+          version: '1.0.0',
+          build: 'linux_64_0',
+          build_number: 0,
+          depends: ['parent-a 1.0', 'parent-b 1.0'],
+          subdir: 'linux-64',
+        },
+        'parent-a-1.0-linux-64.conda': {
+          name: 'parent-a',
+          version: '1.0',
+          build: 'linux_64_0',
+          build_number: 0,
+          depends: ['blas 1.0 *_openblas'],
+          subdir: 'linux-64',
+        },
+        'parent-b-1.0-linux-64.conda': {
+          name: 'parent-b',
+          version: '1.0',
+          build: 'linux_64_0',
+          build_number: 0,
+          depends: ['blas 1.0 *_mkl'],
+          subdir: 'linux-64',
+        },
+        'blas-1.0-h123_openblas.conda': {
+          name: 'blas',
+          version: '1.0',
+          build: 'h123_openblas',
+          build_number: 1,
+          depends: [],
+          subdir: 'linux-64',
+        },
+        'blas-1.0-h456_mkl.conda': {
+          name: 'blas',
+          version: '1.0',
+          build: 'h456_mkl',
+          build_number: 1,
+          depends: [],
+          subdir: 'linux-64',
+        },
+      },
+    });
+
+    const result = await resolver.resolveDependencies('demo', '1.0.0', {
+      targetPlatform: {
+        system: 'Linux',
+        machine: 'x86_64',
+      },
+      pythonVersion: '3.12',
+    });
+
+    expect(
+      result.flatList
+        .filter((pkg) => pkg.name === 'blas')
+        .map((pkg) => pkg.metadata?.filename)
+        .sort(),
+    ).toEqual([
+      'blas-1.0-h123_openblas.conda',
+      'blas-1.0-h456_mkl.conda',
+    ]);
+  });
 });

@@ -3,9 +3,21 @@
  */
 import { DependencyNode, PackageInfo } from '../../types';
 
+function getPackageIdentity(packageInfo: PackageInfo): string {
+  const artifactIdentity =
+    packageInfo.metadata?.filename ??
+    packageInfo.metadata?.downloadUrl;
+  const packageIdentity =
+    `${packageInfo.name.toLowerCase()}@${packageInfo.version}`;
+
+  return artifactIdentity
+    ? `${packageIdentity}#${artifactIdentity}`
+    : packageIdentity;
+}
+
 /**
  * DependencyNode 트리를 순회하여 모든 PackageInfo를 평탄화합니다.
- * 중복된 패키지(name@version)는 한 번만 포함됩니다.
+ * 중복된 패키지 아티팩트(name@version#artifact)는 한 번만 포함됩니다.
  * 반복문 기반으로 구현하여 call stack 문제 방지.
  *
  * @param node 루트 DependencyNode
@@ -25,7 +37,7 @@ export function flattenDependencyTree(node: DependencyNode): PackageInfo[] {
     }
     visited.add(current);
 
-    const key = `${current.package.name.toLowerCase()}@${current.package.version}`;
+    const key = getPackageIdentity(current.package);
     if (!result.has(key)) {
       result.set(key, current.package);
     }
@@ -61,7 +73,7 @@ export function flattenMultipleDependencyTrees(nodes: DependencyNode[]): Package
     }
     visited.add(current);
 
-    const key = `${current.package.name.toLowerCase()}@${current.package.version}`;
+    const key = getPackageIdentity(current.package);
     if (!result.has(key)) {
       result.set(key, current.package);
     }
