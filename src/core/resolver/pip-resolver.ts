@@ -56,6 +56,10 @@ interface FetchedPackageInfo {
 }
 
 type PipArtifactChecksum = { md5?: string; sha256?: string };
+type PipCompatibilityCandidate = Pick<
+  PyPIRelease,
+  'filename' | 'packagetype' | 'requires_python'
+>;
 
 function getSimpleApiChecksum(
   file: SimpleApiPackageFile | null,
@@ -418,7 +422,12 @@ export class PipResolver implements IResolver {
       let packageDownloadUrl: string | undefined;
       let packageChecksum: PipArtifactChecksum | undefined;
       if (urls && urls.length > 0) {
-        const selectedFile = this.selectBestWheel(urls);
+        const releaseCandidates = urls.map((release) => ({
+          ...release,
+          requires_python:
+            release.requires_python ?? info.requires_python,
+        }));
+        const selectedFile = this.selectBestWheel(releaseCandidates);
         if (this.pipTargetPlatform && !selectedFile) {
           throw new Error(
             `대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: ${name}@${actualVersion}`,
@@ -790,38 +799,29 @@ export class PipResolver implements IResolver {
   /**
    * wheel이 타겟 플랫폼과 호환되는지 확인
    */
-  private isWheelCompatible(release: PyPIRelease): boolean {
+  private isWheelCompatible(release: PipCompatibilityCandidate): boolean {
     if (!this.pipTargetPlatform) {
       // 타겟 플랫폼이 설정되지 않으면 기본 동작 (wheel 우선)
       return true;
     }
 
+    if (!this.isRequiresPythonCompatible(release.requires_python)) {
+      return false;
+    }
+
     if (release.packagetype !== 'bdist_wheel') {
-      // wheel이 아니면 호환성 체크 불필요 (sdist는 항상 호환)
+      // sdist는 플랫폼 태그가 없으므로 Python 요구 조건만 확인
       return true;
     }
 
     // Python 버전 호환성 체크
     if (this.pipTargetPlatform.pythonVersion || this.pythonVersion) {
       const wheelMatch = /^[^-]+-[^-]+-([^-]+)-([^-]+)-(.+)\.whl$/.exec(release.filename);
-      if (wheelMatch) {
-        const pythonTag = wheelMatch[1];
-        const abiTag = wheelMatch[2];
-        const targetPyVersion = (this.pipTargetPlatform.pythonVersion || this.pythonVersion || '').replace('.', '');
-
-        if (targetPyVersion) {
-          // 정확한 버전(cp312), abi3, py3, py2.py3 호환
-          const isCompatiblePython =
-            pythonTag.includes(`cp${targetPyVersion}`) ||
-            pythonTag.includes(`py${targetPyVersion}`) ||
-            pythonTag.includes('py3') ||
-            pythonTag.includes('py2.py3') ||
-            abiTag === 'abi3';
-
-          if (!isCompatiblePython) {
-            return false;
-          }
-        }
+      if (
+        !wheelMatch ||
+        !this.isPythonTagCompatible(wheelMatch[1], wheelMatch[2])
+      ) {
+        return false;
       }
     }
 
@@ -924,6 +924,67 @@ export class PipResolver implements IResolver {
     return false;
   }
 
+  private isRequiresPythonCompatible(
+    requiresPython: string | undefined,
+  ): boolean {
+    const targetPythonVersion =
+      this.pipTargetPlatform?.pythonVersion ?? this.pythonVersion ?? undefined;
+
+    if (!targetPythonVersion || !requiresPython) {
+      return true;
+    }
+
+    return isVersionCompatible(targetPythonVersion, requiresPython);
+  }
+
+  private isPythonTagCompatible(
+    pythonTag: string,
+    abiTag: string,
+  ): boolean {
+    const targetPythonVersion =
+      this.pipTargetPlatform?.pythonVersion ?? this.pythonVersion ?? undefined;
+
+    if (!targetPythonVersion) {
+      return true;
+    }
+
+    const [targetMajor, targetMinor] = targetPythonVersion
+      .split('.')
+      .map(Number);
+    if (!Number.isInteger(targetMajor) || !Number.isInteger(targetMinor)) {
+      return false;
+    }
+
+    const targetTag = `${targetMajor}${targetMinor}`;
+    const pythonTags = pythonTag.toLowerCase().split('.');
+    if (
+      pythonTags.includes(`cp${targetTag}`) ||
+      pythonTags.includes(`py${targetTag}`) ||
+      pythonTags.includes(`py${targetMajor}`)
+    ) {
+      return true;
+    }
+
+    const abiTags = abiTag.toLowerCase().split('.');
+    if (!abiTags.includes('abi3')) {
+      return false;
+    }
+
+    return pythonTags.some((tag) => {
+      const match = /^cp(\d)(\d+)$/.exec(tag);
+      if (!match) {
+        return false;
+      }
+
+      const minimumMajor = Number(match[1]);
+      const minimumMinor = Number(match[2]);
+      return (
+        minimumMajor === targetMajor &&
+        minimumMinor <= targetMinor
+      );
+    });
+  }
+
   /**
    * 호환되는 wheel 중 최적의 wheel 선택
    * 우선순위: 1) wheel (호환되는 것 중 가장 높은 버전), 2) sdist
@@ -933,7 +994,11 @@ export class PipResolver implements IResolver {
 
     // wheel과 sdist 분리
     const wheels = urls.filter(u => u.packagetype === 'bdist_wheel');
-    const sdist = urls.find(u => u.packagetype === 'sdist');
+    const sdist = urls.find(
+      (url) =>
+        url.packagetype === 'sdist' &&
+        this.isWheelCompatible(url),
+    );
 
     if (!this.pipTargetPlatform) {
       // 타겟 플랫폼 미설정 시 기본 동작: 첫 번째 wheel 또는 sdist
@@ -1002,94 +1067,27 @@ export class PipResolver implements IResolver {
       );
     }
 
-    // wheel 파일만 필터링
-    const wheels = files.filter((f) => f.filename.endsWith('.whl'));
-
-    for (const wheel of wheels) {
-      try {
-        // parseWheelFilename을 직접 구현 대신 import에서 가져오기
-        const wheelInfo = this.parseWheelFilenameSimple(wheel.filename);
-        
-        // Python 버전 호환성 체크
-        if (this.pythonVersion) {
-          const pyVersion = this.pythonVersion.replace('.', '');
-          if (!wheelInfo.pythonTag.includes(pyVersion) && !wheelInfo.pythonTag.includes('py3') && !wheelInfo.pythonTag.includes('py2.py3')) {
-            continue;
-          }
-        }
-
-        // 플랫폼 호환성 체크
-        const platformTag = wheelInfo.platformTag.toLowerCase();
-        const targetOs = this.pipTargetPlatform.os.toLowerCase();
-        const targetArch = this.pipTargetPlatform.arch.toLowerCase();
-
-        // 플랫폼 매칭 로직
-        if (platformTag === 'any') {
-          return wheel;
-        }
-
-        // Linux
-        if (targetOs === 'linux') {
-          if (platformTag.includes('manylinux') || platformTag.includes('linux')) {
-            if (targetArch === 'x86_64' && platformTag.includes('x86_64')) {
-              return wheel;
-            }
-            if (targetArch === 'aarch64' && platformTag.includes('aarch64')) {
-              return wheel;
-            }
-          }
-        }
-
-        // Windows
-        if (targetOs === 'windows') {
-          if (platformTag.includes('win')) {
-            if (targetArch === 'x86_64' && (platformTag.includes('amd64') || platformTag.includes('win_amd64'))) {
-              return wheel;
-            }
-            if (targetArch === 'arm64' && platformTag.includes('arm64')) {
-              return wheel;
-            }
-          }
-        }
-
-        // macOS
-        if (targetOs === 'macos') {
-          if (platformTag.includes('macosx')) {
-            if (targetArch === 'x86_64' && platformTag.includes('x86_64')) {
-              return wheel;
-            }
-            if (targetArch === 'arm64' && platformTag.includes('arm64')) {
-              return wheel;
-            }
-          }
-        }
-      } catch {
-        // 파싱 실패 시 다음 wheel 확인
-        continue;
-      }
+    const compatibleWheel = files
+      .filter((file) => file.filename.endsWith('.whl'))
+      .find((file) =>
+        this.isWheelCompatible({
+          filename: file.filename,
+          packagetype: 'bdist_wheel',
+          requires_python: file.requiresPython,
+        }),
+      );
+    if (compatibleWheel) {
+      return compatibleWheel;
     }
 
     // 호환되지 않는 다른 아키텍처 wheel 대신 source dist만 폴백으로 사용
-    return files.find((f) => f.filename.endsWith('.tar.gz')) || null;
-  }
-
-  /**
-   * wheel 파일명 간단 파싱 (Simple API용)
-   */
-  private parseWheelFilenameSimple(filename: string): {
-    pythonTag: string;
-    abiTag: string;
-    platformTag: string;
-  } {
-    const match = /^[^-]+-[^-]+-([^-]+)-([^-]+)-(.+)\.whl$/.exec(filename);
-    if (!match) {
-      throw new Error(`Invalid wheel filename: ${filename}`);
-    }
-    return {
-      pythonTag: match[1],
-      abiTag: match[2],
-      platformTag: match[3],
-    };
+    return (
+      files.find(
+        (file) =>
+          file.filename.endsWith('.tar.gz') &&
+          this.isRequiresPythonCompatible(file.requiresPython),
+      ) || null
+    );
   }
 }
 

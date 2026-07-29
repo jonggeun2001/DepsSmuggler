@@ -166,6 +166,251 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     );
   });
 
+  it.each([
+    {
+      name: 'Linux arm64',
+      system: 'Linux' as const,
+      machine: 'arm64' as const,
+      filename:
+        'demo-1.0.0-cp312-cp312-manylinux_2_17_aarch64.whl',
+    },
+    {
+      name: 'Windows aarch64',
+      system: 'Windows' as const,
+      machine: 'aarch64' as const,
+      filename: 'demo-1.0.0-cp312-cp312-win_arm64.whl',
+    },
+    {
+      name: 'macOS aarch64',
+      system: 'Darwin' as const,
+      machine: 'aarch64' as const,
+      filename: 'demo-1.0.0-cp312-cp312-macosx_11_0_arm64.whl',
+    },
+  ])('$name 별칭으로 Simple API ARM64 wheel을 다운로드한다', async ({
+    system,
+    machine,
+    filename,
+  }) => {
+    const downloadUrl = `https://index.example/${filename}`;
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename,
+        url: downloadUrl,
+        hash: { algorithm: 'sha256', digest: 'arm-alias-sha' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system, machine },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      filename,
+      downloadUrl,
+    });
+    await expectSelectedArtifactIsDownloaded(
+      result.root.package,
+      downloadUrl,
+      'arm-alias-sha',
+    );
+  });
+
+  it('PyPI JSON에서 대상 Python보다 높은 abi3 wheel을 거부한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: {
+          name: 'demo',
+          version: '1.0.0',
+          requires_dist: [],
+        },
+        urls: [
+          {
+            filename:
+              'demo-1.0.0-cp313-abi3-manylinux_2_17_x86_64.whl',
+            url: 'https://files.example/demo-cp313-abi3.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp313',
+            digests: { sha256: 'cp313-sha' },
+            size: 100,
+          },
+          {
+            filename:
+              'demo-1.0.0-cp37-abi3-manylinux_2_17_x86_64.whl',
+            url: 'https://files.example/demo-cp37-abi3.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp37',
+            digests: { sha256: 'cp37-sha' },
+            size: 100,
+          },
+        ],
+      },
+    });
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      filename: 'demo-1.0.0-cp37-abi3-manylinux_2_17_x86_64.whl',
+      downloadUrl: 'https://files.example/demo-cp37-abi3.whl',
+    });
+    await expectSelectedArtifactIsDownloaded(
+      result.root.package,
+      'https://files.example/demo-cp37-abi3.whl',
+      'cp37-sha',
+    );
+  });
+
+  it('Simple API에서 유효한 구버전 abi3 wheel을 선택한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename:
+          'demo-1.0.0-cp313-abi3-manylinux_2_17_x86_64.whl',
+        url: 'https://index.example/demo-cp313-abi3.whl',
+        hash: { algorithm: 'sha256', digest: 'simple-cp313-sha' },
+      },
+      {
+        filename:
+          'demo-1.0.0-cp37-abi3-manylinux_2_17_x86_64.whl',
+        url: 'https://index.example/demo-cp37-abi3.whl',
+        hash: { algorithm: 'sha256', digest: 'simple-cp37-sha' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      filename: 'demo-1.0.0-cp37-abi3-manylinux_2_17_x86_64.whl',
+      downloadUrl: 'https://index.example/demo-cp37-abi3.whl',
+    });
+    await expectSelectedArtifactIsDownloaded(
+      result.root.package,
+      'https://index.example/demo-cp37-abi3.whl',
+      'simple-cp37-sha',
+    );
+  });
+
+  it('PyPI JSON의 requires_python과 대상 Python 버전을 비교한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: {
+          name: 'demo',
+          version: '1.0.0',
+          requires_dist: [],
+        },
+        urls: [
+          {
+            filename:
+              'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+            url: 'https://files.example/demo-python313-required.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp312',
+            requires_python: '>=3.13',
+            digests: { sha256: 'python313-required-sha' },
+            size: 100,
+          },
+          {
+            filename:
+              'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+            url: 'https://files.example/demo-python312-compatible.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp312',
+            requires_python: '>=3.8,<3.13',
+            digests: { sha256: 'python312-compatible-sha' },
+            size: 100,
+          },
+        ],
+      },
+    });
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      downloadUrl: 'https://files.example/demo-python312-compatible.whl',
+    });
+    await expectSelectedArtifactIsDownloaded(
+      result.root.package,
+      'https://files.example/demo-python312-compatible.whl',
+      'python312-compatible-sha',
+    );
+  });
+
+  it('Simple API의 requiresPython과 대상 Python 버전을 비교한다', async () => {
+    const filename =
+      'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl';
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename,
+        url: 'https://index.example/demo-python313-required.whl',
+        requiresPython: '>=3.13',
+        hash: { algorithm: 'sha256', digest: 'simple-python313-sha' },
+      },
+      {
+        filename,
+        url: 'https://index.example/demo-python312-compatible.whl',
+        requiresPython: '>=3.8,<3.13',
+        hash: { algorithm: 'sha256', digest: 'simple-python312-sha' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      downloadUrl:
+        'https://index.example/demo-python312-compatible.whl',
+    });
+    await expectSelectedArtifactIsDownloaded(
+      result.root.package,
+      'https://index.example/demo-python312-compatible.whl',
+      'simple-python312-sha',
+    );
+  });
+
   it('Simple API에 호환 wheel이 없으면 다른 아키텍처 wheel 대신 sdist를 선택한다', async () => {
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
       {

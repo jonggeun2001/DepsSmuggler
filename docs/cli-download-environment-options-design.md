@@ -95,7 +95,7 @@ DownloadManager queue
 실제 downloader의 사용 계약은 다음과 같다.
 
 - pip downloader는 전달받은 `metadata.downloadUrl`과 체크섬을 우선 사용한다. URL이 없을 때만 기존 PyPI 메타데이터 조회 경로로 폴백한다.
-- pip resolver는 PyPI JSON과 Simple API 양쪽에서 선택한 wheel 또는 sdist의 `downloadUrl`, `filename`, 체크섬을 메타데이터에 저장한다. 대상 환경에 맞는 wheel이 없으면 다른 아키텍처 wheel 대신 sdist만 폴백으로 허용하고, sdist도 없으면 해결을 실패시킨다.
+- pip resolver는 PyPI JSON과 Simple API 양쪽에서 선택한 wheel 또는 sdist의 `downloadUrl`, `filename`, 체크섬을 메타데이터에 저장한다. `arm64`/`aarch64`, `amd64`/`x86_64` 별칭은 OS와 무관하게 같은 아키텍처로 평가한다. `abi3` wheel은 파일명의 최소 CPython 태그가 대상 버전 이하일 때만 허용하고, PyPI `requires_python`과 Simple API `requiresPython` 제약도 대상 Python 버전과 비교한다. 대상 환경에 맞는 wheel이 없으면 다른 아키텍처 wheel 대신 호환되는 sdist만 폴백으로 허용하고, sdist도 없으면 해결을 실패시킨다.
 - Conda downloader는 기존 동작대로 `metadata.downloadUrl`을 우선 사용한다. URL이 없으면 `repository`, `subdir`, `filename` 또는 아키텍처 기반 메타데이터 조회로 폴백한다.
 - Maven downloader는 병합된 `metadata.classifier`를 아티팩트 경로와 파일명에 사용한다.
 
@@ -114,7 +114,7 @@ DownloadManager queue
 2. 잘못된 OS, 아키텍처, Python/CUDA 버전과 패키지 타입별 잘못된 조합이 다운로드 시작 전에 거부되는지 확인한다.
 3. `--no-deps`에서 환경 민감 타입은 깊이 0 루트 해결만 수행하고 의존성을 큐에 추가하지 않는지 확인한다.
 4. 공용 dependency resolver 테스트에서 기존 루트 패키지에 resolver의 URL, 파일명, classifier 메타데이터가 병합되는지 확인한다.
-5. pip resolver에서 downloader까지 이어지는 테스트로 PyPI JSON과 Simple API에서 선택한 URL·체크섬을 재조회 없이 사용하는지 확인한다.
+5. pip resolver에서 downloader까지 이어지는 테스트로 PyPI JSON과 Simple API에서 선택한 URL·체크섬을 재조회 없이 사용하는지 확인하고, ARM64 별칭·`abi3` 최소 버전·`Requires-Python` 제약을 검증한다.
 6. 파일 입력과 `--no-deps`에도 비기본 아키텍처가 적용되고, pip/Conda의 미지원 아키텍처와 classifier 없는 Maven 대상 OS/아키텍처가 부수 효과 전에 거부되는지 확인한다.
 7. 관련 단위 테스트, 저장소 표준 worktree 검증 스크립트, TypeScript 빌드를 실행한다.
 
