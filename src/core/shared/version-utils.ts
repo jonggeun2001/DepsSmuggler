@@ -71,14 +71,14 @@ function checkSingleCondition(version: string, condition: string): boolean {
     if (target.includes('*')) {
       return !matchesWildcardVersion(version, target);
     }
-    return version !== target;
+    return compareVersions(version, target) !== 0;
   }
   if (condition.startsWith('==')) {
     const target = condition.slice(2).trim();
     if (target.includes('*')) {
       return matchesWildcardVersion(version, target);
     }
-    return version === target;
+    return compareVersions(version, target) === 0;
   }
   if (condition.startsWith('~=')) {
     // 호환 릴리스 (예: ~=2.1은 >=2.1, ==2.*)

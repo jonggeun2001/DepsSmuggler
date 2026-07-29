@@ -101,6 +101,11 @@ describe('version-utils', () => {
         expect(isVersionCompatible('1.0.1', '==1.0.0')).toBe(false);
       });
 
+      it('생략된 release segment를 0으로 정규화한다', () => {
+        expect(isVersionCompatible('3.12', '==3.12.0')).toBe(true);
+        expect(isVersionCompatible('3.12.1', '==3.12.0')).toBe(false);
+      });
+
       it('와일드카드 매칭', () => {
         expect(isVersionCompatible('1.0.5', '==1.0.*')).toBe(true);
         expect(isVersionCompatible('1.1.0', '==1.0.*')).toBe(false);
@@ -115,6 +120,11 @@ describe('version-utils', () => {
 
       it('불일치 조건 미충족', () => {
         expect(isVersionCompatible('1.0.0', '!=1.0.0')).toBe(false);
+      });
+
+      it('생략된 release segment를 0으로 정규화한다', () => {
+        expect(isVersionCompatible('3.12', '!=3.12.0')).toBe(false);
+        expect(isVersionCompatible('3.12.1', '!=3.12.0')).toBe(true);
       });
     });
 

@@ -985,15 +985,31 @@ export class PipResolver implements IResolver {
 
     const targetTag = `${targetMajor}${targetMinor}`;
     const pythonTags = pythonTag.toLowerCase().split('.');
+    const abiTags = abiTag.toLowerCase().split('.');
+
+    // 일반 CPython 대상은 동일 CPython ABI, stable ABI, ABI 비의존 wheel만 허용한다.
     if (
-      pythonTags.includes(`cp${targetTag}`) ||
-      pythonTags.includes(`py${targetTag}`) ||
-      pythonTags.includes(`py${targetMajor}`)
+      pythonTags.includes(`cp${targetTag}`) &&
+      (
+        abiTags.includes(`cp${targetTag}`) ||
+        abiTags.includes('abi3') ||
+        abiTags.includes('none')
+      )
     ) {
       return true;
     }
 
-    const abiTags = abiTag.toLowerCase().split('.');
+    // 범용 Python 태그는 ABI 비의존 wheel이어야 한다.
+    if (
+      (
+        pythonTags.includes(`py${targetTag}`) ||
+        pythonTags.includes(`py${targetMajor}`)
+      ) &&
+      abiTags.includes('none')
+    ) {
+      return true;
+    }
+
     if (!abiTags.includes('abi3')) {
       return false;
     }
