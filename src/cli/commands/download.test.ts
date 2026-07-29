@@ -4,6 +4,7 @@ import { resolveAllDependencies } from '../../core/shared';
 
 const {
   ensureDir,
+  readFile,
   reset,
   addToQueue,
   on,
@@ -14,6 +15,7 @@ const {
   stop,
 } = vi.hoisted(() => ({
   ensureDir: vi.fn(),
+  readFile: vi.fn(),
   reset: vi.fn(),
   addToQueue: vi.fn(),
   on: vi.fn(),
@@ -27,10 +29,10 @@ const {
 vi.mock('fs-extra', () => ({
   default: {
     ensureDir,
-    readFile: vi.fn(),
+    readFile,
   },
   ensureDir,
-  readFile: vi.fn(),
+  readFile,
 }));
 
 vi.mock('cli-progress', () => ({
@@ -335,12 +337,42 @@ describe('downloadCommand', () => {
     expect(resolveAllDependencies).not.toHaveBeenCalled();
   });
 
+  it('--file 입력 패키지에도 선택한 아키텍처를 적용한다', async () => {
+    readFile.mockResolvedValueOnce('requests==2.28.0');
+
+    await downloadCommand(commandOptions({
+      package: undefined,
+      file: '/tmp/requirements.txt',
+      deps: false,
+      arch: 'arm64',
+    }));
+
+    expect(resolveAllDependencies).not.toHaveBeenCalled();
+    expect(addToQueue).toHaveBeenCalledWith([
+      expect.objectContaining({
+        type: 'pip',
+        name: 'requests',
+        version: '2.28.0',
+        arch: 'arm64',
+      }),
+    ]);
+  });
+
   it.each([
     ['지원하지 않는 아키텍처', { arch: 'sparc64' }],
+    ['pip에서 지원하지 않는 아키텍처', { arch: 'i386' }],
     ['지원하지 않는 대상 OS', { targetOS: 'freebsd' }],
     ['npm 대상 OS', { type: 'npm', targetOS: 'linux' }],
     ['잘못된 Python 버전', { pythonVersion: '3.12.1' }],
     ['pip CUDA 버전', { cudaVersion: '12.4' }],
+    [
+      'classifier 없는 Maven 대상 OS',
+      {
+        type: 'maven',
+        package: 'org.lwjgl:lwjgl',
+        targetOS: 'linux',
+      },
+    ],
   ])('%s는 모든 부수 효과 전에 실패한다', async (_name, overrides) => {
     const exitSpy = vi
       .spyOn(process, 'exit')

@@ -185,6 +185,11 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       process.exit(1);
     }
 
+    packages = packages.map((pkg) => ({
+      ...pkg,
+      arch: options.arch,
+    }));
+
     if (options.classifier !== undefined) {
       packages = packages.map((pkg) => ({
         ...pkg,

@@ -23,6 +23,13 @@ const TARGET_OS_PACKAGE_TYPES = new Set<PackageType>([
   'conda',
   'maven',
 ]);
+const TARGET_ARTIFACT_PACKAGE_TYPES = new Set<PackageType>(['pip', 'conda']);
+const TARGET_ARTIFACT_ARCHITECTURES = new Set<Architecture>([
+  'x86_64',
+  'amd64',
+  'arm64',
+  'aarch64',
+]);
 const PYTHON_PACKAGE_TYPES = new Set<PackageType>(['pip', 'conda']);
 const VERSION_PATTERN = /^\d+\.\d+$/;
 
@@ -41,6 +48,15 @@ export function validateDownloadEnvironmentOptions(
 ): void {
   if (!SUPPORTED_ARCHITECTURES.has(options.arch)) {
     throw new Error(`지원하지 않는 아키텍처입니다: ${options.arch}`);
+  }
+
+  if (
+    TARGET_ARTIFACT_PACKAGE_TYPES.has(options.type) &&
+    !TARGET_ARTIFACT_ARCHITECTURES.has(options.arch)
+  ) {
+    throw new Error(
+      `${options.type} 대상 다운로드에서 지원하지 않는 아키텍처입니다: ${options.arch}`,
+    );
   }
 
   if (!SUPPORTED_TARGET_OSES.has(options.targetOS)) {
@@ -96,6 +112,16 @@ export function validateDownloadEnvironmentOptions(
     options.classifier.trim().length === 0
   ) {
     throw new Error('--classifier는 비어 있을 수 없습니다.');
+  }
+
+  if (
+    options.type === 'maven' &&
+    options.targetOS !== 'any' &&
+    options.classifier === undefined
+  ) {
+    throw new Error(
+      'Maven 대상 OS를 지정하려면 --classifier를 함께 지정해야 합니다.',
+    );
   }
 
   if (options.condaChannel !== 'conda-forge' && options.type !== 'conda') {

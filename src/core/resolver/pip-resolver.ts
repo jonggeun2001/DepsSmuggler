@@ -55,6 +55,26 @@ interface FetchedPackageInfo {
   actualVersion: string;
 }
 
+type PipArtifactChecksum = { md5?: string; sha256?: string };
+
+function getSimpleApiChecksum(
+  file: SimpleApiPackageFile | null,
+): PipArtifactChecksum | undefined {
+  const hash = file?.hash;
+  if (!hash) {
+    return undefined;
+  }
+
+  const algorithm = hash.algorithm.toLowerCase();
+  if (algorithm === 'sha256') {
+    return { sha256: hash.digest };
+  }
+  if (algorithm === 'md5') {
+    return { md5: hash.digest };
+  }
+  return undefined;
+}
+
 export class PipResolver implements IResolver {
   readonly type = 'pip' as const;
   private readonly baseUrl = 'https://pypi.org/pypi';
@@ -99,6 +119,7 @@ export class PipResolver implements IResolver {
     this.conflicts = [];
     this.targetPlatform = options?.targetPlatform ?? null;
     this.pythonVersion = options?.pythonVersion ?? null;
+    this.pipTargetPlatform = null;
 
     // pipTargetPlatform 설정 (wheel 호환성 체크용)
     if (this.targetPlatform || this.pythonVersion) {
@@ -158,6 +179,9 @@ export class PipResolver implements IResolver {
         try {
           fetchResult = await this.fetchPackageInfo(name, ver, idx);
         } catch (error) {
+          if (!parentCacheKey) {
+            throw error;
+          }
           logger.warn('패키지 정보 조회 실패', { name, version: ver, error });
           continue;
         }
@@ -343,6 +367,11 @@ export class PipResolver implements IResolver {
 
       // 최적의 wheel 선택
       const selectedFile = this.selectBestWheelFromSimpleApi(targetFiles);
+      if (this.pipTargetPlatform && !selectedFile) {
+        throw new Error(
+          `대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: ${name}@${actualVersion}`,
+        );
+      }
 
       // PEP 658 메타데이터에서 의존성 정보 조회
       if (selectedFile?.metadataHash) {
@@ -370,6 +399,8 @@ export class PipResolver implements IResolver {
           description: '',
           size: 0,
           filename: selectedFile?.filename,
+          downloadUrl: selectedFile?.url,
+          checksum: getSimpleApiChecksum(selectedFile),
           indexUrl,
         },
       };
@@ -384,11 +415,25 @@ export class PipResolver implements IResolver {
 
       let packageSize = 0;
       let packageFilename: string | undefined;
+      let packageDownloadUrl: string | undefined;
+      let packageChecksum: PipArtifactChecksum | undefined;
       if (urls && urls.length > 0) {
         const selectedFile = this.selectBestWheel(urls);
+        if (this.pipTargetPlatform && !selectedFile) {
+          throw new Error(
+            `대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: ${name}@${actualVersion}`,
+          );
+        }
         if (selectedFile) {
           packageSize = selectedFile.size || 0;
           packageFilename = selectedFile.filename;
+          packageDownloadUrl = selectedFile.url;
+          packageChecksum = {
+            ...(selectedFile.digests.md5
+              ? { md5: selectedFile.digests.md5 }
+              : {}),
+            sha256: selectedFile.digests.sha256,
+          };
         }
       }
 
@@ -400,6 +445,8 @@ export class PipResolver implements IResolver {
           description: '',
           size: packageSize,
           filename: packageFilename,
+          downloadUrl: packageDownloadUrl,
+          checksum: packageChecksum,
         },
       };
 
@@ -946,8 +993,13 @@ export class PipResolver implements IResolver {
     files: SimpleApiPackageFile[]
   ): SimpleApiPackageFile | null {
     if (!this.pipTargetPlatform) {
-      // 플랫폼 정보가 없으면 첫 번째 wheel 반환
-      return files.find((f) => f.filename.endsWith('.whl')) || null;
+      // 플랫폼 정보가 없으면 wheel 우선, 없으면 소스 배포본 사용
+      return (
+        files.find((f) => f.filename.endsWith('.whl')) ||
+        files.find((f) => f.filename.endsWith('.tar.gz')) ||
+        files[0] ||
+        null
+      );
     }
 
     // wheel 파일만 필터링
@@ -1017,8 +1069,8 @@ export class PipResolver implements IResolver {
       }
     }
 
-    // 호환되는 wheel이 없으면 첫 번째 wheel 또는 source dist 반환
-    return wheels[0] || files.find((f) => f.filename.endsWith('.tar.gz')) || files[0];
+    // 호환되지 않는 다른 아키텍처 wheel 대신 source dist만 폴백으로 사용
+    return files.find((f) => f.filename.endsWith('.tar.gz')) || null;
   }
 
   /**

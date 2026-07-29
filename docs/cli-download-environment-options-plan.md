@@ -21,6 +21,8 @@
 - Modify `src/core/shared/dependency-resolver.test.ts`: 병합 우선순위와 Conda 선택 메타데이터 보존을 테스트한다.
 - Modify `src/core/downloaders/pip.ts`: resolver가 제공한 URL과 체크섬을 우선 사용한다.
 - Modify `src/core/downloaders/pip.test.ts`: 제공된 URL 사용과 메타데이터 재조회 생략을 테스트한다.
+- Modify `src/core/resolver/pip-resolver.ts`: 선택한 PyPI/Simple API 파일 URL과 체크섬을 결과 메타데이터에 보존한다.
+- Create `src/core/resolver/pip-resolver-download.test.ts`: resolver 선택 결과가 downloader까지 유지되는 통합 경로를 테스트한다.
 - Modify `src/core/downloaders/conda.test.ts`: resolver URL 우선 사용 회귀 테스트를 추가한다.
 - Modify `src/core/downloaders/maven-download.test.ts`: classifier가 실제 다운로드 호출에 전달되는지 assertion을 강화한다.
 - Modify `docs/cli.md`: 새 옵션, 적용 범위, 검증과 예시를 문서화한다.
@@ -682,3 +684,21 @@ git commit -m "test: worktree 검증 진입점 추가"
 - [ ] **Step 7: `worktree-flow` 후속 단계 실행**
 
 브랜치를 push하고 한글 PR을 생성한 뒤 skill helper로 라벨을 부착한다. 전체 PR 기록을 주입한 독립 리뷰 게이트가 PASS일 때만 CI를 기다리고 squash merge와 브랜치/worktree 정리를 수행한다.
+
+### Task 7: 독립 코드 리뷰 후 정확도 보강
+
+**Files:**
+- Modify: `src/cli/commands/download-environment.ts`
+- Modify: `src/cli/commands/download-environment.test.ts`
+- Modify: `src/cli/commands/download.ts`
+- Modify: `src/cli/commands/download.test.ts`
+- Modify: `src/core/resolver/pip-resolver.ts`
+- Create: `src/core/resolver/pip-resolver-download.test.ts`
+- Modify: `docs/cli.md`
+
+- [ ] pip와 Conda는 resolver가 실제 구분하는 `x86_64`, `amd64`, `arm64`, `aarch64`만 대상 아키텍처로 허용한다.
+- [ ] Maven에서 `--target-os`가 `any`가 아니면 실제 아티팩트를 결정하는 `--classifier`를 요구한다.
+- [ ] `--file`에서 읽은 모든 루트 패키지에도 CLI의 `--arch` 값을 적용한다.
+- [ ] pip resolver가 PyPI JSON 및 Simple API에서 선택한 URL·파일명·체크섬을 결과 메타데이터에 저장한다.
+- [ ] Simple API에 호환 wheel이 없으면 다른 아키텍처 wheel이 아니라 sdist로 폴백한다.
+- [ ] resolver 결과를 Pip downloader에 직접 전달하는 테스트로 메타데이터 재조회 없이 같은 URL과 체크섬을 사용하는지 확인한다.

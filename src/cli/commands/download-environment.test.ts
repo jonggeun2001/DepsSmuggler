@@ -44,6 +44,16 @@ describe('validateDownloadEnvironmentOptions', () => {
 
   it.each([
     ['invalid-arch', createOptions({ arch: 'sparc64' }), '지원하지 않는 아키텍처'],
+    [
+      'pip-unsupported-arch',
+      createOptions({ type: 'pip', arch: 'i386' }),
+      'pip 대상 다운로드에서 지원하지 않는 아키텍처',
+    ],
+    [
+      'conda-unsupported-arch',
+      createOptions({ type: 'conda', arch: 'arm/v7' }),
+      'conda 대상 다운로드에서 지원하지 않는 아키텍처',
+    ],
     ['invalid-os', createOptions({ targetOS: 'freebsd' }), '지원하지 않는 대상 OS'],
     [
       'python-type',
@@ -87,8 +97,20 @@ describe('validateDownloadEnvironmentOptions', () => {
       createOptions({ type: 'pip', condaChannel: 'pytorch' }),
       '--conda-channel 옵션은 conda',
     ],
+    [
+      'maven-target-without-classifier',
+      createOptions({ type: 'maven', targetOS: 'linux' }),
+      'Maven 대상 OS를 지정하려면 --classifier',
+    ],
   ])('%s 조합을 거부한다', (_name, options, message) => {
     expect(() => validateDownloadEnvironmentOptions(options)).toThrow(message);
+  });
+
+  it.each([
+    createOptions({ type: 'npm', arch: 'i386' }),
+    createOptions({ type: 'docker', arch: 'arm/v7' }),
+  ])('pip/conda 외 타입의 기존 아키텍처는 계속 허용한다', (options) => {
+    expect(() => validateDownloadEnvironmentOptions(options)).not.toThrow();
   });
 });
 
