@@ -207,6 +207,77 @@ function compareMatchableVersions(a: string, b: string): number {
   return 0;
 }
 
+function isSameRelease(
+  a: MatchableVersion,
+  b: MatchableVersion,
+): boolean {
+  return a.epoch === b.epoch && releasesEqual(a.release, b.release);
+}
+
+function matchesExclusiveGreaterThan(
+  version: string,
+  target: string,
+): boolean {
+  if (compareMatchableVersions(version, target) <= 0) {
+    return false;
+  }
+
+  const parsedVersion = parseMatchableVersion(version);
+  const parsedTarget = parseMatchableVersion(target);
+  if (
+    !parsedVersion ||
+    !parsedTarget ||
+    !isSameRelease(parsedVersion, parsedTarget)
+  ) {
+    return true;
+  }
+
+  const suffixVersion = parseOrderedVersionSuffix(parsedVersion.suffix);
+  const suffixTarget = parseOrderedVersionSuffix(parsedTarget.suffix);
+  if (!suffixVersion || !suffixTarget) {
+    return true;
+  }
+
+  const isPostReleaseOfTarget =
+    suffixTarget.postNumber === -1 &&
+    suffixVersion.postNumber >= 0 &&
+    suffixVersion.prePhase === suffixTarget.prePhase &&
+    suffixVersion.preNumber === suffixTarget.preNumber;
+
+  return !isPostReleaseOfTarget;
+}
+
+function matchesExclusiveLessThan(
+  version: string,
+  target: string,
+): boolean {
+  if (compareMatchableVersions(version, target) >= 0) {
+    return false;
+  }
+
+  const parsedVersion = parseMatchableVersion(version);
+  const parsedTarget = parseMatchableVersion(target);
+  if (
+    !parsedVersion ||
+    !parsedTarget ||
+    !isSameRelease(parsedVersion, parsedTarget)
+  ) {
+    return true;
+  }
+
+  const suffixVersion = parseOrderedVersionSuffix(parsedVersion.suffix);
+  const suffixTarget = parseOrderedVersionSuffix(parsedTarget.suffix);
+  if (!suffixVersion || !suffixTarget) {
+    return true;
+  }
+
+  const isPrereleaseOfFinalTarget =
+    suffixTarget.prePhase === 3 &&
+    suffixVersion.prePhase < 3;
+
+  return !isPrereleaseOfFinalTarget;
+}
+
 function matchesWildcardVersion(version: string, pattern: string): boolean {
   const prefix = pattern
     .replace(/\*.*$/, '')
@@ -301,11 +372,11 @@ function checkSingleCondition(version: string, condition: string): boolean {
   }
   if (condition.startsWith('>')) {
     const target = condition.slice(1).trim();
-    return compareMatchableVersions(version, target) > 0;
+    return matchesExclusiveGreaterThan(version, target);
   }
   if (condition.startsWith('<')) {
     const target = condition.slice(1).trim();
-    return compareMatchableVersions(version, target) < 0;
+    return matchesExclusiveLessThan(version, target);
   }
   if (condition.includes('*')) {
     return matchesWildcardVersion(version, condition.trim());

@@ -96,6 +96,11 @@ describe('version-utils', () => {
         expect(isVersionCompatible('1!2.0', '>2.0')).toBe(true);
         expect(isVersionCompatible('2.0', '>1!1.0')).toBe(false);
       });
+
+      it('같은 release의 post-release를 exclusive 비교에서 제외한다', () => {
+        expect(isVersionCompatible('1.0.post1', '>1.0')).toBe(false);
+        expect(isVersionCompatible('1.0.post2', '>1.0.post1')).toBe(true);
+      });
     });
 
     describe('< 연산자', () => {
@@ -121,10 +126,16 @@ describe('version-utils', () => {
           expect(
             isVersionCompatible(
               ascendingVersions[index],
-              `<${ascendingVersions[index + 1]}`,
+              `<=${ascendingVersions[index + 1]}`,
             ),
           ).toBe(true);
         }
+      });
+
+      it('같은 release의 prerelease를 exclusive 비교에서 제외한다', () => {
+        expect(isVersionCompatible('1.0rc1', '<1.0')).toBe(false);
+        expect(isVersionCompatible('0.9rc1', '<1.0')).toBe(true);
+        expect(isVersionCompatible('1.0a1', '<1.0rc1')).toBe(true);
       });
     });
 
