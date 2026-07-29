@@ -74,6 +74,125 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     vi.clearAllMocks();
   });
 
+  it('PyPI latest 요청은 더 높은 프리릴리스보다 안정 릴리스를 선택한다', async () => {
+    const release = (version: string) => ({
+      filename: `demo-${version}-py3-none-any.whl`,
+      url: `https://files.example/demo-${version}.whl`,
+      packagetype: 'bdist_wheel',
+      python_version: 'py3',
+      digests: { sha256: `${version}-sha` },
+      size: 80,
+    });
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (_name: string, version?: string) => {
+        if (version === undefined) {
+          return {
+            data: {
+              info: { name: 'demo', version: '2.0rc1' },
+              releases: {
+                '1.9': [release('1.9')],
+                '2.0rc1': [release('2.0rc1')],
+              },
+            },
+          };
+        }
+        return {
+          data: {
+            info: {
+              name: 'demo',
+              version,
+              requires_dist: [],
+            },
+            urls: [release(version)],
+          },
+        };
+      },
+    );
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      'latest',
+      { maxDepth: 0 },
+    );
+
+    expect(result.root.package.version).toBe('1.9');
+    expect(result.root.package.metadata?.filename).toBe(
+      'demo-1.9-py3-none-any.whl',
+    );
+  });
+
+  it('Simple API latest 요청은 더 높은 프리릴리스보다 안정 릴리스를 선택한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.9-py3-none-any.whl',
+        url: 'https://index.example/demo-1.9.whl',
+      },
+      {
+        filename: 'demo-2.0rc1-py3-none-any.whl',
+        url: 'https://index.example/demo-2.0rc1.whl',
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      'latest',
+      {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+      },
+    );
+
+    expect(result.root.package.version).toBe('1.9');
+    expect(result.root.package.metadata?.filename).toBe(
+      'demo-1.9-py3-none-any.whl',
+    );
+  });
+
+  it('안정 릴리스가 없으면 Simple API latest가 프리릴리스를 선택한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-2.0rc1-py3-none-any.whl',
+        url: 'https://index.example/demo-2.0rc1.whl',
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      'latest',
+      {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+      },
+    );
+
+    expect(result.root.package.version).toBe('2.0rc1');
+  });
+
+  it('프리릴리스가 명시된 제약은 Simple API의 최신 프리릴리스를 허용한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-2.0-py3-none-any.whl',
+        url: 'https://index.example/demo-2.0.whl',
+      },
+      {
+        filename: 'demo-3.0rc1-py3-none-any.whl',
+        url: 'https://index.example/demo-3.0rc1.whl',
+      },
+    ]);
+
+    const version = await (new PipResolver() as any).getLatestVersion(
+      'demo',
+      '>=2.0rc1',
+      'https://index.example/simple',
+    );
+
+    expect(version).toBe('3.0rc1');
+  });
+
   it('PyPI JSON에서 선택한 대상 wheel URL과 체크섬을 다운로드한다', async () => {
     pipCacheMock.fetchPackageMetadata.mockResolvedValue({
       data: {
@@ -731,6 +850,60 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         indexUrl: 'https://index.example/simple',
       }),
     ).rejects.toThrow('필수 pip 의존성');
+  });
+
+  it('major.minor Python 대상에서 참인 full-version 의존성을 포함한다', async () => {
+    const dependencies: Record<string, string[]> = {
+      root: [
+        'fullversionchild==1.0.0; python_full_version < "3.13.0"',
+      ],
+      fullversionchild: [],
+    };
+    const universalRelease = (name: string) => ({
+      filename: `${name}-1.0.0-py3-none-any.whl`,
+      url: `https://files.example/${name}.whl`,
+      packagetype: 'bdist_wheel',
+      python_version: 'py3',
+      digests: { sha256: `${name}-sha` },
+      size: 80,
+    });
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string, version?: string) => {
+        if (!(name in dependencies)) {
+          return null;
+        }
+        if (version === undefined) {
+          return {
+            data: {
+              info: { name, version: '1.0.0' },
+              releases: {
+                '1.0.0': [universalRelease(name)],
+              },
+            },
+          };
+        }
+        return {
+          data: {
+            info: {
+              name,
+              version,
+              requires_dist: dependencies[name],
+            },
+            urls: [universalRelease(name)],
+          },
+        };
+      },
+    );
+
+    const result = await new PipResolver().resolveDependencies(
+      'root',
+      '1.0.0',
+      { pythonVersion: '3.12' },
+    );
+
+    expect(result.flatList.map((pkg) => pkg.name)).toContain(
+      'fullversionchild',
+    );
   });
 
   it('같은 pip 패키지에 나중에 요청된 extra 의존성도 병합한다', async () => {

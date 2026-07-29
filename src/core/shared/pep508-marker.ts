@@ -16,6 +16,18 @@ export interface Pep508MarkerEnvironment {
 }
 
 type MarkerVariable = keyof Pep508MarkerEnvironment;
+type IncompleteVersionVariable =
+  | 'python_full_version'
+  | 'implementation_version';
+type MarkerEvaluation = boolean | undefined;
+
+export interface Pep508MarkerEvaluationOptions {
+  incompleteVersions?: Partial<
+    Record<IncompleteVersionVariable, string>
+  >;
+  unknownResult?: boolean;
+}
+
 type ComparisonOperator =
   | '==='
   | '=='
@@ -158,12 +170,92 @@ function invertOperator(operator: ComparisonOperator): ComparisonOperator {
   return inverted[operator] ?? operator;
 }
 
+function combineAnd(
+  left: MarkerEvaluation,
+  right: MarkerEvaluation,
+): MarkerEvaluation {
+  if (left === false || right === false) {
+    return false;
+  }
+  if (left === true && right === true) {
+    return true;
+  }
+  return undefined;
+}
+
+function combineOr(
+  left: MarkerEvaluation,
+  right: MarkerEvaluation,
+): MarkerEvaluation {
+  if (left === true || right === true) {
+    return true;
+  }
+  if (left === false && right === false) {
+    return false;
+  }
+  return undefined;
+}
+
+function compareIncompleteVersion(
+  versionPrefix: string,
+  operator: ComparisonOperator,
+  target: string,
+): MarkerEvaluation {
+  if (operator === 'in' || operator === 'not in') {
+    return undefined;
+  }
+
+  const normalizedOperator =
+    operator === '===' ? '==' : operator;
+  const releasePrefix = /^(\d+)\.(\d+)$/.exec(versionPrefix);
+  if (!releasePrefix) {
+    return undefined;
+  }
+
+  const lowerVersion = `${versionPrefix}.0`;
+  const upperProbeVersion = `${versionPrefix}.999999`;
+
+  if (
+    normalizedOperator === '==' ||
+    normalizedOperator === '!='
+  ) {
+    const wildcardTarget = /^(\d+)\.(\d+)\.\*$/.exec(target);
+    if (wildcardTarget) {
+      const matchesPrefix =
+        wildcardTarget[1] === releasePrefix[1] &&
+        wildcardTarget[2] === releasePrefix[2];
+      return normalizedOperator === '=='
+        ? matchesPrefix
+        : !matchesPrefix;
+    }
+
+    const exactTarget = /^(\d+)\.(\d+)(?:\.|$)/.exec(target);
+    if (
+      exactTarget?.[1] === releasePrefix[1] &&
+      exactTarget?.[2] === releasePrefix[2]
+    ) {
+      return undefined;
+    }
+  }
+
+  const lowerResult = isVersionCompatible(
+    lowerVersion,
+    `${normalizedOperator}${target}`,
+  );
+  const upperResult = isVersionCompatible(
+    upperProbeVersion,
+    `${normalizedOperator}${target}`,
+  );
+  return lowerResult === upperResult ? lowerResult : undefined;
+}
+
 class MarkerParser {
   private index = 0;
 
   constructor(
     private readonly tokens: Token[],
     private readonly environment: Pep508MarkerEnvironment,
+    private readonly options: Pep508MarkerEvaluationOptions,
   ) {}
 
   parse(): boolean {
@@ -171,28 +263,28 @@ class MarkerParser {
     if (this.index !== this.tokens.length) {
       throw new Error('마커 표현식 뒤에 해석되지 않은 토큰이 있습니다.');
     }
-    return result;
+    return result ?? this.options.unknownResult ?? false;
   }
 
-  private parseOr(): boolean {
+  private parseOr(): MarkerEvaluation {
     let result = this.parseAnd();
     while (this.consumeWord('or')) {
       const right = this.parseAnd();
-      result = result || right;
+      result = combineOr(result, right);
     }
     return result;
   }
 
-  private parseAnd(): boolean {
+  private parseAnd(): MarkerEvaluation {
     let result = this.parsePrimary();
     while (this.consumeWord('and')) {
       const right = this.parsePrimary();
-      result = result && right;
+      result = combineAnd(result, right);
     }
     return result;
   }
 
-  private parsePrimary(): boolean {
+  private parsePrimary(): MarkerEvaluation {
     if (this.consume('leftParen')) {
       const result = this.parseOr();
       if (!this.consume('rightParen')) {
@@ -203,7 +295,7 @@ class MarkerParser {
     return this.parseComparison();
   }
 
-  private parseComparison(): boolean {
+  private parseComparison(): MarkerEvaluation {
     const left = this.parseOperand();
     const operator = this.parseOperator();
     const right = this.parseOperand();
@@ -259,9 +351,35 @@ class MarkerParser {
     left: Operand,
     operator: ComparisonOperator,
     right: Operand,
-  ): boolean {
+  ): MarkerEvaluation {
     if (left.value === undefined || right.value === undefined) {
-      return false;
+      return undefined;
+    }
+
+    const incompleteLeft = left.variable
+      ? this.options.incompleteVersions?.[
+          left.variable as IncompleteVersionVariable
+        ]
+      : undefined;
+    if (incompleteLeft) {
+      return compareIncompleteVersion(
+        incompleteLeft,
+        operator,
+        right.value,
+      );
+    }
+
+    const incompleteRight = right.variable
+      ? this.options.incompleteVersions?.[
+          right.variable as IncompleteVersionVariable
+        ]
+      : undefined;
+    if (incompleteRight) {
+      return compareIncompleteVersion(
+        incompleteRight,
+        invertOperator(operator),
+        left.value,
+      );
     }
 
     let leftValue = left.value;
@@ -339,11 +457,15 @@ class MarkerParser {
 export function evaluatePep508Marker(
   marker: string,
   environment: Pep508MarkerEnvironment,
+  options: Pep508MarkerEvaluationOptions = {},
 ): boolean {
   try {
-    return new MarkerParser(tokenize(marker), environment).parse();
+    return new MarkerParser(
+      tokenize(marker),
+      environment,
+      options,
+    ).parse();
   } catch {
-    // 해석할 수 없는 마커를 잘못 포함시키지 않는다.
-    return false;
+    return options.unknownResult ?? false;
   }
 }

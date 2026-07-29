@@ -162,6 +162,25 @@ function parseOrderedVersionSuffix(
   };
 }
 
+/**
+ * PEP 440 prerelease 또는 development release인지 확인한다.
+ */
+export function isPrereleaseVersion(version: string): boolean {
+  const parsed = parseMatchableVersion(version);
+  if (!parsed) {
+    return /(?:a|b|rc|alpha|beta|pre|preview|dev)\d*/i.test(
+      version,
+    );
+  }
+
+  const suffix = parseOrderedVersionSuffix(parsed.suffix);
+  return Boolean(
+    suffix &&
+      (suffix.prePhase < 3 ||
+        suffix.devNumber !== Number.POSITIVE_INFINITY),
+  );
+}
+
 function compareMatchableVersions(a: string, b: string): number {
   const parsedA = parseMatchableVersion(a);
   const parsedB = parseMatchableVersion(b);

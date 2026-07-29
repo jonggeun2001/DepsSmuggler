@@ -2,12 +2,29 @@ import { describe, it, expect } from 'vitest';
 import {
   compareVersions,
   isVersionCompatible,
+  isPrereleaseVersion,
   sortVersionsDescending,
   sortVersionsAscending,
   findLatestCompatibleVersion
 } from './version-utils';
 
 describe('version-utils', () => {
+  describe('isPrereleaseVersion', () => {
+    it.each(['2.0rc1', '2.0b2', '2.0.dev3'])(
+      '%s를 프리릴리스로 판별한다',
+      (version) => {
+        expect(isPrereleaseVersion(version)).toBe(true);
+      },
+    );
+
+    it.each(['2.0', '2.0.post1', '2.0+linux'])(
+      '%s를 안정 릴리스로 판별한다',
+      (version) => {
+        expect(isPrereleaseVersion(version)).toBe(false);
+      },
+    );
+  });
+
   describe('compareVersions', () => {
     it('동일 버전 비교 - 0 반환', () => {
       expect(compareVersions('1.0.0', '1.0.0')).toBe(0);

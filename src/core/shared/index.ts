@@ -8,6 +8,7 @@ export * from './pip-types';
 // 버전 비교 유틸리티
 export {
   compareVersions,
+  isPrereleaseVersion,
   isVersionCompatible,
   sortVersionsDescending,
   sortVersionsAscending,

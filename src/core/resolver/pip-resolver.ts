@@ -8,7 +8,12 @@ import {
 } from '../../types';
 import logger from '../../utils/logger';
 import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
-import { compareVersions, isVersionCompatible, flattenDependencyTree } from '../shared';
+import {
+  compareVersions,
+  isPrereleaseVersion,
+  isVersionCompatible,
+  flattenDependencyTree,
+} from '../shared';
 import {
   fetchPackageMetadata,
   clearMemoryCache as clearPipCache,
@@ -64,6 +69,31 @@ type PipCompatibilityCandidate = Pick<
 type PipResolverTargetPlatform = Omit<PipTargetPlatform, 'os'> & {
   os: PipTargetPlatform['os'] | 'any';
 };
+
+function explicitlyRequestsPrerelease(versionSpec?: string): boolean {
+  return Boolean(
+    versionSpec &&
+      /\d(?:[._-]?\d)*(?:[._-]?(?:a|b|rc|alpha|beta|pre|preview|dev)\d*)/i.test(
+        versionSpec,
+      ),
+  );
+}
+
+function comparePipVersionsDescending(
+  leftVersion: string,
+  rightVersion: string,
+  versionSpec?: string,
+): number {
+  if (!explicitlyRequestsPrerelease(versionSpec)) {
+    const leftPrerelease = isPrereleaseVersion(leftVersion);
+    const rightPrerelease = isPrereleaseVersion(rightVersion);
+    if (leftPrerelease !== rightPrerelease) {
+      return leftPrerelease ? 1 : -1;
+    }
+  }
+
+  return compareVersions(rightVersion, leftVersion);
+}
 
 function getSimpleApiChecksum(
   file: SimpleApiPackageFile | null,
@@ -578,15 +608,27 @@ export class PipResolver implements IResolver {
   /**
    * 환경 마커 평가
    * 알려진 대상 환경 값으로 PEP 508 마커를 평가
-   * 알 수 없거나 해석할 수 없는 조건은 보수적으로 제외
+   * 알 수 없거나 해석할 수 없는 조건은 의존성 누락을 막기 위해 포함
    */
   private evaluateMarker(marker?: string, extras?: string[]): boolean {
     // 마커가 없으면 항상 포함
     if (!marker) return true;
 
     const system = this.targetPlatform?.system;
+    const rawPythonVersion = this.pythonVersion ?? undefined;
+    const pythonVersionParts = rawPythonVersion?.split('.') ?? [];
+    const pythonVersion =
+      pythonVersionParts.length >= 2
+        ? pythonVersionParts.slice(0, 2).join('.')
+        : rawPythonVersion;
+    const pythonFullVersion = rawPythonVersion;
+    const incompleteFullVersion =
+      pythonVersionParts.length === 2
+        ? pythonVersion
+        : undefined;
     const environment = {
-      python_version: this.pythonVersion ?? undefined,
+      python_version: pythonVersion,
+      python_full_version: pythonFullVersion,
       sys_platform:
         system === 'Windows'
           ? 'win32'
@@ -599,6 +641,7 @@ export class PipResolver implements IResolver {
       platform_machine: this.targetPlatform?.machine,
       os_name: system ? (system === 'Windows' ? 'nt' : 'posix') : undefined,
       implementation_name: this.pythonVersion ? 'cpython' : undefined,
+      implementation_version: pythonFullVersion,
       platform_python_implementation: this.pythonVersion
         ? 'CPython'
         : undefined,
@@ -606,7 +649,19 @@ export class PipResolver implements IResolver {
 
     const selectedExtras = extras?.length ? extras : [''];
     return selectedExtras.some((extra) =>
-      evaluatePep508Marker(marker, { ...environment, extra }),
+      evaluatePep508Marker(
+        marker,
+        { ...environment, extra },
+        {
+          incompleteVersions: incompleteFullVersion
+            ? {
+                python_full_version: incompleteFullVersion,
+                implementation_version: incompleteFullVersion,
+              }
+            : undefined,
+          unknownResult: true,
+        },
+      ),
     );
   }
 
@@ -659,7 +714,9 @@ export class PipResolver implements IResolver {
 
         return compatibleVersions
           .map(([candidateVersion]) => candidateVersion)
-          .sort((a, b) => compareVersions(b, a))[0];
+          .sort((a, b) =>
+            comparePipVersionsDescending(a, b, versionSpec),
+          )[0];
       } else {
         // PyPI JSON API 사용 (기존 로직)
         // 캐시에서 패키지 메타데이터 조회 (버전 없이 조회해야 releases 포함)
@@ -677,7 +734,11 @@ export class PipResolver implements IResolver {
                 isVersionCompatible(candidateVersion, versionSpec)),
           )
           .sort(([leftVersion], [rightVersion]) =>
-            compareVersions(rightVersion, leftVersion),
+            comparePipVersionsDescending(
+              leftVersion,
+              rightVersion,
+              versionSpec,
+            ),
           );
 
         for (const [candidateVersion, releases] of compatibleVersions) {

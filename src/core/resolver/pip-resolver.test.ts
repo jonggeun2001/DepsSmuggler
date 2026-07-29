@@ -166,9 +166,9 @@ describe('PipResolver 단위 테스트', () => {
         expect(callEvaluateMarker(resolver, '')).toBe(true);
       });
 
-      it('targetPlatform이 없고 마커가 있으면 false', () => {
-        // 기본 resolver는 targetPlatform이 없음
-        expect(callEvaluateMarker(resolver, 'sys_platform == "linux"')).toBe(false);
+      it('대상 환경 값이 없으면 의존성을 누락하지 않도록 포함한다', () => {
+        // 대상 OS를 모르면 OS별 의존성을 모두 번들에 포함한다.
+        expect(callEvaluateMarker(resolver, 'sys_platform == "linux"')).toBe(true);
       });
 
       it('플랫폼 없이도 지정한 Python 버전 마커를 평가한다', () => {
@@ -178,8 +178,36 @@ describe('PipResolver 단위 테스트', () => {
         ).toBe(true);
       });
 
-      it('major.minor 입력으로 patch-level Python 값을 추정하지 않는다', () => {
+      it('major.minor 입력의 full version 범위를 보수적으로 평가한다', () => {
         resolver = createResolver({ pythonVersion: '3.12' });
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_full_version < "3.13.0"',
+          ),
+        ).toBe(true);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'implementation_version >= "3.13.0"',
+          ),
+        ).toBe(false);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_full_version == "3.12.5"',
+          ),
+        ).toBe(true);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'implementation_version < "3.12.1"',
+          ),
+        ).toBe(true);
+      });
+
+      it('patch 버전을 지정하면 full version 마커를 정확히 평가한다', () => {
+        resolver = createResolver({ pythonVersion: '3.12.8' });
         expect(
           callEvaluateMarker(
             resolver,
@@ -189,9 +217,9 @@ describe('PipResolver 단위 테스트', () => {
         expect(
           callEvaluateMarker(
             resolver,
-            'implementation_version < "3.12.1"',
+            'implementation_version == "3.12.8"',
           ),
-        ).toBe(false);
+        ).toBe(true);
       });
     });
 
