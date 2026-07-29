@@ -486,7 +486,10 @@ export class PipResolver implements IResolver {
       // PEP 658 메타데이터에서 의존성 정보 조회. 빈 배열은
       // "조회 성공 + 의존성 없음"이고 null은 조회 불가다.
       let customMetadataAvailable = false;
-      if (selectedFile?.metadataHash) {
+      if (
+        selectedFile?.metadataAvailable ||
+        selectedFile?.metadataHash
+      ) {
         const metadataRequiresDist =
           await fetchWheelMetadata(selectedFile);
         if (metadataRequiresDist !== null) {

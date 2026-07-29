@@ -464,12 +464,12 @@ export class CondaRepoDataProcessor {
     const isExplicitCpuBuild =
       /(?:^|[_-])cpu(?:[_-]|$)/.test(normalizedBuild);
     const cudaBuildMarker =
-      /(?:^|[_-])(?:cuda|cu)[_-]?(\d{3}(?=[_-]|$)|\d{1,2}[._]\d{1,2}(?=[_-]|$)|\d{1,2}(?=[_-]|$))/.exec(
+      /(?:^|[_-])(?:cuda|cu)[_-]?(\d{2,3}(?=[a-z_-]|$)|\d{1,2}[._]\d{1,2}(?=[a-z_-]|$)|\d{1,2}(?=[a-z_-]|$))/.exec(
         normalizedBuild,
       );
     const hasUnparsedCudaBuild =
       !cudaBuildMarker &&
-      /(?:^|[_-])(?:cuda|cu)(?=[_-]|$)/.test(
+      /(?:^|[_-])(?:cuda|cu)(?=[0-9._-]|$)/.test(
         normalizedBuild,
       );
 
@@ -500,12 +500,22 @@ export class CondaRepoDataProcessor {
 
     if (cudaBuildMarker) {
       const rawVersion = cudaBuildMarker[1].replace('_', '.');
+      const targetMajorMinor = this.config.cudaVersion
+        .split('.')
+        .slice(0, 2)
+        .join('.');
+      const twoDigitVersion =
+        rawVersion.length === 2
+          ? `${rawVersion[0]}.${rawVersion[1]}`
+          : rawVersion;
       const buildVersion =
         rawVersion.includes('.')
           ? rawVersion
-          : rawVersion.length >= 3
+          : rawVersion.length === 3
             ? `${rawVersion.slice(0, -1)}.${rawVersion.slice(-1)}`
-            : rawVersion;
+            : twoDigitVersion === targetMajorMinor
+              ? twoDigitVersion
+              : rawVersion;
       const targetParts = this.config.cudaVersion.split('.');
       const buildParts = buildVersion.split('.');
       if (

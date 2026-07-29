@@ -191,10 +191,7 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
                   algorithm: 'sha256',
                   digest: 'custom-root-sha',
                 },
-                metadataHash: {
-                  algorithm: 'sha256',
-                  digest: 'custom-root-metadata',
-                },
+                metadataAvailable: true,
               },
             ]
           : [],

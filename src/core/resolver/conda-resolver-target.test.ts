@@ -297,6 +297,80 @@ describe('CondaRepoDataProcessor Python 호환성', () => {
       expect(candidates.length > 0).toBe(expected);
     },
   );
+
+  it.each([
+    ['py36_cu92_pyt14', '9.2'],
+    ['py36_cu101_pyt14', '10.1'],
+    ['cuda116h4bf587c_0', '11.6'],
+    ['cuda124py312h123_0', '12.4'],
+  ])(
+    '실제 compact CUDA build %s를 %s로 판별한다',
+    (build, cudaVersion) => {
+      const processor = new CondaRepoDataProcessor({
+        condaUrl: 'https://conda.example',
+        targetSubdir: 'linux-64',
+        targetArchitecture: 'x86_64',
+        pythonVersion: null,
+        cudaVersion,
+      });
+
+      const candidates = processor.findPackageCandidates(
+        {
+          info: { subdir: 'linux-64' },
+          packages: {
+            [`demo-1.0.0-${build}.tar.bz2`]: {
+              name: 'demo',
+              version: '1.0.0',
+              build,
+              build_number: 0,
+              depends: [],
+              subdir: 'linux-64',
+            },
+          },
+        },
+        'demo',
+        '==1.0.0',
+      );
+
+      expect(candidates).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    ['py36_cu92_pyt14', '10.1'],
+    ['cuda116h4bf587c_0', '12.4'],
+  ])(
+    'compact CUDA build %s를 잘못된 대상 %s에서 제외한다',
+    (build, cudaVersion) => {
+      const processor = new CondaRepoDataProcessor({
+        condaUrl: 'https://conda.example',
+        targetSubdir: 'linux-64',
+        targetArchitecture: 'x86_64',
+        pythonVersion: null,
+        cudaVersion,
+      });
+
+      const candidates = processor.findPackageCandidates(
+        {
+          info: { subdir: 'linux-64' },
+          packages: {
+            [`demo-1.0.0-${build}.tar.bz2`]: {
+              name: 'demo',
+              version: '1.0.0',
+              build,
+              build_number: 0,
+              depends: [],
+              subdir: 'linux-64',
+            },
+          },
+        },
+        'demo',
+        '==1.0.0',
+      );
+
+      expect(candidates).toEqual([]);
+    },
+  );
 });
 
 describe('CondaResolver 대상 아티팩트 선택', () => {

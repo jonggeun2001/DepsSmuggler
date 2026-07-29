@@ -7,6 +7,7 @@
  * 참고: https://peps.python.org/pep-0503/
  */
 
+import { createHash } from 'crypto';
 import * as path from 'path';
 import axios from 'axios';
 import { createDiskCache, CacheStore } from './cache/cache-store';
@@ -30,6 +31,8 @@ export interface SimpleApiPackageFile {
     algorithm: string;
     digest: string;
   };
+  /** PEP 658/714: 해시가 없어도 원격 Core Metadata가 제공되는지 여부 */
+  metadataAvailable?: boolean;
 }
 
 /**
@@ -202,14 +205,33 @@ export function parseSimpleApiHtml(
     // data-yanked 추출
     const yanked = /data-yanked(?:=["'][^"']*["'])?/i.test(attributes);
 
-    // PEP 658: data-dist-info-metadata 추출 (메타데이터 파일 접근 가능 여부)
+    // PEP 658/714: data-core-metadata 우선, legacy 속성 fallback
     let metadataHash: { algorithm: string; digest: string } | undefined;
-    const metadataHashMatch = /data-dist-info-metadata=["']sha256=([a-fA-F0-9]+)["']/i.exec(attributes);
-    if (metadataHashMatch) {
-      metadataHash = {
-        algorithm: 'sha256',
-        digest: metadataHashMatch[1],
-      };
+    let metadataAvailable = false;
+    const coreMetadataMatch =
+      /data-core-metadata=["']([^"']+)["']/i.exec(
+        attributes,
+      );
+    const legacyMetadataMatch =
+      /data-dist-info-metadata=["']([^"']+)["']/i.exec(
+        attributes,
+      );
+    const metadataValue =
+      coreMetadataMatch?.[1] ?? legacyMetadataMatch?.[1];
+    if (metadataValue?.toLowerCase() === 'true') {
+      metadataAvailable = true;
+    } else if (metadataValue) {
+      const metadataHashMatch =
+        /^([A-Za-z0-9][A-Za-z0-9_-]*)=([a-fA-F0-9]+)$/.exec(
+          metadataValue,
+        );
+      if (metadataHashMatch) {
+        metadataAvailable = true;
+        metadataHash = {
+          algorithm: metadataHashMatch[1].toLowerCase(),
+          digest: metadataHashMatch[2],
+        };
+      }
     }
 
     files.push({
@@ -219,6 +241,7 @@ export function parseSimpleApiHtml(
       yanked,
       hash,
       metadataHash,
+      metadataAvailable,
     });
   }
 
@@ -302,8 +325,10 @@ export function isSourceDistribution(filename: string): boolean {
 export async function fetchWheelMetadata(
   file: SimpleApiPackageFile,
 ): Promise<string[] | null> {
-  if (!file.metadataHash) {
-    logger.debug('메타데이터 해시 없음, PEP 658 미지원', { filename: file.filename });
+  if (!file.metadataAvailable && !file.metadataHash) {
+    logger.debug('원격 Core Metadata 미지원', {
+      filename: file.filename,
+    });
     return null;
   }
 
@@ -318,10 +343,40 @@ export async function fetchWheelMetadata(
         Accept: 'text/plain',
       },
       timeout: 30000,
-      responseType: 'text',
+      responseType: 'arraybuffer',
     });
 
-    const metadata = response.data as string;
+    const metadataBytes =
+      typeof response.data === 'string'
+        ? Buffer.from(response.data, 'utf8')
+        : Buffer.from(response.data as ArrayBuffer);
+    if (file.metadataHash) {
+      let actualDigest: string;
+      try {
+        actualDigest = createHash(file.metadataHash.algorithm)
+          .update(metadataBytes)
+          .digest('hex');
+      } catch {
+        logger.warn('지원하지 않는 Core Metadata 해시', {
+          filename: file.filename,
+          algorithm: file.metadataHash.algorithm,
+        });
+        return null;
+      }
+
+      if (
+        actualDigest.toLowerCase() !==
+        file.metadataHash.digest.toLowerCase()
+      ) {
+        logger.warn('Core Metadata 체크섬 불일치', {
+          filename: file.filename,
+          algorithm: file.metadataHash.algorithm,
+        });
+        return null;
+      }
+    }
+
+    const metadata = metadataBytes.toString('utf8');
     return parseRequiresDist(metadata);
   } catch (error) {
     logger.warn('PEP 658 메타데이터 조회 실패', {
