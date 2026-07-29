@@ -8,8 +8,14 @@ import {
 } from '../../types';
 import logger from '../../utils/logger';
 import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
-import { compareVersions, isVersionCompatible, flattenDependencyTree } from '../shared';
+import { flattenDependencyTree } from '../shared';
 import { isPythonRequiresCompatible, isPythonWheelCompatible } from '../shared/pip-wheel';
+import {
+  comparePep440Versions,
+  isPep440PreRelease,
+  isPep440VersionCompatible,
+  specifierAllowsPep440PreRelease,
+} from '../shared/pip-version';
 import {
   fetchPackageMetadata,
   clearMemoryCache as clearPipCache,
@@ -590,16 +596,15 @@ export class PipResolver implements IResolver {
         const compatiblePythonVersions = Array.from(filesByVersion)
           .filter(([, versionFiles]) => this.selectBestWheelFromSimpleApi(versionFiles) !== null)
           .map(([version]) => version)
-          .sort((left, right) => compareVersions(right, left));
-        const compatibleVersions = versionSpec
-          ? compatiblePythonVersions.filter((version) => isVersionCompatible(version, versionSpec))
-          : compatiblePythonVersions;
+          .sort((left, right) => comparePep440Versions(right, left));
+        const compatibleVersion = this.selectPreferredVersion(
+          compatiblePythonVersions,
+          versionSpec
+        );
 
-        if (compatibleVersions.length > 0) {
-          return compatibleVersions[0];
-        }
+        if (compatibleVersion) return compatibleVersion;
 
-        const fallbackVersion = compatiblePythonVersions[0];
+        const fallbackVersion = this.selectPreferredVersion(compatiblePythonVersions);
         if (!fallbackVersion) return null;
 
         if (versionSpec) {
@@ -621,18 +626,20 @@ export class PipResolver implements IResolver {
         if (!data.releases) return null;
 
         const compatiblePythonVersions = Object.entries(data.releases)
-          .filter(([, releases]) => releases.length > 0 && this.selectBestWheel(releases) !== null)
+          .filter(([, releases]) => {
+            const availableReleases = releases.filter((release) => !release.yanked);
+            return availableReleases.length > 0 && this.selectBestWheel(availableReleases) !== null;
+          })
           .map(([version]) => version)
-          .sort((left, right) => compareVersions(right, left));
-        const compatibleVersions = versionSpec
-          ? compatiblePythonVersions.filter((version) => isVersionCompatible(version, versionSpec))
-          : compatiblePythonVersions;
+          .sort((left, right) => comparePep440Versions(right, left));
+        const compatibleVersion = this.selectPreferredVersion(
+          compatiblePythonVersions,
+          versionSpec
+        );
 
-        if (compatibleVersions.length > 0) {
-          return compatibleVersions[0];
-        }
+        if (compatibleVersion) return compatibleVersion;
 
-        const fallbackVersion = compatiblePythonVersions[0];
+        const fallbackVersion = this.selectPreferredVersion(compatiblePythonVersions);
         if (!fallbackVersion) return null;
 
         if (versionSpec) {
@@ -648,6 +655,19 @@ export class PipResolver implements IResolver {
     } catch {
       return null;
     }
+  }
+
+  private selectPreferredVersion(versions: string[], versionSpec?: string): string | null {
+    const matchingVersions = versionSpec
+      ? versions.filter((version) => isPep440VersionCompatible(version, versionSpec))
+      : versions;
+    if (matchingVersions.length === 0) return null;
+
+    if (specifierAllowsPep440PreRelease(versionSpec)) {
+      return matchingVersions[0];
+    }
+
+    return matchingVersions.find((version) => !isPep440PreRelease(version)) ?? matchingVersions[0];
   }
 
   /**

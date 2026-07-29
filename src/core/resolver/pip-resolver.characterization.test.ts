@@ -12,6 +12,7 @@ type PackageFixture = {
         size?: number;
         packagetype?: string;
         requires_python?: string;
+        yanked?: boolean;
       }>;
     }
   >;
@@ -473,6 +474,115 @@ describe('PipResolver characterization', () => {
     const result = await resolver.resolveDependencies('future', 'latest', { pythonVersion: '3.12' });
 
     expect(result.root.package.version).toBe('1.0.0');
+  });
+
+  it('PyPI latest는 yanked와 프리릴리스보다 안정 릴리스를 선택한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        future: {
+          latest: '2.0.0rc1',
+          versions: {
+            '1.0.0': {
+              urls: [
+                {
+                  filename: 'future-1.0.0-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                },
+              ],
+            },
+            '1.1.0': {
+              urls: [
+                {
+                  filename: 'future-1.1.0-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                  yanked: true,
+                },
+              ],
+            },
+            '2.0.0rc1': {
+              urls: [
+                {
+                  filename: 'future-2.0.0rc1-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                },
+              ],
+            },
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('future', 'latest');
+
+    expect(result.root.package.version).toBe('1.0.0');
+  });
+
+  it('정확히 고정한 yanked PyPI 릴리스는 선택할 수 있다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        future: {
+          latest: '1.1.0',
+          versions: {
+            '1.1.0': {
+              urls: [
+                {
+                  filename: 'future-1.1.0-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                  yanked: true,
+                },
+              ],
+            },
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('future', '1.1.0');
+
+    expect(result.root.package.version).toBe('1.1.0');
+  });
+
+  it('프리릴리스를 명시한 범위는 PEP 440 순서로 가장 높은 rc를 선택한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        root: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['future>=1.0.0rc1,<1.0.0'] },
+          },
+        },
+        future: {
+          latest: '1.0.0rc10',
+          versions: {
+            '1.0.0rc2': {
+              urls: [
+                {
+                  filename: 'future-1.0.0rc2-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                },
+              ],
+            },
+            '1.0.0rc10': {
+              urls: [
+                {
+                  filename: 'future-1.0.0rc10-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                },
+              ],
+            },
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('root', '1.0.0');
+
+    expect(result.flatList).toContainEqual(
+      expect.objectContaining({ name: 'future', version: '1.0.0rc10' })
+    );
   });
 
   it('PyPI 범위 의존성은 대상 Python과 호환되는 이전 릴리스를 포함한다', async () => {

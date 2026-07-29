@@ -499,6 +499,11 @@ export async function resolveAllDependencies(
         };
         dependencyTrees.push(convertedResult);
 
+        const resolvedRootKey = `npm:${npmResult.root.name}@${npmResult.root.version}`;
+        if (resolvedRootKey !== key) {
+          resolvedSet.delete(key);
+        }
+
         // npm 의존성 목록 추가
         for (const depPkg of npmResult.flatList) {
           const depKey = `npm:${depPkg.name}@${depPkg.version}`;
@@ -534,6 +539,11 @@ export async function resolveAllDependencies(
         ) as DependencyResolutionResult;
 
         dependencyTrees.push(result);
+
+        const resolvedRootKey = `${result.root.package.type}:${result.root.package.name}@${result.root.package.version}`;
+        if (resolvedRootKey !== key) {
+          resolvedSet.delete(key);
+        }
 
         // 평탄화된 의존성 목록 추가
         for (const depPkg of result.flatList) {

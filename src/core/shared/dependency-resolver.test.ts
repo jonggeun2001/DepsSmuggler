@@ -161,6 +161,28 @@ describe('dependency-resolver', () => {
       expect(result.dependencyTrees).toHaveLength(1);
     });
 
+    it('latest root는 해석된 실제 버전으로 교체한다', async () => {
+      const mockResolver = {
+        resolveDependencies: vi.fn().mockResolvedValue({
+          root: {
+            package: { type: 'pip', name: 'idna', version: '3.18' },
+            dependencies: [],
+          },
+          flatList: [{ type: 'pip', name: 'idna', version: '3.18' }],
+          conflicts: [],
+          totalSize: 0,
+        }),
+      };
+      vi.mocked(getPipResolver).mockReturnValue(mockResolver as any);
+
+      const result = await resolveAllDependencies([
+        { id: 'pip-idna-latest', type: 'pip', name: 'idna', version: 'latest' },
+      ]);
+
+      expect(result.allPackages).toHaveLength(1);
+      expect(result.allPackages[0]).toMatchObject({ name: 'idna', version: '3.18' });
+    });
+
     it('includeDependencies가 false면 원본 패키지만 반환', async () => {
       const mockResolver = {
         resolveDependencies: vi.fn(),
