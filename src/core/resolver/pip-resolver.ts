@@ -11,6 +11,7 @@ import logger from '../../utils/logger';
 import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
 import {
   comparePep440Versions,
+  getPackageArtifactKey,
   isPrereleaseVersion,
   isVersionCompatible,
   flattenDependencyTree,
@@ -243,8 +244,8 @@ export class PipResolver implements IResolver {
 
         if (!fetchResult) continue;
 
-        const { packageInfo, requiresDist, actualVersion } = fetchResult;
-        const cacheKey = `${name.toLowerCase()}@${actualVersion}`;
+        const { packageInfo, requiresDist } = fetchResult;
+        const cacheKey = getPackageArtifactKey(packageInfo);
 
         // extra 패키지도 기본 의존성과 선택한 extra 의존성을 함께 가진다.
         const incomingExtras = Array.from(
@@ -338,36 +339,18 @@ export class PipResolver implements IResolver {
                 throw new Error('호환되는 버전을 찾을 수 없습니다.');
               }
 
-              const depCacheKey = `${dep.name.toLowerCase()}@${depVersion}`;
-              // 아직 해결되지 않은 패키지만 큐에 추가
-              const processedDepExtras = resolvedExtras.get(depCacheKey);
-              const dependencyExtraContexts = [
-                '',
-                ...(dep.extras ?? []),
-              ];
-              const hasNewExtras = dependencyExtraContexts.some(
-                (extra) => !processedDepExtras?.has(extra),
-              );
-              if (
-                !resolvedNodes.has(depCacheKey) ||
-                hasNewExtras
-              ) {
-                queue.push({
-                  name: dep.name,
-                  version: depVersion,
-                  indexUrl: usedIndexUrl,
-                  extras: dep.extras,
-                  parentCacheKey: cacheKey,
-                  depth: depth + 1,
-                });
-              } else {
-                // 이미 해결된 경우 부모-자식 관계만 추가
-                const children = parentChildMap.get(cacheKey) || [];
-                if (!children.includes(depCacheKey)) {
-                  children.push(depCacheKey);
-                  parentChildMap.set(cacheKey, children);
-                }
-              }
+              // 저장소/URL/파일/체크섬은 실제 패키지 정보를 조회한 뒤에야
+              // 확정된다. name@version만으로 미리 중복 제거하면 서로 다른
+              // 인덱스의 같은 버전 아티팩트가 합쳐지므로 최종 아티팩트 키는
+              // dequeue 후 packageInfo에서 계산한다.
+              queue.push({
+                name: dep.name,
+                version: depVersion,
+                indexUrl: usedIndexUrl,
+                extras: dep.extras,
+                parentCacheKey: cacheKey,
+                depth: depth + 1,
+              });
             } catch (error) {
               const reason =
                 error instanceof Error ? error.message : String(error);

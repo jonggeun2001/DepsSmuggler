@@ -7,6 +7,7 @@ describe('CondaRepoDataProcessor Python 호환성', () => {
     const processor = new CondaRepoDataProcessor({
       condaUrl: 'https://conda.example',
       targetSubdir: 'noarch',
+      targetArchitecture: 'x86_64',
       pythonVersion: '3.12',
       cudaVersion: null,
     });
@@ -43,6 +44,7 @@ describe('CondaRepoDataProcessor Python 호환성', () => {
     const processor = new CondaRepoDataProcessor({
       condaUrl: 'https://conda.example',
       targetSubdir: 'noarch',
+      targetArchitecture: 'x86_64',
       pythonVersion: '3.12',
       cudaVersion: null,
     });
@@ -72,6 +74,7 @@ describe('CondaRepoDataProcessor Python 호환성', () => {
     const processor = new CondaRepoDataProcessor({
       condaUrl: 'https://conda.example',
       targetSubdir: 'linux-aarch64',
+      targetArchitecture: 'aarch64',
       pythonVersion: '3.12',
       cudaVersion: null,
     });
@@ -98,6 +101,114 @@ describe('CondaRepoDataProcessor Python 호환성', () => {
       processor.getLatestVersionFromRepoData('demo', 'conda-forge'),
     ).resolves.toBeNull();
   });
+
+  it('대상 아키텍처와 다른 __archspec noarch 빌드를 제외한다', () => {
+    const processor = new CondaRepoDataProcessor({
+      condaUrl: 'https://conda.example',
+      targetSubdir: 'noarch',
+      targetArchitecture: 'aarch64',
+      pythonVersion: null,
+      cudaVersion: null,
+    });
+
+    const candidates = processor.findPackageCandidates(
+      {
+        info: { subdir: 'noarch' },
+        packages: {
+          'demo-1.0.0-x86_1.tar.bz2': {
+            name: 'demo',
+            version: '1.0.0',
+            build: 'x86_1',
+            build_number: 1,
+            depends: ['__archspec 1 x86_64'],
+            subdir: 'noarch',
+          },
+          'demo-1.0.0-portable_0.tar.bz2': {
+            name: 'demo',
+            version: '1.0.0',
+            build: 'portable_0',
+            build_number: 0,
+            depends: [],
+            subdir: 'noarch',
+          },
+        },
+      },
+      'demo',
+      '==1.0.0',
+    );
+
+    expect(candidates.map((candidate) => candidate.filename)).toEqual([
+      'demo-1.0.0-portable_0.tar.bz2',
+    ]);
+  });
+
+  it.each([
+    ['linux-aarch64', 'arm64', 'aarch64'],
+    ['osx-arm64', 'aarch64', 'aarch64'],
+    ['win-arm64', 'arm64', 'aarch64'],
+    ['noarch', 'arm64', 'arm64'],
+  ])(
+    '%s 대상에서 ARM 별칭 %s를 __archspec %s와 대응한다',
+    (targetSubdir, targetArchitecture, archspecBuild) => {
+      const processor = new CondaRepoDataProcessor({
+        condaUrl: 'https://conda.example',
+        targetSubdir,
+        targetArchitecture,
+        pythonVersion: null,
+        cudaVersion: null,
+      });
+
+      const candidates = processor.findPackageCandidates(
+        {
+          info: { subdir: targetSubdir },
+          packages: {
+            'demo-1.0.0-arm_0.tar.bz2': {
+              name: 'demo',
+              version: '1.0.0',
+              build: 'arm_0',
+              build_number: 0,
+              depends: [`__archspec=1=${archspecBuild}`],
+              subdir: targetSubdir,
+            },
+          },
+        },
+        'demo',
+        '==1.0.0',
+      );
+
+      expect(candidates).toHaveLength(1);
+    },
+  );
+
+  it('일반 ARM 대상만으로 판정할 수 없는 microarchitecture를 거부한다', () => {
+    const processor = new CondaRepoDataProcessor({
+      condaUrl: 'https://conda.example',
+      targetSubdir: 'osx-arm64',
+      targetArchitecture: 'arm64',
+      pythonVersion: null,
+      cudaVersion: null,
+    });
+
+    const candidates = processor.findPackageCandidates(
+      {
+        info: { subdir: 'osx-arm64' },
+        packages: {
+          'demo-1.0.0-m1_0.tar.bz2': {
+            name: 'demo',
+            version: '1.0.0',
+            build: 'm1_0',
+            build_number: 0,
+            depends: ['__archspec=1=m1'],
+            subdir: 'osx-arm64',
+          },
+        },
+      },
+      'demo',
+      '==1.0.0',
+    );
+
+    expect(candidates).toEqual([]);
+  });
 });
 
 describe('CondaResolver 대상 아티팩트 선택', () => {
@@ -122,12 +233,12 @@ describe('CondaResolver 대상 아티팩트 선택', () => {
         return {
           info: { subdir: 'noarch' },
           packages: {
-            'demo-1.0.0-linux-only_1.tar.bz2': {
+            'demo-1.0.0-x86-only_1.tar.bz2': {
               name: 'demo',
               version: '1.0.0',
-              build: 'linux_only_1',
+              build: 'x86_only_1',
               build_number: 1,
-              depends: ['__linux'],
+              depends: ['__archspec=1=x86_64'],
               subdir: 'noarch',
             },
             'demo-1.0.0-pyhd8ed1ab_0.tar.bz2': {
@@ -144,7 +255,7 @@ describe('CondaResolver 대상 아티팩트 선택', () => {
 
     const result = await resolver.resolveDependencies('demo', '1.0.0', {
       maxDepth: 0,
-      targetPlatform: { machine: 'x86_64' },
+      targetPlatform: { machine: 'aarch64' },
       pythonVersion: '3.12',
     });
 

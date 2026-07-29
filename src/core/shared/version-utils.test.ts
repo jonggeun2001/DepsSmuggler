@@ -213,6 +213,15 @@ describe('version-utils', () => {
         expect(isVersionCompatible('3.12.0alpha1', '==3.12.0a1')).toBe(true);
       });
 
+      it('===는 zero-padding 없이 ASCII 대소문자만 무시한다', () => {
+        expect(
+          isVersionCompatible('1.0RC1', '===1.0rc1'),
+        ).toBe(true);
+        expect(
+          isVersionCompatible('1.0', '===1.0.0'),
+        ).toBe(false);
+      });
+
       it('PEP 440 post 및 local version을 정규화한다', () => {
         expect(isVersionCompatible('1.0-1', '==1.0.post1')).toBe(true);
         expect(isVersionCompatible('1.0+linux', '==1.0')).toBe(true);

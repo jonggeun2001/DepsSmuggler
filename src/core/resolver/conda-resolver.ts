@@ -63,6 +63,7 @@ export class CondaResolver implements IResolver {
     this.repoDataProcessor = new CondaRepoDataProcessor({
       condaUrl: this.condaUrl,
       targetSubdir: 'linux-64',
+      targetArchitecture: 'x86_64',
       pythonVersion: null,
       cudaVersion: null,
     });
@@ -100,6 +101,7 @@ export class CondaResolver implements IResolver {
     // RepoData 프로세서 설정 업데이트
     this.repoDataProcessor.updateConfig({
       targetSubdir,
+      targetArchitecture: arch,
       pythonVersion: this.pythonVersion,
       cudaVersion,
     });
@@ -108,6 +110,7 @@ export class CondaResolver implements IResolver {
     logger.info(`Conda 의존성 해결 시작: ${packageName}@${version}`, {
       channel,
       targetSubdir,
+      targetArchitecture: arch,
       pythonVersion: this.pythonVersion,
     });
 

@@ -432,6 +432,14 @@ export function compareVersions(a: string, b: string): number {
 function checkSingleCondition(version: string, condition: string): boolean {
   condition = condition.trim();
 
+  if (condition.startsWith('===')) {
+    const target = condition.slice(3).trim();
+    const asciiLowerCase = (value: string) =>
+      value.replace(/[A-Z]/g, (character) =>
+        character.toLowerCase(),
+      );
+    return asciiLowerCase(version) === asciiLowerCase(target);
+  }
   if (condition.startsWith('>=')) {
     const target = condition.slice(2).trim();
     return comparePep440PublicVersions(version, target) >= 0;

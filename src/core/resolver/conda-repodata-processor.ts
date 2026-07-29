@@ -38,6 +38,8 @@ export interface RepoDataProcessorConfig {
   condaUrl: string;
   /** 타겟 플랫폼 서브디렉토리 */
   targetSubdir: string;
+  /** 타겟 아키텍처 (__archspec 가상 패키지 필터링용) */
+  targetArchitecture: string | null;
   /** Python 버전 (빌드 필터링용) */
   pythonVersion: string | null;
   /** CUDA 버전 (null = CPU only, CUDA 의존성 있는 패키지 제외) */
@@ -333,6 +335,39 @@ export class CondaRepoDataProcessor {
     const isLinux = targetSubdir.startsWith('linux-');
     const isWindows = targetSubdir.startsWith('win-');
     const isMacOS = targetSubdir.startsWith('osx-');
+    const targetArchitectures = this.getTargetArchitectureBuilds(
+      this.config.targetArchitecture,
+    );
+    const archSpecs = depends
+      .map((dependency) => parseMatchSpec(dependency))
+      .filter(
+        (matchSpec) =>
+          matchSpec.name.toLowerCase() === '__archspec',
+      );
+
+    if (archSpecs.length > 0) {
+      if (targetArchitectures.length === 0) {
+        return false;
+      }
+
+      for (const archSpec of archSpecs) {
+        if (
+          archSpec.version &&
+          !matchesVersionSpec('1', archSpec.version)
+        ) {
+          return false;
+        }
+        const archspecBuild = archSpec.build;
+        if (
+          archspecBuild &&
+          !targetArchitectures.some((targetArchitecture) =>
+            matchesBuildSpec(targetArchitecture, archspecBuild),
+          )
+        ) {
+          return false;
+        }
+      }
+    }
 
     // 플랫폼 마커 확인 (버전 스펙 포함 가능: "__glibc >=2.17,<3.0.a0")
     const hasWin = depends.some(d => d === '__win' || d.startsWith('__win '));
@@ -376,6 +411,28 @@ export class CondaRepoDataProcessor {
     // 대상 OS를 모르면 OS 가상 의존성이 있는 noarch 빌드는
     // 공통 아티팩트로 간주할 수 없다.
     return false;
+  }
+
+  private getTargetArchitectureBuilds(
+    architecture: string | null,
+  ): string[] {
+    switch (architecture?.trim().toLowerCase()) {
+      case 'x86_64':
+      case 'amd64':
+        return ['x86_64'];
+      case 'aarch64':
+      case 'arm64':
+        // CEP 30은 *-aarch64와 *-arm64 모두 aarch64를 canonical
+        // build string으로 규정한다. 기존 Conda가 보고한 arm64도
+        // 호환성을 위해 함께 허용한다.
+        return ['aarch64', 'arm64'];
+      case 'x86':
+      case 'i386':
+      case 'i686':
+        return ['x86'];
+      default:
+        return [];
+    }
   }
 
 

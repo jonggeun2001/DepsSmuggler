@@ -245,6 +245,27 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     expect(version).toBe('1.9');
   });
 
+  it('PEP 440 === 제약으로 지정한 정확한 프리릴리스를 선택한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.0rc1-py3-none-any.whl',
+        url: 'https://index.example/demo-1.0rc1.whl',
+      },
+      {
+        filename: 'demo-1.0-py3-none-any.whl',
+        url: 'https://index.example/demo-1.0.whl',
+      },
+    ]);
+
+    const version = await (new PipResolver() as any).getLatestVersion(
+      'demo',
+      '===1.0rc1',
+      'https://index.example/simple',
+    );
+
+    expect(version).toBe('1.0rc1');
+  });
+
   it('Simple API latest는 final보다 post release를 우선한다', async () => {
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
       {
@@ -1124,6 +1145,120 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     expect(result.flatList.map((pkg) => pkg.name)).toEqual(
       expect.arrayContaining(['basechild', 'securitychild']),
     );
+  });
+
+  it('같은 이름과 버전의 커스텀 인덱스·PyPI 아티팩트를 별도 노드로 보존한다', async () => {
+    const indexUrl = 'https://index.example/simple';
+    const simpleFiles: Record<string, Array<Record<string, unknown>>> = {
+      root: [
+        {
+          filename: 'root-1.0.0-py3-none-any.whl',
+          url: 'https://index.example/root.whl',
+          metadataHash: {
+            algorithm: 'sha256',
+            digest: 'root-metadata',
+          },
+        },
+      ],
+      customparent: [
+        {
+          filename: 'customparent-1.0.0-py3-none-any.whl',
+          url: 'https://index.example/customparent.whl',
+          metadataHash: {
+            algorithm: 'sha256',
+            digest: 'customparent-metadata',
+          },
+        },
+      ],
+      shared: [
+        {
+          filename: 'shared-1.0.0-py3-none-any.whl',
+          url: 'https://index.example/shared.whl',
+          hash: {
+            algorithm: 'sha256',
+            digest: 'custom-shared-sha',
+          },
+          metadataHash: {
+            algorithm: 'sha256',
+            digest: 'custom-shared-metadata',
+          },
+        },
+      ],
+      publicparent: [],
+    };
+    simpleApiMock.fetchPackageFiles.mockImplementation(
+      async (_requestedIndexUrl: string, name: string) =>
+        simpleFiles[name] ?? [],
+    );
+    simpleApiMock.fetchWheelMetadata.mockImplementation(
+      async (file: { filename: string }) => {
+        if (file.filename.startsWith('root-')) {
+          return [
+            'customparent==1.0.0',
+            'publicparent==1.0.0',
+          ];
+        }
+        if (file.filename.startsWith('customparent-')) {
+          return ['shared==1.0.0'];
+        }
+        return [];
+      },
+    );
+
+    const pypiRelease = (name: string) => ({
+      filename: `${name}-1.0.0-py3-none-any.whl`,
+      url: `https://files.example/${name}.whl`,
+      packagetype: 'bdist_wheel',
+      python_version: 'py3',
+      digests: { sha256: `public-${name}-sha` },
+      size: 80,
+    });
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string, version?: string) => {
+        if (!['publicparent', 'shared'].includes(name)) {
+          return null;
+        }
+        if (version === undefined) {
+          return {
+            data: {
+              info: { name, version: '1.0.0' },
+              releases: {
+                '1.0.0': [pypiRelease(name)],
+              },
+            },
+          };
+        }
+        return {
+          data: {
+            info: {
+              name,
+              version,
+              requires_dist:
+                name === 'publicparent'
+                  ? ['shared==1.0.0']
+                  : [],
+            },
+            urls: [pypiRelease(name)],
+          },
+        };
+      },
+    );
+
+    const result = await new PipResolver().resolveDependencies(
+      'root',
+      '1.0.0',
+      { indexUrl },
+    );
+
+    expect(
+      result.flatList
+        .filter((pkg) => pkg.name === 'shared')
+        .map((pkg) => pkg.metadata?.downloadUrl)
+        .sort(),
+    ).toEqual([
+      'https://files.example/shared.whl',
+      'https://index.example/shared.whl',
+    ]);
   });
 
   it('Simple API에서 선택한 대상 wheel URL과 체크섬을 다운로드한다', async () => {
