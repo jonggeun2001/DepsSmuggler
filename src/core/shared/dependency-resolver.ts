@@ -656,12 +656,23 @@ export async function resolveAllDependencies(
             depPkg.type === result.root.package.type &&
             depPkg.name === result.root.package.name &&
             depPkg.version === result.root.package.version;
-          const resultKey = isRootPackage ? key : depKey;
-          const existing = resolvedSet.get(resultKey);
+
+          if (isRootPackage) {
+            const resolvedRoot = mergeResolvedPackage(
+              pkg,
+              downloadPkg,
+            );
+            resolvedSet.delete(key);
+            resolvedSet.delete(depKey);
+            resolvedSet.set(depKey, resolvedRoot);
+            continue;
+          }
+
+          const existing = resolvedSet.get(depKey);
 
           if (existing) {
             resolvedSet.set(
-              resultKey,
+              depKey,
               mergeResolvedPackage(existing, downloadPkg),
             );
           } else {

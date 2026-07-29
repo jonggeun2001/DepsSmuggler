@@ -452,6 +452,71 @@ describe('dependency-resolver', () => {
       ]);
     });
 
+    it('앞선 의존성과 같은 Conda root 아티팩트를 중복하지 않는다', async () => {
+      const packageInfo = (
+        name: string,
+        filename: string,
+      ) => ({
+        type: 'conda' as const,
+        name,
+        version: '1.0',
+        metadata: {
+          subdir: 'linux-64',
+          filename,
+          downloadUrl: `https://conda.example/${filename}`,
+        },
+      });
+      const rootA = packageInfo('a', 'a-1.0-linux_64_0.conda');
+      const rootB = packageInfo('b', 'b-1.0-linux_64_0.conda');
+      const resolveDependencies = vi.fn().mockImplementation(
+        async (name: string) =>
+          name === 'a'
+            ? {
+                root: {
+                  package: rootA,
+                  dependencies: [
+                    { package: rootB, dependencies: [] },
+                  ],
+                },
+                flatList: [rootA, rootB],
+                conflicts: [],
+              }
+            : {
+                root: { package: rootB, dependencies: [] },
+                flatList: [rootB],
+                conflicts: [],
+              },
+      );
+      vi.mocked(getCondaResolver).mockReturnValue({
+        resolveDependencies,
+      } as any);
+
+      const result = await resolveAllDependencies([
+        {
+          id: 'request-a',
+          type: 'conda',
+          name: 'a',
+          version: '1.0',
+        },
+        {
+          id: 'request-b',
+          type: 'conda',
+          name: 'b',
+          version: '1.0',
+        },
+      ]);
+
+      expect(result.allPackages).toHaveLength(2);
+      expect(
+        result.allPackages.filter(
+          (pkg) => pkg.filename === 'b-1.0-linux_64_0.conda',
+        ),
+      ).toHaveLength(1);
+      expect(
+        result.allPackages.find((pkg) => pkg.name === 'b')?.id,
+      ).toBe('request-b');
+    });
+
     it('대상 Conda 아티팩트 메타데이터가 없으면 해결 실패로 기록한다', async () => {
       const mockCondaResult = {
         root: {
