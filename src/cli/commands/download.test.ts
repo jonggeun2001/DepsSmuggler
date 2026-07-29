@@ -178,7 +178,10 @@ describe('downloadCommand', () => {
 
     expect(resolveAllDependencies).toHaveBeenCalledWith(
       expect.any(Array),
-      expect.objectContaining({ pythonVersion: '3.12' })
+      expect.objectContaining({
+        pythonVersion: '3.12',
+        targetOS: 'linux',
+      })
     );
   });
 
@@ -348,6 +351,61 @@ describe('downloadCommand', () => {
         arch: 'x86_64',
       },
     ]);
+  });
+
+  it('기본 모드에서 모든 직접 항목 해결에 실패하면 빈 아카이브를 만들지 않는다', async () => {
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => {
+        throw new Error('process.exit');
+      }) as never);
+
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'pip-Crypto-Py-0.0.4',
+          type: 'pip',
+          name: 'Crypto-Py',
+          version: '0.0.4',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'pip-Crypto-Py-0.0.4',
+          type: 'pip',
+          name: 'Crypto-Py',
+          version: '0.0.4',
+          architecture: 'x86_64',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [
+        {
+          name: 'crypto_py',
+          version: '0.0.4',
+          error: '패키지를 찾을 수 없음',
+        },
+      ],
+    });
+
+    await expect(
+      downloadCommand({
+        type: 'pip',
+        package: 'Crypto-Py',
+        pkgVersion: '0.0.4',
+        arch: 'x86_64',
+        output: './output',
+        format: 'zip',
+        deps: true,
+        concurrency: '3',
+      })
+    ).rejects.toThrow('process.exit');
+
+    expect(addToQueue).not.toHaveBeenCalled();
+    expect(startDownload).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
   });
 
   it('strict 모드에서 의존성 해결 실패가 있으면 명령을 실패 처리한다', async () => {

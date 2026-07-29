@@ -244,6 +244,36 @@ describe('PipResolver 단위 테스트', () => {
         expect(callEvaluateMarker(resolver, 'python_version < "3.12"')).toBe(false);
         expect(callEvaluateMarker(resolver, 'python_version <= "3.12"')).toBe(true);
       });
+
+      it('반복 Python 조건과 and/or 우선순위를 평가한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_version >= "3.8" and python_version < "3.12"'
+          )
+        ).toBe(false);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_version < "3.12" or sys_platform == "linux"'
+          )
+        ).toBe(true);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_version >= "3.12" or python_version == "3.11" and sys_platform == "win32"'
+          )
+        ).toBe(true);
+      });
+
+      it('괄호로 묶인 marker 논리식을 평가한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            '(python_version == "3.12" and sys_platform == "linux") or sys_platform == "win32"'
+          )
+        ).toBe(true);
+      });
     });
 
     describe('Windows 플랫폼', () => {

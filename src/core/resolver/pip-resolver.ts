@@ -33,6 +33,18 @@ interface ParsedDependency {
   markers?: string;
 }
 
+type MarkerComparisonOperator = '===' | '==' | '!=' | '>=' | '<=' | '>' | '<';
+
+const MARKER_COMPARISON_OPERATORS: readonly MarkerComparisonOperator[] = [
+  '===',
+  '==',
+  '!=',
+  '>=',
+  '<=',
+  '>',
+  '<',
+];
+
 // 타겟 플랫폼 타입
 interface TargetPlatform {
   system?: 'Linux' | 'Windows' | 'Darwin';
@@ -476,77 +488,69 @@ export class PipResolver implements IResolver {
     // 타겟 플랫폼이 설정되지 않으면 마커가 있는 의존성 제외 (기존 동작)
     if (!this.targetPlatform) return false;
 
-    const { system, machine } = this.targetPlatform;
+    return this.evaluateMarkerExpression(marker, extras);
+  }
 
-    // extra 마커 평가 (예: extra == "cuda")
-    const extraMatch = marker.match(/extra\s*==\s*["'](\w+)["']/);
-    if (extraMatch) {
-      const requiredExtra = extraMatch[1];
-      return extras?.includes(requiredExtra) ?? false;
+  private evaluateMarkerExpression(expression: string, extras?: string[]): boolean {
+    const normalized = stripOuterMarkerParentheses(expression);
+    const orTerms = splitMarkerExpression(normalized, 'or');
+    if (orTerms.length > 1) {
+      return orTerms.some((term) => this.evaluateMarkerExpression(term, extras));
     }
 
-    // platform_system 평가
-    const systemMatch = marker.match(/platform_system\s*==\s*["'](\w+)["']/);
-    if (systemMatch) {
-      const requiredSystem = systemMatch[1];
-      if (system && system !== requiredSystem) return false;
-      if (!system) return false; // 시스템이 지정되지 않으면 제외
+    const andTerms = splitMarkerExpression(normalized, 'and');
+    if (andTerms.length > 1) {
+      return andTerms.every((term) => this.evaluateMarkerExpression(term, extras));
     }
 
-    // platform_machine 평가
-    const machineMatch = marker.match(/platform_machine\s*==\s*["'](\w+)["']/);
-    if (machineMatch) {
-      const requiredMachine = machineMatch[1];
-      if (machine) {
-        // x86_64와 amd64는 동일하게 처리
-        const normalizedRequired = requiredMachine.toLowerCase();
-        const normalizedTarget = machine.toLowerCase();
-        const isX64 = (m: string) => m === 'x86_64' || m === 'amd64';
+    return this.evaluateMarkerCondition(normalized, extras);
+  }
 
-        if (isX64(normalizedRequired) && isX64(normalizedTarget)) {
-          // 둘 다 x64 계열이면 통과
-        } else if (normalizedRequired !== normalizedTarget) {
-          return false;
-        }
-      } else {
-        return false; // 머신이 지정되지 않으면 제외
-      }
-    }
-
-    const pythonVersionMatch = marker.match(
-      /python_version\s*(===|==|!=|>=|<=|>|<)\s*["'](\d+(?:\.\d+)*)["']/
+  private evaluateMarkerCondition(condition: string, extras?: string[]): boolean {
+    const markerMatch = condition.match(
+      /^(python_version|sys_platform|platform_system|platform_machine|extra)\s*(===|==|!=|>=|<=|>|<)\s*["']([^"']*)["']$/
     );
-    if (pythonVersionMatch && this.pythonVersion) {
-      const [, operator, requiredVersion] = pythonVersionMatch;
-      const comparison = comparePythonVersions(this.pythonVersion, requiredVersion);
-      const matches = {
-        '===': comparison === 0,
-        '==': comparison === 0,
-        '!=': comparison !== 0,
-        '>=': comparison >= 0,
-        '<=': comparison <= 0,
-        '>': comparison > 0,
-        '<': comparison < 0,
-      }[operator];
+    if (!markerMatch) return true;
 
-      if (!matches) return false;
+    const [, variable, operator, requiredValue] = markerMatch;
+    if (!isMarkerComparisonOperator(operator)) return true;
+    const { system, machine } = this.targetPlatform ?? {};
+
+    if (variable === 'extra') {
+      if (!extras) return false;
+      const matchesExtra = extras.includes(requiredValue);
+      return operator === '!=' ? !matchesExtra : operator === '==' || operator === '===' ? matchesExtra : false;
     }
 
-    // sys_platform 평가
-    const sysPlatformMatch = marker.match(/sys_platform\s*==\s*["'](\w+)["']/);
-    if (sysPlatformMatch) {
-      const requiredPlatform = sysPlatformMatch[1];
-      const platformMap: Record<string, string> = {
-        'Linux': 'linux',
-        'Windows': 'win32',
-        'Darwin': 'darwin',
-      };
-      if (system && platformMap[system] !== requiredPlatform) return false;
-      if (!system) return false;
+    if (variable === 'python_version') {
+      if (!this.pythonVersion) return true;
+      return matchesComparison(
+        comparePythonVersions(this.pythonVersion, requiredValue),
+        operator
+      );
     }
 
-    // 모든 조건을 통과하면 포함
-    return true;
+    if (variable === 'platform_system') {
+      return system ? matchesComparison(system.localeCompare(requiredValue), operator) : false;
+    }
+
+    if (variable === 'platform_machine') {
+      if (!machine) return false;
+      return matchesComparison(
+        normalizeMachine(machine).localeCompare(normalizeMachine(requiredValue)),
+        operator
+      );
+    }
+
+    const platformMap: Record<string, string> = {
+      Linux: 'linux',
+      Windows: 'win32',
+      Darwin: 'darwin',
+    };
+    const targetPlatform = system ? platformMap[system] : undefined;
+    return targetPlatform
+      ? matchesComparison(targetPlatform.localeCompare(requiredValue), operator)
+      : false;
   }
 
   /**
@@ -1076,6 +1080,113 @@ function comparePythonVersions(left: string, right: string): number {
   }
 
   return 0;
+}
+
+function matchesComparison(
+  comparison: number,
+  operator: MarkerComparisonOperator
+): boolean {
+  switch (operator) {
+    case '===':
+    case '==':
+      return comparison === 0;
+    case '!=':
+      return comparison !== 0;
+    case '>=':
+      return comparison >= 0;
+    case '<=':
+      return comparison <= 0;
+    case '>':
+      return comparison > 0;
+    case '<':
+      return comparison < 0;
+  }
+}
+
+function isMarkerComparisonOperator(value: string): value is MarkerComparisonOperator {
+  return MARKER_COMPARISON_OPERATORS.includes(value as MarkerComparisonOperator);
+}
+
+function normalizeMachine(machine: string): string {
+  const normalized = machine.toLowerCase();
+  return normalized === 'amd64' ? 'x86_64' : normalized;
+}
+
+function stripOuterMarkerParentheses(expression: string): string {
+  let normalized = expression.trim();
+
+  while (normalized.startsWith('(') && normalized.endsWith(')')) {
+    let depth = 0;
+    let quote: string | null = null;
+    let closesBeforeEnd = false;
+
+    for (let index = 0; index < normalized.length; index += 1) {
+      const character = normalized[index];
+      if (quote) {
+        if (character === quote) quote = null;
+        continue;
+      }
+      if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === '(') {
+        depth += 1;
+      } else if (character === ')') {
+        depth -= 1;
+        if (depth === 0 && index < normalized.length - 1) {
+          closesBeforeEnd = true;
+          break;
+        }
+      }
+    }
+
+    if (closesBeforeEnd || depth !== 0) break;
+    normalized = normalized.slice(1, -1).trim();
+  }
+
+  return normalized;
+}
+
+function splitMarkerExpression(expression: string, operator: 'and' | 'or'): string[] {
+  const terms: string[] = [];
+  const normalized = expression.trim();
+  let start = 0;
+  let depth = 0;
+  let quote: string | null = null;
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index];
+    if (quote) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '(') {
+      depth += 1;
+      continue;
+    }
+    if (character === ')') {
+      depth -= 1;
+      continue;
+    }
+    if (depth !== 0 || normalized.slice(index, index + operator.length).toLowerCase() !== operator) {
+      continue;
+    }
+
+    const previous = normalized[index - 1];
+    const next = normalized[index + operator.length];
+    if (previous && !/\s/.test(previous) || next && !/\s/.test(next)) continue;
+
+    terms.push(normalized.slice(start, index).trim());
+    start = index + operator.length;
+    index += operator.length - 1;
+  }
+
+  if (terms.length === 0) return [normalized];
+  terms.push(normalized.slice(start).trim());
+  return terms;
 }
 
 // 싱글톤 인스턴스

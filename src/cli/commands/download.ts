@@ -109,7 +109,7 @@ function toPackageInfo(pkg: DownloadPackage): PackageInfo {
 
 async function preparePackagesForDownload(
   packages: PackageInfo[],
-  options: Pick<DownloadCommandOptions, 'arch' | 'deps' | 'pythonVersion' | 'strict'>
+  options: Pick<DownloadCommandOptions, 'type' | 'arch' | 'deps' | 'pythonVersion' | 'strict'>
 ): Promise<PreparedPackagesResult> {
   if (!options.deps) {
     return {
@@ -131,6 +131,7 @@ async function preparePackagesForDownload(
     architecture: options.arch,
     includeDependencies: true,
     pythonVersion: options.pythonVersion,
+    ...(options.type === 'pip' && options.pythonVersion ? { targetOS: 'linux' as const } : {}),
   });
 
   if (resolved.failedPackages.length > 0) {
@@ -152,10 +153,15 @@ async function preparePackagesForDownload(
       skippedRoots.map((pkg) => getNormalizedPackageKey(pkg.name, pkg.version))
     );
 
+    const resolvedPackages = resolved.allPackages
+      .filter((pkg) => !skippedRootKeys.has(getNormalizedPackageKey(pkg.name, pkg.version)));
+
+    if (resolvedPackages.length === 0) {
+      throw new Error(`다운로드할 해결된 패키지가 없습니다: ${failedList}`);
+    }
+
     return {
-      packages: resolved.allPackages
-        .filter((pkg) => !skippedRootKeys.has(getNormalizedPackageKey(pkg.name, pkg.version)))
-        .map(toPackageInfo),
+      packages: resolvedPackages.map(toPackageInfo),
       dependencyResolutionApplied: true,
       warning: `의존성 해결에 실패한 직접 패키지 ${skippedRoots.length}개를 건너뜁니다: ${failedList}`,
     };
@@ -200,6 +206,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
 
     const requestedCount = packages.length;
     const prepared = await preparePackagesForDownload(packages, {
+      type: options.type,
       arch: options.arch,
       deps: options.deps,
       pythonVersion: options.pythonVersion,
