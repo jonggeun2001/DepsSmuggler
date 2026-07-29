@@ -82,10 +82,11 @@ depssmuggler download [옵션]
 - 표의 적용 타입과 맞지 않는 선택 옵션을 사용하면 오류가 발생합니다. 예를 들어 npm에 `--target-os linux`를 지정하거나 pip에 `--cuda-version 12.4`를 지정할 수 없습니다.
 - 기본값인 `--target-os any`와 `--conda-channel conda-forge`는 적용 대상이 아닌 타입에서 기존 동작을 유지합니다. 그러나 다른 OS나 채널을 명시하면 적용 타입을 검사합니다.
 - pip에서 대상 OS가 `any`이면 특정 OS wheel을 임의로 선택하지 않고 범용 wheel 또는 `Requires-Python` 조건을 만족하는 소스 배포본을 선택합니다. `--python-version`도 생략하면 특정 CPython ABI wheel 대신 Python 버전 독립 wheel 또는 소스 배포본만 선택합니다.
-- pip 의존성의 PEP 508 환경 마커는 지정한 OS, 아키텍처, Python 버전과 extra를 기준으로 평가합니다. 필요한 대상 값이 없거나 마커를 해석할 수 없으면 해당 조건부 의존성을 임의로 포함하지 않습니다.
+- pip 의존성의 PEP 508 환경 마커는 지정한 OS, 아키텍처, Python 버전과 extra를 기준으로 평가합니다. `--python-version`은 `major.minor`만 받으므로 `python_full_version`처럼 patch 버전이 필요한 조건은 알 수 없는 값으로 보고 제외합니다. 필요한 대상 값이 없거나 마커를 해석할 수 없으면 해당 조건부 의존성을 임의로 포함하지 않습니다.
 - Conda에서 대상 OS가 `any`이면 특정 플랫폼을 임의로 가정하지 않고 `noarch` 빌드만 조회합니다. 플랫폼별 빌드가 필요하면 `--target-os`를 명시해야 합니다.
 - Conda에서 지정한 OS, 아키텍처, Python/CUDA 조건과 일치하는 대상 subdir 또는 `noarch` 빌드를 찾지 못하면 다른 플랫폼으로 재조회하지 않고 다운로드 전에 실패합니다.
 - pip와 Conda에서 필수 전이 의존성의 호환 버전이나 아티팩트를 찾지 못하면 불완전한 묶음을 만들지 않고 전체 명령이 실패합니다. Conda의 OpenSSL, zlib 같은 런타임 라이브러리도 오프라인 묶음에 포함됩니다.
+- pip 하위 의존성은 버전 제약과 대상 환경에 호환되는 아티팩트를 함께 만족하는 최신 릴리스를 선택하며, 같은 패키지에 여러 경로로 요청된 extra는 합쳐서 평가합니다. Conda 하위 의존성은 버전뿐 아니라 build MatchSpec도 실제 파일 선택까지 유지합니다.
 - Maven classifier 형식은 라이브러리마다 다르므로 OS와 아키텍처만으로 자동 생성하지 않습니다. Maven에 `--target-os` 또는 기본값이 아닌 `--arch`를 지정할 때는 실제 네이티브 아티팩트를 선택할 `--classifier`를 함께 지정해야 합니다.
 - pip, Conda, Maven에서 대상 환경을 명시하고 `--no-deps`를 사용하면 해당 환경에 맞는 루트 아티팩트만 선택하고 전이 의존성은 다운로드하지 않습니다. pip/Conda의 기본값이 아닌 `--arch`도 대상 환경 명시로 처리합니다.
 - pip 대상 환경에 호환되는 wheel이 없으면 sdist를 사용하며, sdist도 없으면 다른 아키텍처 wheel로 바꾸지 않고 오류로 종료합니다.

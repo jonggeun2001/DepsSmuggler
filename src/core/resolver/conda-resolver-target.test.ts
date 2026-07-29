@@ -371,4 +371,62 @@ describe('CondaResolver 대상 아티팩트 선택', () => {
 
     expect(result.flatList.map((pkg) => pkg.name)).toContain('openssl');
   });
+
+  it('하위 의존성의 Conda build MatchSpec을 실제 아티팩트 선택까지 유지한다', async () => {
+    const resolver = new CondaResolver();
+    const processor = (
+      resolver as unknown as {
+        repoDataProcessor: {
+          getRepoData: (
+            channel: string,
+            subdir: string,
+          ) => Promise<Record<string, unknown>>;
+        };
+      }
+    ).repoDataProcessor;
+
+    vi.spyOn(processor, 'getRepoData').mockResolvedValue({
+      info: { subdir: 'linux-64' },
+      packages: {
+        'demo-1.0.0-linux-64.conda': {
+          name: 'demo',
+          version: '1.0.0',
+          build: 'linux_64_0',
+          build_number: 0,
+          depends: ['blas 1.0 *_openblas'],
+          subdir: 'linux-64',
+        },
+        'blas-1.0-mkl_2.conda': {
+          name: 'blas',
+          version: '1.0',
+          build: 'mkl_2',
+          build_number: 2,
+          depends: [],
+          subdir: 'linux-64',
+        },
+        'blas-1.0-h123_openblas.conda': {
+          name: 'blas',
+          version: '1.0',
+          build: 'h123_openblas',
+          build_number: 1,
+          depends: [],
+          subdir: 'linux-64',
+        },
+      },
+    });
+
+    const result = await resolver.resolveDependencies('demo', '1.0.0', {
+      targetPlatform: {
+        system: 'Linux',
+        machine: 'x86_64',
+      },
+      pythonVersion: '3.12',
+    });
+
+    expect(
+      result.flatList.find((pkg) => pkg.name === 'blas')?.metadata,
+    ).toMatchObject({
+      filename: 'blas-1.0-h123_openblas.conda',
+    });
+  });
 });

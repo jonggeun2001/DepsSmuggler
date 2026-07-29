@@ -258,6 +258,323 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     ).rejects.toThrow('필수 pip 의존성');
   });
 
+  it('선택한 필수 pip 하위 의존성 메타데이터 조회 오류를 전파한다', async () => {
+    const universalRelease = (name: string) => ({
+      filename: `${name}-1.0.0-py3-none-any.whl`,
+      url: `https://files.example/${name}.whl`,
+      packagetype: 'bdist_wheel',
+      python_version: 'py3',
+      digests: { sha256: `${name}-sha` },
+      size: 80,
+    });
+
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string, version?: string) => {
+        if (name === 'demo') {
+          return {
+            data: {
+              info: {
+                name,
+                version: '1.0.0',
+                requires_dist: ['brokenchild==1.0.0'],
+              },
+              urls: [universalRelease(name)],
+            },
+          };
+        }
+        if (name === 'brokenchild' && version === undefined) {
+          return {
+            data: {
+              info: { name, version: '1.0.0' },
+              releases: {
+                '1.0.0': [universalRelease(name)],
+              },
+            },
+          };
+        }
+        if (name === 'brokenchild' && version === '1.0.0') {
+          throw new Error('저장소 응답 오류');
+        }
+        return null;
+      },
+    );
+
+    await expect(
+      new PipResolver().resolveDependencies('demo', '1.0.0', {
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      }),
+    ).rejects.toThrow('필수 pip 의존성 아티팩트');
+  });
+
+  it('PyPI JSON에서 버전 제약과 대상 Python을 모두 만족하는 최신 의존성을 선택한다', async () => {
+    const rootRelease = {
+      filename: 'demo-1.0.0-py3-none-any.whl',
+      url: 'https://files.example/demo.whl',
+      packagetype: 'bdist_wheel',
+      python_version: 'py3',
+      digests: { sha256: 'demo-sha' },
+      size: 80,
+    };
+    const incompatibleRelease = {
+      filename: 'jsonchild-2.0.0-cp313-cp313-manylinux_2_17_x86_64.whl',
+      url: 'https://files.example/jsonchild-2.whl',
+      packagetype: 'bdist_wheel',
+      python_version: 'cp313',
+      requires_python: '>=3.13',
+      digests: { sha256: 'child-2-sha' },
+      size: 100,
+    };
+    const compatibleRelease = {
+      filename: 'jsonchild-1.5.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+      url: 'https://files.example/jsonchild-1.5.whl',
+      packagetype: 'bdist_wheel',
+      python_version: 'cp312',
+      requires_python: '>=3.12',
+      digests: { sha256: 'child-1-sha' },
+      size: 90,
+    };
+
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string, version?: string) => {
+        if (name === 'demo') {
+          return {
+            data: {
+              info: {
+                name,
+                version: '1.0.0',
+                requires_dist: ['jsonchild<3'],
+              },
+              urls: [rootRelease],
+            },
+          };
+        }
+        if (name === 'jsonchild' && version === undefined) {
+          return {
+            data: {
+              info: { name, version: '2.0.0' },
+              releases: {
+                '2.0.0': [incompatibleRelease],
+                '1.5.0': [compatibleRelease],
+              },
+            },
+          };
+        }
+        if (name === 'jsonchild' && version === '1.5.0') {
+          return {
+            data: {
+              info: {
+                name,
+                version,
+                requires_dist: [],
+              },
+              urls: [compatibleRelease],
+            },
+          };
+        }
+        if (name === 'jsonchild' && version === '2.0.0') {
+          return {
+            data: {
+              info: {
+                name,
+                version,
+                requires_dist: [],
+              },
+              urls: [incompatibleRelease],
+            },
+          };
+        }
+        return null;
+      },
+    );
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(
+      result.flatList.map((pkg) => `${pkg.name}@${pkg.version}`),
+    ).toContain('jsonchild@1.5.0');
+  });
+
+  it('PyPI JSON 의존성 버전 제약을 만족하는 릴리스가 없으면 실패한다', async () => {
+    const universalRelease = (
+      name: string,
+      version: string,
+    ) => ({
+      filename: `${name}-${version}-py3-none-any.whl`,
+      url: `https://files.example/${name}-${version}.whl`,
+      packagetype: 'bdist_wheel',
+      python_version: 'py3',
+      digests: { sha256: `${name}-${version}-sha` },
+      size: 80,
+    });
+
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string, version?: string) => {
+        if (name === 'demo') {
+          return {
+            data: {
+              info: {
+                name,
+                version: '1.0.0',
+                requires_dist: ['strictchild<2'],
+              },
+              urls: [universalRelease('demo', '1.0.0')],
+            },
+          };
+        }
+        if (name === 'strictchild' && version === undefined) {
+          return {
+            data: {
+              info: { name, version: '2.0.0' },
+              releases: {
+                '2.0.0': [universalRelease(name, '2.0.0')],
+              },
+            },
+          };
+        }
+        if (name === 'strictchild' && version === '2.0.0') {
+          return {
+            data: {
+              info: { name, version, requires_dist: [] },
+              urls: [universalRelease(name, version)],
+            },
+          };
+        }
+        return null;
+      },
+    );
+
+    await expect(
+      new PipResolver().resolveDependencies('demo', '1.0.0', {
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      }),
+    ).rejects.toThrow('필수 pip 의존성');
+  });
+
+  it('Simple API에서 버전 제약과 대상 Python을 모두 만족하는 최신 의존성을 선택한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockImplementation(
+      async (_indexUrl: string, name: string) => {
+        if (name === 'demo') {
+          return [
+            {
+              filename: 'demo-1.0.0-py3-none-any.whl',
+              url: 'https://index.example/demo.whl',
+              metadataHash: {
+                algorithm: 'sha256',
+                digest: 'metadata-sha',
+              },
+            },
+          ];
+        }
+        if (name === 'simplechild') {
+          return [
+            {
+              filename:
+                'simplechild-2.0.0-cp313-cp313-manylinux_2_17_x86_64.whl',
+              url: 'https://index.example/simplechild-2.whl',
+              requiresPython: '>=3.13',
+            },
+            {
+              filename:
+                'simplechild-1.5.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+              url: 'https://index.example/simplechild-1.5.whl',
+              requiresPython: '>=3.12',
+            },
+          ];
+        }
+        return [];
+      },
+    );
+    simpleApiMock.fetchWheelMetadata.mockImplementation(
+      async (file: { filename: string }) =>
+        file.filename.startsWith('demo-')
+          ? ['simplechild<3']
+          : [],
+    );
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+        indexUrl: 'https://index.example/simple',
+      },
+    );
+
+    expect(
+      result.flatList.map((pkg) => `${pkg.name}@${pkg.version}`),
+    ).toContain('simplechild@1.5.0');
+  });
+
+  it('같은 pip 패키지에 나중에 요청된 extra 의존성도 병합한다', async () => {
+    const dependencies: Record<string, string[]> = {
+      root: ['plainparent==1.0.0', 'secureparent==1.0.0'],
+      plainparent: ['shared==1.0.0'],
+      secureparent: ['shared[security]==1.0.0'],
+      shared: ['securitychild==1.0.0; extra == "security"'],
+      securitychild: [],
+    };
+    const universalRelease = (name: string) => ({
+      filename: `${name}-1.0.0-py3-none-any.whl`,
+      url: `https://files.example/${name}.whl`,
+      packagetype: 'bdist_wheel',
+      python_version: 'py3',
+      digests: { sha256: `${name}-sha` },
+      size: 80,
+    });
+
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string, version?: string) => {
+        if (!(name in dependencies)) {
+          return null;
+        }
+        if (version === undefined) {
+          return {
+            data: {
+              info: { name, version: '1.0.0' },
+              releases: {
+                '1.0.0': [universalRelease(name)],
+              },
+            },
+          };
+        }
+        return {
+          data: {
+            info: {
+              name,
+              version,
+              requires_dist: dependencies[name],
+            },
+            urls: [universalRelease(name)],
+          },
+        };
+      },
+    );
+
+    const result = await new PipResolver().resolveDependencies(
+      'root',
+      '1.0.0',
+      {
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.flatList.map((pkg) => pkg.name)).toContain(
+      'securitychild',
+    );
+  });
+
   it('Simple API에서 선택한 대상 wheel URL과 체크섬을 다운로드한다', async () => {
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
       {

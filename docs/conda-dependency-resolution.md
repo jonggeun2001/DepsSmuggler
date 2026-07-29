@@ -653,23 +653,20 @@ if (depends.length === 0 || !isPythonMatch) {
 2. `noarch` - Python 버전 무관
 3. Python 버전 불일치 시 스킵 (strict mode)
 
-### 7.6 시스템 패키지 스킵
+### 7.6 외부 런타임 및 가상 패키지 스킵
 
-conda 의존성 중 시스템 패키지는 다운로드하지 않고 스킵합니다.
+대상 Python 런타임과 Conda 가상 패키지는 다운로드하지 않고
+호환성 조건으로만 사용합니다. OpenSSL, zlib, libgcc 같은 실제 Conda
+런타임 패키지는 오프라인 묶음에 포함합니다.
 
 ```typescript
 private isSystemPackage(name: string): boolean {
-  const systemPackages = [
-    'python',
-    'python_abi',
-    '__glibc',
-    '__linux',
-    '__unix',
-    '__win',
-    '__osx',
-    '__macos',
-  ];
-  return systemPackages.includes(name.toLowerCase());
+  const normalizedName = name.toLowerCase();
+  return (
+    normalizedName === 'python' ||
+    normalizedName === 'python_abi' ||
+    normalizedName.startsWith('__')
+  );
 }
 ```
 

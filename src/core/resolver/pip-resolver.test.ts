@@ -177,6 +177,22 @@ describe('PipResolver 단위 테스트', () => {
           callEvaluateMarker(resolver, 'python_version >= "3.11"'),
         ).toBe(true);
       });
+
+      it('major.minor 입력으로 patch-level Python 값을 추정하지 않는다', () => {
+        resolver = createResolver({ pythonVersion: '3.12' });
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_full_version < "3.12.1"',
+          ),
+        ).toBe(false);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'implementation_version < "3.12.1"',
+          ),
+        ).toBe(false);
+      });
     });
 
     describe('Linux 플랫폼', () => {

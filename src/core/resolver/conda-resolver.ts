@@ -118,6 +118,7 @@ export class CondaResolver implements IResolver {
         version: string;
         depth: number;
         parentCacheKey?: string;
+        buildSpec?: string;
       }
 
       const queue: QueueItem[] = [{ name: packageName, version, depth: 0 }];
@@ -127,14 +128,22 @@ export class CondaResolver implements IResolver {
 
       while (queue.length > 0) {
         const current = queue.shift()!;
-        const { name, version: ver, depth, parentCacheKey } = current;
+        const {
+          name,
+          version: ver,
+          depth,
+          parentCacheKey,
+          buildSpec,
+        } = current;
 
         // 최대 깊이 체크
         if (depth > maxDepth) {
           continue;
         }
 
-        const cacheKey = `${channel}/${name.toLowerCase()}@${ver}`;
+        const cacheKey =
+          `${channel}/${name.toLowerCase()}@${ver}` +
+          (buildSpec ? `#${buildSpec}` : '');
 
         // 이미 해결된 패키지면 부모-자식 관계만 추가
         if (resolvedNodes.has(cacheKey)) {
@@ -154,7 +163,12 @@ export class CondaResolver implements IResolver {
         }
 
         // 패키지 정보 조회
-        const pkgInfo = await this.fetchPackageInfoBFS(name, ver, channel);
+        const pkgInfo = await this.fetchPackageInfoBFS(
+          name,
+          ver,
+          channel,
+          buildSpec,
+        );
 
         // 노드 생성
         const node: DependencyNode = {
@@ -191,20 +205,24 @@ export class CondaResolver implements IResolver {
               parsed.name,
               channel,
               parsed.versionSpec,
-              (n, ch, spec) => this.getLatestVersion(n, ch, spec)
+              (n, ch, spec) => this.getLatestVersion(n, ch, spec),
+              parsed.build,
             );
 
             if (!depVersion) {
               throw new Error('호환되는 버전을 찾을 수 없습니다.');
             }
 
-            const depCacheKey = `${channel}/${parsed.name.toLowerCase()}@${depVersion}`;
+            const depCacheKey =
+              `${channel}/${parsed.name.toLowerCase()}@${depVersion}` +
+              (parsed.build ? `#${parsed.build}` : '');
             if (!resolvedNodes.has(depCacheKey)) {
               queue.push({
                 name: parsed.name,
                 version: depVersion,
                 depth: depth + 1,
                 parentCacheKey: cacheKey,
+                buildSpec: parsed.build,
               });
             } else {
               // 이미 해결된 경우 부모-자식 관계만 추가
@@ -267,7 +285,8 @@ export class CondaResolver implements IResolver {
   private async fetchPackageInfoBFS(
     name: string,
     version: string,
-    channel: string
+    channel: string,
+    buildSpec?: string,
   ): Promise<{ packageInfo: PackageInfo; depends: string[]; isPythonMatch: boolean }> {
     // repodata에서 패키지 정보 조회
     let depends: string[] = [];
@@ -284,7 +303,13 @@ export class CondaResolver implements IResolver {
 
     if (repodata) {
       const versionSpec = version === 'latest' ? undefined : `==${version}`;
-      const candidates = this.repoDataProcessor.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
+      const candidates = this.repoDataProcessor.findPackageCandidates(
+        repodata,
+        name,
+        versionSpec,
+        targetCacheKey,
+        buildSpec,
+      );
       if (candidates.length > 0) {
         isPythonMatch = candidates[0].isPythonMatch;
         depends = candidates[0].depends;
@@ -307,7 +332,8 @@ export class CondaResolver implements IResolver {
           noarchRepodata,
           name,
           version === 'latest' ? undefined : `==${version}`,
-          noarchCacheKey
+          noarchCacheKey,
+          buildSpec,
         );
         if (candidates.length > 0) {
           isPythonMatch = candidates[0].isPythonMatch;
@@ -490,7 +516,8 @@ export class CondaResolver implements IResolver {
                   parsed.name,
                   channel,
                   parsed.versionSpec,
-                  (name, ch, spec) => this.getLatestVersion(name, ch, spec)
+                  (name, ch, spec) => this.getLatestVersion(name, ch, spec),
+                  parsed.build,
                 );
                 if (compatVersion) {
                   version = compatVersion;

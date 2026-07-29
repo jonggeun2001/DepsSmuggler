@@ -154,7 +154,8 @@ export class CondaRepoDataProcessor {
     repodata: RepoData,
     packageName: string,
     versionSpec?: string,
-    cacheKey?: string
+    cacheKey?: string,
+    buildSpec?: string,
   ): PackageCandidate[] {
     const candidates: Array<PackageCandidate & { timestamp: number }> = [];
     const normalizedName = packageName.toLowerCase();
@@ -186,6 +187,9 @@ export class CondaRepoDataProcessor {
     for (const { filename, pkg } of packageEntries) {
       // 버전 스펙 체크 (새로운 MatchSpec 파서 사용)
       if (versionSpec && !matchesVersionSpec(pkg.version, versionSpec)) {
+        continue;
+      }
+      if (buildSpec && !matchesBuildSpec(pkg.build, buildSpec)) {
         continue;
       }
 
@@ -483,7 +487,8 @@ export class CondaRepoDataProcessor {
     name: string,
     channel: string,
     versionSpec?: string,
-    fallbackFn?: (name: string, channel: string, versionSpec?: string) => Promise<string | null>
+    fallbackFn?: (name: string, channel: string, versionSpec?: string) => Promise<string | null>,
+    buildSpec?: string,
   ): Promise<string | null> {
     // 타겟 플랫폼 repodata 확인
     const targetCacheKey = `${channel}/${this.config.targetSubdir}`;
@@ -491,7 +496,13 @@ export class CondaRepoDataProcessor {
     let targetCandidate: { version: string; isPythonMatch: boolean } | null = null;
 
     if (repodata) {
-      const candidates = this.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
+      const candidates = this.findPackageCandidates(
+        repodata,
+        name,
+        versionSpec,
+        targetCacheKey,
+        buildSpec,
+      );
       if (candidates.length > 0) {
         // 첫 번째 후보가 Python 버전과 호환되는지 확인
         const firstCandidate = candidates[0];
@@ -514,7 +525,8 @@ export class CondaRepoDataProcessor {
           noarchRepodata,
           name,
           versionSpec,
-          noarchCacheKey
+          noarchCacheKey,
+          buildSpec,
         );
         if (candidates.length > 0 && candidates[0].isPythonMatch) {
           return candidates[0].version;
