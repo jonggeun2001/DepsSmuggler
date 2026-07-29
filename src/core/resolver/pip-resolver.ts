@@ -21,7 +21,6 @@ import type { PipTargetPlatform } from '../../types/platform/pip-target-platform
 import {
   fetchPackageFiles,
   extractVersionFromFilename,
-  findLatestVersion as findLatestVersionFromSimpleApi,
   SimpleApiPackageFile,
   fetchWheelMetadata,
 } from './pip-simple-api';
@@ -574,45 +573,44 @@ export class PipResolver implements IResolver {
         const files = await fetchPackageFiles(indexUrl, name);
         if (files.length === 0) return null;
 
-        // versionSpec이 없으면 최신 버전 반환
-        if (!versionSpec) {
-          return findLatestVersionFromSimpleApi(files);
-        }
-
-        // versionSpec과 호환되는 버전 필터링
-        const versions = new Set<string>();
+        const filesByVersion = new Map<string, SimpleApiPackageFile[]>();
         for (const file of files) {
           try {
             const version = extractVersionFromFilename(file.filename);
             if (!file.yanked) {
-              versions.add(version);
+              const versionFiles = filesByVersion.get(version) ?? [];
+              versionFiles.push(file);
+              filesByVersion.set(version, versionFiles);
             }
           } catch {
             // 버전 추출 실패 시 무시
           }
         }
 
-        const compatibleVersions = Array.from(versions).filter((v) =>
-          isVersionCompatible(v, versionSpec)
-        );
+        const compatiblePythonVersions = Array.from(filesByVersion)
+          .filter(([, versionFiles]) => this.selectBestWheelFromSimpleApi(versionFiles) !== null)
+          .map(([version]) => version)
+          .sort((left, right) => compareVersions(right, left));
+        const compatibleVersions = versionSpec
+          ? compatiblePythonVersions.filter((version) => isVersionCompatible(version, versionSpec))
+          : compatiblePythonVersions;
 
-        if (compatibleVersions.length === 0) {
-          // 호환 버전이 없으면 최신 버전 사용 (충돌 기록)
-          const latestVersion = findLatestVersionFromSimpleApi(files);
-          if (latestVersion) {
-            this.conflicts.push({
-              type: 'version',
-              packageName: name,
-              versions: [versionSpec, latestVersion],
-              resolvedVersion: latestVersion,
-            });
-            return latestVersion;
-          }
-          return null;
+        if (compatibleVersions.length > 0) {
+          return compatibleVersions[0];
         }
 
-        // 최신 호환 버전 반환
-        return compatibleVersions.sort((a, b) => compareVersions(b, a))[0];
+        const fallbackVersion = compatiblePythonVersions[0];
+        if (!fallbackVersion) return null;
+
+        if (versionSpec) {
+          this.conflicts.push({
+            type: 'version',
+            packageName: name,
+            versions: [versionSpec, fallbackVersion],
+            resolvedVersion: fallbackVersion,
+          });
+        }
+        return fallbackVersion;
       } else {
         // PyPI JSON API 사용 (기존 로직)
         // 캐시에서 패키지 메타데이터 조회 (버전 없이 조회해야 releases 포함)
@@ -622,37 +620,30 @@ export class PipResolver implements IResolver {
         const { data } = cacheResult;
         if (!data.releases) return null;
 
-        const versions = Object.keys(data.releases).filter(
-          (v) => data.releases![v].length > 0 // 실제 릴리스가 있는 버전만
-        );
+        const compatiblePythonVersions = Object.entries(data.releases)
+          .filter(([, releases]) => releases.length > 0 && this.selectBestWheel(releases) !== null)
+          .map(([version]) => version)
+          .sort((left, right) => compareVersions(right, left));
+        const compatibleVersions = versionSpec
+          ? compatiblePythonVersions.filter((version) => isVersionCompatible(version, versionSpec))
+          : compatiblePythonVersions;
 
-        if (versions.length === 0) return null;
-
-        // 버전 스펙이 없으면 최신 버전
-        if (!versionSpec) {
-          return data.info.version;
+        if (compatibleVersions.length > 0) {
+          return compatibleVersions[0];
         }
 
-        // 버전 스펙 파싱 및 필터링
-        const compatibleVersions = versions.filter((v) =>
-          isVersionCompatible(v, versionSpec)
-        );
+        const fallbackVersion = compatiblePythonVersions[0];
+        if (!fallbackVersion) return null;
 
-        if (compatibleVersions.length === 0) {
-          // 호환 버전이 없으면 최신 버전 사용 (충돌 기록)
+        if (versionSpec) {
           this.conflicts.push({
             type: 'version',
             packageName: name,
-            versions: [versionSpec, data.info.version],
-            resolvedVersion: data.info.version,
+            versions: [versionSpec, fallbackVersion],
+            resolvedVersion: fallbackVersion,
           });
-          return data.info.version;
         }
-
-        // 최신 호환 버전 반환
-        return compatibleVersions.sort((a, b) =>
-          compareVersions(b, a)
-        )[0];
+        return fallbackVersion;
       }
     } catch {
       return null;
@@ -978,9 +969,13 @@ export class PipResolver implements IResolver {
     files: SimpleApiPackageFile[]
   ): SimpleApiPackageFile | null {
     if (!this.pipTargetPlatform) {
-      // 플랫폼 정보가 없으면 첫 번째 wheel 반환
+      // 플랫폼 정보가 없으면 첫 번째 wheel 또는 source distribution 반환
       return files.find(
         (file) => file.filename.endsWith('.whl') && this.isSimpleFilePythonCompatible(file)
+      ) || files.find(
+        (file) =>
+          (file.filename.endsWith('.tar.gz') || file.filename.endsWith('.zip')) &&
+          this.isSimpleFilePythonCompatible(file)
       ) || null;
     }
 

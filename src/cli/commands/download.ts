@@ -42,11 +42,11 @@ function getNormalizedPackageKey(name: string, version: string): string {
   return `${name.toLowerCase().replace(/[-_.]+/g, '_')}@${version}`;
 }
 
-function getPipTargetPlatform(arch: Architecture, pythonVersion?: string): PipTargetPlatform | undefined {
-  if (!pythonVersion) return undefined;
-
+function getPipTargetPlatform(arch: Architecture, pythonVersion?: string): PipTargetPlatform {
   const pipArch = PIP_TARGET_ARCHITECTURES[arch] ?? 'x86_64';
-  const normalizedPythonVersion = normalizePythonVersion(pythonVersion);
+  const normalizedPythonVersion = pythonVersion
+    ? normalizePythonVersion(pythonVersion)
+    : undefined;
 
   return {
     os: 'linux',

@@ -81,7 +81,12 @@ const createPyPIFixtureResponder = (packages: Record<string, PackageFixture>) =>
           releases: Object.fromEntries(
             Object.entries(fixture.versions).map(([currentVersion, currentFixture]) => [
               currentVersion,
-              currentFixture.urls ?? [{ filename: `${name}-${currentVersion}.tar.gz` }],
+              currentFixture.urls ?? [
+                {
+                  filename: `${name}-${currentVersion}.tar.gz`,
+                  packagetype: 'sdist',
+                },
+              ],
             ])
           ),
         },
@@ -432,5 +437,107 @@ describe('PipResolver characterization', () => {
         pythonVersion: '3.12',
       })
     ).rejects.toThrow('호환되는 패키지를 찾을 수 없습니다: future@1.0.0');
+  });
+
+  it('PyPI latest는 대상 Python과 호환되는 이전 릴리스를 선택한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        future: {
+          latest: '2.0.0',
+          versions: {
+            '1.0.0': {
+              urls: [
+                {
+                  filename: 'future-1.0.0-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                  requires_python: '<3.13',
+                },
+              ],
+            },
+            '2.0.0': {
+              requiresPython: '>=3.13',
+              urls: [
+                {
+                  filename: 'future-2.0.0-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                  requires_python: '>=3.13',
+                },
+              ],
+            },
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('future', 'latest', { pythonVersion: '3.12' });
+
+    expect(result.root.package.version).toBe('1.0.0');
+  });
+
+  it('PyPI 범위 의존성은 대상 Python과 호환되는 이전 릴리스를 포함한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        root: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['future>=1.0.0'] },
+          },
+        },
+        future: {
+          latest: '2.0.0',
+          versions: {
+            '1.0.0': {
+              urls: [
+                {
+                  filename: 'future-1.0.0-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                  requires_python: '<3.13',
+                },
+              ],
+            },
+            '2.0.0': {
+              requiresPython: '>=3.13',
+              urls: [
+                {
+                  filename: 'future-2.0.0-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                  requires_python: '>=3.13',
+                },
+              ],
+            },
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('root', '1.0.0', { pythonVersion: '3.12' });
+
+    expect(result.flatList).toContainEqual(expect.objectContaining({ name: 'future', version: '1.0.0' }));
+  });
+
+  it('Simple API latest는 대상 Python과 호환되는 이전 릴리스를 선택한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'future-1.0.0-py3-none-any.whl',
+        url: 'https://packages.example.com/future-1.0.0.whl',
+        requiresPython: '<3.13',
+      },
+      {
+        filename: 'future-2.0.0-py3-none-any.whl',
+        url: 'https://packages.example.com/future-2.0.0.whl',
+        requiresPython: '>=3.13',
+      },
+    ]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('future', 'latest', {
+      indexUrl: 'https://packages.example.com/simple',
+      pythonVersion: '3.12',
+    });
+
+    expect(result.root.package.version).toBe('1.0.0');
   });
 });

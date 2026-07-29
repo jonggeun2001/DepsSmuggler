@@ -289,6 +289,36 @@ describe('downloadCommand', () => {
     );
   });
 
+  it('Python 버전이 없어도 pip 아키텍처 타겟을 resolver와 downloader에 전달한다', async () => {
+    await downloadCommand({
+      type: 'pip',
+      package: 'requests',
+      pkgVersion: '2.28.0',
+      arch: 'arm64',
+      output: './output',
+      format: 'zip',
+      deps: true,
+      concurrency: '3',
+    });
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        architecture: 'aarch64',
+        targetOS: 'linux',
+      })
+    );
+    expect(startDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pipTargetPlatform: expect.objectContaining({
+          os: 'linux',
+          arch: 'aarch64',
+          pythonVersion: undefined,
+        }),
+      })
+    );
+  });
+
   it('conda Python 버전을 의존성 해결에 전달한다', async () => {
     await downloadCommand({
       type: 'conda',
