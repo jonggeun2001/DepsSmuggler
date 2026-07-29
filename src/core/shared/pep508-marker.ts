@@ -405,18 +405,18 @@ class MarkerParser {
       leftValue = normalizeExtraName(leftValue);
       rightValue = normalizeExtraName(rightValue);
     }
+    if (operator === '===') {
+      return versionVariable || reverseVersionVariable
+        ? leftValue.toLowerCase() === rightValue.toLowerCase()
+        : leftValue === rightValue;
+    }
+
     if (
       left.variable === 'platform_machine' ||
       right.variable === 'platform_machine'
     ) {
       leftValue = normalizeMachine(leftValue);
       rightValue = normalizeMachine(rightValue);
-    }
-
-    if (operator === '===') {
-      return versionVariable || reverseVersionVariable
-        ? leftValue.toLowerCase() === rightValue.toLowerCase()
-        : leftValue === rightValue;
     }
 
     if (

@@ -18,6 +18,24 @@ describe('evaluatePep508Marker', () => {
     },
   );
 
+  it('extra의 ===에는 PEP 685 정규화를 적용한다', () => {
+    expect(
+      evaluatePep508Marker(
+        'extra === "foo-bar"',
+        { extra: 'Foo.Bar' },
+      ),
+    ).toBe(true);
+  });
+
+  it('platform_machine의 ===는 별칭을 정규화하지 않는다', () => {
+    expect(
+      evaluatePep508Marker(
+        'platform_machine === "AMD64"',
+        { platform_machine: 'x86_64' },
+      ),
+    ).toBe(false);
+  });
+
   it('===는 버전을 정규화하지 않고 원문 문자열로 비교한다', () => {
     expect(
       evaluatePep508Marker(
