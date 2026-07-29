@@ -224,6 +224,103 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     );
   });
 
+  it.each([
+    {
+      name: 'build tag 포함 macOS arm64',
+      machine: 'arm64' as const,
+      filename:
+        'demo-1.0.0-1-cp312-cp312-macosx_11_0_arm64.whl',
+    },
+    {
+      name: 'macOS universal2 arm64 대상',
+      machine: 'arm64' as const,
+      filename:
+        'demo-1.0.0-cp312-cp312-macosx_11_0_universal2.whl',
+    },
+    {
+      name: 'macOS universal2 x86_64 대상',
+      machine: 'x86_64' as const,
+      filename:
+        'demo-1.0.0-cp312-cp312-macosx_11_0_universal2.whl',
+    },
+  ])('$name wheel을 PyPI JSON과 Simple API에서 선택한다', async ({
+    machine,
+    filename,
+  }) => {
+    const pypiUrl = `https://files.example/${filename}`;
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: {
+          name: 'demo',
+          version: '1.0.0',
+          requires_dist: [],
+        },
+        urls: [
+          {
+            filename,
+            url: pypiUrl,
+            packagetype: 'bdist_wheel',
+            python_version: 'cp312',
+            digests: { sha256: 'pypi-macos-sha' },
+            size: 100,
+          },
+        ],
+      },
+    });
+
+    const pypiResult = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        targetPlatform: { system: 'Darwin', machine },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(pypiResult.root.package.metadata).toMatchObject({
+      filename,
+      downloadUrl: pypiUrl,
+    });
+    await expectSelectedArtifactIsDownloaded(
+      pypiResult.root.package,
+      pypiUrl,
+      'pypi-macos-sha',
+    );
+
+    const simpleUrl = `https://index.example/${filename}`;
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename,
+        url: simpleUrl,
+        hash: { algorithm: 'sha256', digest: 'simple-macos-sha' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const simpleResult = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Darwin', machine },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(simpleResult.root.package.metadata).toMatchObject({
+      filename,
+      downloadUrl: simpleUrl,
+    });
+    await expectSelectedArtifactIsDownloaded(
+      simpleResult.root.package,
+      simpleUrl,
+      'simple-macos-sha',
+    );
+  });
+
   it('PyPI JSON에서 대상 Python보다 높은 abi3 wheel을 거부한다', async () => {
     pipCacheMock.fetchPackageMetadata.mockResolvedValue({
       data: {

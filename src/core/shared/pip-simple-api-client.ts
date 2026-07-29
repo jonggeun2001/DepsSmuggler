@@ -225,7 +225,7 @@ function parseSimpleApiHtml(html: string, baseUrl: string): SimpleApiPackageFile
  */
 export function extractVersionFromFilename(filename: string): string {
   // 휠 파일명 형식: {name}-{version}[-{build}]-{python}-{abi}-{platform}.whl
-  const wheelMatch = /^([a-zA-Z0-9._-]+)-([a-zA-Z0-9._+]+?)(?:-\d+)?-([a-z0-9]+)-([a-z0-9_]+)-([a-z0-9_]+)\.whl$/i.exec(
+  const wheelMatch = /^([a-zA-Z0-9._-]+?)-([a-zA-Z0-9._+]+?)(?:-\d[0-9a-z_]*)?-([a-z0-9.]+)-([a-z0-9_.]+)-([a-z0-9_.]+)\.whl$/i.exec(
     filename
   );
 
@@ -251,7 +251,7 @@ export function extractVersionFromFilename(filename: string): string {
  */
 export function parseWheelFilename(filename: string): WheelInfo {
   const wheelMatch =
-    /^([a-zA-Z0-9._-]+)-([a-zA-Z0-9._+]+?)(?:-\d+)?-([a-z0-9]+)-([a-z0-9_]+)-([a-z0-9_.]+)\.whl$/i.exec(
+    /^([a-zA-Z0-9._-]+?)-([a-zA-Z0-9._+]+?)(?:-\d[0-9a-z_]*)?-([a-z0-9.]+)-([a-z0-9_.]+)-([a-z0-9_.]+)\.whl$/i.exec(
       filename
     );
 

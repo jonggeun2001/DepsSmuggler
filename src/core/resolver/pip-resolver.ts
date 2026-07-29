@@ -741,17 +741,34 @@ export class PipResolver implements IResolver {
   }
 
   /**
+   * wheel 파일명 오른쪽의 Python/ABI/플랫폼 태그 추출
+   */
+  private extractWheelTags(filename: string): {
+    pythonTag: string;
+    abiTag: string;
+    platformTags: string[];
+  } | null {
+    if (!filename.endsWith('.whl')) return null;
+
+    // wheel 형식: {distribution}-{version}(-{build})?-{python}-{abi}-{platform}.whl
+    // build tag가 있어도 마지막 세 필드는 항상 Python/ABI/플랫폼 태그다.
+    const parts = filename.slice(0, -'.whl'.length).split('-');
+    if (parts.length < 5) return null;
+
+    const [pythonTag, abiTag, platformTag] = parts.slice(-3);
+    return {
+      pythonTag,
+      abiTag,
+      platformTags: platformTag.split('.'),
+    };
+  }
+
+  /**
    * wheel 파일명에서 플랫폼 태그 추출
    * 예: numpy-1.24.0-cp311-cp311-manylinux_2_17_x86_64.whl -> ['manylinux_2_17_x86_64']
    */
   private extractPlatformTags(filename: string): string[] {
-    // wheel 파일명 형식: {distribution}-{version}(-{build})?-{python}-{abi}-{platform}.whl
-    const parts = filename.replace('.whl', '').split('-');
-    if (parts.length < 5) return [];
-
-    // 마지막 부분이 플랫폼 태그 (여러 개일 수 있음, . 으로 구분)
-    const platformPart = parts[parts.length - 1];
-    return platformPart.split('.');
+    return this.extractWheelTags(filename)?.platformTags ?? [];
   }
 
   /**
@@ -816,10 +833,13 @@ export class PipResolver implements IResolver {
 
     // Python 버전 호환성 체크
     if (this.pipTargetPlatform.pythonVersion || this.pythonVersion) {
-      const wheelMatch = /^[^-]+-[^-]+-([^-]+)-([^-]+)-(.+)\.whl$/.exec(release.filename);
+      const wheelTags = this.extractWheelTags(release.filename);
       if (
-        !wheelMatch ||
-        !this.isPythonTagCompatible(wheelMatch[1], wheelMatch[2])
+        !wheelTags ||
+        !this.isPythonTagCompatible(
+          wheelTags.pythonTag,
+          wheelTags.abiTag,
+        )
       ) {
         return false;
       }
@@ -900,9 +920,17 @@ export class PipResolver implements IResolver {
         if (macosMatch) {
           const wheelMacOS = `${macosMatch[1]}_${macosMatch[2]}`;
           const wheelArch = normalizeArch(macosMatch[3]);
+          const isUniversal2Compatible =
+            wheelArch === 'universal2' &&
+            (targetArch === 'aarch64' || targetArch === 'x86_64');
 
           // 아키텍처 체크
-          if (wheelArch !== targetArch) continue;
+          if (
+            wheelArch !== targetArch &&
+            !isUniversal2Compatible
+          ) {
+            continue;
+          }
 
           // macOS 버전 체크
           if (macosVersion && !this.compareMacOSVersions(wheelMacOS, macosVersion.replace('.', '_'))) {
