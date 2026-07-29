@@ -124,7 +124,7 @@ describe('fetchWheelMetadata', () => {
     },
   );
 
-  it('해시가 없는 true metadata도 조회한다', async () => {
+  it('해시가 없는 true metadata는 검증할 수 없어 조회하지 않는다', async () => {
     mockedAxios.get.mockResolvedValue({
       data: 'Metadata-Version: 2.4\n',
     });
@@ -135,6 +135,7 @@ describe('fetchWheelMetadata', () => {
         url: 'https://index.example/demo.whl',
         metadataAvailable: true,
       }),
-    ).resolves.toEqual([]);
+    ).resolves.toBeNull();
+    expect(mockedAxios.get).not.toHaveBeenCalled();
   });
 });

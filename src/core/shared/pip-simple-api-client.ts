@@ -331,6 +331,12 @@ export async function fetchWheelMetadata(
     });
     return null;
   }
+  if (!file.metadataHash) {
+    logger.warn('검증할 수 없는 원격 Core Metadata', {
+      filename: file.filename,
+    });
+    return null;
+  }
 
   try {
     // 메타데이터 URL: {wheel_url}.metadata

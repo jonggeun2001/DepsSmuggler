@@ -252,7 +252,12 @@ export class PipResolver implements IResolver {
         // 패키지 정보 조회
         let fetchResult: FetchedPackageInfo | null = null;
         try {
-          fetchResult = await this.fetchPackageInfo(name, ver, idx);
+          fetchResult = await this.fetchPackageInfo(
+            name,
+            ver,
+            idx,
+            depth < maxDepth,
+          );
         } catch (error) {
           if (!parentCacheKey) {
             throw error;
@@ -432,7 +437,8 @@ export class PipResolver implements IResolver {
   private async fetchPackageInfo(
     name: string,
     version: string,
-    indexUrl?: string
+    indexUrl?: string,
+    requireDependencyMetadata = true,
   ): Promise<FetchedPackageInfo | null> {
     logger.debug('📦 패키지 정보 조회', {
       name,
@@ -472,7 +478,12 @@ export class PipResolver implements IResolver {
           name,
           version: actualVersion,
         });
-        return await this.fetchPackageInfo(name, actualVersion, undefined);
+        return await this.fetchPackageInfo(
+          name,
+          actualVersion,
+          undefined,
+          requireDependencyMetadata,
+        );
       }
 
       // 최적의 wheel 선택
@@ -486,10 +497,7 @@ export class PipResolver implements IResolver {
       // PEP 658 메타데이터에서 의존성 정보 조회. 빈 배열은
       // "조회 성공 + 의존성 없음"이고 null은 조회 불가다.
       let customMetadataAvailable = false;
-      if (
-        selectedFile?.metadataAvailable ||
-        selectedFile?.metadataHash
-      ) {
+      if (selectedFile?.metadataHash) {
         const metadataRequiresDist =
           await fetchWheelMetadata(selectedFile);
         if (metadataRequiresDist !== null) {
@@ -512,10 +520,21 @@ export class PipResolver implements IResolver {
             )
           ) {
             requiresDist = pypiResult.data.info.requires_dist || [];
+            customMetadataAvailable = true;
           }
         } catch {
           // 커스텀 전용 패키지일 수 있음
         }
+      }
+
+      if (
+        requireDependencyMetadata &&
+        selectedFile &&
+        !customMetadataAvailable
+      ) {
+        throw new Error(
+          `검증된 의존성 메타데이터를 찾을 수 없습니다: ${name}@${actualVersion}`,
+        );
       }
 
       packageInfo = {

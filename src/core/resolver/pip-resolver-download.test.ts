@@ -191,7 +191,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
                   algorithm: 'sha256',
                   digest: 'custom-root-sha',
                 },
-                metadataAvailable: true,
+                metadataHash: {
+                  algorithm: 'sha256',
+                  digest: 'custom-root-metadata',
+                },
               },
             ]
           : [],
@@ -249,7 +252,7 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     ).not.toHaveBeenCalled();
   });
 
-  it('PEP 658 조회 실패 시 체크섬이 다른 PyPI 메타데이터를 사용하지 않는다', async () => {
+  it('PEP 658 조회 실패와 PyPI 체크섬 불일치 시 의존성 해결을 실패시킨다', async () => {
     simpleApiMock.fetchPackageFiles.mockImplementation(
       async (_indexUrl: string, name: string) =>
         name === 'custom-root'
@@ -287,10 +290,67 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
       },
     });
 
+    await expect(
+      new PipResolver().resolveDependencies(
+        'custom-root',
+        '1.0.0',
+        {
+          indexUrl: 'https://index.example/simple',
+        },
+      ),
+    ).rejects.toThrow(
+      '검증된 의존성 메타데이터를 찾을 수 없습니다',
+    );
+  });
+
+  it('해시 없는 PEP 714 metadata는 의존성 해결에 사용하지 않는다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'custom_root-1.0.0-py3-none-any.whl',
+        url: 'https://index.example/custom-root.whl',
+        hash: {
+          algorithm: 'sha256',
+          digest: 'custom-root-sha',
+        },
+        metadataAvailable: true,
+      },
+    ]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    await expect(
+      new PipResolver().resolveDependencies(
+        'custom-root',
+        '1.0.0',
+        {
+          indexUrl: 'https://index.example/simple',
+        },
+      ),
+    ).rejects.toThrow(
+      '검증된 의존성 메타데이터를 찾을 수 없습니다',
+    );
+    expect(
+      simpleApiMock.fetchWheelMetadata,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('no-deps 깊이에서는 검증된 커스텀 의존성 메타데이터를 요구하지 않는다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'custom_root-1.0.0-py3-none-any.whl',
+        url: 'https://index.example/custom-root.whl',
+        hash: {
+          algorithm: 'sha256',
+          digest: 'custom-root-sha',
+        },
+      },
+    ]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
     const result = await new PipResolver().resolveDependencies(
       'custom-root',
       '1.0.0',
       {
+        maxDepth: 0,
         indexUrl: 'https://index.example/simple',
       },
     );
@@ -1110,12 +1170,20 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
                 'simplechild-2.0.0-cp313-cp313-manylinux_2_17_x86_64.whl',
               url: 'https://index.example/simplechild-2.whl',
               requiresPython: '>=3.13',
+              metadataHash: {
+                algorithm: 'sha256',
+                digest: 'simplechild-2-metadata',
+              },
             },
             {
               filename:
                 'simplechild-1.5.0-cp312-cp312-manylinux_2_17_x86_64.whl',
               url: 'https://index.example/simplechild-1.5.whl',
               requiresPython: '>=3.12',
+              metadataHash: {
+                algorithm: 'sha256',
+                digest: 'simplechild-1.5-metadata',
+              },
             },
           ];
         }
