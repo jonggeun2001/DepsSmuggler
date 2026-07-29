@@ -51,12 +51,22 @@ function getPipTargetPlatform(arch: Architecture, pythonVersion?: string): PipTa
   const pipArch = PIP_TARGET_ARCHITECTURES.has(arch as PipTargetPlatform['arch'])
     ? arch as PipTargetPlatform['arch']
     : 'x86_64';
+  const normalizedPythonVersion = normalizePythonVersion(pythonVersion);
 
   return {
     os: 'linux',
     arch: pipArch,
-    pythonVersion,
+    pythonVersion: normalizedPythonVersion,
   };
+}
+
+function normalizePythonVersion(pythonVersion: string): string {
+  const match = pythonVersion.trim().match(/^(\d+)\.(\d+)(?:\.\d+)?$/);
+  if (!match) {
+    throw new Error('Python 버전은 major.minor 또는 major.minor.patch 형식이어야 합니다');
+  }
+
+  return `${match[1]}.${match[2]}`;
 }
 
 function toDownloadPackage(pkg: PackageInfo): DownloadPackage {
@@ -109,7 +119,9 @@ function toPackageInfo(pkg: DownloadPackage): PackageInfo {
 
 async function preparePackagesForDownload(
   packages: PackageInfo[],
-  options: Pick<DownloadCommandOptions, 'type' | 'arch' | 'deps' | 'pythonVersion' | 'strict'>
+  options: Pick<DownloadCommandOptions, 'type' | 'arch' | 'deps' | 'pythonVersion' | 'strict'> & {
+    pipTargetPlatform?: PipTargetPlatform;
+  }
 ): Promise<PreparedPackagesResult> {
   if (!options.deps) {
     return {
@@ -128,10 +140,10 @@ async function preparePackagesForDownload(
   }
 
   const resolved = await resolveAllDependencies(packages.map(toDownloadPackage), {
-    architecture: options.arch,
+    architecture: options.pipTargetPlatform?.arch ?? options.arch,
     includeDependencies: true,
-    pythonVersion: options.pythonVersion,
-    ...(options.type === 'pip' && options.pythonVersion ? { targetOS: 'linux' as const } : {}),
+    pythonVersion: options.pipTargetPlatform?.pythonVersion ?? options.pythonVersion,
+    ...(options.pipTargetPlatform ? { targetOS: 'linux' as const } : {}),
   });
 
   if (resolved.failedPackages.length > 0) {
@@ -205,12 +217,16 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
     console.log(chalk.green(`✓ ${packages.length}개 패키지 준비 완료`));
 
     const requestedCount = packages.length;
+    const pipTargetPlatform = options.type === 'pip'
+      ? getPipTargetPlatform(options.arch, options.pythonVersion)
+      : undefined;
     const prepared = await preparePackagesForDownload(packages, {
       type: options.type,
       arch: options.arch,
       deps: options.deps,
       pythonVersion: options.pythonVersion,
       strict: options.strict,
+      pipTargetPlatform,
     });
     packages = prepared.packages;
 
@@ -273,9 +289,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       outputPath,
       concurrency: parseInt(options.concurrency, 10),
       maxRetries: 3,
-      pipTargetPlatform: options.type === 'pip'
-        ? getPipTargetPlatform(options.arch, options.pythonVersion)
-        : undefined,
+      pipTargetPlatform,
     });
 
     multibar.stop();

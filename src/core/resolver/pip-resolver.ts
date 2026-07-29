@@ -517,8 +517,7 @@ export class PipResolver implements IResolver {
     const { system, machine } = this.targetPlatform ?? {};
 
     if (variable === 'extra') {
-      if (!extras) return false;
-      const matchesExtra = extras.includes(requiredValue);
+      const matchesExtra = extras?.includes(requiredValue) ?? false;
       return operator === '!=' ? !matchesExtra : operator === '==' || operator === '===' ? matchesExtra : false;
     }
 

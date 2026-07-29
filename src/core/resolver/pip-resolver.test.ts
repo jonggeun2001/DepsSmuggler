@@ -172,8 +172,12 @@ describe('PipResolver 단위 테스트', () => {
   });
 
   describe('evaluateMarker', () => {
-    const callEvaluateMarker = (resolver: PipResolver, marker?: string): boolean => {
-      return (resolver as any).evaluateMarker(marker);
+    const callEvaluateMarker = (
+      resolver: PipResolver,
+      marker?: string,
+      extras?: string[]
+    ): boolean => {
+      return (resolver as any).evaluateMarker(marker, extras);
     };
 
     describe('기본 동작', () => {
@@ -333,6 +337,26 @@ describe('PipResolver 단위 테스트', () => {
 
       it('extra 마커가 포함되면 제외', () => {
         expect(callEvaluateMarker(resolver, 'extra == "security"')).toBe(false);
+      });
+
+      it('선택하지 않은 extra의 부정 마커는 포함한다', () => {
+        expect(callEvaluateMarker(resolver, 'extra != "docs"')).toBe(true);
+        expect(callEvaluateMarker(resolver, 'extra == "docs"')).toBe(false);
+      });
+
+      it('extra 부정 마커와 플랫폼 조건을 함께 평가한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'extra != "docs" and sys_platform == "linux"'
+          )
+        ).toBe(true);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'extra != "docs" and sys_platform == "win32"'
+          )
+        ).toBe(false);
       });
     });
   });

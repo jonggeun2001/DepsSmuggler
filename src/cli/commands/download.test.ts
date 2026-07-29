@@ -209,6 +209,38 @@ describe('downloadCommand', () => {
     );
   });
 
+  it('pip 타겟의 아키텍처와 Python patch 버전을 resolver 및 downloader에서 동일하게 정규화한다', async () => {
+    await downloadCommand({
+      type: 'pip',
+      package: 'requests',
+      pkgVersion: '2.28.0',
+      arch: 'i686',
+      output: './output',
+      format: 'zip',
+      deps: true,
+      concurrency: '3',
+      pythonVersion: '3.12.0',
+    });
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        architecture: 'x86_64',
+        targetOS: 'linux',
+        pythonVersion: '3.12',
+      })
+    );
+    expect(startDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pipTargetPlatform: {
+          os: 'linux',
+          arch: 'x86_64',
+          pythonVersion: '3.12',
+        },
+      })
+    );
+  });
+
   it('conda Python 버전을 의존성 해결에 전달한다', async () => {
     await downloadCommand({
       type: 'conda',
