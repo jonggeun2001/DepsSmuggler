@@ -16,6 +16,7 @@ import type {
   DownloadItem as CanonicalDownloadItem,
   DownloadStatus as CanonicalDownloadStatus,
 } from '../../types';
+import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 
 // 다운로드 아이템 상태
 export type DownloadManagerItemStatus = CanonicalDownloadStatus;
@@ -42,6 +43,7 @@ export interface DownloadManagerOptions {
   outputPath: string;
   concurrency?: number;
   maxRetries?: number;
+  pipTargetPlatform?: PipTargetPlatform;
   onUserDecision?: (
     item: DownloadManagerItem,
     error: Error
@@ -64,6 +66,17 @@ export type DownloadItemStatus = DownloadManagerItemStatus;
 export type DownloadItem = DownloadManagerItem;
 export type DownloadOptions = DownloadManagerOptions;
 export type DownloadResult = DownloadManagerResult;
+
+interface PipTargetPlatformAwareDownloader extends IDownloader {
+  setPipTargetPlatform(platform: PipTargetPlatform | null): void;
+}
+
+function supportsPipTargetPlatform(
+  downloader: IDownloader
+): downloader is PipTargetPlatformAwareDownloader {
+  return 'setPipTargetPlatform' in downloader
+    && typeof downloader.setPipTargetPlatform === 'function';
+}
 
 // 전체 진행률
 export interface OverallProgress {
@@ -143,6 +156,11 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
       maxRetries: DOWNLOAD_CONSTANTS.MAX_RETRIES,
       ...options,
     };
+
+    const pipDownloader = this.downloaders.get('pip');
+    if (pipDownloader && supportsPipTargetPlatform(pipDownloader)) {
+      pipDownloader.setPipTargetPlatform(this.options.pipTargetPlatform ?? null);
+    }
 
     this.queue = new PQueue({ concurrency: this.options.concurrency });
     this.isRunning = true;

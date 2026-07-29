@@ -4,6 +4,7 @@ import { resolveAllDependencies } from '../../core/shared';
 
 const {
   ensureDir,
+  readFile,
   reset,
   addToQueue,
   on,
@@ -14,6 +15,7 @@ const {
   stop,
 } = vi.hoisted(() => ({
   ensureDir: vi.fn(),
+  readFile: vi.fn(),
   reset: vi.fn(),
   addToQueue: vi.fn(),
   on: vi.fn(),
@@ -27,10 +29,10 @@ const {
 vi.mock('fs-extra', () => ({
   default: {
     ensureDir,
-    readFile: vi.fn(),
+    readFile,
   },
   ensureDir,
-  readFile: vi.fn(),
+  readFile,
 }));
 
 vi.mock('cli-progress', () => ({
@@ -161,6 +163,68 @@ describe('downloadCommand', () => {
     ]);
   });
 
+  it('pip Python 버전을 의존성 해결에 전달한다', async () => {
+    await downloadCommand({
+      type: 'pip',
+      package: 'requests',
+      pkgVersion: '2.28.0',
+      arch: 'x86_64',
+      output: './output',
+      format: 'zip',
+      deps: true,
+      concurrency: '3',
+      pythonVersion: '3.12',
+    });
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ pythonVersion: '3.12' })
+    );
+  });
+
+  it('pip Python 버전 선택 시 wheel 타겟을 다운로드 매니저에 전달한다', async () => {
+    await downloadCommand({
+      type: 'pip',
+      package: 'requests',
+      pkgVersion: '2.28.0',
+      arch: 'x86_64',
+      output: './output',
+      format: 'zip',
+      deps: true,
+      concurrency: '3',
+      pythonVersion: '3.12',
+    });
+
+    expect(startDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pipTargetPlatform: {
+          os: 'linux',
+          arch: 'x86_64',
+          pythonVersion: '3.12',
+        },
+      })
+    );
+  });
+
+  it('conda Python 버전을 의존성 해결에 전달한다', async () => {
+    await downloadCommand({
+      type: 'conda',
+      package: 'numpy',
+      pkgVersion: '1.26.0',
+      arch: 'x86_64',
+      output: './output',
+      format: 'zip',
+      deps: true,
+      concurrency: '3',
+      pythonVersion: '3.12',
+    });
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ pythonVersion: '3.12' })
+    );
+  });
+
   it('deps가 false면 원본 패키지만 큐에 추가한다', async () => {
     await downloadCommand({
       type: 'pip',
@@ -207,7 +271,86 @@ describe('downloadCommand', () => {
     ]);
   });
 
-  it('의존성 해결 실패가 있으면 명령을 실패 처리한다', async () => {
+  it('기본 모드에서는 실패한 직접 항목을 제외하고 해결된 패키지를 다운로드한다', async () => {
+    readFile.mockResolvedValue('requests==2.28.0\nCrypto-Py==0.0.4\n');
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+          architecture: 'x86_64',
+        },
+        {
+          id: 'pip-Crypto-Py-0.0.4',
+          type: 'pip',
+          name: 'Crypto-Py',
+          version: '0.0.4',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+          architecture: 'x86_64',
+        },
+        {
+          id: 'pip-urllib3-1.26.0',
+          type: 'pip',
+          name: 'urllib3',
+          version: '1.26.0',
+          architecture: 'x86_64',
+        },
+        {
+          id: 'pip-Crypto-Py-0.0.4',
+          type: 'pip',
+          name: 'Crypto-Py',
+          version: '0.0.4',
+          architecture: 'x86_64',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [
+        {
+          name: 'crypto_py',
+          version: '0.0.4',
+          error: '패키지를 찾을 수 없음',
+        },
+      ],
+    });
+
+    await downloadCommand({
+      type: 'pip',
+      pkgVersion: 'latest',
+      arch: 'x86_64',
+      output: './output',
+      format: 'zip',
+      file: 'requirements.txt',
+      deps: true,
+      concurrency: '3',
+    });
+
+    expect(addToQueue).toHaveBeenCalledWith([
+      {
+        type: 'pip',
+        name: 'requests',
+        version: '2.28.0',
+        arch: 'x86_64',
+      },
+      {
+        type: 'pip',
+        name: 'urllib3',
+        version: '1.26.0',
+        arch: 'x86_64',
+      },
+    ]);
+  });
+
+  it('strict 모드에서 의존성 해결 실패가 있으면 명령을 실패 처리한다', async () => {
     const exitSpy = vi
       .spyOn(process, 'exit')
       .mockImplementation((() => {
@@ -253,6 +396,7 @@ describe('downloadCommand', () => {
         format: 'zip',
         deps: true,
         concurrency: '3',
+        strict: true,
       })
     ).rejects.toThrow('process.exit');
 

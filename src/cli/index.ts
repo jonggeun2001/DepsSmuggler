@@ -37,7 +37,9 @@ program
   .option('-o, --output <path>', '출력 경로', './output')
   .option('-f, --format <format>', '출력 형식 (zip, tar.gz)', 'zip')
   .option('--file <file>', '줄 단위 패키지 목록 파일 (requirements.txt, Maven 좌표 목록 등)')
+  .option('--python-version <version>', '타겟 Python 버전 (예: 3.12)')
   .option('--no-deps', '의존성 포함하지 않음')
+  .option('--strict', '의존성 해결 실패 시 다운로드하지 않음')
   .option('--concurrency <num>', '동시 다운로드 수', '3')
   .action(async (options) => {
     const { downloadCommand } = await import('./commands/download');

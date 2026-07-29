@@ -8,11 +8,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { PipResolver } from './pip-resolver';
 
 // PipResolver 인스턴스 생성 및 targetPlatform 설정
-const createResolver = (options?: { targetPlatform?: { system?: string; machine?: string } }) => {
+const createResolver = (options?: {
+  targetPlatform?: { system?: string; machine?: string };
+  pythonVersion?: string;
+}) => {
   const resolver = new PipResolver();
   // targetPlatform은 private 속성이므로 직접 설정
   if (options?.targetPlatform) {
     (resolver as any).targetPlatform = options.targetPlatform;
+  }
+  if (options?.pythonVersion) {
+    (resolver as any).pythonVersion = options.pythonVersion;
   }
   return resolver;
 };
@@ -112,6 +118,29 @@ describe('PipResolver 단위 테스트', () => {
       });
     });
 
+    it('괄호형 버전 제약식을 파싱한다', () => {
+      const result = callParseDependencyString(resolver, 'cached-property (>=1.5.2)');
+      expect(result).toEqual({
+        name: 'cached_property',
+        versionSpec: '>=1.5.2',
+        extras: undefined,
+        markers: undefined,
+      });
+    });
+
+    it('괄호형 버전 제약식과 extras 및 환경 마커를 함께 보존한다', () => {
+      const result = callParseDependencyString(
+        resolver,
+        'requests[security] (>=2.0) ; sys_platform == "linux"'
+      );
+      expect(result).toEqual({
+        name: 'requests',
+        versionSpec: '>=2.0',
+        extras: ['security'],
+        markers: 'sys_platform == "linux"',
+      });
+    });
+
     it('환경 마커', () => {
       const result = callParseDependencyString(
         resolver,
@@ -195,6 +224,25 @@ describe('PipResolver 단위 테스트', () => {
 
       it('platform_machine == "arm64" 실패', () => {
         expect(callEvaluateMarker(resolver, 'platform_machine == "arm64"')).toBe(false);
+      });
+    });
+
+    describe('Python 버전', () => {
+      beforeEach(() => {
+        resolver = createResolver({
+          targetPlatform: { system: 'Linux', machine: 'x86_64' },
+          pythonVersion: '3.12',
+        });
+      });
+
+      it('python_version 최소 버전 마커를 평가한다', () => {
+        expect(callEvaluateMarker(resolver, 'python_version >= "3.12"')).toBe(true);
+        expect(callEvaluateMarker(resolver, 'python_version > "3.12"')).toBe(false);
+      });
+
+      it('python_version 최대 버전 마커를 평가한다', () => {
+        expect(callEvaluateMarker(resolver, 'python_version < "3.12"')).toBe(false);
+        expect(callEvaluateMarker(resolver, 'python_version <= "3.12"')).toBe(true);
       });
     });
 

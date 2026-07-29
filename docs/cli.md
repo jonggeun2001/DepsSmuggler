@@ -64,10 +64,14 @@ depssmuggler download [옵션]
 | `-o, --output <path>` | 출력 경로 | `./output` |
 | `-f, --format <format>` | 아카이브 형식 (`zip`, `tar.gz`) | `zip` |
 | `--file <file>` | 줄 단위 패키지 목록 파일 (`requirements.txt`, Maven 좌표 목록 등) | - |
+| `--python-version <version>` | `pip`/`conda` 의존성 해결 대상 Python 버전 | - |
 | `--no-deps` | 의존성 해결 비활성화 | `false` |
+| `--strict` | 직접 패키지 하나라도 의존성 해결에 실패하면 다운로드 중단 | `false` |
 | `--concurrency <num>` | 동시 다운로드 수 | `3` |
 
-기본 동작은 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 의존성을 함께 해결해 다운로드하는 것입니다. `--no-deps`를 지정하면 원본 패키지 목록만 다운로드합니다. 라이브러리 패키지의 의존성 해결이 실패하면 명령은 오류로 종료됩니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
+기본 동작은 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 의존성을 함께 해결해 다운로드하는 것입니다. `--no-deps`를 지정하면 원본 패키지 목록만 다운로드합니다. 직접 지정한 패키지 중 일부를 해결하지 못하면 기본 모드는 실패한 직접 패키지만 경고와 함께 건너뛰고, 나머지 해결된 패키지와 의존성을 계속 다운로드합니다. 전체 실패 정책이 필요하면 `--strict`를 사용합니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
+
+`pip`에서 `--python-version`을 지정하면 해당 버전의 `python_version` 환경 마커를 평가하고, 호환되는 wheel 태그를 선택합니다. CLI에 OS 옵션이 없으므로 wheel 대상 OS는 기존 resolver와 동일하게 Linux를 사용하며, `--arch` 값이 pip wheel 아키텍처로 지원되지 않으면 `x86_64`로 처리합니다.
 
 ### 예시
 
@@ -77,6 +81,8 @@ depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0
 depssmuggler download -t npm -p react -V 19.2.0
 depssmuggler download -t docker -p nginx -V latest
 depssmuggler download -t pip --file requirements.txt -o ./packages
+depssmuggler download -t pip --file requirements.txt --python-version 3.12 -o ./packages
+depssmuggler download -t pip --file requirements.txt --python-version 3.12 --strict -o ./packages
 depssmuggler download -t maven --file ./maven-packages.txt
 depssmuggler download -t pip -p flask -f tar.gz
 ```

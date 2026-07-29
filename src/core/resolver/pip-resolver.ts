@@ -429,19 +429,25 @@ export class PipResolver implements IResolver {
       // extras 제거 후 이름과 버전 분리
       const withoutExtras = mainPart.replace(/\[[^\]]+\]/, '');
 
-      // 버전 지정자 패턴
-      const versionPattern = /(>=|<=|==|!=|~=|>|<|===)/;
-      const match = withoutExtras.match(versionPattern);
-
       let name: string;
       let versionSpec: string | undefined;
 
-      if (match) {
-        const index = withoutExtras.indexOf(match[0]);
-        name = withoutExtras.substring(0, index).trim();
-        versionSpec = withoutExtras.substring(index).trim();
+      const parenthesizedSpec = withoutExtras.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
+      if (parenthesizedSpec) {
+        name = parenthesizedSpec[1].trim();
+        versionSpec = parenthesizedSpec[2].trim();
       } else {
-        name = withoutExtras.trim();
+        // 버전 지정자 패턴
+        const versionPattern = /(>=|<=|==|!=|~=|>|<|===)/;
+        const match = withoutExtras.match(versionPattern);
+
+        if (match) {
+          const index = withoutExtras.indexOf(match[0]);
+          name = withoutExtras.substring(0, index).trim();
+          versionSpec = withoutExtras.substring(index).trim();
+        } else {
+          name = withoutExtras.trim();
+        }
       }
 
       // 패키지명 정규화 (소문자, 하이픈을 언더스코어로)
@@ -507,7 +513,25 @@ export class PipResolver implements IResolver {
       }
     }
 
-    // python_version 마커는 무시 (모든 버전 포함)
+    const pythonVersionMatch = marker.match(
+      /python_version\s*(===|==|!=|>=|<=|>|<)\s*["'](\d+(?:\.\d+)*)["']/
+    );
+    if (pythonVersionMatch && this.pythonVersion) {
+      const [, operator, requiredVersion] = pythonVersionMatch;
+      const comparison = comparePythonVersions(this.pythonVersion, requiredVersion);
+      const matches = {
+        '===': comparison === 0,
+        '==': comparison === 0,
+        '!=': comparison !== 0,
+        '>=': comparison >= 0,
+        '<=': comparison <= 0,
+        '>': comparison > 0,
+        '<': comparison < 0,
+      }[operator];
+
+      if (!matches) return false;
+    }
+
     // sys_platform 평가
     const sysPlatformMatch = marker.match(/sys_platform\s*==\s*["'](\w+)["']/);
     if (sysPlatformMatch) {
@@ -1039,6 +1063,19 @@ export class PipResolver implements IResolver {
       platformTag: match[3],
     };
   }
+}
+
+function comparePythonVersions(left: string, right: string): number {
+  const leftParts = left.split('.').map(Number);
+  const rightParts = right.split('.').map(Number);
+  const maxLength = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) return difference > 0 ? 1 : -1;
+  }
+
+  return 0;
 }
 
 // 싱글톤 인스턴스

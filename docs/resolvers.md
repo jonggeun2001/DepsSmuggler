@@ -74,13 +74,15 @@ interface QueueItem {
 | `setCacheOptions` | 캐시 옵션 설정 |
 | `clearCache` | 캐시 초기화 (공유 캐시 초기화) |
 
-### TargetPlatform
+### Python 대상 옵션
 
 ```typescript
-interface TargetPlatform {
-  os: string;           // 'linux', 'macos', 'windows'
-  architecture: string; // 'x86_64', 'arm64'
-  pythonVersion: string; // '3.11', '3.12'
+interface ResolverOptions {
+  targetPlatform: {
+    system: string;       // 'Linux', 'Darwin', 'Windows'
+    machine: string;      // 'x86_64', 'arm64'
+  };
+  pythonVersion: string;  // '3.11', '3.12'
 }
 ```
 
@@ -89,15 +91,15 @@ interface TargetPlatform {
 PEP 508 환경 마커를 평가하여 플랫폼별 의존성 필터링:
 
 ```typescript
-// 지원되는 마커 변수
-- python_version       // Python 버전 (예: '3.11')
-- python_full_version  // 전체 Python 버전
-- sys_platform        // 플랫폼 (예: 'linux', 'darwin', 'win32')
-- platform_system     // OS 이름 (예: 'Linux', 'Darwin', 'Windows')
-- platform_machine    // 아키텍처 (예: 'x86_64', 'arm64')
-- os_name            // OS 종류 (예: 'posix', 'nt')
-- implementation_name // 구현체 (예: 'cpython')
+// 현재 평가하는 마커 변수
+- python_version       // 선택한 Python 버전과 >=, <=, ==, !=, >, < 비교
+- sys_platform         // 플랫폼 (예: 'linux', 'darwin', 'win32')
+- platform_system      // OS 이름 (예: 'Linux', 'Darwin', 'Windows')
+- platform_machine     // 아키텍처 (예: 'x86_64', 'arm64')
+- extra                // 선택한 extra
 ```
+
+`pythonVersion`이 설정된 경우 `python_version` 비교를 적용합니다. 지정하지 않으면 기존 호환성 동작대로 Python 버전 마커는 필터링하지 않습니다.
 
 ### Characterization 회귀 고정
 
@@ -171,6 +173,13 @@ Requires-Dist: idna <4,>=2.5
 Requires-Dist: urllib3 <3,>=1.21.1
 Requires-Dist: certifi >=2017.4.17
 Requires-Dist: PySocks !=1.5.7,>=1.5.6 ; extra == 'socks'
+```
+
+`Requires-Dist`는 다음처럼 버전 제약식을 괄호로 감싼 PEP 508 표현도 사용할 수 있습니다. resolver는 이 형태와 extras, 환경 마커를 함께 파싱합니다.
+
+```
+Requires-Dist: cached-property (>=1.5.2)
+Requires-Dist: requests[security] (>=2.0) ; sys_platform == 'linux'
 ```
 
 #### DepsSmuggler 구현

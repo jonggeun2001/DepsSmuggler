@@ -7,6 +7,7 @@ import { getArchivePackager, ArchiveFormat } from '../../core/packager/archive-p
 import { getScriptGenerator } from '../../core/packager/script-generator';
 import { DownloadPackage, resolveAllDependencies } from '../../core/shared';
 import { PackageInfo, PackageType, Architecture } from '../../types';
+import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 
 // 다운로드 옵션
 interface DownloadCommandOptions {
@@ -17,7 +18,9 @@ interface DownloadCommandOptions {
   output: string;
   format: ArchiveFormat;
   file?: string;
+  pythonVersion?: string;
   deps: boolean;
+  strict?: boolean;
   concurrency: string;
 }
 
@@ -28,6 +31,33 @@ interface PreparedPackagesResult {
 }
 
 const CLI_DEPENDENCY_SUPPORTED_TYPES = new Set<PackageType>(['pip', 'conda', 'maven', 'npm']);
+const PIP_TARGET_ARCHITECTURES = new Set<PipTargetPlatform['arch']>([
+  'x86_64',
+  'aarch64',
+  'arm64',
+  'i386',
+  'amd64',
+  'arm/v7',
+  '386',
+]);
+
+function getNormalizedPackageKey(name: string, version: string): string {
+  return `${name.toLowerCase().replace(/[-_.]+/g, '_')}@${version}`;
+}
+
+function getPipTargetPlatform(arch: Architecture, pythonVersion?: string): PipTargetPlatform | undefined {
+  if (!pythonVersion) return undefined;
+
+  const pipArch = PIP_TARGET_ARCHITECTURES.has(arch as PipTargetPlatform['arch'])
+    ? arch as PipTargetPlatform['arch']
+    : 'x86_64';
+
+  return {
+    os: 'linux',
+    arch: pipArch,
+    pythonVersion,
+  };
+}
 
 function toDownloadPackage(pkg: PackageInfo): DownloadPackage {
   return {
@@ -79,7 +109,7 @@ function toPackageInfo(pkg: DownloadPackage): PackageInfo {
 
 async function preparePackagesForDownload(
   packages: PackageInfo[],
-  options: Pick<DownloadCommandOptions, 'arch' | 'deps'>
+  options: Pick<DownloadCommandOptions, 'arch' | 'deps' | 'pythonVersion' | 'strict'>
 ): Promise<PreparedPackagesResult> {
   if (!options.deps) {
     return {
@@ -100,13 +130,35 @@ async function preparePackagesForDownload(
   const resolved = await resolveAllDependencies(packages.map(toDownloadPackage), {
     architecture: options.arch,
     includeDependencies: true,
+    pythonVersion: options.pythonVersion,
   });
 
   if (resolved.failedPackages.length > 0) {
     const failedList = resolved.failedPackages
       .map((pkg) => `${pkg.name}@${pkg.version}: ${pkg.error}`)
       .join(', ');
-    throw new Error(`의존성 해결 실패: ${failedList}`);
+
+    if (options.strict) {
+      throw new Error(`의존성 해결 실패: ${failedList}`);
+    }
+
+    const failedRootKeys = new Set(
+      resolved.failedPackages.map((pkg) => getNormalizedPackageKey(pkg.name, pkg.version))
+    );
+    const skippedRoots = resolved.originalPackages.filter((pkg) =>
+      failedRootKeys.has(getNormalizedPackageKey(pkg.name, pkg.version))
+    );
+    const skippedRootKeys = new Set(
+      skippedRoots.map((pkg) => getNormalizedPackageKey(pkg.name, pkg.version))
+    );
+
+    return {
+      packages: resolved.allPackages
+        .filter((pkg) => !skippedRootKeys.has(getNormalizedPackageKey(pkg.name, pkg.version)))
+        .map(toPackageInfo),
+      dependencyResolutionApplied: true,
+      warning: `의존성 해결에 실패한 직접 패키지 ${skippedRoots.length}개를 건너뜁니다: ${failedList}`,
+    };
   }
 
   return {
@@ -150,6 +202,8 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
     const prepared = await preparePackagesForDownload(packages, {
       arch: options.arch,
       deps: options.deps,
+      pythonVersion: options.pythonVersion,
+      strict: options.strict,
     });
     packages = prepared.packages;
 
@@ -212,6 +266,9 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       outputPath,
       concurrency: parseInt(options.concurrency, 10),
       maxRetries: 3,
+      pipTargetPlatform: options.type === 'pip'
+        ? getPipTargetPlatform(options.arch, options.pythonVersion)
+        : undefined,
     });
 
     multibar.stop();
