@@ -433,6 +433,72 @@ describe('downloadCommand', () => {
     ]);
   });
 
+  it('호환 wheel이 없는 직접 항목도 정상 항목과 함께 best-effort로 건너뛴다', async () => {
+    readFile.mockResolvedValue('requests==2.28.0\nnative-only==1.0.0\n');
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+          architecture: 'x86_64',
+        },
+        {
+          id: 'pip-native-only-1.0.0',
+          type: 'pip',
+          name: 'native-only',
+          version: '1.0.0',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+          architecture: 'x86_64',
+        },
+        {
+          id: 'pip-native-only-1.0.0',
+          type: 'pip',
+          name: 'native-only',
+          version: '1.0.0',
+          architecture: 'x86_64',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [
+        {
+          name: 'native_only',
+          version: '1.0.0',
+          error: '호환되는 패키지를 찾을 수 없습니다',
+        },
+      ],
+    });
+
+    await downloadCommand({
+      type: 'pip',
+      pkgVersion: 'latest',
+      arch: 'x86_64',
+      output: './output',
+      format: 'zip',
+      file: 'requirements.txt',
+      deps: true,
+      concurrency: '3',
+    });
+
+    expect(addToQueue).toHaveBeenCalledWith([
+      {
+        type: 'pip',
+        name: 'requests',
+        version: '2.28.0',
+        arch: 'x86_64',
+      },
+    ]);
+  });
+
   it('기본 모드에서 모든 직접 항목 해결에 실패하면 빈 아카이브를 만들지 않는다', async () => {
     const exitSpy = vi
       .spyOn(process, 'exit')

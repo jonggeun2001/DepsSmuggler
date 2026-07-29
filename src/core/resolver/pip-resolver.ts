@@ -172,6 +172,9 @@ export class PipResolver implements IResolver {
           fetchResult = await this.fetchPackageInfo(name, ver, idx);
         } catch (error) {
           logger.warn('패키지 정보 조회 실패', { name, version: ver, error });
+          if (!parentCacheKey) {
+            throw error;
+          }
           continue;
         }
 
@@ -356,9 +359,12 @@ export class PipResolver implements IResolver {
 
       // 최적의 wheel 선택
       const selectedFile = this.selectBestWheelFromSimpleApi(targetFiles);
+      if (!selectedFile) {
+        throw new Error(`호환되는 패키지를 찾을 수 없습니다: ${name}@${actualVersion}`);
+      }
 
       // PEP 658 메타데이터에서 의존성 정보 조회
-      if (selectedFile?.metadataHash) {
+      if (selectedFile.metadataHash) {
         requiresDist = await fetchWheelMetadata(selectedFile);
       }
 
@@ -399,10 +405,11 @@ export class PipResolver implements IResolver {
       let packageFilename: string | undefined;
       if (urls && urls.length > 0) {
         const selectedFile = this.selectBestWheel(urls);
-        if (selectedFile) {
-          packageSize = selectedFile.size || 0;
-          packageFilename = selectedFile.filename;
+        if (!selectedFile) {
+          throw new Error(`호환되는 패키지를 찾을 수 없습니다: ${name}@${actualVersion}`);
         }
+        packageSize = selectedFile.size || 0;
+        packageFilename = selectedFile.filename;
       }
 
       packageInfo = {

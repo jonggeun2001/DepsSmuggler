@@ -323,4 +323,28 @@ describe('PipResolver characterization', () => {
 
     expect(simplifyResult(result)).toMatchSnapshot();
   });
+
+  it('커스텀 인덱스에서 호환 산출물이 없는 root를 해결 실패로 처리한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'native-only-1.0.0-py310-none-any.whl',
+        url: 'https://packages.example.com/native-only-1.0.0-py310.whl',
+      },
+      {
+        filename: 'native-only-1.0.0-cp313-abi3-manylinux_2_28_x86_64.whl',
+        url: 'https://packages.example.com/native-only-1.0.0-cp313.whl',
+      },
+    ]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const resolver = new PipResolver();
+
+    await expect(
+      resolver.resolveDependencies('native-only', '1.0.0', {
+        indexUrl: 'https://packages.example.com/simple',
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      })
+    ).rejects.toThrow('호환되는 패키지를 찾을 수 없습니다: native-only@1.0.0');
+  });
 });
