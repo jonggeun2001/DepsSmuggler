@@ -14,6 +14,108 @@ function normalizeVersion(version: string): (number | string)[] {
   });
 }
 
+interface MatchableVersion {
+  epoch: number;
+  release: number[];
+  suffix: string;
+  local: string | null;
+}
+
+function normalizeVersionSuffix(suffix: string): string {
+  let normalized = suffix.toLowerCase().replace(/[-_.]+/g, '');
+
+  // PEP 440에서 허용하는 prerelease/post-release 별칭을 정규화한다.
+  normalized = normalized
+    .replace(/^alpha/, 'a')
+    .replace(/^beta/, 'b')
+    .replace(/^(preview|pre)/, 'rc')
+    .replace(/^c(?=\d|$)/, 'rc')
+    .replace(/rev/g, 'post')
+    .replace(/r(?=\d|$)/g, 'post');
+
+  // 1.0-1은 1.0.post1의 암시적 표기다.
+  if (/^\d+$/.test(normalized)) {
+    return `post${Number(normalized)}`;
+  }
+
+  return normalized.replace(
+    /(a|b|rc|post|dev)(\d*)/g,
+    (_match, label: string, number: string) =>
+      `${label}${Number(number || '0')}`,
+  );
+}
+
+function parseMatchableVersion(version: string): MatchableVersion | null {
+  let normalized = version.trim().toLowerCase().replace(/^v(?=\d)/, '');
+
+  const localSeparator = normalized.indexOf('+');
+  const local =
+    localSeparator === -1
+      ? null
+      : normalized
+          .slice(localSeparator + 1)
+          .split(/[-_.]+/)
+          .filter(Boolean)
+          .join('.');
+  if (localSeparator !== -1) {
+    normalized = normalized.slice(0, localSeparator);
+  }
+
+  let epoch = 0;
+  const epochMatch = /^(\d+)!/.exec(normalized);
+  if (epochMatch) {
+    epoch = Number(epochMatch[1]);
+    normalized = normalized.slice(epochMatch[0].length);
+  }
+
+  const releaseMatch = /^(\d+(?:\.\d+)*)/.exec(normalized);
+  if (!releaseMatch) {
+    return null;
+  }
+
+  return {
+    epoch,
+    release: releaseMatch[1].split('.').map(Number),
+    suffix: normalizeVersionSuffix(
+      normalized.slice(releaseMatch[0].length),
+    ),
+    local,
+  };
+}
+
+function releasesEqual(a: number[], b: number[]): boolean {
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index++) {
+    if ((a[index] ?? 0) !== (b[index] ?? 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function matchesExactVersion(version: string, target: string): boolean {
+  const parsedVersion = parseMatchableVersion(version);
+  const parsedTarget = parseMatchableVersion(target);
+
+  if (!parsedVersion || !parsedTarget) {
+    return version === target;
+  }
+
+  if (
+    parsedVersion.epoch !== parsedTarget.epoch ||
+    !releasesEqual(parsedVersion.release, parsedTarget.release) ||
+    parsedVersion.suffix !== parsedTarget.suffix
+  ) {
+    return false;
+  }
+
+  // specifier에 local version이 없으면 candidate의 local label은 무시한다.
+  return (
+    parsedTarget.local === null ||
+    parsedVersion.local === parsedTarget.local
+  );
+}
+
 function matchesWildcardVersion(version: string, pattern: string): boolean {
   const prefix = pattern
     .replace(/\*.*$/, '')
@@ -23,7 +125,20 @@ function matchesWildcardVersion(version: string, pattern: string): boolean {
     return true;
   }
 
-  return version === prefix || version.startsWith(`${prefix}.`);
+  const parsedVersion = parseMatchableVersion(version);
+  const parsedPrefix = parseMatchableVersion(prefix);
+  if (!parsedVersion || !parsedPrefix) {
+    return version === prefix || version.startsWith(`${prefix}.`);
+  }
+
+  if (parsedVersion.epoch !== parsedPrefix.epoch) {
+    return false;
+  }
+
+  return parsedPrefix.release.every(
+    (segment, index) =>
+      (parsedVersion.release[index] ?? 0) === segment,
+  );
 }
 
 /**
@@ -71,14 +186,14 @@ function checkSingleCondition(version: string, condition: string): boolean {
     if (target.includes('*')) {
       return !matchesWildcardVersion(version, target);
     }
-    return compareVersions(version, target) !== 0;
+    return !matchesExactVersion(version, target);
   }
   if (condition.startsWith('==')) {
     const target = condition.slice(2).trim();
     if (target.includes('*')) {
       return matchesWildcardVersion(version, target);
     }
-    return compareVersions(version, target) === 0;
+    return matchesExactVersion(version, target);
   }
   if (condition.startsWith('~=')) {
     // 호환 릴리스 (예: ~=2.1은 >=2.1, ==2.*)

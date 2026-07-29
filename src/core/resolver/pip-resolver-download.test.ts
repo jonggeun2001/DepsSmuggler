@@ -607,6 +607,15 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         urls: [
           {
             filename,
+            url: 'https://files.example/demo-python312-prerelease-exact.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp312',
+            requires_python: '==3.12.0rc1',
+            digests: { sha256: 'python312-prerelease-exact-sha' },
+            size: 100,
+          },
+          {
+            filename,
             url: 'https://files.example/demo-python312-excluded-exact.whl',
             packagetype: 'bdist_wheel',
             python_version: 'cp312',
@@ -643,6 +652,15 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     });
 
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename,
+        url: 'https://index.example/demo-python312-prerelease-exact.whl',
+        requiresPython: '==3.12.0rc1',
+        hash: {
+          algorithm: 'sha256',
+          digest: 'simple-prerelease-exact-sha',
+        },
+      },
       {
         filename,
         url: 'https://index.example/demo-python312-excluded-exact.whl',
@@ -691,7 +709,7 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
             url: 'https://files.example/demo-python312-excluded.whl',
             packagetype: 'bdist_wheel',
             python_version: 'cp312',
-            requires_python: '!=3.12.*',
+            requires_python: '!=3.12.0.*',
             digests: { sha256: 'python312-excluded-sha' },
             size: 100,
           },
@@ -701,7 +719,7 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
             url: 'https://files.example/demo-python312-included.whl',
             packagetype: 'bdist_wheel',
             python_version: 'cp312',
-            requires_python: '==3.12.*',
+            requires_python: '==3.12.0.*',
             digests: { sha256: 'python312-included-sha' },
             size: 100,
           },
@@ -731,13 +749,13 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
       {
         filename,
         url: 'https://index.example/demo-python312-excluded.whl',
-        requiresPython: '!=3.12.*',
+        requiresPython: '!=3.12.0.*',
         hash: { algorithm: 'sha256', digest: 'simple-excluded-sha' },
       },
       {
         filename,
         url: 'https://index.example/demo-python312-included.whl',
-        requiresPython: '==3.12.*',
+        requiresPython: '==3.12.0.*',
         hash: { algorithm: 'sha256', digest: 'simple-included-sha' },
       },
     ]);

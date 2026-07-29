@@ -106,6 +106,22 @@ describe('version-utils', () => {
         expect(isVersionCompatible('3.12.1', '==3.12.0')).toBe(false);
       });
 
+      it('final 버전과 prerelease 버전을 구분한다', () => {
+        expect(isVersionCompatible('3.12', '==3.12.0rc1')).toBe(false);
+        expect(isVersionCompatible('3.12.0rc1', '==3.12')).toBe(false);
+      });
+
+      it('PEP 440 prerelease 별칭을 정규화한다', () => {
+        expect(isVersionCompatible('3.12.0c1', '==3.12.0rc1')).toBe(true);
+        expect(isVersionCompatible('3.12.0alpha1', '==3.12.0a1')).toBe(true);
+      });
+
+      it('PEP 440 post 및 local version을 정규화한다', () => {
+        expect(isVersionCompatible('1.0-1', '==1.0.post1')).toBe(true);
+        expect(isVersionCompatible('1.0+linux', '==1.0')).toBe(true);
+        expect(isVersionCompatible('1.0+linux', '==1.0+mac')).toBe(false);
+      });
+
       it('와일드카드 매칭', () => {
         expect(isVersionCompatible('1.0.5', '==1.0.*')).toBe(true);
         expect(isVersionCompatible('1.1.0', '==1.0.*')).toBe(false);
@@ -125,6 +141,11 @@ describe('version-utils', () => {
       it('생략된 release segment를 0으로 정규화한다', () => {
         expect(isVersionCompatible('3.12', '!=3.12.0')).toBe(false);
         expect(isVersionCompatible('3.12.1', '!=3.12.0')).toBe(true);
+      });
+
+      it('final 버전과 prerelease 버전을 구분한다', () => {
+        expect(isVersionCompatible('3.12', '!=3.12.0rc1')).toBe(true);
+        expect(isVersionCompatible('3.12.0rc1', '!=3.12')).toBe(true);
       });
     });
 
@@ -167,11 +188,13 @@ describe('version-utils', () => {
 
       it('major.minor 버전을 equality wildcard와 비교', () => {
         expect(isVersionCompatible('3.12', '==3.12.*')).toBe(true);
+        expect(isVersionCompatible('3.12', '==3.12.0.*')).toBe(true);
         expect(isVersionCompatible('3.12', '==3.11.*')).toBe(false);
       });
 
       it('major.minor 버전을 exclusion wildcard와 비교', () => {
         expect(isVersionCompatible('3.12', '!=3.12.*')).toBe(false);
+        expect(isVersionCompatible('3.12', '!=3.12.0.*')).toBe(false);
         expect(isVersionCompatible('3.12', '!=3.11.*')).toBe(true);
       });
     });
