@@ -31,7 +31,10 @@ import {
   SimpleApiPackageFile,
   fetchWheelMetadata,
 } from './pip-simple-api';
-import { evaluatePep508Marker } from '../shared/pep508-marker';
+import {
+  evaluatePep508Marker,
+  normalizeExtraName,
+} from '../shared/pep508-marker';
 
 // 의존성 파싱 결과
 interface ParsedDependency {
@@ -276,7 +279,12 @@ export class PipResolver implements IResolver {
 
         // extra 패키지도 기본 의존성과 선택한 extra 의존성을 함께 가진다.
         const incomingExtras = Array.from(
-          new Set(['', ...(ext ?? [])]),
+          new Set([
+            '',
+            ...(ext ?? [])
+              .map((extra) => normalizeExtraName(extra))
+              .filter(Boolean),
+          ]),
         );
 
         // 이미 해결된 패키지는 새 extra가 있을 때만 의존성을 다시 평가
@@ -622,7 +630,16 @@ export class PipResolver implements IResolver {
 
       // extras 추출 ([...] 부분)
       const extrasMatch = mainPart.match(/\[([^\]]+)\]/);
-      const extras = extrasMatch ? extrasMatch[1].split(',').map((e) => e.trim()) : undefined;
+      const extras = extrasMatch
+        ? Array.from(
+            new Set(
+              extrasMatch[1]
+                .split(',')
+                .map((extra) => normalizeExtraName(extra))
+                .filter(Boolean),
+            ),
+          )
+        : undefined;
 
       // extras 제거 후 이름과 버전 분리
       const withoutExtras = mainPart.replace(/\[[^\]]+\]/, '');
@@ -698,7 +715,13 @@ export class PipResolver implements IResolver {
         : undefined,
     };
 
-    const selectedExtras = extras?.length ? extras : [''];
+    const normalizedExtras = Array.from(
+      new Set(
+        (extras ?? []).map((extra) => normalizeExtraName(extra)),
+      ),
+    );
+    const selectedExtras =
+      normalizedExtras.length > 0 ? normalizedExtras : [''];
     return selectedExtras.some((extra) =>
       evaluatePep508Marker(
         marker,

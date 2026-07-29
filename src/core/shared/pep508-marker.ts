@@ -160,6 +160,10 @@ function normalizeMachine(value: string): string {
   return normalized;
 }
 
+export function normalizeExtraName(value: string): string {
+  return value.trim().toLowerCase().replace(/[-_.]+/g, '-');
+}
+
 function invertOperator(operator: ComparisonOperator): ComparisonOperator {
   const inverted: Partial<Record<ComparisonOperator, ComparisonOperator>> = {
     '<': '>',
@@ -392,20 +396,27 @@ class MarkerParser {
       );
     }
 
-    if (operator === '===') {
-      return versionVariable || reverseVersionVariable
-        ? left.value.toLowerCase() === right.value.toLowerCase()
-        : left.value === right.value;
-    }
-
     let leftValue = left.value;
     let rightValue = right.value;
+    if (
+      left.variable === 'extra' ||
+      right.variable === 'extra'
+    ) {
+      leftValue = normalizeExtraName(leftValue);
+      rightValue = normalizeExtraName(rightValue);
+    }
     if (
       left.variable === 'platform_machine' ||
       right.variable === 'platform_machine'
     ) {
       leftValue = normalizeMachine(leftValue);
       rightValue = normalizeMachine(rightValue);
+    }
+
+    if (operator === '===') {
+      return versionVariable || reverseVersionVariable
+        ? leftValue.toLowerCase() === rightValue.toLowerCase()
+        : leftValue === rightValue;
     }
 
     if (

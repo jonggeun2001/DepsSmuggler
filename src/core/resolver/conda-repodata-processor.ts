@@ -201,7 +201,14 @@ export class CondaRepoDataProcessor {
       }
 
       // CUDA 호환성 체크 (가상/메타 의존성과 build 변형 반영)
-      if (!this.isBuildCompatibleWithCuda(pkg.build, pkg.depends || [])) {
+      if (
+        !this.isBuildCompatibleWithCuda(
+          pkg.name,
+          pkg.version,
+          pkg.build,
+          pkg.depends || [],
+        )
+      ) {
         continue;
       }
 
@@ -439,13 +446,18 @@ export class CondaRepoDataProcessor {
   /**
    * 빌드가 타겟 CUDA 버전과 호환되는지 확인
    * __cuda 및 CUDA 메타 패키지 의존성과 build 태그를 평가
+   * CUDA 메타 패키지 자체 버전도 대상 CUDA와 비교
    * 명시적 CPU build는 CUDA 요청에서 제외
    * CUDA 신호가 없는 공통 런타임 패키지는 양쪽 환경에서 허용
+   * @param packageName 패키지 이름
+   * @param packageVersion 패키지 버전
    * @param build Conda build 문자열
    * @param depends 패키지의 의존성 목록
    * @returns CUDA 호환 여부
    */
   isBuildCompatibleWithCuda(
+    packageName: string,
+    packageVersion: string,
     build: string,
     depends: string[],
   ): boolean {
@@ -455,6 +467,9 @@ export class CondaRepoDataProcessor {
       'cuda-version',
       'cudatoolkit',
     ]);
+    const isCudaMetaPackage = cudaDependencyNames.has(
+      packageName.toLowerCase(),
+    );
     const cudaSpecs = depends
       .map((dependency) => parseMatchSpec(dependency))
       .filter((matchSpec) =>
@@ -475,6 +490,7 @@ export class CondaRepoDataProcessor {
 
     if (!this.config.cudaVersion) {
       return (
+        !isCudaMetaPackage &&
         cudaSpecs.length === 0 &&
         !cudaBuildMarker &&
         !hasUnparsedCudaBuild
@@ -483,6 +499,22 @@ export class CondaRepoDataProcessor {
 
     if (isExplicitCpuBuild || hasUnparsedCudaBuild) {
       return false;
+    }
+
+    if (isCudaMetaPackage) {
+      const targetCudaVersion = this.extractMajorMinorCudaVersion(
+        this.config.cudaVersion,
+      );
+      const packageCudaVersion = this.extractMajorMinorCudaVersion(
+        packageVersion,
+      );
+      if (
+        !targetCudaVersion ||
+        !packageCudaVersion ||
+        targetCudaVersion !== packageCudaVersion
+      ) {
+        return false;
+      }
     }
 
     for (const cudaSpec of cudaSpecs) {
@@ -528,6 +560,11 @@ export class CondaRepoDataProcessor {
     }
 
     return true;
+  }
+
+  private extractMajorMinorCudaVersion(version: string): string | null {
+    const match = /^(\d+)\.(\d+)(?:[.\-_]|$)/.exec(version.trim());
+    return match ? `${match[1]}.${match[2]}` : null;
   }
 
   /**

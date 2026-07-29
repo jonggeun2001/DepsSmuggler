@@ -108,6 +108,19 @@ describe('PipResolver 단위 테스트', () => {
       });
     });
 
+    it('PEP 685 extra 이름을 정규화하고 중복 제거한다', () => {
+      const result = callParseDependencyString(
+        resolver,
+        'requests[Foo.Bar,foo_bar,foo-bar]',
+      );
+      expect(result).toEqual({
+        name: 'requests',
+        versionSpec: undefined,
+        extras: ['foo-bar'],
+        markers: undefined,
+      });
+    });
+
     it('extras와 버전', () => {
       const result = callParseDependencyString(resolver, 'requests[security]==2.28.0');
       expect(result).toEqual({

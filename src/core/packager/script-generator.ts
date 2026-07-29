@@ -153,14 +153,14 @@ export class ScriptGenerator {
       lines.push('    fi');
       lines.push('');
       lines.push('    # 로컬 저장소에 설치');
-      lines.push('    for jar in "$PACKAGE_DIR"/*.jar; do');
-      lines.push('        if [[ -f "$jar" ]]; then');
-      lines.push('            log_info "$(basename "$jar") 설치 중..."');
-      lines.push('            mvn install:install-file -Dfile="$jar" -DgeneratePom=true || {');
-      lines.push('                log_warn "$(basename "$jar") 설치 실패"');
-      lines.push('            }');
-      lines.push('        fi');
-      lines.push('    done');
+      lines.push('    while IFS= read -r -d \'\' jar; do');
+      lines.push('        log_info "$(basename "$jar") 설치 중..."');
+      lines.push('        mvn install:install-file -Dfile="$jar" -DgeneratePom=true || {');
+      lines.push('            log_warn "$(basename "$jar") 설치 실패"');
+      lines.push('        }');
+      lines.push(
+        '    done < <(find "$PACKAGE_DIR" -type f -name \'*.jar\' -print0)',
+      );
       lines.push('');
       lines.push('    log_info "Maven 패키지 설치 완료"');
       lines.push('}');
@@ -406,8 +406,9 @@ export class ScriptGenerator {
       lines.push('    }');
       lines.push('');
       lines.push('    # JAR 파일 설치');
-      lines.push('    $JarPattern = Join-Path -Path $PackageDir -ChildPath "*.jar"');
-      lines.push('    Get-ChildItem $JarPattern | ForEach-Object {');
+      lines.push(
+        '    Get-ChildItem -Path $PackageDir -Filter "*.jar" -File -Recurse | ForEach-Object {',
+      );
       lines.push('        Write-Info "$($_.Name) 설치 중..."');
       lines.push('        try {');
       lines.push('            mvn install:install-file -Dfile="$($_.FullName)" -DgeneratePom=true');

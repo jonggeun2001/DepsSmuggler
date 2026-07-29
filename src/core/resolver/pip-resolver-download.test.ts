@@ -1312,12 +1312,12 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     );
   });
 
-  it('같은 pip 패키지에 나중에 요청된 extra 의존성도 병합한다', async () => {
+  it('같은 pip 패키지에 나중에 요청된 PEP 685 동등 extra 의존성도 병합한다', async () => {
     const dependencies: Record<string, string[]> = {
       root: ['plainparent==1.0.0', 'secureparent==1.0.0'],
       plainparent: ['shared==1.0.0'],
-      secureparent: ['shared[security]==1.0.0'],
-      shared: ['securitychild==1.0.0; extra == "security"'],
+      secureparent: ['shared[foo_bar]==1.0.0'],
+      shared: ['securitychild==1.0.0; extra == "foo-bar"'],
       securitychild: [],
     };
     const universalRelease = (name: string) => ({

@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { evaluatePep508Marker } from './pep508-marker';
 
 describe('evaluatePep508Marker', () => {
+  it.each([
+    ['Foo.Bar', 'foo-bar'],
+    ['foo_bar', 'foo-bar'],
+    ['foo-bar', 'Foo.Bar'],
+  ])(
+    'PEP 685 extra 이름 %s와 %s를 동등하게 비교한다',
+    (selectedExtra, markerExtra) => {
+      expect(
+        evaluatePep508Marker(
+          `extra == "${markerExtra}"`,
+          { extra: selectedExtra },
+        ),
+      ).toBe(true);
+    },
+  );
+
   it('===는 버전을 정규화하지 않고 원문 문자열로 비교한다', () => {
     expect(
       evaluatePep508Marker(

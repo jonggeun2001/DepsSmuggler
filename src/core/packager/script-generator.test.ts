@@ -86,6 +86,12 @@ describe('ScriptGenerator', () => {
       const content = await fs.readFile(outputPath, 'utf-8');
       expect(content).toContain('mvn');
       expect(content).toContain('install:install-file'); // 로컬 저장소에 설치
+      expect(content).toContain(
+        'find "$PACKAGE_DIR" -type f -name \'*.jar\' -print0',
+      );
+      expect(content).not.toContain(
+        'for jar in "$PACKAGE_DIR"/*.jar; do',
+      );
     });
 
     it('YUM 패키지 설치 명령을 포함해야 함', async () => {
@@ -184,6 +190,23 @@ describe('ScriptGenerator', () => {
         'Get-ChildItem -Path $PackageDir -Directory -Recurse',
       );
       expect(content).toContain('@PipFindLinkArgs');
+    });
+
+    it('중첩된 Maven JAR를 재귀적으로 설치해야 함', async () => {
+      const outputPath = path.join(tempDir, 'install.ps1');
+      const packages: PackageInfo[] = [
+        { name: 'spring-core', version: '5.3.0', type: 'maven' },
+      ];
+
+      await generator.generatePowerShellScript(packages, outputPath);
+
+      const content = await fs.readFile(outputPath, 'utf-8');
+      expect(content).toContain(
+        'Get-ChildItem -Path $PackageDir -Filter "*.jar" -File -Recurse',
+      );
+      expect(content).not.toContain(
+        'Get-ChildItem $JarPattern',
+      );
     });
 
     it('Docker 이미지 로드 명령을 포함해야 함', async () => {

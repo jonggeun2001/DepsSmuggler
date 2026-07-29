@@ -299,6 +299,88 @@ describe('CondaRepoDataProcessor Python 호환성', () => {
   );
 
   it.each([
+    'pytorch-cuda',
+    'cuda-version',
+    'cudatoolkit',
+  ])(
+    'CUDA 메타 패키지 %s 자체 버전을 대상 CUDA와 비교한다',
+    (packageName) => {
+      const processor = new CondaRepoDataProcessor({
+        condaUrl: 'https://conda.example',
+        targetSubdir: 'linux-64',
+        targetArchitecture: 'x86_64',
+        pythonVersion: null,
+        cudaVersion: '12.4',
+      });
+
+      const candidates = processor.findPackageCandidates(
+        {
+          info: { subdir: 'linux-64' },
+          packages: {
+            [`${packageName}-11.8-generic_0.tar.bz2`]: {
+              name: packageName,
+              version: '11.8',
+              build: 'generic_0',
+              build_number: 0,
+              depends: [],
+              subdir: 'linux-64',
+            },
+            [`${packageName}-12.4-generic_0.tar.bz2`]: {
+              name: packageName,
+              version: '12.4',
+              build: 'generic_0',
+              build_number: 0,
+              depends: [],
+              subdir: 'linux-64',
+            },
+          },
+        },
+        packageName,
+      );
+
+      expect(candidates.map((candidate) => candidate.version)).toEqual([
+        '12.4',
+      ]);
+    },
+  );
+
+  it.each([
+    'pytorch-cuda',
+    'cuda-version',
+    'cudatoolkit',
+  ])(
+    'CPU 전용 대상에서 CUDA 메타 패키지 %s를 제외한다',
+    (packageName) => {
+      const processor = new CondaRepoDataProcessor({
+        condaUrl: 'https://conda.example',
+        targetSubdir: 'linux-64',
+        targetArchitecture: 'x86_64',
+        pythonVersion: null,
+        cudaVersion: null,
+      });
+
+      const candidates = processor.findPackageCandidates(
+        {
+          info: { subdir: 'linux-64' },
+          packages: {
+            [`${packageName}-12.4-generic_0.tar.bz2`]: {
+              name: packageName,
+              version: '12.4',
+              build: 'generic_0',
+              build_number: 0,
+              depends: [],
+              subdir: 'linux-64',
+            },
+          },
+        },
+        packageName,
+      );
+
+      expect(candidates).toEqual([]);
+    },
+  );
+
+  it.each([
     ['py36_cu92_pyt14', '9.2'],
     ['py36_cu101_pyt14', '10.1'],
     ['cuda116h4bf587c_0', '11.6'],
