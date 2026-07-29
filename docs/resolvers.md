@@ -99,7 +99,7 @@ PEP 508 환경 마커를 평가하여 플랫폼별 의존성 필터링:
 - extra                // 선택한 extra
 ```
 
-`pythonVersion`이 설정된 경우 `python_version` 비교를 적용합니다. 지정하지 않으면 기존 호환성 동작대로 Python 버전 마커는 필터링하지 않습니다.
+`pythonVersion`이 설정된 경우 `python_version` 비교를 적용합니다. 지정하지 않으면 기존 호환성 동작대로 Python 버전 마커는 필터링하지 않습니다. `platform_machine` 비교에서는 `amd64`를 `x86_64`로, Linux ARM64의 `arm64`/`aarch64` 별칭을 `aarch64`로 정규화합니다.
 
 지원하는 marker 조건은 괄호와 `and`/`or`를 조합할 수 있으며, `and`를 `or`보다 먼저 평가합니다. 예를 들어 `python_version >= '3.8' and (python_version < '3.12' or sys_platform == 'linux')`처럼 반복된 Python 조건과 플랫폼 조건을 함께 처리합니다.
 

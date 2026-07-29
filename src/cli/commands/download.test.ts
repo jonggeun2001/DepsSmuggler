@@ -265,6 +265,30 @@ describe('downloadCommand', () => {
     );
   });
 
+  it('Linux ARM64 별칭은 resolver와 downloader에서 aarch64로 통일한다', async () => {
+    await downloadCommand({
+      type: 'pip',
+      package: 'requests',
+      pkgVersion: '2.28.0',
+      arch: 'arm64',
+      output: './output',
+      format: 'zip',
+      deps: true,
+      concurrency: '3',
+      pythonVersion: '3.12',
+    });
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ architecture: 'aarch64' })
+    );
+    expect(startDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pipTargetPlatform: expect.objectContaining({ arch: 'aarch64' }),
+      })
+    );
+  });
+
   it('conda Python 버전을 의존성 해결에 전달한다', async () => {
     await downloadCommand({
       type: 'conda',

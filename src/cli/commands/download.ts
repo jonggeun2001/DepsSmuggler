@@ -35,7 +35,7 @@ const PIP_TARGET_ARCHITECTURES: Partial<Record<Architecture, PipTargetPlatform['
   x86_64: 'x86_64',
   amd64: 'x86_64',
   aarch64: 'aarch64',
-  arm64: 'arm64',
+  arm64: 'aarch64',
 };
 
 function getNormalizedPackageKey(name: string, version: string): string {

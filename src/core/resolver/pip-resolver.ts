@@ -1108,7 +1108,9 @@ function isMarkerComparisonOperator(value: string): value is MarkerComparisonOpe
 
 function normalizeMachine(machine: string): string {
   const normalized = machine.toLowerCase();
-  return normalized === 'amd64' ? 'x86_64' : normalized;
+  if (normalized === 'amd64') return 'x86_64';
+  if (normalized === 'aarch64' || normalized === 'arm64') return 'aarch64';
+  return normalized;
 }
 
 function stripOuterMarkerParentheses(expression: string): string {

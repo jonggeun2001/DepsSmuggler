@@ -231,6 +231,18 @@ describe('PipResolver 단위 테스트', () => {
       });
     });
 
+    describe('Linux ARM64 플랫폼', () => {
+      beforeEach(() => {
+        resolver = createResolver({
+          targetPlatform: { system: 'Linux', machine: 'arm64' },
+        });
+      });
+
+      it('platform_machine == "aarch64" 별칭을 통과시킨다', () => {
+        expect(callEvaluateMarker(resolver, 'platform_machine == "aarch64"')).toBe(true);
+      });
+    });
+
     describe('Python 버전', () => {
       beforeEach(() => {
         resolver = createResolver({

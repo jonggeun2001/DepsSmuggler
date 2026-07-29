@@ -71,7 +71,7 @@ depssmuggler download [옵션]
 
 기본 동작은 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 의존성을 함께 해결해 다운로드하는 것입니다. `--no-deps`를 지정하면 원본 패키지 목록만 다운로드합니다. 직접 지정한 패키지 중 일부를 해결하지 못하면 기본 모드는 실패한 직접 패키지만 경고와 함께 건너뛰고, 나머지 해결된 패키지와 의존성을 계속 다운로드합니다. 모든 직접 패키지를 해결하지 못해 남은 다운로드 항목이 없으면 빈 아카이브를 만들지 않고 오류로 종료합니다. 전체 실패 정책이 필요하면 `--strict`를 사용합니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
 
-`pip`에서 `--python-version`을 지정하면 해당 버전의 `python_version` 환경 마커를 평가하고, 호환되는 wheel 태그를 선택합니다. Python 버전은 `major.minor` 또는 `major.minor.patch` 형식만 허용하며, patch가 있으면 `major.minor`로 정규화합니다. CLI에 OS 옵션이 없으므로 wheel 대상 OS는 기존 resolver와 동일하게 Linux를 사용하며, `--arch` 값이 pip wheel 아키텍처로 지원되지 않으면 `x86_64`로 처리합니다. 이 정규화된 대상은 resolver와 downloader에 동일하게 적용됩니다.
+`pip`에서 `--python-version`을 지정하면 해당 버전의 `python_version` 환경 마커를 평가하고, 호환되는 wheel 태그를 선택합니다. Python 버전은 `major.minor` 또는 `major.minor.patch` 형식만 허용하며, patch가 있으면 `major.minor`로 정규화합니다. CLI에 OS 옵션이 없으므로 wheel 대상 OS는 기존 resolver와 동일하게 Linux를 사용하며, Linux ARM64의 `arm64`/`aarch64` 별칭은 `aarch64`로 통일합니다. `--arch` 값이 pip wheel 아키텍처로 지원되지 않으면 `x86_64`로 처리합니다. 이 정규화된 대상은 resolver와 downloader에 동일하게 적용됩니다.
 
 ### 예시
 
