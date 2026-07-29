@@ -7,7 +7,12 @@
 
 import logger from '../../utils/logger';
 import { RepoData, RepoDataPackage } from '../shared/conda-types';
-import { compareCondaVersions, matchesVersionSpec } from '../shared';
+import {
+  compareCondaVersions,
+  matchesBuildSpec,
+  matchesVersionSpec,
+  parseMatchSpec,
+} from '../shared';
 import { fetchRepodata } from '../shared/conda-cache';
 
 /**
@@ -194,7 +199,10 @@ export class CondaRepoDataProcessor {
         continue;
       }
 
-      const isPythonMatch = this.isBuildCompatibleWithPython(pkg.build);
+      const isPythonMatch = this.isBuildCompatibleWithPython(
+        pkg.build,
+        pkg.depends || [],
+      );
 
       candidates.push({
         filename,
@@ -257,20 +265,59 @@ export class CondaRepoDataProcessor {
   /**
    * 빌드 문자열이 Python 버전과 호환되는지 확인
    */
-  isBuildCompatibleWithPython(build: string): boolean {
+  isBuildCompatibleWithPython(
+    build: string,
+    depends: string[] = [],
+  ): boolean {
     const pythonTag = this.getPythonBuildTag();
 
     // pythonTag가 없으면 필터링 안함
     if (!pythonTag) return true;
 
-    // build에 python 버전이 없으면 (네이티브 라이브러리) 호환
-    // py\d+ (conda 스타일) 또는 cp\d+ (CPython 스타일) 패턴 검사
+    // 빌드 문자열에 버전 태그가 있으면 대상 Python과 정확히 일치해야 한다.
     const pyMatch = build.match(/(py|cp)\d+/);
-    if (!pyMatch) return true;
-
-    // Python 버전이 있으면 정확히 매칭 (py313 또는 cp313)
     const pythonNumber = pythonTag.slice(2); // 'py313' -> '313'
-    return build.includes(`py${pythonNumber}`) || build.includes(`cp${pythonNumber}`);
+    if (
+      pyMatch &&
+      !build.includes(`py${pythonNumber}`) &&
+      !build.includes(`cp${pythonNumber}`)
+    ) {
+      return false;
+    }
+
+    // pyhd... 같은 noarch 빌드는 실제 Python 범위를 depends에 보관한다.
+    const configuredVersion = this.config.pythonVersion;
+    if (!configuredVersion) {
+      return true;
+    }
+    const targetVersion = /^\d+\.\d+$/.test(configuredVersion)
+      ? `${configuredVersion}.0`
+      : configuredVersion;
+
+    return depends.every((dependency) => {
+      const matchSpec = parseMatchSpec(dependency);
+      const dependencyName = matchSpec.name.toLowerCase();
+      if (dependencyName !== 'python' && dependencyName !== 'python_abi') {
+        return true;
+      }
+
+      if (
+        matchSpec.version &&
+        !matchesVersionSpec(targetVersion, matchSpec.version)
+      ) {
+        return false;
+      }
+
+      if (
+        dependencyName === 'python_abi' &&
+        matchSpec.build &&
+        !matchesBuildSpec(`0_cp${pythonNumber}`, matchSpec.build)
+      ) {
+        return false;
+      }
+
+      return true;
+    });
   }
 
   /**
@@ -447,10 +494,10 @@ export class CondaRepoDataProcessor {
       const candidates = this.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
       if (candidates.length > 0) {
         // 첫 번째 후보가 Python 버전과 호환되는지 확인
-        const firstCandidate = candidates[0] as { version: string; isPythonMatch?: boolean };
+        const firstCandidate = candidates[0];
         targetCandidate = {
           version: firstCandidate.version,
-          isPythonMatch: firstCandidate.isPythonMatch ?? true,
+          isPythonMatch: firstCandidate.isPythonMatch,
         };
       }
     }
@@ -466,8 +513,7 @@ export class CondaRepoDataProcessor {
           versionSpec,
           noarchCacheKey
         );
-        if (candidates.length > 0) {
-          // noarch 패키지는 모든 Python 버전과 호환되므로 우선 사용
+        if (candidates.length > 0 && candidates[0].isPythonMatch) {
           return candidates[0].version;
         }
       }
