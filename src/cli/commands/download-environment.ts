@@ -116,11 +116,11 @@ export function validateDownloadEnvironmentOptions(
 
   if (
     options.type === 'maven' &&
-    options.targetOS !== 'any' &&
+    (options.targetOS !== 'any' || options.arch !== 'x86_64') &&
     options.classifier === undefined
   ) {
     throw new Error(
-      'Maven 대상 OS를 지정하려면 --classifier를 함께 지정해야 합니다.',
+      'Maven 대상 OS/아키텍처를 지정하려면 --classifier를 함께 지정해야 합니다.',
     );
   }
 
@@ -135,6 +135,7 @@ export function hasExplicitTargetEnvironment(
   options: CliDownloadEnvironmentOptions,
 ): boolean {
   return (
+    options.arch !== 'x86_64' ||
     options.targetOS !== 'any' ||
     options.pythonVersion !== undefined ||
     options.cudaVersion !== undefined ||

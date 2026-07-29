@@ -14,7 +14,7 @@
 
 | 옵션 | 기본값 | 적용 대상 | 역할 |
 |------|--------|-----------|------|
-| `--arch <arch>` | `x86_64` | 전체 | 기존 옵션을 유지하고 허용 값을 검증한다. pip/Conda의 대상 아티팩트 선택은 `x86_64`, `amd64`, `arm64`, `aarch64`만 지원한다. |
+| `--arch <arch>` | `x86_64` | 전체 | 기존 옵션을 유지하고 허용 값을 검증한다. pip/Conda의 대상 아티팩트 선택은 `x86_64`, `amd64`, `arm64`, `aarch64`만 지원한다. Maven의 비기본 아키텍처는 classifier가 필요하다. |
 | `--target-os <os>` | `any` | pip, conda, Maven | `any`, `linux`, `windows`, `macos` 중 대상 OS를 지정한다. Maven에서 `any`가 아닌 값을 사용하려면 classifier가 필요하다. |
 | `--python-version <version>` | 없음 | pip, conda | `major.minor` 형식의 Python 버전을 지정한다. |
 | `--cuda-version <version>` | 없음 | conda | `major.minor` 형식의 CUDA 호환 버전을 지정한다. |
@@ -33,7 +33,7 @@
 - `--python-version`은 `pip`와 `conda`에서만 허용한다.
 - `--cuda-version`은 `conda`에서만 허용한다.
 - `--classifier`는 `maven`에서만 허용한다.
-- Maven resolver는 OS/아키텍처만으로 라이브러리별 classifier를 안전하게 생성할 수 없으므로, `--target-os`가 `any`가 아니면 `--classifier`를 함께 요구한다. Maven의 실제 변형 아티팩트 선택 기준은 classifier다.
+- Maven resolver는 OS/아키텍처만으로 라이브러리별 classifier를 안전하게 생성할 수 없으므로, `--target-os`가 `any`가 아니거나 `--arch`가 기본값 `x86_64`가 아니면 `--classifier`를 함께 요구한다. Maven resolver에는 deprecated된 OS/아키텍처 필드를 넘기지 않으며, 실제 변형 아티팩트 선택 기준은 classifier다.
 - `--target-os`의 기본값 `any`는 적용 대상이 아닌 `npm`과 `docker`에서 무시한다. `any`가 아닌 값은 `pip`, `conda`, `maven`에서만 허용하고 다른 타입에서는 오류로 처리한다.
 - `--conda-channel`의 기본값 `conda-forge`는 conda가 아닌 타입에서 무시한다. 기본값이 아닌 채널은 `conda`에서만 허용하고 다른 타입에서는 오류로 처리한다. Commander 옵션 객체만으로 사용자의 기본값 명시 여부를 구분하지 않는다.
 - 잘못된 값이나 적용할 수 없는 조합은 다운로드나 파일 생성 전에 한글 오류로 실패시킨다.
@@ -81,7 +81,7 @@ DownloadManager queue
    - `targetOS`가 `any`가 아님
    - `condaChannel`이 `conda-forge`가 아님
 
-이 경우에도 해결된 의존성은 큐에 넣지 않고 루트 아티팩트의 메타데이터만 사용한다. 새 환경 옵션을 사용하지 않은 기존 `--no-deps` 명령, 아키텍처만 지정한 기존 명령, npm과 Docker는 resolver를 추가 호출하지 않고 기존 경로를 유지한다.
+이 경우에도 해결된 의존성은 큐에 넣지 않고 루트 아티팩트의 메타데이터만 사용한다. pip/Conda에서 기본값이 아닌 아키텍처만 지정한 경우도 깊이 0 해결을 수행한다. 모든 환경 옵션이 기본값인 기존 `--no-deps` 명령, npm과 Docker는 resolver를 추가 호출하지 않고 기존 경로를 유지한다.
 
 `resolveAllDependencies`는 이미 요청 패키지를 결과 맵에 먼저 넣으므로, 동일 키의 resolver 결과를 단순히 건너뛰지 않고 resolver가 제공한 메타데이터와 파일 정보를 기존 항목에 병합한다. 이 변경으로 Conda 루트 패키지와 Maven classifier 같은 선택 결과가 CLI 다운로드 단계까지 보존된다.
 
@@ -115,7 +115,7 @@ DownloadManager queue
 3. `--no-deps`에서 환경 민감 타입은 깊이 0 루트 해결만 수행하고 의존성을 큐에 추가하지 않는지 확인한다.
 4. 공용 dependency resolver 테스트에서 기존 루트 패키지에 resolver의 URL, 파일명, classifier 메타데이터가 병합되는지 확인한다.
 5. pip resolver에서 downloader까지 이어지는 테스트로 PyPI JSON과 Simple API에서 선택한 URL·체크섬을 재조회 없이 사용하는지 확인한다.
-6. 파일 입력에도 아키텍처가 적용되고, pip/Conda의 미지원 아키텍처와 classifier 없는 Maven 대상 OS가 부수 효과 전에 거부되는지 확인한다.
+6. 파일 입력과 `--no-deps`에도 비기본 아키텍처가 적용되고, pip/Conda의 미지원 아키텍처와 classifier 없는 Maven 대상 OS/아키텍처가 부수 효과 전에 거부되는지 확인한다.
 7. 관련 단위 테스트, 저장소 표준 worktree 검증 스크립트, TypeScript 빌드를 실행한다.
 
 ## 문서 영향

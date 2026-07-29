@@ -100,7 +100,12 @@ describe('validateDownloadEnvironmentOptions', () => {
     [
       'maven-target-without-classifier',
       createOptions({ type: 'maven', targetOS: 'linux' }),
-      'Maven 대상 OS를 지정하려면 --classifier',
+      'Maven 대상 OS/아키텍처를 지정하려면 --classifier',
+    ],
+    [
+      'maven-architecture-without-classifier',
+      createOptions({ type: 'maven', arch: 'arm64' }),
+      'Maven 대상 OS/아키텍처를 지정하려면 --classifier',
     ],
   ])('%s 조합을 거부한다', (_name, options, message) => {
     expect(() => validateDownloadEnvironmentOptions(options)).toThrow(message);
@@ -129,11 +134,11 @@ describe('hasExplicitTargetEnvironment', () => {
     expect(hasExplicitTargetEnvironment(createOptions(overrides))).toBe(true);
   });
 
-  it('아키텍처만 지정한 경우에는 기존 동작으로 판단한다', () => {
+  it('기본값이 아닌 아키텍처만 지정해도 대상 환경으로 판단한다', () => {
     expect(
       hasExplicitTargetEnvironment(
         createOptions({ arch: 'arm64' as Architecture }),
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 });

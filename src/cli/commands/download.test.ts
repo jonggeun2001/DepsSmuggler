@@ -339,6 +339,29 @@ describe('downloadCommand', () => {
 
   it('--file 입력 패키지에도 선택한 아키텍처를 적용한다', async () => {
     readFile.mockResolvedValueOnce('requests==2.28.0');
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+          architecture: 'arm64',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+          architecture: 'arm64',
+          downloadUrl: 'https://files.example.com/requests-arm64.whl',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [],
+    });
 
     await downloadCommand(commandOptions({
       package: undefined,
@@ -347,13 +370,23 @@ describe('downloadCommand', () => {
       arch: 'arm64',
     }));
 
-    expect(resolveAllDependencies).not.toHaveBeenCalled();
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        architecture: 'arm64',
+        includeDependencies: true,
+        maxDepth: 0,
+      }),
+    );
     expect(addToQueue).toHaveBeenCalledWith([
       expect.objectContaining({
         type: 'pip',
         name: 'requests',
         version: '2.28.0',
         arch: 'arm64',
+        metadata: expect.objectContaining({
+          downloadUrl: 'https://files.example.com/requests-arm64.whl',
+        }),
       }),
     ]);
   });
@@ -371,6 +404,14 @@ describe('downloadCommand', () => {
         type: 'maven',
         package: 'org.lwjgl:lwjgl',
         targetOS: 'linux',
+      },
+    ],
+    [
+      'classifier 없는 Maven 대상 아키텍처',
+      {
+        type: 'maven',
+        package: 'org.lwjgl:lwjgl',
+        arch: 'arm64',
       },
     ],
   ])('%s는 모든 부수 효과 전에 실패한다', async (_name, overrides) => {

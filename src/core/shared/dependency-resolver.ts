@@ -520,12 +520,9 @@ export async function resolveAllDependencies(
           architecture,
         };
       } else if (pkg.type === 'maven') {
-        // maven: 사용자 선택 classifier 또는 targetOS/targetArchitecture 전달
+        // maven: 라이브러리별 형식이 다른 네이티브 아티팩트는 classifier로 선택
         resolverOptions = {
           ...resolverOptions,
-          targetOS: options?.targetOS !== 'any' ? options?.targetOS : undefined,
-          targetArchitecture: architecture,
-          // 사용자가 UI에서 선택한 classifier 전달
           classifier: pkg.classifier,
         };
       }

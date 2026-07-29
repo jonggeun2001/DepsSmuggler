@@ -397,6 +397,16 @@ describe('dependency-resolver', () => {
       const result = await resolveAllDependencies(packages);
 
       expect(getMavenResolver).toHaveBeenCalled();
+      expect(mockResolver.resolveDependencies).toHaveBeenCalledWith(
+        'spring-core',
+        '5.3.0',
+        expect.objectContaining({
+          classifier: 'natives-linux',
+        }),
+      );
+      const resolverOptions = mockResolver.resolveDependencies.mock.calls[0][2];
+      expect(resolverOptions).not.toHaveProperty('targetOS');
+      expect(resolverOptions).not.toHaveProperty('targetArchitecture');
       expect(result.allPackages).toHaveLength(2);
       expect(result.allPackages[0]).toMatchObject({
         id: 'test-1',
