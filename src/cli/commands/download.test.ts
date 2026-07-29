@@ -74,6 +74,24 @@ vi.mock('../../core/shared', () => ({
   resolveAllDependencies: vi.fn(),
 }));
 
+function commandOptions(
+  overrides: Record<string, unknown> = {},
+): Parameters<typeof downloadCommand>[0] {
+  return {
+    type: 'pip',
+    package: 'requests',
+    pkgVersion: '2.28.0',
+    arch: 'x86_64',
+    targetOS: 'any',
+    condaChannel: 'conda-forge',
+    output: './output',
+    format: 'zip',
+    deps: true,
+    concurrency: '3',
+    ...overrides,
+  } as Parameters<typeof downloadCommand>[0];
+}
+
 describe('downloadCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -119,16 +137,7 @@ describe('downloadCommand', () => {
   });
 
   it('deps가 true면 의존성을 해결한 패키지 목록을 큐에 추가한다', async () => {
-    await downloadCommand({
-      type: 'pip',
-      package: 'requests',
-      pkgVersion: '2.28.0',
-      arch: 'x86_64',
-      output: './output',
-      format: 'zip',
-      deps: true,
-      concurrency: '3',
-    });
+    await downloadCommand(commandOptions());
 
     expect(resolveAllDependencies).toHaveBeenCalledWith(
       [
@@ -143,7 +152,7 @@ describe('downloadCommand', () => {
       expect.objectContaining({
         architecture: 'x86_64',
         includeDependencies: true,
-      })
+      }),
     );
     expect(addToQueue).toHaveBeenCalledWith([
       {
@@ -162,16 +171,7 @@ describe('downloadCommand', () => {
   });
 
   it('deps가 false면 원본 패키지만 큐에 추가한다', async () => {
-    await downloadCommand({
-      type: 'pip',
-      package: 'requests',
-      pkgVersion: '2.28.0',
-      arch: 'x86_64',
-      output: './output',
-      format: 'zip',
-      deps: false,
-      concurrency: '3',
-    });
+    await downloadCommand(commandOptions({ deps: false }));
 
     expect(resolveAllDependencies).not.toHaveBeenCalled();
     expect(addToQueue).toHaveBeenCalledWith([
@@ -185,16 +185,11 @@ describe('downloadCommand', () => {
   });
 
   it('yum 타입은 의존성 자동 해결을 시도하지 않고 원본 패키지만 큐에 추가한다', async () => {
-    await downloadCommand({
+    await downloadCommand(commandOptions({
       type: 'yum',
       package: 'httpd',
       pkgVersion: '2.4.0',
-      arch: 'x86_64',
-      output: './output',
-      format: 'zip',
-      deps: true,
-      concurrency: '3',
-    });
+    }));
 
     expect(resolveAllDependencies).not.toHaveBeenCalled();
     expect(addToQueue).toHaveBeenCalledWith([
@@ -244,19 +239,177 @@ describe('downloadCommand', () => {
     });
 
     await expect(
-      downloadCommand({
-        type: 'pip',
-        package: 'requests',
-        pkgVersion: '2.28.0',
-        arch: 'x86_64',
-        output: './output',
-        format: 'zip',
-        deps: true,
-        concurrency: '3',
-      })
+      downloadCommand(commandOptions()),
     ).rejects.toThrow('process.exit');
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     exitSpy.mockRestore();
+  });
+
+  it('대상 환경 옵션을 의존성 resolver에 전달한다', async () => {
+    await downloadCommand(commandOptions({
+      type: 'conda',
+      package: 'numpy',
+      targetOS: 'linux',
+      arch: 'aarch64',
+      pythonVersion: '3.12',
+      cudaVersion: '12.4',
+      condaChannel: 'defaults',
+    }));
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        architecture: 'aarch64',
+        targetOS: 'linux',
+        pythonVersion: '3.12',
+        cudaVersion: '12.4',
+        condaChannel: 'defaults',
+        includeDependencies: true,
+      }),
+    );
+  });
+
+  it('환경 옵션이 지정된 pip --no-deps는 깊이 0으로 루트만 해결한다', async () => {
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+          architecture: 'x86_64',
+          downloadUrl: 'https://files.example.com/requests.whl',
+          metadata: {
+            checksum: { sha256: 'abc123' },
+          },
+        },
+        {
+          id: 'pip-urllib3-1.26.0',
+          type: 'pip',
+          name: 'urllib3',
+          version: '1.26.0',
+          architecture: 'x86_64',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [],
+    });
+
+    await downloadCommand(commandOptions({
+      deps: false,
+      targetOS: 'linux',
+      pythonVersion: '3.12',
+    }));
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        includeDependencies: true,
+        maxDepth: 0,
+      }),
+    );
+    expect(addToQueue).toHaveBeenCalledWith([
+      expect.objectContaining({
+        type: 'pip',
+        name: 'requests',
+        metadata: expect.objectContaining({
+          downloadUrl: 'https://files.example.com/requests.whl',
+        }),
+      }),
+    ]);
+  });
+
+  it('새 환경 옵션이 없는 --no-deps는 resolver를 호출하지 않는다', async () => {
+    await downloadCommand(commandOptions({ deps: false }));
+
+    expect(resolveAllDependencies).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['지원하지 않는 아키텍처', { arch: 'sparc64' }],
+    ['지원하지 않는 대상 OS', { targetOS: 'freebsd' }],
+    ['npm 대상 OS', { type: 'npm', targetOS: 'linux' }],
+    ['잘못된 Python 버전', { pythonVersion: '3.12.1' }],
+    ['pip CUDA 버전', { cudaVersion: '12.4' }],
+  ])('%s는 모든 부수 효과 전에 실패한다', async (_name, overrides) => {
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => {
+        throw new Error('process.exit');
+      }) as never);
+
+    try {
+      await expect(
+        downloadCommand(commandOptions(overrides)),
+      ).rejects.toThrow('process.exit');
+
+      expect(resolveAllDependencies).not.toHaveBeenCalled();
+      expect(addToQueue).not.toHaveBeenCalled();
+      expect(ensureDir).not.toHaveBeenCalled();
+    } finally {
+      exitSpy.mockRestore();
+    }
+  });
+
+  it('Maven classifier를 resolver 입력과 다운로드 큐에 보존한다', async () => {
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'maven-org.lwjgl:lwjgl-3.3.3',
+          type: 'maven',
+          name: 'org.lwjgl:lwjgl',
+          version: '3.3.3',
+          architecture: 'x86_64',
+          classifier: 'natives-linux',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'maven-org.lwjgl:lwjgl-3.3.3',
+          type: 'maven',
+          name: 'org.lwjgl:lwjgl',
+          version: '3.3.3',
+          architecture: 'x86_64',
+          classifier: 'natives-linux',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [],
+    });
+
+    await downloadCommand(commandOptions({
+      type: 'maven',
+      package: 'org.lwjgl:lwjgl',
+      pkgVersion: '3.3.3',
+      classifier: 'natives-linux',
+    }));
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          classifier: 'natives-linux',
+        }),
+      ],
+      expect.any(Object),
+    );
+    expect(addToQueue).toHaveBeenCalledWith([
+      expect.objectContaining({
+        type: 'maven',
+        name: 'org.lwjgl:lwjgl',
+        metadata: expect.objectContaining({
+          classifier: 'natives-linux',
+        }),
+      }),
+    ]);
   });
 });
