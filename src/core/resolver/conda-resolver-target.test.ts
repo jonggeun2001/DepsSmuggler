@@ -122,6 +122,14 @@ describe('CondaResolver 대상 아티팩트 선택', () => {
         return {
           info: { subdir: 'noarch' },
           packages: {
+            'demo-1.0.0-linux-only_1.tar.bz2': {
+              name: 'demo',
+              version: '1.0.0',
+              build: 'linux_only_1',
+              build_number: 1,
+              depends: ['__linux'],
+              subdir: 'noarch',
+            },
             'demo-1.0.0-pyhd8ed1ab_0.tar.bz2': {
               name: 'demo',
               version: '1.0.0',

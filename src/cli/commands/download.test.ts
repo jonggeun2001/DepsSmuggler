@@ -239,10 +239,17 @@ describe('downloadCommand', () => {
     ]);
   });
 
-  it('deps가 false면 원본 패키지만 큐에 추가한다', async () => {
+  it('pip deps가 false여도 깊이 0 resolver로 루트 아티팩트를 선택한다', async () => {
     await downloadCommand(commandOptions({ deps: false }));
 
-    expect(resolveAllDependencies).not.toHaveBeenCalled();
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        architecture: 'x86_64',
+        targetOS: 'any',
+        maxDepth: 0,
+      }),
+    );
     expect(addToQueue).toHaveBeenCalledWith([
       {
         type: 'pip',
@@ -398,10 +405,67 @@ describe('downloadCommand', () => {
     ]);
   });
 
-  it('새 환경 옵션이 없는 --no-deps는 resolver를 호출하지 않는다', async () => {
+  it('기본 환경의 pip --no-deps도 resolver로 루트 아티팩트를 검증한다', async () => {
     await downloadCommand(commandOptions({ deps: false }));
 
-    expect(resolveAllDependencies).not.toHaveBeenCalled();
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        includeDependencies: true,
+        maxDepth: 0,
+      }),
+    );
+  });
+
+  it('기본 환경의 Conda --no-deps도 resolver로 루트 아티팩트를 검증한다', async () => {
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'conda-numpy-2.0.0',
+          type: 'conda',
+          name: 'numpy',
+          version: '2.0.0',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'conda-numpy-2.0.0',
+          type: 'conda',
+          name: 'numpy',
+          version: '2.0.0',
+          architecture: 'x86_64',
+          filename: 'numpy-2.0.0-py312_0.conda',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [],
+    });
+
+    await downloadCommand(commandOptions({
+      type: 'conda',
+      package: 'numpy',
+      pkgVersion: '2.0.0',
+      deps: false,
+    }));
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        architecture: 'x86_64',
+        targetOS: 'any',
+        maxDepth: 0,
+      }),
+    );
+    expect(addToQueue).toHaveBeenCalledWith([
+      expect.objectContaining({
+        type: 'conda',
+        name: 'numpy',
+        metadata: expect.objectContaining({
+          filename: 'numpy-2.0.0-py312_0.conda',
+        }),
+      }),
+    ]);
   });
 
   it('--file 입력 패키지에도 선택한 아키텍처를 적용한다', async () => {

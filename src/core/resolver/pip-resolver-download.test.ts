@@ -239,6 +239,31 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     expect(version).toBe('2.0.post1');
   });
 
+  it('Simple API latest는 같은 공개 버전의 최신 local version을 선택한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.0-py3-none-any.whl',
+        url: 'https://index.example/demo-1.0.whl',
+      },
+      {
+        filename: 'demo-1.0+cpu-py3-none-any.whl',
+        url: 'https://index.example/demo-1.0+cpu.whl',
+      },
+      {
+        filename: 'demo-1.0+cu121-py3-none-any.whl',
+        url: 'https://index.example/demo-1.0+cu121.whl',
+      },
+    ]);
+
+    const version = await (new PipResolver() as any).getLatestVersion(
+      'demo',
+      undefined,
+      'https://index.example/simple',
+    );
+
+    expect(version).toBe('1.0+cu121');
+  });
+
   it('PyPI JSON에서 선택한 대상 wheel URL과 체크섬을 다운로드한다', async () => {
     pipCacheMock.fetchPackageMetadata.mockResolvedValue({
       data: {

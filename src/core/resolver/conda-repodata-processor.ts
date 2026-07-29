@@ -373,8 +373,9 @@ export class CondaRepoDataProcessor {
       return true;
     }
 
-    // noarch 등 기타: 모든 빌드 허용
-    return true;
+    // 대상 OS를 모르면 OS 가상 의존성이 있는 noarch 빌드는
+    // 공통 아티팩트로 간주할 수 없다.
+    return false;
   }
 
 

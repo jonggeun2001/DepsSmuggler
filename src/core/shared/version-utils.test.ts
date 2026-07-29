@@ -42,6 +42,18 @@ describe('version-utils', () => {
     it('c 별칭을 rc와 같은 prerelease로 비교한다', () => {
       expect(comparePep440Versions('2.0c1', '2.0rc1')).toBe(0);
     });
+
+    it('같은 공개 버전의 local segment를 PEP 440 순서로 비교한다', () => {
+      expect(
+        comparePep440Versions('1.0+cpu', '1.0'),
+      ).toBeGreaterThan(0);
+      expect(
+        comparePep440Versions('1.0+cu121', '1.0+cpu'),
+      ).toBeGreaterThan(0);
+      expect(
+        comparePep440Versions('1.0+2', '1.0+cpu'),
+      ).toBeGreaterThan(0);
+    });
   });
 
   describe('compareVersions', () => {
@@ -136,6 +148,11 @@ describe('version-utils', () => {
       it('같은 release의 post-release를 exclusive 비교에서 제외한다', () => {
         expect(isVersionCompatible('1.0.post1', '>1.0')).toBe(false);
         expect(isVersionCompatible('1.0.post2', '>1.0.post1')).toBe(true);
+      });
+
+      it('제약 비교에서는 candidate local label을 공개 버전과 동일하게 취급한다', () => {
+        expect(isVersionCompatible('1.0+cpu', '>1.0')).toBe(false);
+        expect(isVersionCompatible('1.0+cpu', '>=1.0')).toBe(true);
       });
     });
 

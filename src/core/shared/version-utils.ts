@@ -181,7 +181,7 @@ export function isPrereleaseVersion(version: string): boolean {
   );
 }
 
-export function comparePep440Versions(
+function comparePep440PublicVersions(
   a: string,
   b: string,
 ): number {
@@ -229,6 +229,81 @@ export function comparePep440Versions(
   return 0;
 }
 
+function comparePep440LocalVersions(
+  left: string | null,
+  right: string | null,
+): number {
+  if (left === right) {
+    return 0;
+  }
+  if (left === null) {
+    return -1;
+  }
+  if (right === null) {
+    return 1;
+  }
+
+  const leftSegments = left.split('.');
+  const rightSegments = right.split('.');
+  const segmentCount = Math.max(
+    leftSegments.length,
+    rightSegments.length,
+  );
+
+  for (let index = 0; index < segmentCount; index++) {
+    const leftSegment = leftSegments[index];
+    const rightSegment = rightSegments[index];
+    if (leftSegment === undefined) {
+      return -1;
+    }
+    if (rightSegment === undefined) {
+      return 1;
+    }
+
+    const leftIsNumber = /^\d+$/.test(leftSegment);
+    const rightIsNumber = /^\d+$/.test(rightSegment);
+    if (leftIsNumber && rightIsNumber) {
+      const difference =
+        Number(leftSegment) - Number(rightSegment);
+      if (difference !== 0) {
+        return difference;
+      }
+      continue;
+    }
+    if (leftIsNumber !== rightIsNumber) {
+      return leftIsNumber ? 1 : -1;
+    }
+
+    if (leftSegment !== rightSegment) {
+      return leftSegment < rightSegment ? -1 : 1;
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * 후보 선택용 전체 PEP 440 순서 비교.
+ * 공개 버전이 같으면 local version segment까지 비교한다.
+ */
+export function comparePep440Versions(
+  a: string,
+  b: string,
+): number {
+  const publicResult = comparePep440PublicVersions(a, b);
+  if (publicResult !== 0) {
+    return publicResult;
+  }
+
+  const parsedA = parseMatchableVersion(a);
+  const parsedB = parseMatchableVersion(b);
+  if (!parsedA || !parsedB) {
+    return 0;
+  }
+
+  return comparePep440LocalVersions(parsedA.local, parsedB.local);
+}
+
 function isSameRelease(
   a: MatchableVersion,
   b: MatchableVersion,
@@ -240,7 +315,7 @@ function matchesExclusiveGreaterThan(
   version: string,
   target: string,
 ): boolean {
-  if (comparePep440Versions(version, target) <= 0) {
+  if (comparePep440PublicVersions(version, target) <= 0) {
     return false;
   }
 
@@ -273,7 +348,7 @@ function matchesExclusiveLessThan(
   version: string,
   target: string,
 ): boolean {
-  if (comparePep440Versions(version, target) >= 0) {
+  if (comparePep440PublicVersions(version, target) >= 0) {
     return false;
   }
 
@@ -359,11 +434,11 @@ function checkSingleCondition(version: string, condition: string): boolean {
 
   if (condition.startsWith('>=')) {
     const target = condition.slice(2).trim();
-    return comparePep440Versions(version, target) >= 0;
+    return comparePep440PublicVersions(version, target) >= 0;
   }
   if (condition.startsWith('<=')) {
     const target = condition.slice(2).trim();
-    return comparePep440Versions(version, target) <= 0;
+    return comparePep440PublicVersions(version, target) <= 0;
   }
   if (condition.startsWith('!=')) {
     const target = condition.slice(2).trim();
@@ -388,7 +463,7 @@ function checkSingleCondition(version: string, condition: string): boolean {
       ? `${parsedBase.epoch ? `${parsedBase.epoch}!` : ''}${releasePrefix.join('.')}`
       : base.split('.').slice(0, -1).join('.');
     return (
-      comparePep440Versions(version, base) >= 0 &&
+      comparePep440PublicVersions(version, base) >= 0 &&
       matchesWildcardVersion(version, `${prefix}.*`)
     );
   }

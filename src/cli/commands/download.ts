@@ -32,6 +32,10 @@ interface PreparedPackagesResult {
 
 const CLI_DEPENDENCY_SUPPORTED_TYPES = new Set<PackageType>(['pip', 'conda', 'maven', 'npm']);
 const CLI_TARGET_ENVIRONMENT_TYPES = new Set<PackageType>(['pip', 'conda', 'maven']);
+const CLI_ROOT_ARTIFACT_RESOLUTION_TYPES = new Set<PackageType>([
+  'pip',
+  'conda',
+]);
 
 function toDownloadPackage(pkg: PackageInfo): DownloadPackage {
   const metadata = pkg.metadata as Record<string, unknown> | undefined;
@@ -108,8 +112,9 @@ async function preparePackagesForDownload(
 ): Promise<PreparedPackagesResult> {
   const shouldResolveTargetedRoots =
     !options.deps &&
-    CLI_TARGET_ENVIRONMENT_TYPES.has(options.type) &&
-    hasExplicitTargetEnvironment(options);
+    (CLI_ROOT_ARTIFACT_RESOLUTION_TYPES.has(options.type) ||
+      (CLI_TARGET_ENVIRONMENT_TYPES.has(options.type) &&
+        hasExplicitTargetEnvironment(options)));
 
   if (!options.deps && !shouldResolveTargetedRoots) {
     return {
