@@ -230,12 +230,42 @@ describe('dependency-resolver', () => {
     it('conda 패키지 의존성 해결', async () => {
       const mockCondaResult = {
         root: {
-          package: { type: 'conda', name: 'pandas', version: '2.0.0' },
+          package: {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+            metadata: {
+              subdir: 'osx-arm64',
+              filename: 'pandas-2.0.0-py311.conda',
+              downloadUrl:
+                'https://conda.example/osx-arm64/pandas-2.0.0-py311.conda',
+            },
+          },
           dependencies: [],
         },
         flatList: [
-          { type: 'conda', name: 'pandas', version: '2.0.0' },
-          { type: 'conda', name: 'numpy', version: '1.24.0' },
+          {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+            metadata: {
+              subdir: 'osx-arm64',
+              filename: 'pandas-2.0.0-py311.conda',
+              downloadUrl:
+                'https://conda.example/osx-arm64/pandas-2.0.0-py311.conda',
+            },
+          },
+          {
+            type: 'conda',
+            name: 'numpy',
+            version: '1.24.0',
+            metadata: {
+              subdir: 'osx-arm64',
+              filename: 'numpy-1.24.0-py311.conda',
+              downloadUrl:
+                'https://conda.example/osx-arm64/numpy-1.24.0-py311.conda',
+            },
+          },
         ],
         conflicts: [],
         totalSize: 20000000,
@@ -352,6 +382,65 @@ describe('dependency-resolver', () => {
           downloadUrl: 'https://conda.example/pandas-2.0.0-py312.conda',
         },
       });
+    });
+
+    it('대상 Conda 아티팩트 메타데이터가 없으면 해결 실패로 기록한다', async () => {
+      const mockCondaResult = {
+        root: {
+          package: {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+          },
+          dependencies: [],
+        },
+        flatList: [
+          {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+          },
+        ],
+        conflicts: [],
+        totalSize: 0,
+      };
+      const mockResolver = {
+        resolveDependencies: vi.fn().mockResolvedValue(mockCondaResult),
+      };
+      vi.mocked(getCondaResolver).mockReturnValue(mockResolver as any);
+
+      const result = await resolveAllDependencies(
+        [
+          {
+            id: 'request-id',
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+            architecture: 'aarch64',
+          },
+        ],
+        {
+          architecture: 'aarch64',
+          targetOS: 'linux',
+          pythonVersion: '3.12',
+        },
+      );
+
+      expect(result.failedPackages).toEqual([
+        expect.objectContaining({
+          name: 'pandas',
+          error: expect.stringContaining(
+            '대상 환경과 호환되는 Conda 아티팩트를 찾을 수 없습니다',
+          ),
+        }),
+      ]);
+      expect(result.allPackages).toEqual([
+        expect.objectContaining({
+          id: 'request-id',
+          name: 'pandas',
+        }),
+      ]);
+      expect(result.allPackages[0]).not.toHaveProperty('downloadUrl');
     });
 
     it('maven 패키지 의존성 해결', async () => {

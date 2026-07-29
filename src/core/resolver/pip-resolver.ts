@@ -17,6 +17,7 @@ import {
   PyPIPackageInfo,
 } from '../shared/pip-cache';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
+import { getPackageType as getSimplePackageType } from '../shared/pip-simple-api';
 import {
   fetchPackageFiles,
   extractVersionFromFilename,
@@ -60,6 +61,9 @@ type PipCompatibilityCandidate = Pick<
   PyPIRelease,
   'filename' | 'packagetype' | 'requires_python'
 >;
+type PipResolverTargetPlatform = Omit<PipTargetPlatform, 'os'> & {
+  os: PipTargetPlatform['os'] | 'any';
+};
 
 function getSimpleApiChecksum(
   file: SimpleApiPackageFile | null,
@@ -87,7 +91,7 @@ export class PipResolver implements IResolver {
   private targetPlatform: TargetPlatform | null = null;
   private pythonVersion: string | null = null;
   private cacheOptions: PipCacheOptions = {};
-  private pipTargetPlatform: PipTargetPlatform | null = null;
+  private pipTargetPlatform: PipResolverTargetPlatform | null = null;
 
   /**
    * 캐시 옵션 설정
@@ -140,7 +144,9 @@ export class PipResolver implements IResolver {
       };
 
       this.pipTargetPlatform = {
-        os: osMap[this.targetPlatform?.system || ''] || 'linux',
+        os: this.targetPlatform?.system
+          ? osMap[this.targetPlatform.system]
+          : 'any',
         arch: archMap[this.targetPlatform?.machine || ''] || 'x86_64',
         pythonVersion: this.pythonVersion ?? undefined,
       };
@@ -855,6 +861,11 @@ export class PipResolver implements IResolver {
       return true;
     }
 
+    // 대상 OS가 지정되지 않으면 특정 OS wheel을 임의로 선택하지 않는다.
+    if (os === 'any') {
+      return false;
+    }
+
     // 아키텍처 정규화
     const normalizeArch = (a: string): string => {
       if (a === 'x86_64' || a === 'amd64') return 'x86_64';
@@ -1128,7 +1139,7 @@ export class PipResolver implements IResolver {
     return (
       files.find(
         (file) =>
-          file.filename.endsWith('.tar.gz') &&
+          getSimplePackageType(file.filename) === 'sdist' &&
           this.isRequiresPythonCompatible(file.requiresPython),
       ) || null
     );

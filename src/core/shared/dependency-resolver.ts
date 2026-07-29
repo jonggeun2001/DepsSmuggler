@@ -118,6 +118,28 @@ function mergeResolvedPackage(
   };
 }
 
+function assertTargetedCondaArtifacts(
+  packages: PackageInfo[],
+): void {
+  const unresolved = packages.find((pkg) => {
+    const metadata = pkg.metadata as Record<string, unknown> | undefined;
+    return (
+      pkg.type === 'conda' &&
+      (
+        typeof metadata?.downloadUrl !== 'string' ||
+        typeof metadata?.filename !== 'string' ||
+        typeof metadata?.subdir !== 'string'
+      )
+    );
+  });
+
+  if (unresolved) {
+    throw new Error(
+      `대상 환경과 호환되는 Conda 아티팩트를 찾을 수 없습니다: ${unresolved.name}@${unresolved.version}`,
+    );
+  }
+}
+
 /**
  * 의존성 해결 결과 인터페이스
  */
@@ -221,6 +243,12 @@ export async function resolveAllDependencies(
   const condaChannel = options?.condaChannel ?? 'conda-forge';
   const architecture = options?.architecture ?? 'x86_64';
   const targetOS = options?.targetOS ?? 'any';
+  const hasTargetedCondaEnvironment =
+    targetOS !== 'any' ||
+    architecture !== 'x86_64' ||
+    options?.pythonVersion !== undefined ||
+    options?.cudaVersion !== undefined ||
+    condaChannel !== 'conda-forge';
 
   if (!includeDependencies) {
     return {
@@ -612,6 +640,10 @@ export async function resolveAllDependencies(
           pkg.version,
           resolverOptions
         ) as DependencyResolutionResult;
+
+        if (pkg.type === 'conda' && hasTargetedCondaEnvironment) {
+          assertTargetedCondaArtifacts(result.flatList);
+        }
 
         dependencyTrees.push(result);
 

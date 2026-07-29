@@ -81,6 +81,8 @@ depssmuggler download [옵션]
 - pip에서는 `arm64`와 `aarch64`, `amd64`와 `x86_64`를 같은 아키텍처로 처리합니다. 대상 Python 버전은 wheel 태그(`abi3` 최소 버전 포함)와 저장소의 `Requires-Python` 조건(PEP 440 wildcard 포함)을 모두 만족해야 합니다.
 - 표의 적용 타입과 맞지 않는 선택 옵션을 사용하면 오류가 발생합니다. 예를 들어 npm에 `--target-os linux`를 지정하거나 pip에 `--cuda-version 12.4`를 지정할 수 없습니다.
 - 기본값인 `--target-os any`와 `--conda-channel conda-forge`는 적용 대상이 아닌 타입에서 기존 동작을 유지합니다. 그러나 다른 OS나 채널을 명시하면 적용 타입을 검사합니다.
+- pip에서 대상 OS가 `any`이면 특정 OS wheel을 임의로 선택하지 않고 범용 wheel 또는 `Requires-Python` 조건을 만족하는 소스 배포본을 선택합니다.
+- Conda에서 지정한 OS, 아키텍처, Python/CUDA 조건과 일치하는 대상 subdir 또는 `noarch` 빌드를 찾지 못하면 다른 플랫폼으로 재조회하지 않고 다운로드 전에 실패합니다.
 - Maven classifier 형식은 라이브러리마다 다르므로 OS와 아키텍처만으로 자동 생성하지 않습니다. Maven에 `--target-os` 또는 기본값이 아닌 `--arch`를 지정할 때는 실제 네이티브 아티팩트를 선택할 `--classifier`를 함께 지정해야 합니다.
 - pip, Conda, Maven에서 대상 환경을 명시하고 `--no-deps`를 사용하면 해당 환경에 맞는 루트 아티팩트만 선택하고 전이 의존성은 다운로드하지 않습니다. pip/Conda의 기본값이 아닌 `--arch`도 대상 환경 명시로 처리합니다.
 - pip 대상 환경에 호환되는 wheel이 없으면 sdist를 사용하며, sdist도 없으면 다른 아키텍처 wheel로 바꾸지 않고 오류로 종료합니다.

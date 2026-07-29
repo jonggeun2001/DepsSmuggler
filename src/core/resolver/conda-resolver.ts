@@ -283,8 +283,8 @@ export class CondaResolver implements IResolver {
       }
     }
 
-    // noarch도 확인: 후보가 없거나 Python 버전이 맞지 않는 경우
-    if (depends.length === 0 || !isPythonMatch) {
+    // noarch도 확인: 대상 subdir 후보가 없거나 Python 버전이 맞지 않는 경우
+    if (!resolvedFilename || !isPythonMatch) {
       const noarchCacheKey = `${channel}/noarch`;
       const noarchRepodata = await this.repoDataProcessor.getRepoData(channel, 'noarch');
       if (noarchRepodata) {
@@ -305,10 +305,15 @@ export class CondaResolver implements IResolver {
       }
     }
 
+    if (!resolvedSubdir || !resolvedFilename || !isPythonMatch) {
+      throw new Error(
+        `대상 환경과 호환되는 Conda 아티팩트를 찾을 수 없습니다: ${name}@${version} (${targetSubdir})`,
+      );
+    }
+
     // 다운로드 URL 생성
-    const downloadUrl = resolvedSubdir && resolvedFilename
-      ? `${this.condaUrl}/${channel}/${resolvedSubdir}/${resolvedFilename}`
-      : undefined;
+    const downloadUrl =
+      `${this.condaUrl}/${channel}/${resolvedSubdir}/${resolvedFilename}`;
 
     const packageInfo: PackageInfo = {
       type: 'conda',

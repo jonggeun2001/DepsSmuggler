@@ -127,6 +127,52 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     );
   });
 
+  it('대상 OS를 지정하지 않으면 Linux wheel 대신 범용 wheel을 선택한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: {
+          name: 'demo',
+          version: '1.0.0',
+          requires_dist: [],
+        },
+        urls: [
+          {
+            filename:
+              'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+            url: 'https://files.example/demo-linux.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp312',
+            digests: { sha256: 'linux-sha' },
+            size: 100,
+          },
+          {
+            filename: 'demo-1.0.0-py3-none-any.whl',
+            url: 'https://files.example/demo-any.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'py3',
+            digests: { sha256: 'any-sha' },
+            size: 80,
+          },
+        ],
+      },
+    });
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        targetPlatform: { machine: 'x86_64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      filename: 'demo-1.0.0-py3-none-any.whl',
+      downloadUrl: 'https://files.example/demo-any.whl',
+    });
+  });
+
   it('Simple API에서 선택한 대상 wheel URL과 체크섬을 다운로드한다', async () => {
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
       {
@@ -829,6 +875,41 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
       filename: 'demo-1.0.0.tar.gz',
       downloadUrl: 'https://index.example/demo-1.0.0.tar.gz',
       checksum: { sha256: 'simple-sdist-sha' },
+    });
+  });
+
+  it('Simple API에 호환 wheel이 없으면 ZIP sdist를 선택한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+        url: 'https://index.example/demo-x86_64.whl',
+        hash: { algorithm: 'sha256', digest: 'simple-x86-sha' },
+      },
+      {
+        filename: 'demo-1.0.0.zip',
+        url: 'https://index.example/demo-1.0.0.zip',
+        hash: { algorithm: 'sha256', digest: 'simple-zip-sha' },
+        requiresPython: '>=3.12',
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Linux', machine: 'aarch64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      filename: 'demo-1.0.0.zip',
+      downloadUrl: 'https://index.example/demo-1.0.0.zip',
+      checksum: { sha256: 'simple-zip-sha' },
     });
   });
 
