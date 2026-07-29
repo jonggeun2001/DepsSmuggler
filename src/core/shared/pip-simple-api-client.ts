@@ -233,8 +233,11 @@ export function extractVersionFromFilename(filename: string): string {
     return wheelMatch[2]; // version
   }
 
-  // tar.gz / zip 형식: {name}-{version}.{ext}
-  const sourceMatch = /^([a-zA-Z0-9._-]+)-([a-zA-Z0-9._+]+)\.(tar\.gz|zip)$/i.exec(filename);
+  // 소스 배포본 형식: {name}-{version}.{ext}
+  const sourceMatch =
+    /^([a-zA-Z0-9._-]+)-([a-zA-Z0-9._+]+)\.(tar\.gz|zip|tar\.bz2|tar\.xz)$/i.exec(
+      filename,
+    );
   if (sourceMatch) {
     return sourceMatch[2];
   }

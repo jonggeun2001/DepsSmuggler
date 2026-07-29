@@ -362,9 +362,13 @@ export class PipResolver implements IResolver {
       // Simple API 사용 (커스텀 인덱스)
       const files = await fetchPackageFiles(indexUrl, name);
 
-      const targetFiles = files.filter(
-        (f) => extractVersionFromFilename(f.filename) === actualVersion
-      );
+      const targetFiles = files.filter((file) => {
+        try {
+          return extractVersionFromFilename(file.filename) === actualVersion;
+        } catch {
+          return false;
+        }
+      });
 
       if (targetFiles.length === 0) {
         // 커스텀 인덱스에서 찾지 못하면 PyPI로 fallback

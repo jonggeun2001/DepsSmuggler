@@ -913,6 +913,80 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     });
   });
 
+  it.each([
+    {
+      extension: 'tar.bz2',
+      digest: 'simple-bz2-sha',
+    },
+    {
+      extension: 'tar.xz',
+      digest: 'simple-xz-sha',
+    },
+  ])(
+    'Simple API의 $extension sdist와 Requires-Python을 처리한다',
+    async ({ extension, digest }) => {
+      simpleApiMock.fetchPackageFiles.mockResolvedValue([
+        {
+          filename: `demo-1.0.0.${extension}`,
+          url: `https://index.example/demo-1.0.0.${extension}`,
+          hash: { algorithm: 'sha256', digest },
+          requiresPython: '>=3.12,<3.13',
+        },
+      ]);
+      simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+      pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+      const result = await new PipResolver().resolveDependencies(
+        'demo',
+        '1.0.0',
+        {
+          maxDepth: 0,
+          indexUrl: 'https://index.example/simple',
+          targetPlatform: { system: 'Linux', machine: 'aarch64' },
+          pythonVersion: '3.12',
+        },
+      );
+
+      expect(result.root.package.metadata).toMatchObject({
+        filename: `demo-1.0.0.${extension}`,
+        downloadUrl: `https://index.example/demo-1.0.0.${extension}`,
+        checksum: { sha256: digest },
+      });
+    },
+  );
+
+  it('Simple API의 알 수 없는 파일은 무시하고 유효한 sdist를 선택한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.0.0.exe',
+        url: 'https://index.example/demo-1.0.0.exe',
+      },
+      {
+        filename: 'demo-1.0.0.tar.xz',
+        url: 'https://index.example/demo-1.0.0.tar.xz',
+        requiresPython: '>=3.12',
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Linux', machine: 'aarch64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      filename: 'demo-1.0.0.tar.xz',
+      downloadUrl: 'https://index.example/demo-1.0.0.tar.xz',
+    });
+  });
+
   it('호환 wheel과 sdist가 모두 없으면 다른 아키텍처를 선택하지 않고 실패한다', async () => {
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
       {

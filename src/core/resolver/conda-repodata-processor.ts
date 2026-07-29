@@ -22,6 +22,7 @@ export interface PackageCandidate {
   depends: string[];
   subdir: string;
   size: number;
+  isPythonMatch: boolean;
 }
 
 /**
@@ -150,7 +151,7 @@ export class CondaRepoDataProcessor {
     versionSpec?: string,
     cacheKey?: string
   ): PackageCandidate[] {
-    const candidates: Array<PackageCandidate & { isPythonMatch: boolean; timestamp: number }> = [];
+    const candidates: Array<PackageCandidate & { timestamp: number }> = [];
     const normalizedName = packageName.toLowerCase();
 
     // 인덱스가 있으면 O(1) 조회 사용

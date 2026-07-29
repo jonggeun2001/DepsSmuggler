@@ -274,7 +274,7 @@ export class CondaResolver implements IResolver {
       const versionSpec = version === 'latest' ? undefined : `==${version}`;
       const candidates = this.repoDataProcessor.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
       if (candidates.length > 0) {
-        isPythonMatch = (candidates[0] as { isPythonMatch?: boolean }).isPythonMatch ?? true;
+        isPythonMatch = candidates[0].isPythonMatch;
         depends = candidates[0].depends;
         resolvedVersion = candidates[0].version;
         resolvedSubdir = candidates[0].subdir;
@@ -295,7 +295,7 @@ export class CondaResolver implements IResolver {
           noarchCacheKey
         );
         if (candidates.length > 0) {
-          isPythonMatch = true; // noarch는 항상 호환
+          isPythonMatch = candidates[0].isPythonMatch;
           depends = candidates[0].depends;
           resolvedVersion = candidates[0].version;
           resolvedSubdir = candidates[0].subdir;

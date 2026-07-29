@@ -89,4 +89,53 @@ describe('CondaResolver 대상 아티팩트 선택', () => {
       '대상 환경과 호환되는 Conda 아티팩트를 찾을 수 없습니다',
     );
   });
+
+  it('대상 Python과 맞지 않는 noarch 빌드를 거부한다', async () => {
+    const resolver = new CondaResolver();
+    const processor = (
+      resolver as unknown as {
+        repoDataProcessor: {
+          getRepoData: (
+            channel: string,
+            subdir: string,
+          ) => Promise<Record<string, unknown>>;
+          findPackageCandidates: () => unknown[];
+        };
+      }
+    ).repoDataProcessor;
+
+    vi.spyOn(processor, 'getRepoData').mockResolvedValue({
+      packages: {},
+      'packages.conda': {},
+      info: {},
+    });
+    vi.spyOn(processor, 'findPackageCandidates')
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        {
+          filename: 'demo-1.0.0-py311_0.conda',
+          name: 'demo',
+          version: '1.0.0',
+          build: 'py311_0',
+          buildNumber: 0,
+          depends: ['python >=3.11,<3.12'],
+          subdir: 'noarch',
+          size: 100,
+          isPythonMatch: false,
+        },
+      ]);
+
+    await expect(
+      resolver.resolveDependencies('demo', '1.0.0', {
+        maxDepth: 0,
+        targetPlatform: {
+          system: 'Linux',
+          machine: 'aarch64',
+        },
+        pythonVersion: '3.12',
+      }),
+    ).rejects.toThrow(
+      '대상 환경과 호환되는 Conda 아티팩트를 찾을 수 없습니다',
+    );
+  });
 });
