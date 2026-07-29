@@ -578,12 +578,13 @@ export class PipResolver implements IResolver {
         // Simple API 사용
         const files = await fetchPackageFiles(indexUrl, name);
         if (files.length === 0) return null;
+        const includeYanked = isExactPinnedVersionSpecifier(versionSpec);
 
         const filesByVersion = new Map<string, SimpleApiPackageFile[]>();
         for (const file of files) {
           try {
             const version = extractVersionFromFilename(file.filename);
-            if (!file.yanked) {
+            if (!file.yanked || includeYanked) {
               const versionFiles = filesByVersion.get(version) ?? [];
               versionFiles.push(file);
               filesByVersion.set(version, versionFiles);
@@ -624,10 +625,13 @@ export class PipResolver implements IResolver {
 
         const { data } = cacheResult;
         if (!data.releases) return null;
+        const includeYanked = isExactPinnedVersionSpecifier(versionSpec);
 
         const compatiblePythonVersions = Object.entries(data.releases)
           .filter(([, releases]) => {
-            const availableReleases = releases.filter((release) => !release.yanked);
+            const availableReleases = includeYanked
+              ? releases
+              : releases.filter((release) => !release.yanked);
             return availableReleases.length > 0 && this.selectBestWheel(availableReleases) !== null;
           })
           .map(([version]) => version)
@@ -697,8 +701,8 @@ export class PipResolver implements IResolver {
         let version = 'latest';
 
         if (parsed.versionSpec) {
-          // ==로 고정된 버전 추출
-          const exactMatch = parsed.versionSpec.match(/^==(.+)$/);
+          // == 또는 ===로 고정된 버전 추출
+          const exactMatch = parsed.versionSpec.match(/^(?:===|==)\s*([^,*\s]+)\s*$/);
           if (exactMatch) {
             version = exactMatch[1];
           } else {
@@ -1146,6 +1150,10 @@ function normalizeMachine(machine: string): string {
   if (normalized === 'amd64') return 'x86_64';
   if (normalized === 'aarch64' || normalized === 'arm64') return 'aarch64';
   return normalized;
+}
+
+function isExactPinnedVersionSpecifier(versionSpec: string | undefined): boolean {
+  return versionSpec !== undefined && /^(?:===|==)\s*[^,*\s]+\s*$/.test(versionSpec);
 }
 
 function stripOuterMarkerParentheses(expression: string): string {

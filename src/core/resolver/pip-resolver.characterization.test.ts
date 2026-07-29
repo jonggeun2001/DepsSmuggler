@@ -544,6 +544,75 @@ describe('PipResolver characterization', () => {
     expect(result.root.package.version).toBe('1.1.0');
   });
 
+  it('PyPI의 정확 고정 yanked 전이 의존성은 포함한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        root: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['future==1.1.0'] },
+          },
+        },
+        future: {
+          latest: '1.1.0',
+          versions: {
+            '1.1.0': {
+              urls: [
+                {
+                  filename: 'future-1.1.0-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                  yanked: true,
+                },
+              ],
+            },
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('root', '1.0.0');
+
+    expect(result.flatList).toContainEqual(
+      expect.objectContaining({ name: 'future', version: '1.1.0' })
+    );
+  });
+
+  it('Simple API의 정확 고정 yanked 전이 의존성은 포함한다', async () => {
+    const filesByPackage: SimpleApiFixture = {
+      root: [
+        {
+          filename: 'root-1.0.0-py3-none-any.whl',
+          url: 'https://packages.example.com/root-1.0.0.whl',
+          metadataHash: 'sha256:root',
+        },
+      ],
+      future: [
+        {
+          filename: 'future-1.1.0-py3-none-any.whl',
+          url: 'https://packages.example.com/future-1.1.0.whl',
+          yanked: true,
+        },
+      ],
+    };
+    simpleApiMock.fetchPackageFiles.mockImplementation(async (_indexUrl: string, name: string) => {
+      return filesByPackage[name] ?? [];
+    });
+    simpleApiMock.fetchWheelMetadata.mockImplementation(async (file: { filename: string }) => {
+      return file.filename.startsWith('root-') ? ['future===1.1.0'] : [];
+    });
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('root', '1.0.0', {
+      indexUrl: 'https://packages.example.com/simple',
+    });
+
+    expect(result.flatList).toContainEqual(
+      expect.objectContaining({ name: 'future', version: '1.1.0' })
+    );
+  });
+
   it('프리릴리스를 명시한 범위는 PEP 440 순서로 가장 높은 rc를 선택한다', async () => {
     pipCacheMock.fetchPackageMetadata.mockImplementation(
       createPyPIFixtureResponder({
