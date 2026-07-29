@@ -29,12 +29,13 @@
 
 - 아키텍처는 프로젝트의 `Architecture` 공개 타입에 정의된 값만 허용한다.
 - 대상 OS는 `any`, `linux`, `windows`, `macos`만 허용한다.
-- Python 및 CUDA 버전은 현재 resolver가 안정적으로 처리하는 `major.minor` 형식만 허용한다.
+- Python 및 CUDA 버전은 현재 resolver가 안정적으로 처리하는 `major.minor` 형식만 허용하며, 검증식은 `^\d+\.\d+$`이다.
 - `--python-version`은 `pip`와 `conda`에서만 허용한다.
 - `--cuda-version`은 `conda`에서만 허용한다.
 - `--classifier`는 `maven`에서만 허용한다.
+- `--target-os`의 기본값 `any`는 적용 대상이 아닌 `npm`과 `docker`에서 무시한다. `any`가 아닌 값은 `pip`, `conda`, `maven`에서만 허용하고 다른 타입에서는 오류로 처리한다.
+- `--conda-channel`의 기본값 `conda-forge`는 conda가 아닌 타입에서 무시한다. 기본값이 아닌 채널은 `conda`에서만 허용하고 다른 타입에서는 오류로 처리한다. Commander 옵션 객체만으로 사용자의 기본값 명시 여부를 구분하지 않는다.
 - 잘못된 값이나 적용할 수 없는 조합은 다운로드나 파일 생성 전에 한글 오류로 실패시킨다.
-- `--conda-channel`의 기본값은 다른 타입에서 무시되며, 사용자가 명시하는 별도 여부를 추적하지 않는다.
 
 기존 옵션만 사용하는 명령은 기존 기본값과 동작을 유지한다.
 
@@ -67,11 +68,34 @@ DownloadManager queue
 패키지별 downloader가 선택된 metadata로 실제 파일 다운로드
 ```
 
-의존성을 포함하지 않는 경우에도 pip, conda, Maven처럼 대상 환경이 아티팩트 선택에 영향을 주는 타입은 깊이 0으로 루트 패키지만 해결한다. 해결된 의존성은 큐에 넣지 않으며, 루트 아티팩트의 메타데이터만 사용한다. npm과 Docker는 기존 `--no-deps` 경로를 그대로 사용한다.
+의존성을 포함하지 않는 경우에는 다음 조건을 모두 만족할 때만 깊이 0으로 루트 패키지를 해결한다.
+
+1. 타입이 `pip`, `conda`, `maven` 중 하나다.
+2. 새 환경 옵션 중 하나가 실질적인 비기본값이다.
+   - `pythonVersion`이 지정됨
+   - `cudaVersion`이 지정됨
+   - `classifier`가 지정됨
+   - `targetOS`가 `any`가 아님
+   - `condaChannel`이 `conda-forge`가 아님
+
+이 경우에도 해결된 의존성은 큐에 넣지 않고 루트 아티팩트의 메타데이터만 사용한다. 새 환경 옵션을 사용하지 않은 기존 `--no-deps` 명령, 아키텍처만 지정한 기존 명령, npm과 Docker는 resolver를 추가 호출하지 않고 기존 경로를 유지한다.
 
 `resolveAllDependencies`는 이미 요청 패키지를 결과 맵에 먼저 넣으므로, 동일 키의 resolver 결과를 단순히 건너뛰지 않고 resolver가 제공한 메타데이터와 파일 정보를 기존 항목에 병합한다. 이 변경으로 Conda 루트 패키지와 Maven classifier 같은 선택 결과가 CLI 다운로드 단계까지 보존된다.
 
-pip downloader는 전달받은 `metadata.downloadUrl`이 있으면 해당 URL과 체크섬을 우선 사용한다. URL이 없을 때만 기존 PyPI 메타데이터 조회 경로로 폴백한다. 이 동작은 resolver가 고른 wheel과 실제 다운로드 파일이 달라지는 문제를 막는다.
+병합 우선순위는 다음과 같이 고정한다.
+
+- 요청 식별자인 `id`, `type`, `name`은 기존 항목을 유지한다.
+- 실제 선택 결과인 `version`, `architecture`, `size`, `downloadUrl`, `repository`, `location`, `filename`, `classifier`는 resolver 값이 정의되어 있으면 resolver 값을 사용하고, 없으면 기존 값을 유지한다.
+- 연결 입력인 `indexUrl`과 `extras`는 기존 요청 값을 우선하고, 기존 값이 없을 때 resolver 값을 사용한다.
+- `metadata`는 `{ ...existing.metadata, ...resolved.metadata }` 순서의 얕은 병합으로 resolver 선택 결과를 우선한다. resolver에 없는 `classifier`, `indexUrl` 같은 요청 메타데이터는 유지한다. `checksum`처럼 중첩된 선택 결과는 resolver 객체 전체를 사용한다.
+
+실제 downloader의 사용 계약은 다음과 같다.
+
+- pip downloader는 전달받은 `metadata.downloadUrl`과 체크섬을 우선 사용한다. URL이 없을 때만 기존 PyPI 메타데이터 조회 경로로 폴백한다.
+- Conda downloader는 기존 동작대로 `metadata.downloadUrl`을 우선 사용한다. URL이 없으면 `repository`, `subdir`, `filename` 또는 아키텍처 기반 메타데이터 조회로 폴백한다.
+- Maven downloader는 병합된 `metadata.classifier`를 아티팩트 경로와 파일명에 사용한다.
+
+따라서 resolver가 선택한 pip wheel, Conda 빌드와 Maven classifier가 실제 다운로드 단계에서 다시 다른 아티팩트로 바뀌지 않는다.
 
 ## 오류 처리
 
