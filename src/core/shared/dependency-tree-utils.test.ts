@@ -6,6 +6,7 @@ import { DependencyNode, PackageInfo } from '../../types';
 import {
   flattenDependencyTree,
   flattenMultipleDependencyTrees,
+  getPackageArtifactKey,
   getDependencyTreeDepth,
   getDependencyTreeSize,
 } from './dependency-tree-utils';
@@ -19,6 +20,58 @@ function createPackage(name: string, version: string, type: 'pip' | 'conda' = 'p
 function createNode(pkg: PackageInfo, dependencies: DependencyNode[] = []): DependencyNode {
   return { package: pkg, dependencies };
 }
+
+describe('getPackageArtifactKey', () => {
+  it('같은 파일명이라도 출처·classifier·체크섬이 다르면 별도 아티팩트로 식별한다', () => {
+    const basePackage: PackageInfo = {
+      type: 'pip',
+      name: 'demo',
+      version: '1.0.0',
+      metadata: {
+        filename: 'demo-1.0.0-py3-none-any.whl',
+        downloadUrl: 'https://repo-a.example/demo.whl',
+        repository: 'repo-a',
+        classifier: 'cpu',
+        checksum: { sha256: 'checksum-a' },
+      },
+    };
+    const variants: PackageInfo[] = [
+      basePackage,
+      {
+        ...basePackage,
+        metadata: {
+          ...basePackage.metadata,
+          downloadUrl: 'https://repo-b.example/demo.whl',
+        },
+      },
+      {
+        ...basePackage,
+        metadata: {
+          ...basePackage.metadata,
+          repository: 'repo-b',
+        },
+      },
+      {
+        ...basePackage,
+        metadata: {
+          ...basePackage.metadata,
+          classifier: 'cuda',
+        },
+      },
+      {
+        ...basePackage,
+        metadata: {
+          ...basePackage.metadata,
+          checksum: { sha256: 'checksum-b' },
+        },
+      },
+    ];
+
+    expect(
+      new Set(variants.map(getPackageArtifactKey)).size,
+    ).toBe(variants.length);
+  });
+});
 
 describe('flattenDependencyTree', () => {
   it('단일 노드 트리를 평탄화해야 함', () => {

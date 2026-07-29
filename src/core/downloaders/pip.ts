@@ -10,7 +10,10 @@ import {
 import { compareVersions } from '../shared';
 import { BaseLanguageDownloader } from './lang-shared/base-language-downloader';
 import logger from '../../utils/logger';
-import { verifyFileChecksum } from '../shared/integrity/checksum';
+import {
+  ChecksumAlgorithm,
+  verifyFileChecksum,
+} from '../shared/integrity/checksum';
 import {
   fetchPackageFiles,
   extractVersionFromFilename,
@@ -23,6 +26,65 @@ import {
 } from '../shared/pip-types';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 /* eslint-enable import/order */
+
+const CHECKSUM_PREFERENCE: readonly ChecksumAlgorithm[] = [
+  'sha512',
+  'sha256',
+  'sha1',
+  'md5',
+];
+
+interface SelectedChecksum {
+  algorithm: ChecksumAlgorithm;
+  digest: string;
+}
+
+function toPackageChecksum(
+  hash: SimpleApiPackageFile['hash'],
+): PackageMetadata['checksum'] {
+  if (!hash) {
+    return undefined;
+  }
+
+  return {
+    [hash.algorithm.toLowerCase()]: hash.digest,
+  } as NonNullable<PackageMetadata['checksum']>;
+}
+
+function selectStrongestChecksum(
+  checksum: PackageMetadata['checksum'],
+): SelectedChecksum | undefined {
+  if (!checksum) {
+    return undefined;
+  }
+
+  const providedChecksums = Object.entries(
+    checksum as Record<string, unknown>,
+  ).filter(
+    (entry): entry is [string, string] =>
+      typeof entry[1] === 'string' &&
+      entry[1].trim().length > 0,
+  );
+  if (providedChecksums.length === 0) {
+    return undefined;
+  }
+
+  for (const algorithm of CHECKSUM_PREFERENCE) {
+    const digest = providedChecksums.find(
+      ([providedAlgorithm]) =>
+        providedAlgorithm.toLowerCase() === algorithm,
+    )?.[1];
+    if (digest) {
+      return { algorithm, digest };
+    }
+  }
+
+  throw new Error(
+    `지원하지 않는 체크섬 알고리즘: ${providedChecksums
+      .map(([algorithm]) => algorithm)
+      .join(', ')}`,
+  );
+}
 
 export class PipDownloader extends BaseLanguageDownloader implements IDownloader {
   readonly type = 'pip' as const;
@@ -177,11 +239,7 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
 
         const metadata: PackageMetadata = {
           description: `커스텀 인덱스: ${new URL(indexUrl).hostname}`,
-          checksum: selectedFile.hash
-            ? {
-                sha256: selectedFile.hash.digest,
-              }
-            : undefined,
+          checksum: toPackageChecksum(selectedFile.hash),
           downloadUrl: selectedFile.url,
           indexUrl,
         };
@@ -260,17 +318,26 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
         throw new Error(`다운로드 URL을 찾을 수 없습니다: ${info.name}@${info.version}`);
       }
 
-      const expectedSha256 = packageInfo.metadata?.checksum?.sha256;
+      const selectedChecksum = selectStrongestChecksum(
+        packageInfo.metadata?.checksum,
+      );
       const filePath = await this.downloadArtifactFile(
         destPath,
         {
           downloadUrl,
           itemId: `${info.name}@${info.version}`,
           timeoutMs: 300000,
-          verifyFile: expectedSha256
-            ? (pathToVerify) => this.verifyChecksum(pathToVerify, expectedSha256)
+          verifyFile: selectedChecksum
+            ? (pathToVerify) =>
+                this.verifyChecksum(
+                  pathToVerify,
+                  selectedChecksum.digest,
+                  selectedChecksum.algorithm,
+                )
             : undefined,
-          verificationFailureMessage: expectedSha256 ? '체크섬 검증 실패' : undefined,
+          verificationFailureMessage: selectedChecksum
+            ? '체크섬 검증 실패'
+            : undefined,
         },
         onProgress
       );
@@ -296,8 +363,12 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
   /**
    * 체크섬 검증
    */
-  async verifyChecksum(filePath: string, expected: string): Promise<boolean> {
-    return verifyFileChecksum(filePath, expected, 'sha256');
+  async verifyChecksum(
+    filePath: string,
+    expected: string,
+    algorithm: ChecksumAlgorithm = 'sha256',
+  ): Promise<boolean> {
+    return verifyFileChecksum(filePath, expected, algorithm);
   }
 
   /**

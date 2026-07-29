@@ -134,7 +134,10 @@ export async function fetchPackageFiles(
  *    data-requires-python="&gt;=3.8"
  *    data-yanked="">torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl</a>
  */
-function parseSimpleApiHtml(html: string, baseUrl: string): SimpleApiPackageFile[] {
+export function parseSimpleApiHtml(
+  html: string,
+  baseUrl: string,
+): SimpleApiPackageFile[] {
   const files: SimpleApiPackageFile[] = [];
 
   // <a> 태그 정규식 매칭
@@ -163,15 +166,20 @@ function parseSimpleApiHtml(html: string, baseUrl: string): SimpleApiPackageFile
 
     let url = hrefMatch[1];
 
-    // SHA256 해시 추출 (URL fragment)
+    // 체크섬 해시 추출 (URL fragment)
     let hash: { algorithm: string; digest: string } | undefined;
-    const hashMatch = url.match(/#sha256=([a-fA-F0-9]+)/);
-    if (hashMatch) {
-      hash = {
-        algorithm: 'sha256',
-        digest: hashMatch[1],
-      };
-      url = url.replace(/#.*$/, ''); // fragment 제거
+    const fragmentIndex = url.indexOf('#');
+    if (fragmentIndex !== -1) {
+      const fragment = url.slice(fragmentIndex + 1);
+      const hashMatch =
+        /^([A-Za-z0-9][A-Za-z0-9_-]*)=([^&]+)/.exec(fragment);
+      if (hashMatch) {
+        hash = {
+          algorithm: hashMatch[1].toLowerCase(),
+          digest: decodeURIComponent(hashMatch[2]),
+        };
+      }
+      url = url.slice(0, fragmentIndex);
     }
 
     // 상대 URL → 절대 URL 변환

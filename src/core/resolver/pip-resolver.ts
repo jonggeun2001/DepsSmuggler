@@ -1,6 +1,7 @@
 import {
   IResolver,
   PackageInfo,
+  PackageMetadata,
   DependencyNode,
   DependencyResolutionResult,
   DependencyConflict,
@@ -61,7 +62,10 @@ interface FetchedPackageInfo {
   actualVersion: string;
 }
 
-type PipArtifactChecksum = { md5?: string; sha256?: string };
+type PipArtifactChecksum = NonNullable<
+  PackageMetadata['checksum']
+> &
+  Record<string, string | undefined>;
 type PipCompatibilityCandidate = Pick<
   PyPIRelease,
   'filename' | 'packagetype' | 'requires_python'
@@ -71,12 +75,22 @@ type PipResolverTargetPlatform = Omit<PipTargetPlatform, 'os'> & {
 };
 
 function explicitlyRequestsPrerelease(versionSpec?: string): boolean {
-  return Boolean(
-    versionSpec &&
-      /\d(?:[._-]?\d)*(?:[._-]?(?:a|b|c|rc|alpha|beta|pre|preview|dev)\d*)/i.test(
-        versionSpec,
-      ),
-  );
+  if (!versionSpec) {
+    return false;
+  }
+
+  const prereleasePattern =
+    /\d(?:[._-]?\d)*(?:[._-]?(?:a|b|c|rc|alpha|beta|pre|preview|dev)\d*)/i;
+
+  return versionSpec.split(/[|,]/).some((rawClause) => {
+    const clause = rawClause.trim();
+    const match =
+      /^(===|==|!=|~=|<=|>=|<|>)?\s*(.*)$/.exec(clause);
+    if (!match || match[1] === '!=') {
+      return false;
+    }
+    return prereleasePattern.test(match[2]);
+  });
 }
 
 function comparePipVersionsDescending(
@@ -104,13 +118,9 @@ function getSimpleApiChecksum(
   }
 
   const algorithm = hash.algorithm.toLowerCase();
-  if (algorithm === 'sha256') {
-    return { sha256: hash.digest };
-  }
-  if (algorithm === 'md5') {
-    return { md5: hash.digest };
-  }
-  return undefined;
+  return {
+    [algorithm]: hash.digest,
+  } as PipArtifactChecksum;
 }
 
 export class PipResolver implements IResolver {

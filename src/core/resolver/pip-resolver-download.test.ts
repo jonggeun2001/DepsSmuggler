@@ -32,7 +32,8 @@ async function expectSelectedArtifactIsDownloaded(
     ReturnType<PipResolver['resolveDependencies']>
   >['root']['package'],
   expectedUrl: string,
-  expectedSha256: string,
+  expectedChecksum: string,
+  expectedAlgorithm = 'sha256',
 ): Promise<void> {
   const downloader = new PipDownloader();
   const getMetadata = vi
@@ -65,7 +66,8 @@ async function expectSelectedArtifactIsDownloaded(
   await artifactOptions.verifyFile('/tmp/test/demo.whl');
   expect(verifyChecksum).toHaveBeenCalledWith(
     '/tmp/test/demo.whl',
-    expectedSha256,
+    expectedChecksum,
+    expectedAlgorithm,
   );
 }
 
@@ -216,6 +218,31 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     );
 
     expect(version).toBe('3.0rc1');
+  });
+
+  it('제외 제약에만 등장한 프리릴리스는 프리릴리스 허용 신호가 아니다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.9-py3-none-any.whl',
+        url: 'https://index.example/demo-1.9.whl',
+      },
+      {
+        filename: 'demo-2.0rc1-py3-none-any.whl',
+        url: 'https://index.example/demo-2.0rc1.whl',
+      },
+      {
+        filename: 'demo-2.0rc2-py3-none-any.whl',
+        url: 'https://index.example/demo-2.0rc2.whl',
+      },
+    ]);
+
+    const version = await (new PipResolver() as any).getLatestVersion(
+      'demo',
+      '!=2.0rc1',
+      'https://index.example/simple',
+    );
+
+    expect(version).toBe('1.9');
   });
 
   it('Simple API latest는 final보다 post release를 우선한다', async () => {
@@ -1135,6 +1162,37 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
       result.root.package,
       'https://index.example/demo-aarch64.whl',
       'simple-arm-sha',
+    );
+  });
+
+  it('Simple API의 MD5 체크섬을 resolver부터 downloader까지 보존한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.0.0-py3-none-any.whl',
+        url: 'https://index.example/demo.whl',
+        hash: { algorithm: 'md5', digest: 'simple-md5' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      checksum: { md5: 'simple-md5' },
+    });
+    await expectSelectedArtifactIsDownloaded(
+      result.root.package,
+      'https://index.example/demo.whl',
+      'simple-md5',
+      'md5',
     );
   });
 

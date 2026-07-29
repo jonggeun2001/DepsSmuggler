@@ -9,27 +9,85 @@ interface PackageArtifactDescriptor {
   version: string;
   filename?: string;
   downloadUrl?: string;
+  repository?: { baseUrl: string; name?: string };
+  indexUrl?: string;
   classifier?: string;
   metadata?: Record<string, unknown>;
+}
+
+function normalizeArtifactIdentityValue(
+  value: unknown,
+): string | undefined {
+  if (typeof value === 'string') {
+    return value || undefined;
+  }
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value)
+    .filter(
+      (entry): entry is [string, string | number | boolean] =>
+        ['string', 'number', 'boolean'].includes(typeof entry[1]),
+    )
+    .sort(([left], [right]) => left.localeCompare(right));
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return entries
+    .map(([key, entryValue]) => `${key}:${String(entryValue)}`)
+    .join(',');
 }
 
 export function getPackageArtifactKey(
   packageInfo: PackageArtifactDescriptor,
 ): string {
   const metadata = packageInfo.metadata;
-  const artifactIdentity =
+  const filename =
     packageInfo.filename ??
     (typeof metadata?.filename === 'string'
       ? metadata.filename
-      : undefined) ??
+      : undefined);
+  const downloadUrl =
     packageInfo.downloadUrl ??
     (typeof metadata?.downloadUrl === 'string'
       ? metadata.downloadUrl
-      : undefined) ??
+      : undefined);
+  const repository =
+    normalizeArtifactIdentityValue(packageInfo.repository) ??
+    normalizeArtifactIdentityValue(metadata?.repository) ??
+    packageInfo.indexUrl ??
+    (typeof metadata?.indexUrl === 'string'
+      ? metadata.indexUrl
+      : undefined);
+  const classifier =
     packageInfo.classifier ??
     (typeof metadata?.classifier === 'string'
       ? metadata.classifier
       : undefined);
+  const checksum = normalizeArtifactIdentityValue(
+    metadata?.checksum,
+  );
+  const artifactIdentity = [
+    ['filename', filename],
+    ['url', downloadUrl],
+    ['repository', repository],
+    ['classifier', classifier],
+    ['checksum', checksum],
+  ]
+    .filter((entry): entry is [string, string] =>
+      Boolean(entry[1]),
+    )
+    .map(
+      ([label, value]) =>
+        `${label}=${encodeURIComponent(value)}`,
+    )
+    .join('&');
   const packageIdentity =
     `${packageInfo.type}:${packageInfo.name.toLowerCase()}` +
     `@${packageInfo.version}`;

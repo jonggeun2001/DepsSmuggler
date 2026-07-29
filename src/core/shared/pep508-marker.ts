@@ -204,9 +204,12 @@ function compareIncompleteVersion(
   if (operator === 'in' || operator === 'not in') {
     return undefined;
   }
+  if (operator === '===') {
+    // 임의 문자열 동등 비교는 불완전한 버전 prefix로 확정할 수 없다.
+    return undefined;
+  }
 
-  const normalizedOperator =
-    operator === '===' ? '==' : operator;
+  const normalizedOperator = operator;
   const releasePrefix = /^(\d+)\.(\d+)$/.exec(versionPrefix);
   if (!releasePrefix) {
     return undefined;
@@ -356,6 +359,13 @@ class MarkerParser {
       return undefined;
     }
 
+    const versionVariable = left.variable
+      ? VERSION_VARIABLES.has(left.variable)
+      : false;
+    const reverseVersionVariable = right.variable
+      ? VERSION_VARIABLES.has(right.variable)
+      : false;
+
     const incompleteLeft = left.variable
       ? this.options.incompleteVersions?.[
           left.variable as IncompleteVersionVariable
@@ -382,6 +392,12 @@ class MarkerParser {
       );
     }
 
+    if (operator === '===') {
+      return versionVariable || reverseVersionVariable
+        ? left.value.toLowerCase() === right.value.toLowerCase()
+        : left.value === right.value;
+    }
+
     let leftValue = left.value;
     let rightValue = right.value;
     if (
@@ -392,13 +408,6 @@ class MarkerParser {
       rightValue = normalizeMachine(rightValue);
     }
 
-    const versionVariable = left.variable
-      ? VERSION_VARIABLES.has(left.variable)
-      : false;
-    const reverseVersionVariable = right.variable
-      ? VERSION_VARIABLES.has(right.variable)
-      : false;
-
     if (
       (versionVariable || reverseVersionVariable) &&
       !['in', 'not in'].includes(operator)
@@ -408,13 +417,13 @@ class MarkerParser {
       const rawVersionOperator = versionVariable
         ? operator
         : invertOperator(operator);
-      const versionOperator =
-        rawVersionOperator === '===' ? '==' : rawVersionOperator;
-      return isVersionCompatible(version, `${versionOperator}${target}`);
+      return isVersionCompatible(
+        version,
+        `${rawVersionOperator}${target}`,
+      );
     }
 
     switch (operator) {
-      case '===':
       case '==':
         return leftValue === rightValue;
       case '!=':
