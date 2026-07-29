@@ -154,6 +154,16 @@ describe('version-utils', () => {
         expect(isVersionCompatible('2.5.0', '2.*')).toBe(true);
         expect(isVersionCompatible('3.0.0', '2.*')).toBe(false);
       });
+
+      it('major.minor 버전을 equality wildcard와 비교', () => {
+        expect(isVersionCompatible('3.12', '==3.12.*')).toBe(true);
+        expect(isVersionCompatible('3.12', '==3.11.*')).toBe(false);
+      });
+
+      it('major.minor 버전을 exclusion wildcard와 비교', () => {
+        expect(isVersionCompatible('3.12', '!=3.12.*')).toBe(false);
+        expect(isVersionCompatible('3.12', '!=3.11.*')).toBe(true);
+      });
     });
   });
 

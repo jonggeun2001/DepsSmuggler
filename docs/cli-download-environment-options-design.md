@@ -95,7 +95,7 @@ DownloadManager queue
 실제 downloader의 사용 계약은 다음과 같다.
 
 - pip downloader는 전달받은 `metadata.downloadUrl`과 체크섬을 우선 사용한다. URL이 없을 때만 기존 PyPI 메타데이터 조회 경로로 폴백한다.
-- pip resolver는 PyPI JSON과 Simple API 양쪽에서 선택한 wheel 또는 sdist의 `downloadUrl`, `filename`, 체크섬을 메타데이터에 저장한다. `arm64`/`aarch64`, `amd64`/`x86_64` 별칭은 OS와 무관하게 같은 아키텍처로 평가한다. `abi3` wheel은 파일명의 최소 CPython 태그가 대상 버전 이하일 때만 허용하고, PyPI `requires_python`과 Simple API `requiresPython` 제약도 대상 Python 버전과 비교한다. 대상 환경에 맞는 wheel이 없으면 다른 아키텍처 wheel 대신 호환되는 sdist만 폴백으로 허용하고, sdist도 없으면 해결을 실패시킨다.
+- pip resolver는 PyPI JSON과 Simple API 양쪽에서 선택한 wheel 또는 sdist의 `downloadUrl`, `filename`, 체크섬을 메타데이터에 저장한다. `arm64`/`aarch64`, `amd64`/`x86_64` 별칭은 OS와 무관하게 같은 아키텍처로 평가한다. `abi3` wheel은 파일명의 최소 CPython 태그가 대상 버전 이하일 때만 허용하고, PyPI `requires_python`과 Simple API `requiresPython` 제약도 대상 Python 버전과 비교한다. 이때 `==3.12.*`, `!=3.12.*` 같은 PEP 440 wildcard는 `major.minor` 대상 버전에도 적용한다. 대상 환경에 맞는 wheel이 없으면 다른 아키텍처 wheel 대신 호환되는 sdist만 폴백으로 허용하고, sdist도 없으면 해결을 실패시킨다.
 - Conda downloader는 기존 동작대로 `metadata.downloadUrl`을 우선 사용한다. URL이 없으면 `repository`, `subdir`, `filename` 또는 아키텍처 기반 메타데이터 조회로 폴백한다.
 - Maven downloader는 병합된 `metadata.classifier`를 아티팩트 경로와 파일명에 사용한다.
 

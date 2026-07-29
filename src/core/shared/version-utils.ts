@@ -14,6 +14,18 @@ function normalizeVersion(version: string): (number | string)[] {
   });
 }
 
+function matchesWildcardVersion(version: string, pattern: string): boolean {
+  const prefix = pattern
+    .replace(/\*.*$/, '')
+    .replace(/[._-]+$/, '');
+
+  if (!prefix) {
+    return true;
+  }
+
+  return version === prefix || version.startsWith(`${prefix}.`);
+}
+
 /**
  * 버전 문자열 비교 (semver 스타일)
  * @param a 첫 번째 버전
@@ -56,14 +68,15 @@ function checkSingleCondition(version: string, condition: string): boolean {
   }
   if (condition.startsWith('!=')) {
     const target = condition.slice(2).trim();
+    if (target.includes('*')) {
+      return !matchesWildcardVersion(version, target);
+    }
     return version !== target;
   }
   if (condition.startsWith('==')) {
     const target = condition.slice(2).trim();
     if (target.includes('*')) {
-      // 와일드카드 처리 (예: ==2.*)
-      const prefix = target.replace(/\*.*$/, '');
-      return version.startsWith(prefix);
+      return matchesWildcardVersion(version, target);
     }
     return version === target;
   }
@@ -87,9 +100,7 @@ function checkSingleCondition(version: string, condition: string): boolean {
     return compareVersions(version, target) < 0;
   }
   if (condition.includes('*')) {
-    // 와일드카드만 있는 경우 (예: 2.*)
-    const prefix = condition.replace(/\*.*$/, '').trim();
-    return version.startsWith(prefix);
+    return matchesWildcardVersion(version, condition.trim());
   }
 
   // 특수 조건이 없으면 true

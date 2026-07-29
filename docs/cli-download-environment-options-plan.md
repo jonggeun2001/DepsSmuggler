@@ -701,6 +701,6 @@ git commit -m "test: worktree 검증 진입점 추가"
 - [ ] pip/Conda의 `--no-deps`에서도 비기본 `--arch`를 명시하면 깊이 0으로 대상 루트 아티팩트를 해결한다.
 - [ ] Maven의 비기본 OS/아키텍처에는 classifier를 요구하고 resolver에는 deprecated된 대상 OS/아키텍처 필드를 전달하지 않는다.
 - [ ] pip resolver가 PyPI JSON 및 Simple API에서 선택한 URL·파일명·체크섬을 결과 메타데이터에 저장한다.
-- [ ] pip의 ARM64/x86_64 별칭을 API 경로와 OS에 관계없이 정규화하고, `abi3` 최소 CPython 버전과 `Requires-Python` 제약을 평가한다.
+- [ ] pip의 ARM64/x86_64 별칭을 API 경로와 OS에 관계없이 정규화하고, `abi3` 최소 CPython 버전과 PEP 440 wildcard를 포함한 `Requires-Python` 제약을 평가한다.
 - [ ] Simple API에 호환 wheel이 없으면 다른 아키텍처 wheel이 아니라 sdist로 폴백한다.
 - [ ] resolver 결과를 Pip downloader에 직접 전달하는 테스트로 메타데이터 재조회 없이 같은 URL과 체크섬을 사용하는지 확인한다.

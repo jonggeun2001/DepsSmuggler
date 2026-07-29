@@ -411,6 +411,91 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     );
   });
 
+  it('PyPI JSON의 Requires-Python wildcard를 평가한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: {
+          name: 'demo',
+          version: '1.0.0',
+          requires_dist: [],
+        },
+        urls: [
+          {
+            filename:
+              'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+            url: 'https://files.example/demo-python312-excluded.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp312',
+            requires_python: '!=3.12.*',
+            digests: { sha256: 'python312-excluded-sha' },
+            size: 100,
+          },
+          {
+            filename:
+              'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+            url: 'https://files.example/demo-python312-included.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp312',
+            requires_python: '==3.12.*',
+            digests: { sha256: 'python312-included-sha' },
+            size: 100,
+          },
+        ],
+      },
+    });
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      downloadUrl: 'https://files.example/demo-python312-included.whl',
+    });
+  });
+
+  it('Simple API의 Requires-Python wildcard를 평가한다', async () => {
+    const filename =
+      'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl';
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename,
+        url: 'https://index.example/demo-python312-excluded.whl',
+        requiresPython: '!=3.12.*',
+        hash: { algorithm: 'sha256', digest: 'simple-excluded-sha' },
+      },
+      {
+        filename,
+        url: 'https://index.example/demo-python312-included.whl',
+        requiresPython: '==3.12.*',
+        hash: { algorithm: 'sha256', digest: 'simple-included-sha' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      downloadUrl:
+        'https://index.example/demo-python312-included.whl',
+    });
+  });
+
   it('Simple API에 호환 wheel이 없으면 다른 아키텍처 wheel 대신 sdist를 선택한다', async () => {
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
       {
