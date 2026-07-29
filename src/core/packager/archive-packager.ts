@@ -42,10 +42,28 @@ export class ArchivePackager {
     packages: PackageInfo[],
     options: ArchiveOptions
   ): Promise<string> {
-    const fileEntries = files.map((file) => ({
-      sourcePath: file,
-      archivePath: path.posix.join('packages', path.basename(file)),
-    }));
+    const archiveBasePath = path.dirname(resolvePath(outputPath));
+    const fileEntries = files.map((file) => {
+      const sourcePath = resolvePath(file);
+      const relativePath = path.relative(
+        archiveBasePath,
+        sourcePath,
+      );
+      const isContained =
+        relativePath.length > 0 &&
+        relativePath !== '..' &&
+        !relativePath.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relativePath);
+      return {
+        sourcePath: file,
+        archivePath: path.posix.join(
+          'packages',
+          isContained
+            ? toUnixPath(relativePath)
+            : path.basename(file),
+        ),
+      };
+    });
 
     return this.createArchiveFromFileEntries(fileEntries, outputPath, packages, options);
   }
@@ -372,9 +390,9 @@ export class ArchivePackager {
     // 타입별 설치 방법
     if (grouped.has('pip') || grouped.has('conda')) {
       lines.push('[Python 패키지]');
-      lines.push('  pip install --no-index --find-links=./packages <패키지명>');
-      lines.push('  또는');
-      lines.push('  pip install --no-index --find-links=./packages -r requirements.txt');
+      lines.push('  함께 생성된 install.sh 또는 install.ps1을 실행하세요.');
+      lines.push('  수동 설치 시 packages의 모든 하위 디렉터리를');
+      lines.push('  각각 pip --find-links 인수로 지정해야 합니다.');
       lines.push('');
     }
 

@@ -115,11 +115,16 @@ export class ScriptGenerator {
       lines.push('        return 1');
       lines.push('    fi');
       lines.push('');
+      lines.push('    PIP_FIND_LINK_ARGS=()');
+      lines.push('    while IFS= read -r -d \'\' directory; do');
+      lines.push('        PIP_FIND_LINK_ARGS+=(--find-links="$directory")');
+      lines.push('    done < <(find "$PACKAGE_DIR" -type d -print0)');
+      lines.push('');
 
       for (const pkg of pipPackages) {
         lines.push(`    # ${pkg.name} 설치`);
         lines.push(`    log_info "${pkg.name}==${pkg.version} 설치 중..."`);
-        lines.push(`    pip install --no-index --find-links="$PACKAGE_DIR" ${pkg.name}==${pkg.version} || {`);
+        lines.push(`    pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" ${pkg.name}==${pkg.version} || {`);
         lines.push(`        log_warn "${pkg.name} 설치 실패, 계속 진행합니다."`);
         lines.push('    }');
         lines.push('');
@@ -362,12 +367,18 @@ export class ScriptGenerator {
       lines.push('        return');
       lines.push('    }');
       lines.push('');
+      lines.push('    $PipFindLinkArgs = @("--find-links=$PackageDir")');
+      lines.push('    $PipFindLinkArgs += @(');
+      lines.push('        Get-ChildItem -Path $PackageDir -Directory -Recurse |');
+      lines.push('            ForEach-Object { "--find-links=$($_.FullName)" }');
+      lines.push('    )');
+      lines.push('');
 
       for (const pkg of pipPackages) {
         lines.push(`    # ${pkg.name} 설치`);
         lines.push(`    Write-Info "${pkg.name}==${pkg.version} 설치 중..."`);
         lines.push('    try {');
-        lines.push(`        pip install --no-index --find-links="$PackageDir" ${pkg.name}==${pkg.version}`);
+        lines.push(`        pip install --no-index @PipFindLinkArgs ${pkg.name}==${pkg.version}`);
         lines.push('    } catch {');
         lines.push(`        Write-Warn "${pkg.name} 설치 실패, 계속 진행합니다."`);
         lines.push('    }');

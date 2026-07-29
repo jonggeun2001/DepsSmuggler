@@ -124,6 +124,28 @@ function getSimpleApiChecksum(
   } as PipArtifactChecksum;
 }
 
+function hasMatchingPypiArtifactChecksum(
+  file: SimpleApiPackageFile,
+  releases: PyPIRelease[],
+): boolean {
+  const hash = file.hash;
+  if (!hash) {
+    return false;
+  }
+
+  const algorithm = hash.algorithm.toLowerCase();
+  const expectedDigest = hash.digest.toLowerCase();
+  return releases.some((release) => {
+    const digests = release.digests as Record<
+      string,
+      string | undefined
+    >;
+    const releaseDigest =
+      digests?.[algorithm];
+    return releaseDigest?.toLowerCase() === expectedDigest;
+  });
+}
+
 export class PipResolver implements IResolver {
   readonly type = 'pip' as const;
   private readonly baseUrl = 'https://pypi.org/pypi';
@@ -461,17 +483,31 @@ export class PipResolver implements IResolver {
         );
       }
 
-      // PEP 658 메타데이터에서 의존성 정보 조회
+      // PEP 658 메타데이터에서 의존성 정보 조회. 빈 배열은
+      // "조회 성공 + 의존성 없음"이고 null은 조회 불가다.
+      let customMetadataAvailable = false;
       if (selectedFile?.metadataHash) {
-        requiresDist = await fetchWheelMetadata(selectedFile);
+        const metadataRequiresDist =
+          await fetchWheelMetadata(selectedFile);
+        if (metadataRequiresDist !== null) {
+          requiresDist = metadataRequiresDist;
+          customMetadataAvailable = true;
+        }
       }
 
-      // PEP 658 실패 시 PyPI 폴백
-      if (requiresDist.length === 0) {
+      // PEP 658을 사용할 수 없을 때는 선택한 커스텀 아티팩트와
+      // PyPI 아티팩트의 체크섬이 같을 때만 공개 메타데이터를 사용한다.
+      if (!customMetadataAvailable && selectedFile) {
         try {
           const baseVersion = actualVersion.split('+')[0];
           const pypiResult = await fetchPackageMetadata(name, baseVersion, this.cacheOptions);
-          if (pypiResult) {
+          if (
+            pypiResult &&
+            hasMatchingPypiArtifactChecksum(
+              selectedFile,
+              pypiResult.data.urls ?? [],
+            )
+          ) {
             requiresDist = pypiResult.data.info.requires_dist || [];
           }
         } catch {

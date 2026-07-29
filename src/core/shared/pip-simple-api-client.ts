@@ -297,12 +297,14 @@ export function isSourceDistribution(filename: string): boolean {
  * PEP 658: 휠 메타데이터 파일에서 의존성 정보 가져오기
  *
  * @param file Simple API 파일 정보 (metadataHash가 있어야 함)
- * @returns Requires-Dist 목록
+ * @returns Requires-Dist 목록. 메타데이터를 가져올 수 없으면 null
  */
-export async function fetchWheelMetadata(file: SimpleApiPackageFile): Promise<string[]> {
+export async function fetchWheelMetadata(
+  file: SimpleApiPackageFile,
+): Promise<string[] | null> {
   if (!file.metadataHash) {
     logger.debug('메타데이터 해시 없음, PEP 658 미지원', { filename: file.filename });
-    return [];
+    return null;
   }
 
   try {
@@ -326,7 +328,7 @@ export async function fetchWheelMetadata(file: SimpleApiPackageFile): Promise<st
       filename: file.filename,
       error: error instanceof Error ? error.message : String(error),
     });
-    return [];
+    return null;
   }
 }
 

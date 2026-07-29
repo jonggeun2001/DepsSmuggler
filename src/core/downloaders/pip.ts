@@ -1,4 +1,6 @@
 /* eslint-disable import/order */
+import { createHash } from 'crypto';
+import * as path from 'path';
 import axios, { AxiosInstance } from 'axios';
 import {
   IDownloader,
@@ -7,7 +9,10 @@ import {
   DownloadProgressEvent,
   Architecture,
 } from '../../types';
-import { compareVersions } from '../shared';
+import {
+  compareVersions,
+  getPackageArtifactKey,
+} from '../shared';
 import { BaseLanguageDownloader } from './lang-shared/base-language-downloader';
 import logger from '../../utils/logger';
 import {
@@ -321,12 +326,26 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
       const selectedChecksum = selectStrongestChecksum(
         packageInfo.metadata?.checksum,
       );
+      const metadataFilename = packageInfo.metadata?.filename;
+      const artifactFilename =
+        typeof metadataFilename === 'string' && metadataFilename
+          ? metadataFilename
+          : path.basename(new URL(downloadUrl).pathname);
+      const artifactFingerprint = createHash('sha256')
+        .update(getPackageArtifactKey(packageInfo))
+        .digest('hex')
+        .slice(0, 16);
       const filePath = await this.downloadArtifactFile(
         destPath,
         {
           downloadUrl,
           itemId: `${info.name}@${info.version}`,
           timeoutMs: 300000,
+          relativeFilePath: path.posix.join(
+            'pip',
+            artifactFingerprint,
+            artifactFilename,
+          ),
           verifyFile: selectedChecksum
             ? (pathToVerify) =>
                 this.verifyChecksum(

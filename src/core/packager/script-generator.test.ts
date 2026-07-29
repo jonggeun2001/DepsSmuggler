@@ -67,6 +67,12 @@ describe('ScriptGenerator', () => {
       expect(content).toContain('pip install');
       expect(content).toContain('--no-index');
       expect(content).toContain('--find-links');
+      expect(content).toContain(
+        'find "$PACKAGE_DIR" -type d -print0',
+      );
+      expect(content).toContain(
+        '"${PIP_FIND_LINK_ARGS[@]}"',
+      );
     });
 
     it('Maven 패키지 설치 명령을 포함해야 함', async () => {
@@ -174,6 +180,10 @@ describe('ScriptGenerator', () => {
 
       const content = await fs.readFile(outputPath, 'utf-8');
       expect(content).toContain('pip install');
+      expect(content).toContain(
+        'Get-ChildItem -Path $PackageDir -Directory -Recurse',
+      );
+      expect(content).toContain('@PipFindLinkArgs');
     });
 
     it('Docker 이미지 로드 명령을 포함해야 함', async () => {

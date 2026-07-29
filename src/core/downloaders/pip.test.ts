@@ -1059,6 +1059,54 @@ describe('PipDownloader downloadPackage', () => {
     );
   });
 
+  it('같은 파일명의 서로 다른 저장소 아티팩트를 별도 상대 경로에 저장한다', async () => {
+    const downloadArtifactFile = vi
+      .spyOn(downloader as any, 'downloadArtifactFile')
+      .mockResolvedValue('/tmp/test/demo.whl');
+    const packageInfo = (
+      indexUrl: string,
+      downloadUrl: string,
+      checksum: string,
+    ): PackageInfo => ({
+      type: 'pip',
+      name: 'demo',
+      version: '1.0.0',
+      metadata: {
+        filename: 'demo-1.0.0-py3-none-any.whl',
+        downloadUrl,
+        indexUrl,
+        checksum: { sha256: checksum },
+      },
+    });
+
+    await downloader.downloadPackage(
+      packageInfo(
+        'https://first.example/simple',
+        'https://files.example/demo.whl',
+        'first-sha',
+      ),
+      '/tmp/test',
+    );
+    await downloader.downloadPackage(
+      packageInfo(
+        'https://second.example/simple',
+        'https://files.example/demo.whl',
+        'second-sha',
+      ),
+      '/tmp/test',
+    );
+
+    const relativePaths = downloadArtifactFile.mock.calls.map(
+      (call) => call[1].relativeFilePath,
+    );
+    expect(new Set(relativePaths).size).toBe(2);
+    for (const relativePath of relativePaths) {
+      expect(relativePath).toMatch(
+        /^pip\/[a-f0-9]{16}\/demo-1\.0\.0-py3-none-any\.whl$/,
+      );
+    }
+  });
+
   it('제공된 체크섬 알고리즘을 지원하지 않으면 다운로드 전에 실패한다', async () => {
     const downloadArtifactFile = vi
       .spyOn(downloader as any, 'downloadArtifactFile')

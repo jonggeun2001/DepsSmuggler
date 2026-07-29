@@ -209,6 +209,94 @@ describe('CondaRepoDataProcessor Python 호환성', () => {
 
     expect(candidates).toEqual([]);
   });
+
+  it('요청한 CUDA 버전과 일치하는 build 변형만 선택한다', () => {
+    const processor = new CondaRepoDataProcessor({
+      condaUrl: 'https://conda.example',
+      targetSubdir: 'linux-64',
+      targetArchitecture: 'x86_64',
+      pythonVersion: null,
+      cudaVersion: '12.4',
+    });
+
+    const candidates = processor.findPackageCandidates(
+      {
+        info: { subdir: 'linux-64' },
+        packages: {
+          'demo-1.0.0-cpu_2.tar.bz2': {
+            name: 'demo',
+            version: '1.0.0',
+            build: 'cpu_2',
+            build_number: 2,
+            depends: [],
+            subdir: 'linux-64',
+          },
+          'demo-1.0.0-cuda118_1.tar.bz2': {
+            name: 'demo',
+            version: '1.0.0',
+            build: 'cuda118_1',
+            build_number: 1,
+            depends: [],
+            subdir: 'linux-64',
+          },
+          'demo-1.0.0-cuda124_0.tar.bz2': {
+            name: 'demo',
+            version: '1.0.0',
+            build: 'cuda124_0',
+            build_number: 0,
+            depends: [],
+            subdir: 'linux-64',
+          },
+        },
+      },
+      'demo',
+      '==1.0.0',
+    );
+
+    expect(candidates.map((candidate) => candidate.build)).toEqual([
+      'cuda124_0',
+    ]);
+  });
+
+  it.each([
+    ['pytorch-cuda >=12.4,<12.5', true],
+    ['cuda-version >=12.4,<12.5', true],
+    ['cudatoolkit >=12.4,<12.5', true],
+    ['pytorch-cuda >=11.8,<11.9', false],
+    ['cuda-version >=12.5,<13', false],
+    ['cudatoolkit >=11.8,<11.9', false],
+  ])(
+    'CUDA MatchSpec %s를 요청 버전과 비교한다',
+    (dependency, expected) => {
+      const processor = new CondaRepoDataProcessor({
+        condaUrl: 'https://conda.example',
+        targetSubdir: 'linux-64',
+        targetArchitecture: 'x86_64',
+        pythonVersion: null,
+        cudaVersion: '12.4',
+      });
+
+      const candidates = processor.findPackageCandidates(
+        {
+          info: { subdir: 'linux-64' },
+          packages: {
+            'demo-1.0.0-generic_0.tar.bz2': {
+              name: 'demo',
+              version: '1.0.0',
+              build: 'generic_0',
+              build_number: 0,
+              depends: [dependency],
+              subdir: 'linux-64',
+            },
+          },
+        },
+        'demo',
+        '==1.0.0',
+      );
+
+      expect(candidates.length > 0).toBe(expected);
+    },
+  );
 });
 
 describe('CondaResolver 대상 아티팩트 선택', () => {

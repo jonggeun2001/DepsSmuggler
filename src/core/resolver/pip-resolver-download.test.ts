@@ -178,6 +178,228 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     expect(result.root.package.version).toBe('2.0rc2');
   });
 
+  it('커스텀 PEP 658 메타데이터가 비어 있으면 PyPI 의존성을 섞지 않는다', async () => {
+    simpleApiMock.fetchPackageFiles.mockImplementation(
+      async (_indexUrl: string, name: string) =>
+        name === 'custom-root'
+          ? [
+              {
+                filename:
+                  'custom_root-1.0.0-py3-none-any.whl',
+                url: 'https://index.example/custom-root.whl',
+                hash: {
+                  algorithm: 'sha256',
+                  digest: 'custom-root-sha',
+                },
+                metadataHash: {
+                  algorithm: 'sha256',
+                  digest: 'custom-root-metadata',
+                },
+              },
+            ]
+          : [],
+    );
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string, version?: string) => {
+        if (name === 'custom-root') {
+          return {
+            data: {
+              info: {
+                name,
+                version: version ?? '1.0.0',
+                requires_dist: ['public-child==1.0.0'],
+              },
+              urls: [],
+            },
+          };
+        }
+        if (name === 'public_child' && version === undefined) {
+          return {
+            data: {
+              info: { name, version: '1.0.0' },
+              releases: {
+                '1.0.0': [
+                  {
+                    filename:
+                      'public_child-1.0.0-py3-none-any.whl',
+                    url: 'https://files.example/public-child.whl',
+                    packagetype: 'bdist_wheel',
+                    python_version: 'py3',
+                    digests: { sha256: 'public-child-sha' },
+                    size: 10,
+                  },
+                ],
+              },
+            },
+          };
+        }
+        return null;
+      },
+    );
+
+    const result = await new PipResolver().resolveDependencies(
+      'custom-root',
+      '1.0.0',
+      { indexUrl: 'https://index.example/simple' },
+    );
+
+    expect(result.flatList.map((pkg) => pkg.name)).toEqual([
+      'custom-root',
+    ]);
+    expect(
+      pipCacheMock.fetchPackageMetadata,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('PEP 658 조회 실패 시 체크섬이 다른 PyPI 메타데이터를 사용하지 않는다', async () => {
+    simpleApiMock.fetchPackageFiles.mockImplementation(
+      async (_indexUrl: string, name: string) =>
+        name === 'custom-root'
+          ? [
+              {
+                filename:
+                  'custom_root-1.0.0-py3-none-any.whl',
+                url: 'https://index.example/custom-root.whl',
+                hash: {
+                  algorithm: 'sha256',
+                  digest: 'custom-root-sha',
+                },
+                metadataHash: {
+                  algorithm: 'sha256',
+                  digest: 'custom-root-metadata',
+                },
+              },
+            ]
+          : [],
+    );
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue(null);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: {
+          name: 'custom-root',
+          version: '1.0.0',
+          requires_dist: ['wrong-child==1.0.0'],
+        },
+        urls: [
+          {
+            filename: 'custom_root-1.0.0-py3-none-any.whl',
+            digests: { sha256: 'different-public-sha' },
+          },
+        ],
+      },
+    });
+
+    const result = await new PipResolver().resolveDependencies(
+      'custom-root',
+      '1.0.0',
+      {
+        indexUrl: 'https://index.example/simple',
+      },
+    );
+
+    expect(result.flatList.map((pkg) => pkg.name)).toEqual([
+      'custom-root',
+    ]);
+  });
+
+  it('PEP 658 조회 실패 시 체크섬이 같은 PyPI 메타데이터만 사용한다', async () => {
+    const customFile = {
+      filename: 'custom_root-1.0.0-py3-none-any.whl',
+      url: 'https://index.example/custom-root.whl',
+      hash: {
+        algorithm: 'sha256',
+        digest: 'shared-artifact-sha',
+      },
+      metadataHash: {
+        algorithm: 'sha256',
+        digest: 'custom-root-metadata',
+      },
+    };
+    simpleApiMock.fetchPackageFiles.mockImplementation(
+      async (_indexUrl: string, name: string) =>
+        name === 'custom-root' ? [customFile] : [],
+    );
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue(null);
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string, version?: string) => {
+        if (name === 'custom-root') {
+          return {
+            data: {
+              info: {
+                name,
+                version: '1.0.0',
+                requires_dist: ['verified-child==1.0.0'],
+              },
+              urls: [
+                {
+                  filename: customFile.filename,
+                  digests: {
+                    sha256: 'shared-artifact-sha',
+                  },
+                },
+              ],
+            },
+          };
+        }
+        if (name === 'verified_child' && version === undefined) {
+          return {
+            data: {
+              info: { name, version: '1.0.0' },
+              releases: {
+                '1.0.0': [
+                  {
+                    filename:
+                      'verified_child-1.0.0-py3-none-any.whl',
+                    url: 'https://files.example/verified-child.whl',
+                    packagetype: 'bdist_wheel',
+                    python_version: 'py3',
+                    digests: { sha256: 'verified-child-sha' },
+                    size: 10,
+                  },
+                ],
+              },
+            },
+          };
+        }
+        if (name === 'verified_child') {
+          return {
+            data: {
+              info: {
+                name,
+                version: version ?? '1.0.0',
+                requires_dist: [],
+              },
+              urls: [
+                {
+                  filename:
+                    'verified_child-1.0.0-py3-none-any.whl',
+                  url: 'https://files.example/verified-child.whl',
+                  packagetype: 'bdist_wheel',
+                  python_version: 'py3',
+                  digests: { sha256: 'verified-child-sha' },
+                  size: 10,
+                },
+              ],
+            },
+          };
+        }
+        return null;
+      },
+    );
+
+    const result = await new PipResolver().resolveDependencies(
+      'custom-root',
+      '1.0.0',
+      { indexUrl: 'https://index.example/simple' },
+    );
+
+    expect(result.flatList.map((pkg) => pkg.name).sort()).toEqual([
+      'custom-root',
+      'verified_child',
+    ]);
+  });
+
   it('프리릴리스가 명시된 제약에서도 같은 릴리스의 final을 우선한다', async () => {
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
       {
