@@ -100,6 +100,11 @@ depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0
 depssmuggler download -t npm -p react -V 19.2.0
 depssmuggler download -t docker -p nginx -V latest
 
+# 대상 환경별 아티팩트 다운로드
+depssmuggler download -t pip -p cryptography -V 43.0.0 --target-os linux --python-version 3.12 --arch aarch64
+depssmuggler download -t conda -p pytorch -V 2.5.0 --target-os linux --python-version 3.12 --cuda-version 12.4 --conda-channel pytorch --arch x86_64
+depssmuggler download -t maven -p org.lwjgl:lwjgl -V 3.3.6 --target-os linux --arch x86_64 --classifier natives-linux
+
 # 파일 입력 기반 다운로드
 depssmuggler download -t pip --file requirements.txt
 
@@ -112,6 +117,7 @@ depssmuggler os cache clear
 ```
 
 OS 패키지는 `os` 네임스페이스에서 다루며, `download`는 실제 패키지 다운로드와 의존성 해결, `cache`는 OS 메타데이터 캐시 통계/삭제를 수행합니다.
+대상 OS, Python/CUDA 버전, 아키텍처, Conda 채널과 Maven classifier의 적용 규칙은 [CLI 문서](docs/cli.md#download)를 참고하세요.
 
 ## 저장 위치
 
