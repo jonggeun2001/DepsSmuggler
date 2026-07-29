@@ -73,6 +73,10 @@ describe('version-utils', () => {
       it('이하 조건 미충족', () => {
         expect(isVersionCompatible('2.1.0', '<=2.0.0')).toBe(false);
       });
+
+      it('stable 버전은 같은 release의 prerelease보다 크다', () => {
+        expect(isVersionCompatible('3.12', '<=3.12rc1')).toBe(false);
+      });
     });
 
     describe('> 연산자', () => {
@@ -83,6 +87,15 @@ describe('version-utils', () => {
       it('초과 조건 미충족 (같은 경우)', () => {
         expect(isVersionCompatible('1.0.0', '>1.0.0')).toBe(false);
       });
+
+      it('stable 버전은 같은 release의 prerelease보다 크다', () => {
+        expect(isVersionCompatible('3.12', '>3.12rc1')).toBe(true);
+      });
+
+      it('epoch가 release 번호보다 우선한다', () => {
+        expect(isVersionCompatible('1!2.0', '>2.0')).toBe(true);
+        expect(isVersionCompatible('2.0', '>1!1.0')).toBe(false);
+      });
     });
 
     describe('< 연산자', () => {
@@ -92,6 +105,26 @@ describe('version-utils', () => {
 
       it('미만 조건 미충족 (같은 경우)', () => {
         expect(isVersionCompatible('1.0.0', '<1.0.0')).toBe(false);
+      });
+
+      it('PEP 440 suffix 순서를 적용한다', () => {
+        const ascendingVersions = [
+          '1.0.dev1',
+          '1.0a1',
+          '1.0b1',
+          '1.0rc1',
+          '1.0',
+          '1.0.post1',
+        ];
+
+        for (let index = 0; index < ascendingVersions.length - 1; index++) {
+          expect(
+            isVersionCompatible(
+              ascendingVersions[index],
+              `<${ascendingVersions[index + 1]}`,
+            ),
+          ).toBe(true);
+        }
       });
     });
 

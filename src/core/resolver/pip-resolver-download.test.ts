@@ -511,6 +511,16 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
           {
             filename:
               'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+            url: 'https://files.example/demo-prerelease-upper-bound.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp312',
+            requires_python: '<=3.12rc1',
+            digests: { sha256: 'prerelease-upper-bound-sha' },
+            size: 100,
+          },
+          {
+            filename:
+              'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
             url: 'https://files.example/demo-python313-required.whl',
             packagetype: 'bdist_wheel',
             python_version: 'cp312',
@@ -556,6 +566,15 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     const filename =
       'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl';
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename,
+        url: 'https://index.example/demo-prerelease-upper-bound.whl',
+        requiresPython: '<=3.12rc1',
+        hash: {
+          algorithm: 'sha256',
+          digest: 'simple-prerelease-upper-bound-sha',
+        },
+      },
       {
         filename,
         url: 'https://index.example/demo-python313-required.whl',

@@ -116,6 +116,97 @@ function matchesExactVersion(version: string, target: string): boolean {
   );
 }
 
+interface OrderedVersionSuffix {
+  prePhase: number;
+  preNumber: number;
+  postNumber: number;
+  devNumber: number;
+}
+
+function parseOrderedVersionSuffix(
+  suffix: string,
+): OrderedVersionSuffix | null {
+  const match =
+    /^(?:(a|b|rc)(\d+))?(?:post(\d+))?(?:dev(\d+))?$/.exec(
+      suffix,
+    );
+  if (!match) {
+    return null;
+  }
+
+  const [, preLabel, preNumber, postNumber, devNumber] = match;
+  const prePhaseMap: Record<string, number> = {
+    a: 0,
+    b: 1,
+    rc: 2,
+  };
+
+  let prePhase: number;
+  if (preLabel) {
+    prePhase = prePhaseMap[preLabel];
+  } else if (devNumber !== undefined && postNumber === undefined) {
+    // prerelease가 없는 dev release는 모든 prerelease보다 앞선다.
+    prePhase = -1;
+  } else {
+    // final 및 post release는 모든 prerelease보다 뒤에 온다.
+    prePhase = 3;
+  }
+
+  return {
+    prePhase,
+    preNumber: Number(preNumber ?? 0),
+    postNumber:
+      postNumber === undefined ? -1 : Number(postNumber),
+    devNumber:
+      devNumber === undefined ? Number.POSITIVE_INFINITY : Number(devNumber),
+  };
+}
+
+function compareMatchableVersions(a: string, b: string): number {
+  const parsedA = parseMatchableVersion(a);
+  const parsedB = parseMatchableVersion(b);
+  if (!parsedA || !parsedB) {
+    return compareVersions(a, b);
+  }
+
+  if (parsedA.epoch !== parsedB.epoch) {
+    return parsedA.epoch - parsedB.epoch;
+  }
+
+  const releaseLength = Math.max(
+    parsedA.release.length,
+    parsedB.release.length,
+  );
+  for (let index = 0; index < releaseLength; index++) {
+    const difference =
+      (parsedA.release[index] ?? 0) -
+      (parsedB.release[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+
+  const suffixA = parseOrderedVersionSuffix(parsedA.suffix);
+  const suffixB = parseOrderedVersionSuffix(parsedB.suffix);
+  if (!suffixA || !suffixB) {
+    return parsedA.suffix.localeCompare(parsedB.suffix);
+  }
+
+  const orderedFields: Array<keyof OrderedVersionSuffix> = [
+    'prePhase',
+    'preNumber',
+    'postNumber',
+    'devNumber',
+  ];
+  for (const field of orderedFields) {
+    if (suffixA[field] !== suffixB[field]) {
+      return suffixA[field] < suffixB[field] ? -1 : 1;
+    }
+  }
+
+  return 0;
+}
+
 function matchesWildcardVersion(version: string, pattern: string): boolean {
   const prefix = pattern
     .replace(/\*.*$/, '')
@@ -175,11 +266,11 @@ function checkSingleCondition(version: string, condition: string): boolean {
 
   if (condition.startsWith('>=')) {
     const target = condition.slice(2).trim();
-    return compareVersions(version, target) >= 0;
+    return compareMatchableVersions(version, target) >= 0;
   }
   if (condition.startsWith('<=')) {
     const target = condition.slice(2).trim();
-    return compareVersions(version, target) <= 0;
+    return compareMatchableVersions(version, target) <= 0;
   }
   if (condition.startsWith('!=')) {
     const target = condition.slice(2).trim();
@@ -198,21 +289,23 @@ function checkSingleCondition(version: string, condition: string): boolean {
   if (condition.startsWith('~=')) {
     // 호환 릴리스 (예: ~=2.1은 >=2.1, ==2.*)
     const base = condition.slice(2).trim();
-    const parts = base.split('.');
-    parts.pop();
-    const prefix = parts.join('.');
+    const parsedBase = parseMatchableVersion(base);
+    const releasePrefix = parsedBase?.release.slice(0, -1) ?? [];
+    const prefix = parsedBase
+      ? `${parsedBase.epoch ? `${parsedBase.epoch}!` : ''}${releasePrefix.join('.')}`
+      : base.split('.').slice(0, -1).join('.');
     return (
-      compareVersions(version, base) >= 0 &&
-      version.startsWith(prefix)
+      compareMatchableVersions(version, base) >= 0 &&
+      matchesWildcardVersion(version, `${prefix}.*`)
     );
   }
   if (condition.startsWith('>')) {
     const target = condition.slice(1).trim();
-    return compareVersions(version, target) > 0;
+    return compareMatchableVersions(version, target) > 0;
   }
   if (condition.startsWith('<')) {
     const target = condition.slice(1).trim();
-    return compareVersions(version, target) < 0;
+    return compareMatchableVersions(version, target) < 0;
   }
   if (condition.includes('*')) {
     return matchesWildcardVersion(version, condition.trim());
