@@ -272,14 +272,106 @@ describe('dependency-resolver', () => {
       expect(result.allPackages).toHaveLength(2);
     });
 
-    it('maven 패키지 의존성 해결', async () => {
-      const mockMavenResult = {
+    it('resolver가 선택한 root 메타데이터를 기존 요청 패키지에 병합한다', async () => {
+      const mockCondaResult = {
         root: {
-          package: { type: 'maven', name: 'spring-core', version: '5.3.0' },
+          package: {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+            arch: 'aarch64',
+            metadata: {
+              repository: 'defaults/pandas',
+              subdir: 'linux-aarch64',
+              filename: 'pandas-2.0.0-py312.conda',
+              downloadUrl:
+                'https://conda.example/pandas-2.0.0-py312.conda',
+              checksum: { md5: 'resolved' },
+            },
+          },
           dependencies: [],
         },
         flatList: [
-          { type: 'maven', name: 'spring-core', version: '5.3.0' },
+          {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+            arch: 'aarch64',
+            metadata: {
+              repository: 'defaults/pandas',
+              subdir: 'linux-aarch64',
+              filename: 'pandas-2.0.0-py312.conda',
+              downloadUrl:
+                'https://conda.example/pandas-2.0.0-py312.conda',
+              checksum: { md5: 'resolved' },
+            },
+          },
+        ],
+        conflicts: [],
+        totalSize: 1,
+      };
+      const mockResolver = {
+        resolveDependencies: vi.fn().mockResolvedValue(mockCondaResult),
+      };
+      vi.mocked(getCondaResolver).mockReturnValue(mockResolver as any);
+
+      const [root] = (
+        await resolveAllDependencies([
+          {
+            id: 'request-id',
+            type: 'conda',
+            name: 'pandas',
+            version: 'latest',
+            architecture: 'x86_64',
+            indexUrl: 'https://request.example/simple',
+            extras: ['request-extra'],
+            metadata: {
+              classifier: 'request',
+              checksum: { md5: 'old' },
+            },
+          },
+        ])
+      ).allPackages;
+
+      expect(root).toMatchObject({
+        id: 'request-id',
+        type: 'conda',
+        name: 'pandas',
+        version: '2.0.0',
+        architecture: 'aarch64',
+        downloadUrl: 'https://conda.example/pandas-2.0.0-py312.conda',
+        filename: 'pandas-2.0.0-py312.conda',
+        indexUrl: 'https://request.example/simple',
+        extras: ['request-extra'],
+        metadata: {
+          classifier: 'request',
+          checksum: { md5: 'resolved' },
+          repository: 'defaults/pandas',
+          subdir: 'linux-aarch64',
+          filename: 'pandas-2.0.0-py312.conda',
+          downloadUrl: 'https://conda.example/pandas-2.0.0-py312.conda',
+        },
+      });
+    });
+
+    it('maven 패키지 의존성 해결', async () => {
+      const mockMavenResult = {
+        root: {
+          package: {
+            type: 'maven',
+            name: 'spring-core',
+            version: '5.3.0',
+            metadata: { classifier: 'natives-linux' },
+          },
+          dependencies: [],
+        },
+        flatList: [
+          {
+            type: 'maven',
+            name: 'spring-core',
+            version: '5.3.0',
+            metadata: { classifier: 'natives-linux' },
+          },
           { type: 'maven', name: 'spring-jcl', version: '5.3.0' },
         ],
         conflicts: [],
@@ -292,13 +384,28 @@ describe('dependency-resolver', () => {
       vi.mocked(getMavenResolver).mockReturnValue(mockResolver as any);
 
       const packages: DownloadPackage[] = [
-        { id: 'test-1', type: 'maven', name: 'spring-core', version: '5.3.0' },
+        {
+          id: 'test-1',
+          type: 'maven',
+          name: 'spring-core',
+          version: '5.3.0',
+          classifier: 'natives-linux',
+          metadata: { requestSource: 'cli' },
+        },
       ];
 
       const result = await resolveAllDependencies(packages);
 
       expect(getMavenResolver).toHaveBeenCalled();
       expect(result.allPackages).toHaveLength(2);
+      expect(result.allPackages[0]).toMatchObject({
+        id: 'test-1',
+        classifier: 'natives-linux',
+        metadata: {
+          classifier: 'natives-linux',
+          requestSource: 'cli',
+        },
+      });
     });
 
     // yum, apt, apk는 별도 IPC 핸들러(os:resolveDependencies)에서 처리되므로 스킵
