@@ -3,12 +3,36 @@
  */
 import { DependencyNode, PackageInfo } from '../../types';
 
-function getPackageIdentity(packageInfo: PackageInfo): string {
+interface PackageArtifactDescriptor {
+  type: string;
+  name: string;
+  version: string;
+  filename?: string;
+  downloadUrl?: string;
+  classifier?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export function getPackageArtifactKey(
+  packageInfo: PackageArtifactDescriptor,
+): string {
+  const metadata = packageInfo.metadata;
   const artifactIdentity =
-    packageInfo.metadata?.filename ??
-    packageInfo.metadata?.downloadUrl;
+    packageInfo.filename ??
+    (typeof metadata?.filename === 'string'
+      ? metadata.filename
+      : undefined) ??
+    packageInfo.downloadUrl ??
+    (typeof metadata?.downloadUrl === 'string'
+      ? metadata.downloadUrl
+      : undefined) ??
+    packageInfo.classifier ??
+    (typeof metadata?.classifier === 'string'
+      ? metadata.classifier
+      : undefined);
   const packageIdentity =
-    `${packageInfo.name.toLowerCase()}@${packageInfo.version}`;
+    `${packageInfo.type}:${packageInfo.name.toLowerCase()}` +
+    `@${packageInfo.version}`;
 
   return artifactIdentity
     ? `${packageIdentity}#${artifactIdentity}`
@@ -37,7 +61,7 @@ export function flattenDependencyTree(node: DependencyNode): PackageInfo[] {
     }
     visited.add(current);
 
-    const key = getPackageIdentity(current.package);
+    const key = getPackageArtifactKey(current.package);
     if (!result.has(key)) {
       result.set(key, current.package);
     }
@@ -73,7 +97,7 @@ export function flattenMultipleDependencyTrees(nodes: DependencyNode[]): Package
     }
     visited.add(current);
 
-    const key = getPackageIdentity(current.package);
+    const key = getPackageArtifactKey(current.package);
     if (!result.has(key)) {
       result.set(key, current.package);
     }

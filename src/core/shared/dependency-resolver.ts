@@ -16,6 +16,7 @@ import {
 import { NpmResolutionResult } from './npm-types';
 import type { OSPackageInfo, OSArchitecture } from '../downloaders/os-shared/types';
 import logger from '../../utils/logger';
+import { getPackageArtifactKey } from './dependency-tree-utils';
 
 /**
  * 의존성 해결 진행 상황 콜백
@@ -275,7 +276,7 @@ export async function resolveAllDependencies(
     currentIndex++;
 
     // 원본 패키지 추가
-    const key = `${pkg.type}:${pkg.name}@${pkg.version}`;
+    const key = getPackageArtifactKey(pkg);
     resolvedSet.set(key, pkg);
 
     // 타입별 리졸버 선택
@@ -649,13 +650,13 @@ export async function resolveAllDependencies(
 
         // 평탄화된 의존성 목록 추가
         for (const depPkg of result.flatList) {
-          const depKey = `${depPkg.type}:${depPkg.name}@${depPkg.version}`;
+          const downloadPkg = toResolvedDownloadPackage(depPkg, pkg);
+          const depKey = getPackageArtifactKey(downloadPkg);
           const isRootPackage =
             depPkg.type === result.root.package.type &&
             depPkg.name === result.root.package.name &&
             depPkg.version === result.root.package.version;
           const resultKey = isRootPackage ? key : depKey;
-          const downloadPkg = toResolvedDownloadPackage(depPkg, pkg);
           const existing = resolvedSet.get(resultKey);
 
           if (existing) {

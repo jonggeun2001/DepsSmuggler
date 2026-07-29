@@ -172,6 +172,73 @@ describe('downloadCommand', () => {
     ]);
   });
 
+  it('같은 Conda 버전의 서로 다른 build를 모두 다운로드 큐에 추가한다', async () => {
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'conda-demo-1.0.0',
+          type: 'conda',
+          name: 'demo',
+          version: '1.0.0',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'conda-demo-1.0.0',
+          type: 'conda',
+          name: 'demo',
+          version: '1.0.0',
+          architecture: 'x86_64',
+        },
+        {
+          id: 'conda-blas-openblas',
+          type: 'conda',
+          name: 'blas',
+          version: '1.0',
+          architecture: 'x86_64',
+          filename: 'blas-1.0-h123_openblas.conda',
+          downloadUrl:
+            'https://conda.example/blas-1.0-h123_openblas.conda',
+        },
+        {
+          id: 'conda-blas-mkl',
+          type: 'conda',
+          name: 'blas',
+          version: '1.0',
+          architecture: 'x86_64',
+          filename: 'blas-1.0-h456_mkl.conda',
+          downloadUrl:
+            'https://conda.example/blas-1.0-h456_mkl.conda',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [],
+    });
+
+    await downloadCommand(commandOptions({
+      type: 'conda',
+      package: 'demo',
+      pkgVersion: '1.0.0',
+    }));
+
+    expect(addToQueue).toHaveBeenCalledWith([
+      expect.objectContaining({ name: 'demo' }),
+      expect.objectContaining({
+        name: 'blas',
+        metadata: expect.objectContaining({
+          filename: 'blas-1.0-h123_openblas.conda',
+        }),
+      }),
+      expect.objectContaining({
+        name: 'blas',
+        metadata: expect.objectContaining({
+          filename: 'blas-1.0-h456_mkl.conda',
+        }),
+      }),
+    ]);
+  });
+
   it('deps가 false면 원본 패키지만 큐에 추가한다', async () => {
     await downloadCommand(commandOptions({ deps: false }));
 

@@ -384,6 +384,74 @@ describe('dependency-resolver', () => {
       });
     });
 
+    it('같은 Conda 이름과 버전의 서로 다른 build 아티팩트를 모두 보존한다', async () => {
+      const rootPackage = {
+        type: 'conda' as const,
+        name: 'demo',
+        version: '1.0.0',
+        metadata: {
+          subdir: 'linux-64',
+          filename: 'demo-1.0.0-linux_64_0.conda',
+          downloadUrl:
+            'https://conda.example/demo-1.0.0-linux_64_0.conda',
+        },
+      };
+      const openblas = {
+        type: 'conda' as const,
+        name: 'blas',
+        version: '1.0',
+        metadata: {
+          subdir: 'linux-64',
+          filename: 'blas-1.0-h123_openblas.conda',
+          downloadUrl:
+            'https://conda.example/blas-1.0-h123_openblas.conda',
+        },
+      };
+      const mkl = {
+        type: 'conda' as const,
+        name: 'blas',
+        version: '1.0',
+        metadata: {
+          subdir: 'linux-64',
+          filename: 'blas-1.0-h456_mkl.conda',
+          downloadUrl:
+            'https://conda.example/blas-1.0-h456_mkl.conda',
+        },
+      };
+      vi.mocked(getCondaResolver).mockReturnValue({
+        resolveDependencies: vi.fn().mockResolvedValue({
+          root: {
+            package: rootPackage,
+            dependencies: [
+              { package: openblas, dependencies: [] },
+              { package: mkl, dependencies: [] },
+            ],
+          },
+          flatList: [rootPackage, openblas, mkl],
+          conflicts: [],
+        }),
+      } as any);
+
+      const result = await resolveAllDependencies([
+        {
+          id: 'request-id',
+          type: 'conda',
+          name: 'demo',
+          version: '1.0.0',
+        },
+      ]);
+
+      expect(
+        result.allPackages
+          .filter((pkg) => pkg.name === 'blas')
+          .map((pkg) => pkg.filename)
+          .sort(),
+      ).toEqual([
+        'blas-1.0-h123_openblas.conda',
+        'blas-1.0-h456_mkl.conda',
+      ]);
+    });
+
     it('대상 Conda 아티팩트 메타데이터가 없으면 해결 실패로 기록한다', async () => {
       const mockCondaResult = {
         root: {

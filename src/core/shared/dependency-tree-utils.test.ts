@@ -70,6 +70,25 @@ describe('flattenDependencyTree', () => {
     expect(result).toHaveLength(2);
   });
 
+  it('같은 이름과 버전이라도 실제 아티팩트가 다르면 모두 보존해야 함', () => {
+    const openblas = createNode({
+      ...createPackage('blas', '1.0'),
+      metadata: { filename: 'blas-1.0-openblas.conda' },
+    });
+    const mkl = createNode({
+      ...createPackage('blas', '1.0'),
+      metadata: { filename: 'blas-1.0-mkl.conda' },
+    });
+    const root = createNode(
+      createPackage('root', '1.0.0'),
+      [openblas, mkl],
+    );
+
+    const result = flattenDependencyTree(root);
+
+    expect(result).toHaveLength(3);
+  });
+
   it('빈 의존성 배열을 처리해야 함', () => {
     const node = createNode(createPackage('solo', '1.0.0'), []);
 

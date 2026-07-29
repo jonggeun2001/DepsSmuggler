@@ -500,6 +500,80 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     ).toContain('historicalchild@1.5.0');
   });
 
+  it('PyPI 과거 릴리스의 exact metadata 조회 오류를 전파한다', async () => {
+    const rootRelease = {
+      filename: 'demo-1.0.0-py3-none-any.whl',
+      url: 'https://files.example/demo.whl',
+      packagetype: 'bdist_wheel',
+      python_version: 'py3',
+      digests: { sha256: 'demo-sha' },
+      size: 80,
+    };
+    const latestRelease = {
+      filename:
+        'historicalchild-2.0.0-cp313-cp313-manylinux_2_17_x86_64.whl',
+      url: 'https://files.example/historicalchild-2.0.0.whl',
+      packagetype: 'bdist_wheel',
+      python_version: 'cp313',
+      requires_python: '>=3.13',
+      digests: { sha256: 'latest-sha' },
+      size: 80,
+    };
+    const historicalRelease = {
+      filename:
+        'historicalchild-1.5.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+      url: 'https://files.example/historicalchild-1.5.0.whl',
+      packagetype: 'bdist_wheel',
+      python_version: 'cp312',
+      requires_python: null,
+      digests: { sha256: 'historical-sha' },
+      size: 80,
+    };
+
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string, version?: string) => {
+        if (name === 'demo') {
+          return {
+            data: {
+              info: {
+                name,
+                version: '1.0.0',
+                requires_dist: ['historicalchild<3'],
+              },
+              urls: [rootRelease],
+            },
+          };
+        }
+        if (name === 'historicalchild' && version === undefined) {
+          return {
+            data: {
+              info: {
+                name,
+                version: '2.0.0',
+                requires_python: '>=3.13',
+              },
+              releases: {
+                '2.0.0': [latestRelease],
+                '1.5.0': [historicalRelease],
+              },
+            },
+          };
+        }
+        if (name === 'historicalchild' && version === '1.5.0') {
+          throw new Error('과거 릴리스 메타데이터 500');
+        }
+        return null;
+      },
+    );
+
+    await expect(
+      new PipResolver().resolveDependencies('demo', '1.0.0', {
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      }),
+    ).rejects.toThrow('과거 릴리스 메타데이터 500');
+  });
+
   it('PyPI JSON 의존성 버전 제약을 만족하는 릴리스가 없으면 실패한다', async () => {
     const universalRelease = (
       name: string,

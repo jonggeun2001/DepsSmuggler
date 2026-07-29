@@ -251,6 +251,7 @@ export type { MockResponse, MockErrorConfig } from './mock-http-client';
 export {
   flattenDependencyTree,
   flattenMultipleDependencyTrees,
+  getPackageArtifactKey,
   getDependencyTreeDepth,
   getDependencyTreeSize,
 } from './dependency-tree-utils';
