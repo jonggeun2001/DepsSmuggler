@@ -21,6 +21,7 @@ import {
   PyPIRelease,
   PyPIResponse,
 } from '../shared/pip-types';
+import { isPythonWheelCompatible } from '../shared/pip-wheel';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 /* eslint-enable import/order */
 
@@ -444,18 +445,11 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
       const platformTag = wheelMatch[3].toLowerCase();
 
       // Python 버전 체크
-      if (this.pipTargetPlatform.pythonVersion) {
-        const pyVersion = this.pipTargetPlatform.pythonVersion.replace('.', '');
-        // 정확한 버전(cp312), abi3, py3, py2.py3 호환
-        const isCompatiblePython =
-          pythonTag.includes(`cp${pyVersion}`) ||
-          pythonTag.includes(`py${pyVersion}`) ||
-          pythonTag.includes('py3') ||
-          pythonTag.includes('py2.py3') ||
-          abiTag === 'abi3';
-        if (!isCompatiblePython) {
-          continue;
-        }
+      if (
+        this.pipTargetPlatform.pythonVersion &&
+        !isPythonWheelCompatible(pythonTag, abiTag, this.pipTargetPlatform.pythonVersion)
+      ) {
+        continue;
       }
 
       // 플랫폼 호환성 체크
@@ -500,8 +494,7 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
       }
     }
 
-    // 호환되는 wheel이 없으면 첫 번째 wheel 또는 source dist 반환
-    return wheels[0] || files.find((f) => f.filename.endsWith('.tar.gz')) || files[0];
+    return files.find((f) => f.filename.endsWith('.tar.gz') || f.filename.endsWith('.zip')) || null;
   }
 
   /**
@@ -572,17 +565,7 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
       if (wheelMatch) {
         const pythonTag = wheelMatch[1];
         const abiTag = wheelMatch[2];
-        const pyVersion = this.pipTargetPlatform.pythonVersion.replace('.', '');
-
-        // 정확한 버전(cp312), abi3, py3, py2.py3 호환
-        const isCompatiblePython =
-          pythonTag.includes(`cp${pyVersion}`) ||
-          pythonTag.includes(`py${pyVersion}`) ||
-          pythonTag.includes('py3') ||
-          pythonTag.includes('py2.py3') ||
-          abiTag === 'abi3';
-
-        if (!isCompatiblePython) {
+        if (!isPythonWheelCompatible(pythonTag, abiTag, this.pipTargetPlatform.pythonVersion)) {
           return false;
         }
       }

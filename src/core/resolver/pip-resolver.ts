@@ -9,6 +9,7 @@ import {
 import logger from '../../utils/logger';
 import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
 import { compareVersions, isVersionCompatible, flattenDependencyTree } from '../shared';
+import { isPythonWheelCompatible } from '../shared/pip-wheel';
 import {
   fetchPackageMetadata,
   clearMemoryCache as clearPipCache,
@@ -488,25 +489,26 @@ export class PipResolver implements IResolver {
     // 타겟 플랫폼이 설정되지 않으면 마커가 있는 의존성 제외 (기존 동작)
     if (!this.targetPlatform) return false;
 
-    return this.evaluateMarkerExpression(marker, extras);
+    const extraValues = extras && extras.length > 0 ? Array.from(new Set(extras)) : [''];
+    return extraValues.some((extra) => this.evaluateMarkerExpression(marker, extra));
   }
 
-  private evaluateMarkerExpression(expression: string, extras?: string[]): boolean {
+  private evaluateMarkerExpression(expression: string, extra: string): boolean {
     const normalized = stripOuterMarkerParentheses(expression);
     const orTerms = splitMarkerExpression(normalized, 'or');
     if (orTerms.length > 1) {
-      return orTerms.some((term) => this.evaluateMarkerExpression(term, extras));
+      return orTerms.some((term) => this.evaluateMarkerExpression(term, extra));
     }
 
     const andTerms = splitMarkerExpression(normalized, 'and');
     if (andTerms.length > 1) {
-      return andTerms.every((term) => this.evaluateMarkerExpression(term, extras));
+      return andTerms.every((term) => this.evaluateMarkerExpression(term, extra));
     }
 
-    return this.evaluateMarkerCondition(normalized, extras);
+    return this.evaluateMarkerCondition(normalized, extra);
   }
 
-  private evaluateMarkerCondition(condition: string, extras?: string[]): boolean {
+  private evaluateMarkerCondition(condition: string, extra: string): boolean {
     const markerMatch = condition.match(
       /^(python_version|sys_platform|platform_system|platform_machine|extra)\s*(===|==|!=|>=|<=|>|<)\s*["']([^"']*)["']$/
     );
@@ -517,8 +519,7 @@ export class PipResolver implements IResolver {
     const { system, machine } = this.targetPlatform ?? {};
 
     if (variable === 'extra') {
-      const matchesExtra = extras?.includes(requiredValue) ?? false;
-      return operator === '!=' ? !matchesExtra : operator === '==' || operator === '===' ? matchesExtra : false;
+      return matchesComparison(extra.localeCompare(requiredValue), operator);
     }
 
     if (variable === 'python_version') {
@@ -787,20 +788,10 @@ export class PipResolver implements IResolver {
       if (wheelMatch) {
         const pythonTag = wheelMatch[1];
         const abiTag = wheelMatch[2];
-        const targetPyVersion = (this.pipTargetPlatform.pythonVersion || this.pythonVersion || '').replace('.', '');
+        const targetPythonVersion = this.pipTargetPlatform.pythonVersion || this.pythonVersion;
 
-        if (targetPyVersion) {
-          // 정확한 버전(cp312), abi3, py3, py2.py3 호환
-          const isCompatiblePython =
-            pythonTag.includes(`cp${targetPyVersion}`) ||
-            pythonTag.includes(`py${targetPyVersion}`) ||
-            pythonTag.includes('py3') ||
-            pythonTag.includes('py2.py3') ||
-            abiTag === 'abi3';
-
-          if (!isCompatiblePython) {
-            return false;
-          }
+        if (targetPythonVersion && !isPythonWheelCompatible(pythonTag, abiTag, targetPythonVersion)) {
+          return false;
         }
       }
     }
@@ -986,11 +977,12 @@ export class PipResolver implements IResolver {
         const wheelInfo = this.parseWheelFilenameSimple(wheel.filename);
         
         // Python 버전 호환성 체크
-        if (this.pythonVersion) {
-          const pyVersion = this.pythonVersion.replace('.', '');
-          if (!wheelInfo.pythonTag.includes(pyVersion) && !wheelInfo.pythonTag.includes('py3') && !wheelInfo.pythonTag.includes('py2.py3')) {
-            continue;
-          }
+        const targetPythonVersion = this.pipTargetPlatform.pythonVersion || this.pythonVersion;
+        if (
+          targetPythonVersion &&
+          !isPythonWheelCompatible(wheelInfo.pythonTag, wheelInfo.abiTag, targetPythonVersion)
+        ) {
+          continue;
         }
 
         // 플랫폼 호환성 체크
@@ -1044,8 +1036,7 @@ export class PipResolver implements IResolver {
       }
     }
 
-    // 호환되는 wheel이 없으면 첫 번째 wheel 또는 source dist 반환
-    return wheels[0] || files.find((f) => f.filename.endsWith('.tar.gz')) || files[0];
+    return files.find((f) => f.filename.endsWith('.tar.gz') || f.filename.endsWith('.zip')) || null;
   }
 
   /**

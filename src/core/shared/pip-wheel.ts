@@ -115,6 +115,41 @@ export function isWheelSupported(wheel: WheelInfo, supportedTags: PlatformTag[])
 }
 
 /**
+ * wheel의 Python/ABI 태그가 대상 CPython 버전과 호환되는지 확인합니다.
+ */
+export function isPythonWheelCompatible(
+  pythonTag: string,
+  abiTag: string,
+  targetPythonVersion: string
+): boolean {
+  const targetMatch = /^(\d+)\.(\d+)(?:\.\d+)?$/.exec(targetPythonVersion);
+  if (!targetMatch) return false;
+
+  const targetMajor = Number(targetMatch[1]);
+  const targetMinor = Number(targetMatch[2]);
+  const targetCpTag = `cp${targetMajor}${targetMinor}`;
+  const abiTags = new Set(abiTag.toLowerCase().split('.'));
+
+  return pythonTag.toLowerCase().split('.').some((tag) => {
+    if (tag === `py${targetMajor}` || tag === `py${targetMajor}${targetMinor}`) {
+      return abiTags.has('none');
+    }
+
+    const cpythonMatch = /^cp(\d)(\d+)$/.exec(tag);
+    if (!cpythonMatch || Number(cpythonMatch[1]) !== targetMajor) {
+      return false;
+    }
+
+    const wheelMinor = Number(cpythonMatch[2]);
+    if (abiTags.has('abi3')) {
+      return wheelMinor <= targetMinor;
+    }
+
+    return wheelMinor === targetMinor && (abiTags.has(targetCpTag) || abiTags.has('none'));
+  });
+}
+
+/**
  * Wheel의 최소 지원 인덱스 반환 (pip의 support_index_min)
  * 낮을수록 더 선호됨
  * 호환되지 않으면 -1 반환

@@ -370,6 +370,44 @@ describe('PipResolver 단위 테스트', () => {
           )
         ).toBe(false);
       });
+
+      it('여러 extra는 각 값에 대해 전체 marker 식을 평가한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'extra == "foo" and extra != "bar"',
+            ['foo', 'bar']
+          )
+        ).toBe(true);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'extra == "foo" and extra != "bar"',
+            ['bar']
+          )
+        ).toBe(false);
+      });
+    });
+  });
+
+  describe('wheel Python 태그 호환성', () => {
+    const isWheelCompatible = (filename: string): boolean => {
+      resolver.setPipTargetPlatform({
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.12',
+        glibcVersion: '2.28',
+      });
+      return (resolver as any).isWheelCompatible({
+        filename,
+        packagetype: 'bdist_wheel',
+      });
+    };
+
+    it('Python 3.12에 호환되지 않는 범용 및 미래 abi3 wheel을 거부한다', () => {
+      expect(isWheelCompatible('package-1.0.0-py310-none-any.whl')).toBe(false);
+      expect(isWheelCompatible('package-1.0.0-cp313-abi3-manylinux_2_28_x86_64.whl')).toBe(false);
+      expect(isWheelCompatible('package-1.0.0-cp310-abi3-manylinux_2_28_x86_64.whl')).toBe(true);
     });
   });
 

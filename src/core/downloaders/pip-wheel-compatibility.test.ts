@@ -335,5 +335,23 @@ describe('PipDownloader wheel 호환성', () => {
       const result = testSelectBestRelease(releases, platform);
       expect(result?.filename).toContain('abi3');
     });
+
+    it('Python 3.12에 호환되지 않는 py310 및 미래 abi3 wheel은 선택하지 않아야 함', () => {
+      const releases: PyPIRelease[] = [
+        createWheelRelease('package-1.0.0-py310-none-any.whl'),
+        createWheelRelease('package-1.0.0-cp313-abi3-manylinux_2_28_x86_64.whl'),
+        createSdistRelease('package-1.0.0.tar.gz'),
+      ];
+
+      const platform: PipTargetPlatform = {
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.12',
+        glibcVersion: '2.28',
+      };
+
+      const result = testSelectBestRelease(releases, platform);
+      expect(result?.filename).toContain('.tar.gz');
+    });
   });
 });
