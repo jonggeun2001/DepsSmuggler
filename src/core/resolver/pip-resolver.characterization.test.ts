@@ -6,10 +6,12 @@ type PackageFixture = {
     string,
     {
       requiresDist?: string[];
+      requiresPython?: string;
       urls?: Array<{
         filename: string;
         size?: number;
         packagetype?: string;
+        requires_python?: string;
       }>;
     }
   >;
@@ -21,6 +23,7 @@ type SimpleApiFixture = Record<
     filename: string;
     url: string;
     metadataHash?: string;
+    requiresPython?: string;
     yanked?: boolean;
   }>
 >;
@@ -73,6 +76,7 @@ const createPyPIFixtureResponder = (packages: Record<string, PackageFixture>) =>
             name,
             version: fixture.latest,
             requires_dist: fixture.versions[fixture.latest]?.requiresDist ?? [],
+            requires_python: fixture.versions[fixture.latest]?.requiresPython,
           },
           releases: Object.fromEntries(
             Object.entries(fixture.versions).map(([currentVersion, currentFixture]) => [
@@ -90,8 +94,14 @@ const createPyPIFixtureResponder = (packages: Record<string, PackageFixture>) =>
           name,
           version: resolvedVersion,
           requires_dist: versionFixture.requiresDist ?? [],
+          requires_python: versionFixture.requiresPython,
         },
-        urls: versionFixture.urls ?? [],
+        urls: versionFixture.urls ?? [
+          {
+            filename: `${name}-${resolvedVersion}.tar.gz`,
+            packagetype: 'sdist',
+          },
+        ],
       },
     };
   };
@@ -346,5 +356,81 @@ describe('PipResolver characterization', () => {
         pythonVersion: '3.12',
       })
     ).rejects.toThrow('호환되는 패키지를 찾을 수 없습니다: native-only@1.0.0');
+  });
+
+  it('PyPI가 빈 파일 목록을 반환한 root를 해결 실패로 처리한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        empty: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { urls: [] },
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+
+    await expect(
+      resolver.resolveDependencies('empty', '1.0.0', { pythonVersion: '3.12' })
+    ).rejects.toThrow('호환되는 패키지를 찾을 수 없습니다: empty@1.0.0');
+  });
+
+  it('PyPI 파일의 requires_python이 대상보다 높으면 root를 해결 실패로 처리한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        future: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {
+              urls: [
+                {
+                  filename: 'future-1.0.0-py3-none-any.whl',
+                  packagetype: 'bdist_wheel',
+                  requires_python: '>=3.13',
+                },
+                {
+                  filename: 'future-1.0.0.tar.gz',
+                  packagetype: 'sdist',
+                  requires_python: '>=3.13',
+                },
+              ],
+            },
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+
+    await expect(
+      resolver.resolveDependencies('future', '1.0.0', { pythonVersion: '3.12' })
+    ).rejects.toThrow('호환되는 패키지를 찾을 수 없습니다: future@1.0.0');
+  });
+
+  it('Simple API 파일의 requiresPython이 대상보다 높으면 root를 해결 실패로 처리한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'future-1.0.0-py3-none-any.whl',
+        url: 'https://packages.example.com/future-1.0.0.whl',
+        requiresPython: '>=3.13',
+      },
+      {
+        filename: 'future-1.0.0.tar.gz',
+        url: 'https://packages.example.com/future-1.0.0.tar.gz',
+        requiresPython: '>=3.13',
+      },
+    ]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const resolver = new PipResolver();
+
+    await expect(
+      resolver.resolveDependencies('future', '1.0.0', {
+        indexUrl: 'https://packages.example.com/simple',
+        pythonVersion: '3.12',
+      })
+    ).rejects.toThrow('호환되는 패키지를 찾을 수 없습니다: future@1.0.0');
   });
 });

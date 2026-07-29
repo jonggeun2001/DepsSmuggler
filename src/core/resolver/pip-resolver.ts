@@ -9,7 +9,7 @@ import {
 import logger from '../../utils/logger';
 import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
 import { compareVersions, isVersionCompatible, flattenDependencyTree } from '../shared';
-import { isPythonWheelCompatible } from '../shared/pip-wheel';
+import { isPythonRequiresCompatible, isPythonWheelCompatible } from '../shared/pip-wheel';
 import {
   fetchPackageMetadata,
   clearMemoryCache as clearPipCache,
@@ -388,7 +388,7 @@ export class PipResolver implements IResolver {
         metadata: {
           description: '',
           size: 0,
-          filename: selectedFile?.filename,
+          filename: selectedFile.filename,
           indexUrl,
         },
       };
@@ -401,16 +401,16 @@ export class PipResolver implements IResolver {
 
       const { info, urls } = cacheResult.data;
 
-      let packageSize = 0;
-      let packageFilename: string | undefined;
-      if (urls && urls.length > 0) {
-        const selectedFile = this.selectBestWheel(urls);
-        if (!selectedFile) {
-          throw new Error(`호환되는 패키지를 찾을 수 없습니다: ${name}@${actualVersion}`);
-        }
-        packageSize = selectedFile.size || 0;
-        packageFilename = selectedFile.filename;
+      const targetPythonVersion = this.pipTargetPlatform?.pythonVersion || this.pythonVersion || undefined;
+      if (!isPythonRequiresCompatible(info.requires_python, targetPythonVersion)) {
+        throw new Error(`호환되는 패키지를 찾을 수 없습니다: ${name}@${actualVersion}`);
       }
+      const selectedFile = this.selectBestWheel(urls || []);
+      if (!selectedFile) {
+        throw new Error(`호환되는 패키지를 찾을 수 없습니다: ${name}@${actualVersion}`);
+      }
+      const packageSize = selectedFile.size || 0;
+      const packageFilename = selectedFile.filename;
 
       packageInfo = {
         type: 'pip',
@@ -779,6 +779,11 @@ export class PipResolver implements IResolver {
    * wheel이 타겟 플랫폼과 호환되는지 확인
    */
   private isWheelCompatible(release: PyPIRelease): boolean {
+    const targetPythonVersion = this.pipTargetPlatform?.pythonVersion || this.pythonVersion || undefined;
+    if (!isPythonRequiresCompatible(release.requires_python, targetPythonVersion)) {
+      return false;
+    }
+
     if (!this.pipTargetPlatform) {
       // 타겟 플랫폼이 설정되지 않으면 기본 동작 (wheel 우선)
       return true;
@@ -911,7 +916,9 @@ export class PipResolver implements IResolver {
 
     // wheel과 sdist 분리
     const wheels = urls.filter(u => u.packagetype === 'bdist_wheel');
-    const sdist = urls.find(u => u.packagetype === 'sdist');
+    const sdist = urls.find(
+      (release) => release.packagetype === 'sdist' && this.isWheelCompatible(release)
+    );
 
     if (!this.pipTargetPlatform) {
       // 타겟 플랫폼 미설정 시 기본 동작: 첫 번째 wheel 또는 sdist
@@ -972,11 +979,15 @@ export class PipResolver implements IResolver {
   ): SimpleApiPackageFile | null {
     if (!this.pipTargetPlatform) {
       // 플랫폼 정보가 없으면 첫 번째 wheel 반환
-      return files.find((f) => f.filename.endsWith('.whl')) || null;
+      return files.find(
+        (file) => file.filename.endsWith('.whl') && this.isSimpleFilePythonCompatible(file)
+      ) || null;
     }
 
     // wheel 파일만 필터링
-    const wheels = files.filter((f) => f.filename.endsWith('.whl'));
+    const wheels = files.filter(
+      (file) => file.filename.endsWith('.whl') && this.isSimpleFilePythonCompatible(file)
+    );
 
     for (const wheel of wheels) {
       try {
@@ -1043,7 +1054,18 @@ export class PipResolver implements IResolver {
       }
     }
 
-    return files.find((f) => f.filename.endsWith('.tar.gz') || f.filename.endsWith('.zip')) || null;
+    return files.find(
+      (file) =>
+        (file.filename.endsWith('.tar.gz') || file.filename.endsWith('.zip')) &&
+        this.isSimpleFilePythonCompatible(file)
+    ) || null;
+  }
+
+  private isSimpleFilePythonCompatible(file: SimpleApiPackageFile): boolean {
+    return isPythonRequiresCompatible(
+      file.requiresPython,
+      this.pipTargetPlatform?.pythonVersion || this.pythonVersion || undefined
+    );
   }
 
   /**

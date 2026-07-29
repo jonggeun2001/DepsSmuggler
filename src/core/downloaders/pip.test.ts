@@ -241,6 +241,37 @@ describe('PipDownloader 클래스 메서드 테스트 (모킹)', () => {
       expect(metadata.metadata?.size).toBe(63000);
     });
 
+    it('대상 Python보다 높은 info.requires_python 패키지는 선택하지 않는다', async () => {
+      downloader.setPipTargetPlatform({
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.12',
+      });
+      mockClient.get.mockResolvedValueOnce({
+        data: {
+          info: {
+            name: 'future',
+            version: '1.0.0',
+            requires_python: '>=3.13',
+          },
+          urls: [
+            {
+              filename: 'future-1.0.0-py3-none-any.whl',
+              packagetype: 'bdist_wheel',
+              size: 100,
+              url: 'https://pypi.org/packages/future-1.0.0.whl',
+              digests: { sha256: 'abc123' },
+              md5_digest: 'md5hash',
+            },
+          ],
+        },
+      });
+
+      await expect(downloader.getPackageMetadata('future', '1.0.0')).rejects.toThrow(
+        '호환되는 패키지를 찾을 수 없습니다: future@1.0.0'
+      );
+    });
+
     it('메타데이터 조회 실패 시 예외 발생', async () => {
       const error = new Error('API Error');
       mockClient.get.mockRejectedValueOnce(error);
@@ -338,6 +369,19 @@ describe('PipDownloader 클래스 메서드 테스트 (모킹)', () => {
         r.python_version === 'py3' ||
         r.python_version.includes('311')
       )).toBe(true);
+    });
+
+    it('패키지 requires_python이 대상보다 높으면 빈 릴리스 목록을 반환한다', async () => {
+      mockClient.get.mockResolvedValueOnce({
+        data: {
+          info: { requires_python: '>=3.13' },
+          urls: mockReleases,
+        },
+      });
+
+      await expect(
+        downloader.getReleasesForArch('pkg', '1.0.0', undefined, '3.12')
+      ).resolves.toEqual([]);
     });
 
     it('복합 필터링 (OS + arch)', async () => {
