@@ -31,15 +31,12 @@ interface PreparedPackagesResult {
 }
 
 const CLI_DEPENDENCY_SUPPORTED_TYPES = new Set<PackageType>(['pip', 'conda', 'maven', 'npm']);
-const PIP_TARGET_ARCHITECTURES = new Set<PipTargetPlatform['arch']>([
-  'x86_64',
-  'aarch64',
-  'arm64',
-  'i386',
-  'amd64',
-  'arm/v7',
-  '386',
-]);
+const PIP_TARGET_ARCHITECTURES: Partial<Record<Architecture, PipTargetPlatform['arch']>> = {
+  x86_64: 'x86_64',
+  amd64: 'x86_64',
+  aarch64: 'aarch64',
+  arm64: 'arm64',
+};
 
 function getNormalizedPackageKey(name: string, version: string): string {
   return `${name.toLowerCase().replace(/[-_.]+/g, '_')}@${version}`;
@@ -48,9 +45,7 @@ function getNormalizedPackageKey(name: string, version: string): string {
 function getPipTargetPlatform(arch: Architecture, pythonVersion?: string): PipTargetPlatform | undefined {
   if (!pythonVersion) return undefined;
 
-  const pipArch = PIP_TARGET_ARCHITECTURES.has(arch as PipTargetPlatform['arch'])
-    ? arch as PipTargetPlatform['arch']
-    : 'x86_64';
+  const pipArch = PIP_TARGET_ARCHITECTURES[arch] ?? 'x86_64';
   const normalizedPythonVersion = normalizePythonVersion(pythonVersion);
 
   return {

@@ -241,6 +241,30 @@ describe('downloadCommand', () => {
     );
   });
 
+  it('resolver가 지원하지 않는 pip 아키텍처는 양쪽에서 x86_64로 보정한다', async () => {
+    await downloadCommand({
+      type: 'pip',
+      package: 'requests',
+      pkgVersion: '2.28.0',
+      arch: 'i386',
+      output: './output',
+      format: 'zip',
+      deps: true,
+      concurrency: '3',
+      pythonVersion: '3.12',
+    });
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ architecture: 'x86_64' })
+    );
+    expect(startDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pipTargetPlatform: expect.objectContaining({ arch: 'x86_64' }),
+      })
+    );
+  });
+
   it('conda Python 버전을 의존성 해결에 전달한다', async () => {
     await downloadCommand({
       type: 'conda',
