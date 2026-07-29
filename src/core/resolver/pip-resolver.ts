@@ -25,6 +25,7 @@ import {
   SimpleApiPackageFile,
   fetchWheelMetadata,
 } from './pip-simple-api';
+import { evaluatePep508Marker } from '../shared/pep508-marker';
 
 // 의존성 파싱 결과
 interface ParsedDependency {
@@ -192,8 +193,11 @@ export class PipResolver implements IResolver {
           if (!parentCacheKey) {
             throw error;
           }
-          logger.warn('패키지 정보 조회 실패', { name, version: ver, error });
-          continue;
+          const reason =
+            error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `필수 pip 의존성 아티팩트를 해결할 수 없습니다: ${name}@${ver} (${reason})`,
+          );
         }
 
         if (!fetchResult) continue;
@@ -233,6 +237,10 @@ export class PipResolver implements IResolver {
           parentChildMap.set(parentCacheKey, children);
         }
 
+        if (depth >= maxDepth) {
+          continue;
+        }
+
         // 의존성 파싱 및 큐에 추가
         if (requiresDist.length > 0) {
           const parsedDeps = requiresDist
@@ -260,29 +268,35 @@ export class PipResolver implements IResolver {
                 depVersion = await this.getLatestVersion(dep.name, dep.versionSpec, undefined);
               }
 
-              if (depVersion) {
-                const depCacheKey = `${dep.name.toLowerCase()}@${depVersion}`;
-                // 아직 해결되지 않은 패키지만 큐에 추가
-                if (!resolvedNodes.has(depCacheKey)) {
-                  queue.push({
-                    name: dep.name,
-                    version: depVersion,
-                    indexUrl: usedIndexUrl,
-                    extras: dep.extras,
-                    parentCacheKey: cacheKey,
-                    depth: depth + 1,
-                  });
-                } else {
-                  // 이미 해결된 경우 부모-자식 관계만 추가
-                  const children = parentChildMap.get(cacheKey) || [];
-                  if (!children.includes(depCacheKey)) {
-                    children.push(depCacheKey);
-                    parentChildMap.set(cacheKey, children);
-                  }
+              if (!depVersion) {
+                throw new Error('호환되는 버전을 찾을 수 없습니다.');
+              }
+
+              const depCacheKey = `${dep.name.toLowerCase()}@${depVersion}`;
+              // 아직 해결되지 않은 패키지만 큐에 추가
+              if (!resolvedNodes.has(depCacheKey)) {
+                queue.push({
+                  name: dep.name,
+                  version: depVersion,
+                  indexUrl: usedIndexUrl,
+                  extras: dep.extras,
+                  parentCacheKey: cacheKey,
+                  depth: depth + 1,
+                });
+              } else {
+                // 이미 해결된 경우 부모-자식 관계만 추가
+                const children = parentChildMap.get(cacheKey) || [];
+                if (!children.includes(depCacheKey)) {
+                  children.push(depCacheKey);
+                  parentChildMap.set(cacheKey, children);
                 }
               }
             } catch (error) {
-              logger.warn('의존성 버전 조회 실패', { parent: name, dependency: dep.name, error });
+              const reason =
+                error instanceof Error ? error.message : String(error);
+              throw new Error(
+                `필수 pip 의존성 버전을 해결할 수 없습니다: ${name} -> ${dep.name} (${reason})`,
+              );
             }
           }
         }
@@ -526,69 +540,39 @@ export class PipResolver implements IResolver {
 
   /**
    * 환경 마커 평가
-   * targetPlatform이 설정된 경우 해당 플랫폼에 맞는 마커만 통과
-   * targetPlatform이 없으면 마커가 없는 의존성만 통과 (기존 동작)
+   * 알려진 대상 환경 값으로 PEP 508 마커를 평가
+   * 알 수 없거나 해석할 수 없는 조건은 보수적으로 제외
    */
   private evaluateMarker(marker?: string, extras?: string[]): boolean {
     // 마커가 없으면 항상 포함
     if (!marker) return true;
 
-    // 타겟 플랫폼이 설정되지 않으면 마커가 있는 의존성 제외 (기존 동작)
-    if (!this.targetPlatform) return false;
+    const system = this.targetPlatform?.system;
+    const environment = {
+      python_version: this.pythonVersion ?? undefined,
+      python_full_version: this.pythonVersion ?? undefined,
+      sys_platform:
+        system === 'Windows'
+          ? 'win32'
+          : system === 'Darwin'
+            ? 'darwin'
+            : system === 'Linux'
+              ? 'linux'
+              : undefined,
+      platform_system: system,
+      platform_machine: this.targetPlatform?.machine,
+      os_name: system ? (system === 'Windows' ? 'nt' : 'posix') : undefined,
+      implementation_name: this.pythonVersion ? 'cpython' : undefined,
+      platform_python_implementation: this.pythonVersion
+        ? 'CPython'
+        : undefined,
+      implementation_version: this.pythonVersion ?? undefined,
+    };
 
-    const { system, machine } = this.targetPlatform;
-
-    // extra 마커 평가 (예: extra == "cuda")
-    const extraMatch = marker.match(/extra\s*==\s*["'](\w+)["']/);
-    if (extraMatch) {
-      const requiredExtra = extraMatch[1];
-      return extras?.includes(requiredExtra) ?? false;
-    }
-
-    // platform_system 평가
-    const systemMatch = marker.match(/platform_system\s*==\s*["'](\w+)["']/);
-    if (systemMatch) {
-      const requiredSystem = systemMatch[1];
-      if (system && system !== requiredSystem) return false;
-      if (!system) return false; // 시스템이 지정되지 않으면 제외
-    }
-
-    // platform_machine 평가
-    const machineMatch = marker.match(/platform_machine\s*==\s*["'](\w+)["']/);
-    if (machineMatch) {
-      const requiredMachine = machineMatch[1];
-      if (machine) {
-        // x86_64와 amd64는 동일하게 처리
-        const normalizedRequired = requiredMachine.toLowerCase();
-        const normalizedTarget = machine.toLowerCase();
-        const isX64 = (m: string) => m === 'x86_64' || m === 'amd64';
-
-        if (isX64(normalizedRequired) && isX64(normalizedTarget)) {
-          // 둘 다 x64 계열이면 통과
-        } else if (normalizedRequired !== normalizedTarget) {
-          return false;
-        }
-      } else {
-        return false; // 머신이 지정되지 않으면 제외
-      }
-    }
-
-    // python_version 마커는 무시 (모든 버전 포함)
-    // sys_platform 평가
-    const sysPlatformMatch = marker.match(/sys_platform\s*==\s*["'](\w+)["']/);
-    if (sysPlatformMatch) {
-      const requiredPlatform = sysPlatformMatch[1];
-      const platformMap: Record<string, string> = {
-        'Linux': 'linux',
-        'Windows': 'win32',
-        'Darwin': 'darwin',
-      };
-      if (system && platformMap[system] !== requiredPlatform) return false;
-      if (!system) return false;
-    }
-
-    // 모든 조건을 통과하면 포함
-    return true;
+    const selectedExtras = extras?.length ? extras : [''];
+    return selectedExtras.some((extra) =>
+      evaluatePep508Marker(marker, { ...environment, extra }),
+    );
   }
 
   /**
@@ -842,10 +826,12 @@ export class PipResolver implements IResolver {
     }
 
     // Python 버전 호환성 체크
+    const wheelTags = this.extractWheelTags(release.filename);
+    if (!wheelTags) {
+      return false;
+    }
     if (this.pipTargetPlatform.pythonVersion || this.pythonVersion) {
-      const wheelTags = this.extractWheelTags(release.filename);
       if (
-        !wheelTags ||
         !this.isPythonTagCompatible(
           wheelTags.pythonTag,
           wheelTags.abiTag,
@@ -853,6 +839,11 @@ export class PipResolver implements IResolver {
       ) {
         return false;
       }
+    } else if (!this.isPythonAgnosticWheel(
+      wheelTags.pythonTag,
+      wheelTags.abiTag,
+    )) {
+      return false;
     }
 
     const platformTags = this.extractPlatformTags(release.filename);
@@ -1042,6 +1033,18 @@ export class PipResolver implements IResolver {
         minimumMinor <= targetMinor
       );
     });
+  }
+
+  private isPythonAgnosticWheel(
+    pythonTag: string,
+    abiTag: string,
+  ): boolean {
+    const pythonTags = pythonTag.toLowerCase().split('.');
+    const abiTags = abiTag.toLowerCase().split('.');
+    return (
+      abiTags.every((tag) => tag === 'none') &&
+      pythonTags.every((tag) => /^py[23]$/.test(tag))
+    );
   }
 
   /**

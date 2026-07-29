@@ -173,6 +173,91 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     });
   });
 
+  it('대상 Python을 지정하지 않으면 CPython 전용 wheel 대신 범용 wheel을 선택한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: {
+          name: 'demo',
+          version: '1.0.0',
+          requires_dist: [],
+        },
+        urls: [
+          {
+            filename:
+              'demo-1.0.0-cp39-cp39-manylinux_2_17_x86_64.whl',
+            url: 'https://files.example/demo-cp39.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp39',
+            digests: { sha256: 'cp39-sha' },
+            size: 100,
+          },
+          {
+            filename: 'demo-1.0.0-py3-none-any.whl',
+            url: 'https://files.example/demo-any.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'py3',
+            digests: { sha256: 'any-sha' },
+            size: 80,
+          },
+        ],
+      },
+    });
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      {
+        maxDepth: 0,
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+      },
+    );
+
+    expect(result.root.package.metadata).toMatchObject({
+      filename: 'demo-1.0.0-py3-none-any.whl',
+      downloadUrl: 'https://files.example/demo-any.whl',
+    });
+  });
+
+  it('필수 pip 하위 의존성 아티팩트를 찾지 못하면 전체 해결에 실패한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string) => {
+        if (name !== 'demo') {
+          return null;
+        }
+
+        return {
+          data: {
+            info: {
+              name: 'demo',
+              version: '1.0.0',
+              requires_dist: ['missing-dependency>=1.0'],
+            },
+            urls: [
+              {
+                filename: 'demo-1.0.0.tar.gz',
+                url: 'https://files.example/demo-1.0.0.tar.gz',
+                packagetype: 'sdist',
+                python_version: 'source',
+                digests: { sha256: 'sdist-sha' },
+                size: 80,
+              },
+            ],
+            releases: {
+              '1.0.0': [],
+            },
+          },
+        };
+      },
+    );
+
+    await expect(
+      new PipResolver().resolveDependencies('demo', '1.0.0', {
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.12',
+      }),
+    ).rejects.toThrow('필수 pip 의존성');
+  });
+
   it('Simple API에서 선택한 대상 wheel URL과 체크섬을 다운로드한다', async () => {
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
       {

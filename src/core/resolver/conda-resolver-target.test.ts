@@ -101,6 +101,55 @@ describe('CondaRepoDataProcessor Python 호환성', () => {
 });
 
 describe('CondaResolver 대상 아티팩트 선택', () => {
+  it('대상 OS가 없으면 linux-64 대신 noarch만 조회한다', async () => {
+    const resolver = new CondaResolver();
+    const processor = (
+      resolver as unknown as {
+        repoDataProcessor: {
+          getRepoData: (
+            channel: string,
+            subdir: string,
+          ) => Promise<Record<string, unknown> | null>;
+        };
+      }
+    ).repoDataProcessor;
+    const getRepoData = vi
+      .spyOn(processor, 'getRepoData')
+      .mockImplementation(async (_channel, subdir) => {
+        if (subdir !== 'noarch') {
+          return null;
+        }
+        return {
+          info: { subdir: 'noarch' },
+          packages: {
+            'demo-1.0.0-pyhd8ed1ab_0.tar.bz2': {
+              name: 'demo',
+              version: '1.0.0',
+              build: 'pyhd8ed1ab_0',
+              build_number: 0,
+              depends: ['python >=3.12,<3.13'],
+              subdir: 'noarch',
+            },
+          },
+        };
+      });
+
+    const result = await resolver.resolveDependencies('demo', '1.0.0', {
+      maxDepth: 0,
+      targetPlatform: { machine: 'x86_64' },
+      pythonVersion: '3.12',
+    });
+
+    expect(getRepoData).not.toHaveBeenCalledWith(
+      'conda-forge',
+      'linux-64',
+    );
+    expect(result.root.package.metadata).toMatchObject({
+      subdir: 'noarch',
+      filename: 'demo-1.0.0-pyhd8ed1ab_0.tar.bz2',
+    });
+  });
+
   it('의존성이 없는 대상 subdir 빌드를 noarch보다 우선한다', async () => {
     const resolver = new CondaResolver();
     const processor = (
@@ -237,5 +286,89 @@ describe('CondaResolver 대상 아티팩트 선택', () => {
     ).rejects.toThrow(
       '대상 환경과 호환되는 Conda 아티팩트를 찾을 수 없습니다',
     );
+  });
+
+  it('필수 Conda 하위 의존성 후보가 없으면 전체 해결에 실패한다', async () => {
+    const resolver = new CondaResolver();
+    const processor = (
+      resolver as unknown as {
+        repoDataProcessor: {
+          getRepoData: (
+            channel: string,
+            subdir: string,
+          ) => Promise<Record<string, unknown>>;
+        };
+      }
+    ).repoDataProcessor;
+
+    vi.spyOn(processor, 'getRepoData').mockResolvedValue({
+      info: { subdir: 'linux-aarch64' },
+      packages: {
+        'demo-1.0.0-linux-aarch64.conda': {
+          name: 'demo',
+          version: '1.0.0',
+          build: 'linux_aarch64_0',
+          build_number: 0,
+          depends: ['missing-dependency >=1.0'],
+          subdir: 'linux-aarch64',
+        },
+      },
+    });
+
+    await expect(
+      resolver.resolveDependencies('demo', '1.0.0', {
+        targetPlatform: {
+          system: 'Linux',
+          machine: 'aarch64',
+        },
+        pythonVersion: '3.12',
+      }),
+    ).rejects.toThrow('필수 Conda 의존성');
+  });
+
+  it('OpenSSL 같은 런타임 패키지도 오프라인 묶음에 포함한다', async () => {
+    const resolver = new CondaResolver();
+    const processor = (
+      resolver as unknown as {
+        repoDataProcessor: {
+          getRepoData: (
+            channel: string,
+            subdir: string,
+          ) => Promise<Record<string, unknown>>;
+        };
+      }
+    ).repoDataProcessor;
+
+    vi.spyOn(processor, 'getRepoData').mockResolvedValue({
+      info: { subdir: 'linux-aarch64' },
+      packages: {
+        'demo-1.0.0-linux-aarch64.conda': {
+          name: 'demo',
+          version: '1.0.0',
+          build: 'linux_aarch64_0',
+          build_number: 0,
+          depends: ['openssl >=3.0'],
+          subdir: 'linux-aarch64',
+        },
+        'openssl-3.3.0-linux-aarch64.conda': {
+          name: 'openssl',
+          version: '3.3.0',
+          build: 'linux_aarch64_0',
+          build_number: 0,
+          depends: [],
+          subdir: 'linux-aarch64',
+        },
+      },
+    });
+
+    const result = await resolver.resolveDependencies('demo', '1.0.0', {
+      targetPlatform: {
+        system: 'Linux',
+        machine: 'aarch64',
+      },
+      pythonVersion: '3.12',
+    });
+
+    expect(result.flatList.map((pkg) => pkg.name)).toContain('openssl');
   });
 });

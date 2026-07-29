@@ -503,7 +503,10 @@ export class CondaRepoDataProcessor {
     }
 
     // noarch 확인: 후보가 없거나 Python 버전이 맞지 않는 경우
-    if (!targetCandidate || !targetCandidate.isPythonMatch) {
+    if (
+      this.config.targetSubdir !== 'noarch' &&
+      (!targetCandidate || !targetCandidate.isPythonMatch)
+    ) {
       const noarchCacheKey = `${channel}/noarch`;
       const noarchRepodata = await this.getRepoData(channel, 'noarch');
       if (noarchRepodata) {
