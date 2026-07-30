@@ -88,8 +88,11 @@ interface ResolvedPackageList {
   allPackages: DownloadPackage[];       // 의존성 포함 전체 목록
   dependencyTrees: DependencyResolutionResult[];  // 의존성 트리
   failedPackages: { name: string; version: string; error: string }[];  // 실패 목록
+  successfulPackages?: DownloadPackage[];  // 성공한 직접 루트가 소유한 전체 패키지
 }
 ```
+
+`successfulPackages`는 직접 루트별 해결 성공 시점의 결과를 합친 목록입니다. CLI의 기본 best-effort 모드는 후속 직접 루트가 실패해도 이 목록의 패키지와 의존성만 다운로드합니다. `--strict` 모드는 하나라도 실패하면 다운로드를 중단합니다.
 
 ### DependencyResolverOptions
 

@@ -48,7 +48,7 @@ interface QueueItem {
 // 알고리즘 흐름
 1. 루트 패키지를 큐에 추가
 2. 큐에서 패키지를 꺼내어 정보 조회
-3. 이미 해결된 패키지면 부모-자식 관계만 추가하고 스킵
+3. 동일한 이름과 버전이면 부모-자식 관계를 추가하고, 새 extra가 있을 때만 그 extra로 다시 확장
 4. 노드 생성 및 저장
 5. 하위 의존성을 큐에 추가
 6. 큐가 빌 때까지 반복
@@ -91,17 +91,16 @@ interface ResolverOptions {
 PEP 508 환경 마커를 평가하여 플랫폼별 의존성 필터링:
 
 ```typescript
-// 현재 평가하는 마커 변수
-- python_version       // 선택한 Python 버전과 >=, <=, ==, !=, >, < 비교
-- sys_platform         // 플랫폼 (예: 'linux', 'darwin', 'win32')
-- platform_system      // OS 이름 (예: 'Linux', 'Darwin', 'Windows')
-- platform_machine     // 아키텍처 (예: 'x86_64', 'arm64')
-- extra                // 선택한 extra
+// 현재 평가하는 marker 변수
+- python_version, python_full_version, implementation_version
+- os_name, sys_platform, platform_system, platform_machine
+- platform_python_implementation, implementation_name
+- extra
 ```
 
-`pythonVersion`이 설정된 경우 `python_version` 비교를 적용합니다. `major.minor.patch` 입력은 `requires_python` 평가에 그대로 사용하고, PEP 508의 `python_version` 마커에는 `major.minor`만 사용합니다. 지정하지 않으면 기존 호환성 동작대로 Python 버전 마커는 필터링하지 않습니다. `platform_machine` 비교에서는 `amd64`를 `x86_64`로, Linux ARM64의 `arm64`/`aarch64` 별칭을 `aarch64`로 정규화합니다. extra가 선택되지 않으면 빈 값으로, 여러 extra가 선택되면 각 extra 값으로 PEP 508 marker 식 전체를 평가합니다.
+`pythonVersion`이 설정된 경우 `python_version`은 `major.minor`를, `python_full_version`과 `implementation_version`은 patch까지 포함한 값을 사용합니다. 버전 변수는 PEP 440으로, 나머지 변수는 문자열로 비교합니다. resolver identity는 CPython(`platform_python_implementation = 'CPython'`, `implementation_name = 'cpython'`)으로 고정합니다. `platform_machine` 비교에서는 `amd64`를 `x86_64`로, Linux ARM64의 `arm64`/`aarch64` 별칭을 `aarch64`로 정규화합니다. extra가 선택되지 않으면 빈 값으로 보존하고, 같은 정규화 이름과 버전에 새 extra가 발견되면 해당 extra로만 다시 확장합니다. 이 상태는 한 `resolveDependencies` 호출에만 유지됩니다.
 
-지원하는 marker 조건은 괄호와 `and`/`or`를 조합할 수 있으며, `and`를 `or`보다 먼저 평가합니다. 예를 들어 `python_version >= '3.8' and (python_version < '3.12' or sys_platform == 'linux')`처럼 반복된 Python 조건과 플랫폼 조건을 함께 처리합니다. wheel 선택은 대상 CPython 태그, 범용 `py3`/`py2.py3`, 대상보다 같거나 낮은 CPython 버전의 `abi3` 태그만 호환으로 판단합니다. 대상 Python이 지정되면 PyPI의 패키지·파일 `requires_python`과 Simple API 파일의 `requiresPython`도 PEP 440 specifier set으로 평가하며, 호환 wheel과 source distribution이 모두 없으면 해당 직접 패키지는 해결 실패로 반환됩니다. `latest`와 범위 의존성은 호환 산출물이 있는 비철회 릴리스만 후보로 삼아 PEP 440 순서로 가장 높은 안정 버전을 선택합니다. wildcard가 없는 `==`/`===` 정확 고정만 철회 릴리스를 허용하고, 프리릴리스는 제약에 포함됐거나 안정 후보가 없을 때만 후보가 됩니다.
+지원하는 marker 조건은 괄호와 `and`/`or`, `===`, `==`, `!=`, `>=`, `<=`, `>`, `<`, `in`, `not in`을 조합할 수 있으며, `and`를 `or`보다 먼저 평가합니다. 리터럴-변수 순서를 바꾼 비교도 지원합니다. `platform_release`, `platform_version`, 알 수 없는 변수, 지원하지 않는 연산자나 문법은 fail-closed로 처리하여 의존성을 포함하지 않습니다. wheel 선택은 대상 CPython 태그, 범용 `py3`/`py2.py3`, 대상보다 같거나 낮은 CPython 버전의 `abi3` 태그만 호환으로 판단합니다. 대상 Python이 지정되면 PyPI의 패키지·파일 `requires_python`과 Simple API 파일의 `requiresPython`도 PEP 440 specifier set으로 평가하며, 호환 wheel과 source distribution이 모두 없으면 해당 직접 패키지는 해결 실패로 반환됩니다. `latest`와 범위 의존성은 호환 산출물이 있는 비철회 릴리스만 후보로 삼아 PEP 440 순서로 가장 높은 안정 버전을 선택합니다. wildcard가 없는 `==`/`===` 정확 고정만 철회 릴리스를 허용하고, 프리릴리스는 제약에 포함됐거나 안정 후보가 없을 때만 후보가 됩니다. 필수 전이 의존성의 버전 선택, 메타데이터 조회 또는 최대 깊이 확장이 실패하면 해당 직접 루트 전체를 해결 실패로 반환합니다.
 
 ### Characterization 회귀 고정
 

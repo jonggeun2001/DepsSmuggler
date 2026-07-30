@@ -90,11 +90,12 @@
 - Modify: `docs/superpowers/specs/2026-07-30-pip-marker-and-transitive-resolution-design.md` only if implementation reveals an approved-spec ambiguity.
 - Modify: `docs/cli.md`
 - Modify: `docs/resolvers.md`
+- Modify: `package.json`, `scripts/cli.cjs`, `tsconfig.cli.json` to keep the documented source CLI command executable in a module package.
 - Modify: pull request description after source verification.
 
-- [ ] Run focused tests from Tasks 1-4, then `npm run test`, `npm run lint`, `npm run build`, and `git diff --check`.
-- [ ] Update CLI and resolver documentation with the direct-root failure policy and supported marker evaluation boundary.
-- [ ] Run a real Python 3.12 CLI `--deps` download for a package with transitive dependencies and inspect the archive contents and summary.
+- [x] Run focused tests from Tasks 1-4, then `npm run test`, `npm run lint`, `npm run build`, and `git diff --check`.
+- [x] Update CLI and resolver documentation with the direct-root failure policy and supported marker evaluation boundary.
+- [x] Run a real Python 3.12 CLI download with default dependency inclusion and inspect the archive contents and summary.
 - [ ] Review the final diff for behavior outside the accepted specification and update the PR description with exact verification results.
 - [ ] Push the branch and wait for all required GitHub Actions checks.
 - [ ] Run the independent review gate on the final PR diff. Address findings and repeat verification/review until it reports PASS.
