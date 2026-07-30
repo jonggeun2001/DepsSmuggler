@@ -57,12 +57,15 @@
 **Files:**
 - Modify: `src/core/resolver/pip-resolver.ts`
 - Modify: `src/core/resolver/pip-resolver.test.ts`
+- Modify: `src/core/shared/pip-simple-api-client.ts`
+- Create: `src/core/shared/pip-simple-api-client.test.ts`
 
 - [ ] Add failing tests for selected Simple API artifacts that advertise PEP 658 metadata but cannot load it, and for artifacts without inline metadata where the PyPI JSON fallback cannot establish `Requires-Dist`.
 - [ ] Add a control test confirming that successfully read metadata with an empty `Requires-Dist` list is a valid leaf.
-- [ ] Make metadata loading distinguish an established empty dependency list from unavailable dependency information.
+- [ ] Add shared Simple API client tests that distinguish a successful PEP 658 response with no `Requires-Dist` entries from an unavailable or failed PEP 658 metadata response.
+- [ ] Change the shared metadata-fetch result to represent established metadata separately from unavailable/error metadata; preserve callers that only need a parsed dependency list.
 - [ ] Use PEP 658 metadata when advertised, otherwise use the public PyPI JSON fallback; raise the required-resolution error when neither source establishes dependency metadata.
-- [ ] Run `npm run test -- --run src/core/resolver/pip-resolver.test.ts`.
+- [ ] Run `npm run test -- --run src/core/resolver/pip-resolver.test.ts src/core/shared/pip-simple-api-client.test.ts`.
 - [ ] Commit: `fix: require pip dependency metadata for resolved artifacts`
 
 ## Task 4: Evaluate PEP 508 Markers and Merge Extras Per Root
@@ -85,10 +88,13 @@
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-07-30-pip-marker-and-transitive-resolution-design.md` only if implementation reveals an approved-spec ambiguity.
+- Modify: `docs/cli.md`
+- Modify: `docs/resolvers.md`
 - Modify: pull request description after source verification.
 
 - [ ] Run focused tests from Tasks 1-4, then `npm run test`, `npm run lint`, `npm run build`, and `git diff --check`.
-- [ ] Run a real Python 3.12 CLI download with an available package and inspect the archive contents and summary.
+- [ ] Update CLI and resolver documentation with the direct-root failure policy and supported marker evaluation boundary.
+- [ ] Run a real Python 3.12 CLI `--deps` download for a package with transitive dependencies and inspect the archive contents and summary.
 - [ ] Review the final diff for behavior outside the accepted specification and update the PR description with exact verification results.
 - [ ] Push the branch and wait for all required GitHub Actions checks.
 - [ ] Run the independent review gate on the final PR diff. Address findings and repeat verification/review until it reports PASS.
