@@ -15,17 +15,19 @@ Prevent pip CLI archives from silently omitting required transitive dependencies
 
 - Add a third-party PEP 508 parser dependency.
 - Invent target values for `platform_release` or `platform_version`.
-- Change marker-free dependency resolution, package registry fallback, or archive packaging behavior.
+- Change archive packaging behavior or add private registry authentication.
 
 ## Design
 
 ### Required Transitive Dependencies
 
-After parsing and marker-filtering `Requires-Dist`, every remaining dependency is required. If its version cannot be selected from the custom index or PyPI fallback, or fetching its metadata later fails, the resolver throws a dependency-resolution error that identifies the parent and child package. `resolveAllDependencies` already turns a resolver error into a failed direct root; the CLI then follows its existing best-effort or `--strict` policy. Marker-filtered dependencies remain optional for the current target and do not cause a failure.
+After parsing and marker-filtering `Requires-Dist`, every remaining dependency is required. If no version satisfies its specifier, fetching its metadata fails, or resolution reaches `maxDepth` while another applicable dependency remains, the resolver throws a dependency-resolution error that identifies the parent and child package. Pip resolution no longer substitutes an incompatible fallback version for a required specifier; a fallback is only valid when it satisfies the specifier. `resolveAllDependencies` already turns a resolver error into a failed direct root; the CLI then follows its existing best-effort or `--strict` policy. Marker-filtered dependencies remain optional for the current target and do not cause a failure.
+
+For a custom Simple API artifact, advertised PEP 658 metadata must be fetched and parsed successfully. When PEP 658 metadata is not advertised, the resolver attempts the public PyPI metadata fallback. If neither source can establish `Requires-Dist`, resolution fails rather than assuming an empty dependency list. A successfully fetched empty `Requires-Dist` remains a valid dependency-free package.
 
 ### Marker Environment
 
-The resolver derives one immutable environment for a resolution run:
+The resolver derives immutable target values for a resolution run:
 
 | Marker | Source |
 | --- | --- |
@@ -37,9 +39,9 @@ The resolver derives one immutable environment for a resolution run:
 | `platform_machine` | Normalized selected architecture |
 | `platform_python_implementation` | `CPython` |
 | `implementation_name` | `cpython` |
-| `extra` | Each selected extra, or an empty value |
+| `extra` | The extras requested for the package currently being expanded, or an empty value |
 
-`platform_release` and `platform_version` are deliberately unavailable because the application does not collect target OS release information. A marker using an unavailable value evaluates to false.
+`platform_release` and `platform_version` are deliberately unavailable because the application does not collect target OS release information. A marker using an unavailable value evaluates to false. `extra` is the only package-scoped value: root extras do not leak to descendants, and a dependency declared as `child[foo]` evaluates `child` requirements with `foo`.
 
 ### Marker Evaluation
 
@@ -49,7 +51,7 @@ The existing parenthesis and `and`/`or` expression handling remains. Atomic cond
 
 Regression coverage will verify:
 
-- A missing or incompatible required child makes its direct root fail, allowing CLI best-effort mode to skip that root and `--strict` to fail.
+- A missing, incompatible, metadata-unavailable, or depth-limited required child makes its direct root fail, allowing CLI best-effort mode to skip that root and `--strict` to fail.
 - The newly supported marker variables and `in`/`not in` select or exclude dependencies for a Linux CPython target.
 - Unknown variables, unavailable target values, and malformed conditions are excluded.
 - Existing `python_version` patch handling remains `major.minor`, while `requires_python` continues to use the full version.
