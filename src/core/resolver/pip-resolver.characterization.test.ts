@@ -146,6 +146,7 @@ const simplifyResult = (result: Awaited<ReturnType<PipResolver['resolveDependenc
 describe('PipResolver characterization', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({ status: 'not-advertised' });
   });
 
   it('simple fixture의 그래프를 고정한다', async () => {
@@ -450,9 +451,15 @@ describe('PipResolver characterization', () => {
     });
     simpleApiMock.fetchWheelMetadata.mockImplementation(async (file: { filename: string }) => {
       if (file.filename.includes('numpy-1.26.4-cp311')) {
-        return ['typing-extensions>=4.12.2'];
+        return {
+          status: 'available',
+          requiresDist: ['typing-extensions>=4.12.2'],
+        };
       }
-      return [];
+      return {
+        status: 'available',
+        requiresDist: [],
+      };
     });
     pipCacheMock.fetchPackageMetadata.mockImplementation(async () => null);
 
@@ -464,6 +471,76 @@ describe('PipResolver characterization', () => {
     });
 
     expect(simplifyResult(result)).toMatchSnapshot();
+  });
+
+  it('광고된 PEP 658 메타데이터를 읽지 못하고 PyPI 대체도 없으면 root를 실패시킨다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'root-1.0.0-py3-none-any.whl',
+        url: 'https://packages.example.com/root-1.0.0.whl',
+        metadataHash: { algorithm: 'sha256', digest: 'abc123' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'unavailable',
+      error: 'metadata unavailable',
+    });
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const resolver = new PipResolver();
+
+    await expect(
+      resolver.resolveDependencies('root', '1.0.0', {
+        indexUrl: 'https://packages.example.com/simple',
+        pythonVersion: '3.12',
+      })
+    ).rejects.toThrow('PEP 658 메타데이터를 읽을 수 없습니다');
+  });
+
+  it('메타데이터가 없는 커스텀 산출물에 PyPI 대체도 없으면 root를 실패시킨다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'root-1.0.0-py3-none-any.whl',
+        url: 'https://packages.example.com/root-1.0.0.whl',
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'not-advertised',
+    });
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const resolver = new PipResolver();
+
+    await expect(
+      resolver.resolveDependencies('root', '1.0.0', {
+        indexUrl: 'https://packages.example.com/simple',
+        pythonVersion: '3.12',
+      })
+    ).rejects.toThrow('의존성 메타데이터를 확인할 수 없습니다');
+  });
+
+  it('빈 PEP 658 메타데이터는 PyPI 대체 없이 의존성 없는 root로 처리한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'root-1.0.0-py3-none-any.whl',
+        url: 'https://packages.example.com/root-1.0.0.whl',
+        metadataHash: { algorithm: 'sha256', digest: 'abc123' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
+    pipCacheMock.fetchPackageMetadata.mockRejectedValue(new Error('PyPI fallback should not run'));
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('root', '1.0.0', {
+      indexUrl: 'https://packages.example.com/simple',
+      pythonVersion: '3.12',
+    });
+
+    expect(result.flatList).toHaveLength(1);
+    expect(pipCacheMock.fetchPackageMetadata).not.toHaveBeenCalled();
   });
 
   it('커스텀 인덱스에서 호환 산출물이 없는 root를 해결 실패로 처리한다', async () => {
@@ -717,6 +794,7 @@ describe('PipResolver characterization', () => {
         {
           filename: 'future-1.1.0-py3-none-any.whl',
           url: 'https://packages.example.com/future-1.1.0.whl',
+          metadataHash: 'sha256:future',
           yanked: true,
         },
       ],
@@ -725,7 +803,9 @@ describe('PipResolver characterization', () => {
       return filesByPackage[name] ?? [];
     });
     simpleApiMock.fetchWheelMetadata.mockImplementation(async (file: { filename: string }) => {
-      return file.filename.startsWith('root-') ? ['future===1.1.0'] : [];
+      return file.filename.startsWith('root-')
+        ? { status: 'available', requiresDist: ['future===1.1.0'] }
+        : { status: 'available', requiresDist: [] };
     });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
@@ -797,10 +877,12 @@ describe('PipResolver characterization', () => {
         {
           filename: 'future-1.1.0-py3-none-any.whl',
           url: 'https://packages.example.com/future-1.1.0.whl',
+          metadataHash: 'sha256:future-1.1.0',
         },
         {
           filename: 'future-1.2.0-py3-none-any.whl',
           url: 'https://packages.example.com/future-1.2.0.whl',
+          metadataHash: 'sha256:future-1.2.0',
           yanked: true,
         },
       ],
@@ -809,7 +891,9 @@ describe('PipResolver characterization', () => {
       return filesByPackage[name] ?? [];
     });
     simpleApiMock.fetchWheelMetadata.mockImplementation(async (file: { filename: string }) => {
-      return file.filename.startsWith('root-') ? ['future==1.*'] : [];
+      return file.filename.startsWith('root-')
+        ? { status: 'available', requiresDist: ['future==1.*'] }
+        : { status: 'available', requiresDist: [] };
     });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
@@ -956,7 +1040,13 @@ describe('PipResolver characterization', () => {
         requiresPython: '>=3.13',
       },
     ]);
-    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: {
+          requires_dist: [],
+        },
+      },
+    });
 
     const resolver = new PipResolver();
     const result = await resolver.resolveDependencies('future', 'latest', {

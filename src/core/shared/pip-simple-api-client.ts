@@ -32,6 +32,11 @@ export interface SimpleApiPackageFile {
   };
 }
 
+export type WheelMetadataResult =
+  | { status: 'not-advertised' }
+  | { status: 'available'; requiresDist: string[] }
+  | { status: 'unavailable'; error: string };
+
 /**
  * 휠 파일명 파싱 결과
  */
@@ -286,12 +291,12 @@ export function isSourceDistribution(filename: string): boolean {
  * PEP 658: 휠 메타데이터 파일에서 의존성 정보 가져오기
  *
  * @param file Simple API 파일 정보 (metadataHash가 있어야 함)
- * @returns Requires-Dist 목록
+ * @returns 메타데이터 가용 상태와 Requires-Dist 목록
  */
-export async function fetchWheelMetadata(file: SimpleApiPackageFile): Promise<string[]> {
+export async function fetchWheelMetadata(file: SimpleApiPackageFile): Promise<WheelMetadataResult> {
   if (!file.metadataHash) {
     logger.debug('메타데이터 해시 없음, PEP 658 미지원', { filename: file.filename });
-    return [];
+    return { status: 'not-advertised' };
   }
 
   try {
@@ -309,13 +314,20 @@ export async function fetchWheelMetadata(file: SimpleApiPackageFile): Promise<st
     });
 
     const metadata = response.data as string;
-    return parseRequiresDist(metadata);
+    return {
+      status: 'available',
+      requiresDist: parseRequiresDist(metadata),
+    };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     logger.warn('PEP 658 메타데이터 조회 실패', {
       filename: file.filename,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
     });
-    return [];
+    return {
+      status: 'unavailable',
+      error: errorMessage,
+    };
   }
 }
 

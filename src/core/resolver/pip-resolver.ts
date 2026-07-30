@@ -458,21 +458,23 @@ export class PipResolver implements IResolver {
         throw new Error(`호환되는 패키지를 찾을 수 없습니다: ${name}@${actualVersion}`);
       }
 
-      // PEP 658 메타데이터에서 의존성 정보 조회
-      if (selectedFile.metadataHash) {
-        requiresDist = await fetchWheelMetadata(selectedFile);
-      }
-
-      // PEP 658 실패 시 PyPI 폴백
-      if (requiresDist.length === 0) {
+      const wheelMetadata = await fetchWheelMetadata(selectedFile);
+      if (wheelMetadata.status === 'available') {
+        requiresDist = wheelMetadata.requiresDist;
+      } else if (wheelMetadata.status === 'unavailable') {
+        throw new Error(
+          `PEP 658 메타데이터를 읽을 수 없습니다: ${name}@${actualVersion} (${wheelMetadata.error})`
+        );
+      } else {
         try {
           const baseVersion = actualVersion.split('+')[0];
           const pypiResult = await fetchPackageMetadata(name, baseVersion, this.cacheOptions);
-          if (pypiResult) {
-            requiresDist = pypiResult.data.info.requires_dist || [];
+          if (!pypiResult) {
+            throw new Error('PyPI 메타데이터가 없습니다');
           }
+          requiresDist = pypiResult.data.info.requires_dist ?? [];
         } catch {
-          // 커스텀 전용 패키지일 수 있음
+          throw new Error(`의존성 메타데이터를 확인할 수 없습니다: ${name}@${actualVersion}`);
         }
       }
 

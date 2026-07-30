@@ -42,7 +42,7 @@
 
 **Files:**
 - Modify: `src/core/resolver/pip-resolver.ts`
-- Modify: `src/core/resolver/pip-resolver.test.ts`
+- Modify: `src/core/resolver/pip-resolver.characterization.test.ts`
 
 - [x] Add failing resolver tests for a required child with no satisfying version, a required child whose metadata fetch fails, and a required child blocked by `maxDepth`.
 - [x] Add a regression test proving an incompatible child release is not selected as a fallback for an unsatisfied requirement.
@@ -60,13 +60,13 @@
 - Modify: `src/core/shared/pip-simple-api-client.ts`
 - Create: `src/core/shared/pip-simple-api-client.test.ts`
 
-- [ ] Add failing tests for selected Simple API artifacts that advertise PEP 658 metadata but cannot load it, and for artifacts without inline metadata where the PyPI JSON fallback cannot establish `Requires-Dist`.
-- [ ] Add a control test confirming that successfully read metadata with an empty `Requires-Dist` list is a valid leaf.
-- [ ] Add shared Simple API client tests that distinguish a successful PEP 658 response with no `Requires-Dist` entries from an unavailable or failed PEP 658 metadata response.
-- [ ] Change the shared metadata-fetch result to represent established metadata separately from unavailable/error metadata; preserve callers that only need a parsed dependency list.
-- [ ] Use PEP 658 metadata when advertised, otherwise use the public PyPI JSON fallback; raise the required-resolution error when neither source establishes dependency metadata.
-- [ ] Run `npm run test -- --run src/core/resolver/pip-resolver.test.ts src/core/shared/pip-simple-api-client.test.ts`.
-- [ ] Commit: `fix: require pip dependency metadata for resolved artifacts`
+- [x] Add failing tests for selected Simple API artifacts that advertise PEP 658 metadata but cannot load it, and for artifacts without inline metadata where the PyPI JSON fallback cannot establish `Requires-Dist`.
+- [x] Add a control test confirming that successfully read metadata with an empty `Requires-Dist` list is a valid leaf.
+- [x] Add shared Simple API client tests that distinguish a successful PEP 658 response with no `Requires-Dist` entries from an unavailable or failed PEP 658 metadata response.
+- [x] Change the shared metadata-fetch result to represent established metadata separately from unavailable/error metadata; preserve callers that only need a parsed dependency list.
+- [x] Use PEP 658 metadata when advertised, otherwise use the public PyPI JSON fallback; raise the required-resolution error when neither source establishes dependency metadata.
+- [x] Run `npm run test -- --run src/core/resolver/pip-resolver.characterization.test.ts src/core/shared/pip-simple-api-client.test.ts`.
+- [x] Commit: `fix: require pip dependency metadata for resolved artifacts`
 
 ## Task 4: Evaluate PEP 508 Markers and Merge Extras Per Root
 
