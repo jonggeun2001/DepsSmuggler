@@ -352,6 +352,178 @@ describe('PipResolver characterization', () => {
     expect(simplifyResult(result)).toMatchSnapshot();
   });
 
+  it('서로 다른 경로의 extras를 같은 패키지에 합쳐 새 extra를 재확장한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        root: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['left>=1.0.0', 'right>=1.0.0'] },
+          },
+        },
+        left: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['shared[alpha]>=1.0.0'] },
+          },
+        },
+        right: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['shared[beta]>=1.0.0'] },
+          },
+        },
+        shared: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {
+              requiresDist: [
+                'alpha-child>=1.0.0 ; extra == "alpha"',
+                'beta-child>=1.0.0 ; extra == "beta"',
+              ],
+            },
+          },
+        },
+        alpha_child: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {},
+          },
+        },
+        beta_child: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {},
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('root', '1.0.0', {
+      targetPlatform: { system: 'Linux', machine: 'x86_64' },
+      pythonVersion: '3.12.2',
+    });
+
+    expect(result.flatList).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'shared', version: '1.0.0' }),
+        expect.objectContaining({ name: 'alpha_child', version: '1.0.0' }),
+        expect.objectContaining({ name: 'beta_child', version: '1.0.0' }),
+      ])
+    );
+  });
+
+  it('동일 패키지에서 기본 extra와 새 extra를 모두 유지한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        root: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['first>=1.0.0', 'second>=1.0.0'] },
+          },
+        },
+        first: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['shared>=1.0.0'] },
+          },
+        },
+        second: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['shared[docs]>=1.0.0'] },
+          },
+        },
+        shared: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {
+              requiresDist: [
+                'base-child>=1.0.0 ; extra != "docs"',
+                'docs-child>=1.0.0 ; extra == "docs"',
+              ],
+            },
+          },
+        },
+        base_child: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {},
+          },
+        },
+        docs_child: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {},
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('root', '1.0.0', {
+      targetPlatform: { system: 'Linux', machine: 'x86_64' },
+      pythonVersion: '3.12.2',
+    });
+
+    expect(result.flatList).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'base_child', version: '1.0.0' }),
+        expect.objectContaining({ name: 'docs_child', version: '1.0.0' }),
+      ])
+    );
+  });
+
+  it('한 직접 루트의 extras가 다음 직접 루트로 누출되지 않는다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        root_one: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['shared[docs]>=1.0.0'] },
+          },
+        },
+        root_two: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['shared>=1.0.0'] },
+          },
+        },
+        shared: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {
+              requiresDist: ['docs-child>=1.0.0 ; extra == "docs"'],
+            },
+          },
+        },
+        docs_child: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {},
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+    const options = {
+      targetPlatform: { system: 'Linux' as const, machine: 'x86_64' as const },
+      pythonVersion: '3.12.2',
+    };
+
+    const first = await resolver.resolveDependencies('root_one', '1.0.0', options);
+    const second = await resolver.resolveDependencies('root_two', '1.0.0', options);
+
+    expect(first.flatList).toContainEqual(
+      expect.objectContaining({ name: 'docs_child', version: '1.0.0' })
+    );
+    expect(second.flatList).not.toContainEqual(
+      expect.objectContaining({ name: 'docs_child', version: '1.0.0' })
+    );
+  });
+
   it('만족 불가능한 필수 버전 제약은 직접 루트를 실패시킨다', async () => {
     pipCacheMock.fetchPackageMetadata.mockImplementation(
       createPyPIFixtureResponder({

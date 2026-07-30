@@ -75,14 +75,14 @@
 - Modify: `src/core/resolver/pip-resolver.test.ts`
 - Modify: `src/core/resolver/pip-resolver.characterization.test.ts`
 
-- [ ] Add failing marker tests for `python_full_version`, `implementation_version`, `os_name`, `platform_python_implementation`, and `implementation_name` using a non-host target.
-- [ ] Add failing tests for `in`/`not in`, reversed literal-variable comparisons, unavailable `platform_release`/`platform_version`, and unsupported syntax. Assert unknown or unavailable conditions evaluate false.
-- [ ] Add failing tests where multiple paths request distinct extras for the same name@version in one direct-root tree. Assert extras are unioned and the package is re-expanded when a new extra is discovered.
-- [ ] Add a test proving extras from one direct root cannot enable dependencies for a separately resolved direct root.
-- [ ] Build a target marker environment from explicit Python version, normalized platform/architecture, and the fixed CPython resolver identity. Compare version-valued variables with PEP 440 semantics and all other supported values as strings.
-- [ ] Track resolved package state by normalized name@version plus an extras set local to one `resolveDependencies` call; retain the empty set and reprocess only on newly added extras.
-- [ ] Run `npm run test -- --run src/core/resolver/pip-resolver.test.ts src/core/resolver/pip-resolver.characterization.test.ts`.
-- [ ] Commit: `fix: evaluate pip markers against target environment`
+- [x] Add failing marker tests for `python_full_version`, `implementation_version`, `os_name`, `platform_python_implementation`, and `implementation_name` using a non-host target.
+- [x] Add failing tests for `in`/`not in`, reversed literal-variable comparisons, unavailable `platform_release`/`platform_version`, and unsupported syntax. Assert unknown or unavailable conditions evaluate false.
+- [x] Add failing tests where multiple paths request distinct extras for the same name@version in one direct-root tree. Assert extras are unioned and the package is re-expanded when a new extra is discovered.
+- [x] Add a test proving extras from one direct root cannot enable dependencies for a separately resolved direct root.
+- [x] Build a target marker environment from explicit Python version, normalized platform/architecture, and the fixed CPython resolver identity. Compare version-valued variables with PEP 440 semantics and all other supported values as strings.
+- [x] Track resolved package state by normalized name@version plus an extras set local to one `resolveDependencies` call; retain the empty set and reprocess only on newly added extras.
+- [x] Run `npm run test -- --run src/core/resolver/pip-resolver.test.ts src/core/resolver/pip-resolver.characterization.test.ts`.
+- [x] Commit: `fix: evaluate pip markers against target environment`
 
 ## Task 5: Integrate, Verify, and Review
 

@@ -39,9 +39,20 @@ interface ParsedDependency {
   markers?: string;
 }
 
-type MarkerComparisonOperator = '===' | '==' | '!=' | '>=' | '<=' | '>' | '<';
+type MarkerComparisonOperator =
+  | 'not in'
+  | 'in'
+  | '==='
+  | '=='
+  | '!='
+  | '>='
+  | '<='
+  | '>'
+  | '<';
 
 const MARKER_COMPARISON_OPERATORS: readonly MarkerComparisonOperator[] = [
+  'not in',
+  'in',
   '===',
   '==',
   '!=',
@@ -179,8 +190,20 @@ export class PipResolver implements IResolver {
       const resolvedNodes: Map<string, DependencyNode> = new Map();
       // 부모-자식 관계 저장 (부모캐시키 → 자식캐시키[])
       const parentChildMap: Map<string, string[]> = new Map();
+      // 패키지별로 확장한 extra. 기본 의존성은 빈 문자열로 보존한다.
+      const expandedExtrasByCacheKey: Map<string, Set<string>> = new Map();
       // 루트 캐시키
       let rootCacheKey: string | undefined;
+
+      const addParentChildRelation = (parentKey: string | undefined, childKey: string): void => {
+        if (!parentKey) return;
+
+        const children = parentChildMap.get(parentKey) || [];
+        if (!children.includes(childKey)) {
+          children.push(childKey);
+          parentChildMap.set(parentKey, children);
+        }
+      };
 
       // BFS 반복
       while (queue.length > 0) {
@@ -241,17 +264,19 @@ export class PipResolver implements IResolver {
         }
 
         const { packageInfo, requiresDist, actualVersion } = fetchResult;
-        const cacheKey = `${name.toLowerCase()}@${actualVersion}`;
+        const cacheKey = `${normalizePipPackageName(name)}@${actualVersion}`;
+        const requestedExtras = new Set(
+          (ext && ext.length > 0 ? ext : ['']).map(normalizePipExtraName)
+        );
+        const expandedExtras = expandedExtrasByCacheKey.get(cacheKey) || new Set<string>();
+        const extrasToExpand = Array.from(requestedExtras).filter(
+          (extra) => !expandedExtras.has(extra)
+        );
 
-        // 이미 해결된 패키지면 스킵 (부모-자식 관계만 추가)
-        if (resolvedNodes.has(cacheKey)) {
-          if (parentCacheKey) {
-            const children = parentChildMap.get(parentCacheKey) || [];
-            if (!children.includes(cacheKey)) {
-              children.push(cacheKey);
-              parentChildMap.set(parentCacheKey, children);
-            }
-          }
+        addParentChildRelation(parentCacheKey, cacheKey);
+
+        // 이미 확장한 extra만 요청되면 그래프 연결만 추가한다.
+        if (resolvedNodes.has(cacheKey) && extrasToExpand.length === 0) {
           continue;
         }
 
@@ -261,19 +286,19 @@ export class PipResolver implements IResolver {
         }
 
         // 노드 생성 및 저장
-        const node: DependencyNode = {
-          package: packageInfo,
-          dependencies: [], // 나중에 트리 빌드 시 채움
-        };
-        resolvedNodes.set(cacheKey, node);
-        this.visited.set(cacheKey, node);
-
-        // 부모-자식 관계 저장
-        if (parentCacheKey) {
-          const children = parentChildMap.get(parentCacheKey) || [];
-          children.push(cacheKey);
-          parentChildMap.set(parentCacheKey, children);
+        if (!resolvedNodes.has(cacheKey)) {
+          const node: DependencyNode = {
+            package: packageInfo,
+            dependencies: [], // 나중에 트리 빌드 시 채움
+          };
+          resolvedNodes.set(cacheKey, node);
+          this.visited.set(cacheKey, node);
         }
+
+        for (const extra of extrasToExpand) {
+          expandedExtras.add(extra);
+        }
+        expandedExtrasByCacheKey.set(cacheKey, expandedExtras);
 
         // 의존성 파싱 및 큐에 추가
         if (requiresDist.length > 0) {
@@ -281,7 +306,7 @@ export class PipResolver implements IResolver {
             .map((dep) => this.parseDependencyString(dep))
             .filter(
               (dep): dep is ParsedDependency =>
-                dep !== null && this.evaluateMarker(dep.markers, ext)
+                dep !== null && this.evaluateMarker(dep.markers, extrasToExpand)
             );
 
           if (depth >= maxDepth && parsedDeps.length > 0) {
@@ -324,30 +349,19 @@ export class PipResolver implements IResolver {
                 );
               }
 
-              const depCacheKey = `${dep.name.toLowerCase()}@${depVersion}`;
-              // 아직 해결되지 않은 패키지만 큐에 추가
-              if (!resolvedNodes.has(depCacheKey)) {
-                queue.push({
-                  name: dep.name,
-                  version: depVersion,
-                  indexUrl: usedIndexUrl,
-                  extras: dep.extras,
-                  parentCacheKey: cacheKey,
-                  parent: {
-                    name: packageInfo.name,
-                    version: actualVersion,
-                    versionSpec: dep.versionSpec,
-                  },
-                  depth: depth + 1,
-                });
-              } else {
-                // 이미 해결된 경우 부모-자식 관계만 추가
-                const children = parentChildMap.get(cacheKey) || [];
-                if (!children.includes(depCacheKey)) {
-                  children.push(depCacheKey);
-                  parentChildMap.set(cacheKey, children);
-                }
-              }
+              queue.push({
+                name: dep.name,
+                version: depVersion,
+                indexUrl: usedIndexUrl,
+                extras: dep.extras,
+                parentCacheKey: cacheKey,
+                parent: {
+                  name: packageInfo.name,
+                  version: actualVersion,
+                  versionSpec: dep.versionSpec,
+                },
+                depth: depth + 1,
+              });
             } catch (error) {
               if (error instanceof RequiredDependencyResolutionError) {
                 throw error;
@@ -614,47 +628,70 @@ export class PipResolver implements IResolver {
 
   private evaluateMarkerCondition(condition: string, extra: string): boolean {
     const markerMatch = condition.match(
-      /^(python_version|sys_platform|platform_system|platform_machine|extra)\s*(===|==|!=|>=|<=|>|<)\s*["']([^"']*)["']$/
+      /^(?:(["'])(.*?)\1|([A-Za-z_][A-Za-z0-9_]*))\s*(not\s+in|in|===|==|!=|>=|<=|>|<)\s*(?:(["'])(.*?)\5|([A-Za-z_][A-Za-z0-9_]*))$/
     );
-    if (!markerMatch) return true;
+    if (!markerMatch) return false;
 
-    const [, variable, operator, requiredValue] = markerMatch;
-    if (!isMarkerComparisonOperator(operator)) return true;
+    const [, , leftLiteral, leftVariable, operator, , rightLiteral, rightVariable] = markerMatch;
+    if (!isMarkerComparisonOperator(operator)) return false;
+
+    const left = leftVariable
+      ? this.getMarkerValue(leftVariable, extra)
+      : leftLiteral;
+    const right = rightVariable
+      ? this.getMarkerValue(rightVariable, extra)
+      : rightLiteral;
+    if (left === undefined || right === undefined) return false;
+
+    const comparesMachine = leftVariable === 'platform_machine' ||
+      rightVariable === 'platform_machine';
+    const comparableLeft = comparesMachine ? normalizeMachine(left) : left;
+    const comparableRight = comparesMachine ? normalizeMachine(right) : right;
+
+    if (operator === 'in') return comparableRight.includes(comparableLeft);
+    if (operator === 'not in') return !comparableRight.includes(comparableLeft);
+
+    const comparesVersion = isVersionMarkerVariable(leftVariable) || isVersionMarkerVariable(rightVariable);
+    const comparison = comparesVersion
+      ? comparePep440Versions(comparableLeft, comparableRight)
+      : comparableLeft.localeCompare(comparableRight);
+    return matchesComparison(comparison, operator);
+  }
+
+  private getMarkerValue(variable: string, extra: string): string | undefined {
     const { system, machine } = this.targetPlatform ?? {};
-
-    if (variable === 'extra') {
-      return matchesComparison(extra.localeCompare(requiredValue), operator);
-    }
-
-    if (variable === 'python_version') {
-      if (!this.pythonVersion) return true;
-      return matchesComparison(
-        comparePythonVersions(getPythonMarkerVersion(this.pythonVersion), requiredValue),
-        operator
-      );
-    }
-
-    if (variable === 'platform_system') {
-      return system ? matchesComparison(system.localeCompare(requiredValue), operator) : false;
-    }
-
-    if (variable === 'platform_machine') {
-      if (!machine) return false;
-      return matchesComparison(
-        normalizeMachine(machine).localeCompare(normalizeMachine(requiredValue)),
-        operator
-      );
-    }
-
-    const platformMap: Record<string, string> = {
+    const pythonFullVersion = this.pythonVersion ?? this.pipTargetPlatform?.pythonVersion;
+    const sysPlatforms: Record<NonNullable<TargetPlatform['system']>, string> = {
       Linux: 'linux',
       Windows: 'win32',
       Darwin: 'darwin',
     };
-    const targetPlatform = system ? platformMap[system] : undefined;
-    return targetPlatform
-      ? matchesComparison(targetPlatform.localeCompare(requiredValue), operator)
-      : false;
+
+    switch (variable) {
+      case 'python_version':
+        return pythonFullVersion ? getPythonMarkerVersion(pythonFullVersion) : undefined;
+      case 'python_full_version':
+      case 'implementation_version':
+        return pythonFullVersion;
+      case 'os_name':
+        if (system === 'Windows') return 'nt';
+        return system ? 'posix' : undefined;
+      case 'sys_platform':
+        return system ? sysPlatforms[system] : undefined;
+      case 'platform_system':
+        return system;
+      case 'platform_machine':
+        return machine ? normalizeMachine(machine) : undefined;
+      case 'platform_python_implementation':
+        return 'CPython';
+      case 'implementation_name':
+        return 'cpython';
+      case 'extra':
+        return extra;
+      default:
+        // platform_release, platform_version, 그리고 알 수 없는 변수는 대상 정보가 없다.
+        return undefined;
+    }
   }
 
   /**
@@ -1177,19 +1214,6 @@ export class PipResolver implements IResolver {
   }
 }
 
-function comparePythonVersions(left: string, right: string): number {
-  const leftParts = left.split('.').map(Number);
-  const rightParts = right.split('.').map(Number);
-  const maxLength = Math.max(leftParts.length, rightParts.length);
-
-  for (let index = 0; index < maxLength; index += 1) {
-    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
-    if (difference !== 0) return difference > 0 ? 1 : -1;
-  }
-
-  return 0;
-}
-
 function matchesComparison(
   comparison: number,
   operator: MarkerComparisonOperator
@@ -1208,6 +1232,8 @@ function matchesComparison(
       return comparison > 0;
     case '<':
       return comparison < 0;
+    default:
+      return false;
   }
 }
 
@@ -1225,6 +1251,20 @@ function normalizeMachine(machine: string): string {
 function getPythonMarkerVersion(pythonVersion: string): string {
   const match = /^(\d+)\.(\d+)/.exec(pythonVersion.trim());
   return match ? `${match[1]}.${match[2]}` : pythonVersion;
+}
+
+function normalizePipPackageName(name: string): string {
+  return name.toLowerCase().replace(/[-_.]+/g, '-');
+}
+
+function normalizePipExtraName(extra: string): string {
+  return extra === '' ? '' : normalizePipPackageName(extra);
+}
+
+function isVersionMarkerVariable(variable: string | undefined): boolean {
+  return variable === 'python_version' ||
+    variable === 'python_full_version' ||
+    variable === 'implementation_version';
 }
 
 function isExactPinnedVersionSpecifier(versionSpec: string | undefined): boolean {

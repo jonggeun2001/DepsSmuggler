@@ -336,6 +336,41 @@ describe('PipResolver 단위 테스트', () => {
       });
     });
 
+    describe('확장 PEP 508 marker 환경', () => {
+      beforeEach(() => {
+        resolver = createResolver({
+          targetPlatform: { system: 'Linux', machine: 'x86_64' },
+          pythonVersion: '3.12.2',
+        });
+      });
+
+      it('선택한 대상의 Python 및 구현 marker를 평가한다', () => {
+        expect(callEvaluateMarker(resolver, 'python_full_version == "3.12.2"')).toBe(true);
+        expect(callEvaluateMarker(resolver, 'implementation_version >= "3.12.2"')).toBe(true);
+        expect(callEvaluateMarker(resolver, 'platform_python_implementation == "CPython"')).toBe(true);
+        expect(callEvaluateMarker(resolver, 'implementation_name == "cpython"')).toBe(true);
+      });
+
+      it('선택한 대상의 OS marker를 평가한다', () => {
+        expect(callEvaluateMarker(resolver, 'os_name == "posix"')).toBe(true);
+        expect(callEvaluateMarker(resolver, 'os_name == "nt"')).toBe(false);
+      });
+
+      it('in, not in 및 리터럴-변수 역방향 비교를 평가한다', () => {
+        expect(callEvaluateMarker(resolver, 'sys_platform in "linux win32"')).toBe(true);
+        expect(callEvaluateMarker(resolver, 'sys_platform not in "win32 darwin"')).toBe(true);
+        expect(callEvaluateMarker(resolver, '"linux" == sys_platform')).toBe(true);
+        expect(callEvaluateMarker(resolver, '"3.12.2" <= python_full_version')).toBe(true);
+      });
+
+      it('사용할 수 없거나 지원하지 않는 marker 조건은 제외한다', () => {
+        expect(callEvaluateMarker(resolver, 'platform_release == "6.0"')).toBe(false);
+        expect(callEvaluateMarker(resolver, 'platform_version == "1"')).toBe(false);
+        expect(callEvaluateMarker(resolver, 'unknown_marker == "value"')).toBe(false);
+        expect(callEvaluateMarker(resolver, 'python_version ~= "3.12"')).toBe(false);
+      });
+    });
+
     describe('extra 마커', () => {
       beforeEach(() => {
         resolver = createResolver({
