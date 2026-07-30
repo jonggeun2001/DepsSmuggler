@@ -45,6 +45,10 @@ The resolver derives immutable target values for a resolution run:
 
 Package identity remains normalized `name@version`, but requested extras are merged across every path to that identity. The resolver records the extras already expanded for a package and re-expands it when a newly reached path adds an extra. The empty extra is retained for unqualified paths. This produces the union of applicable child requirements without duplicating the package artifact or dependency node.
 
+### Direct Root Ownership
+
+Each `PipResolver.resolveDependencies` call owns one direct-root resolution tree, so extra unions never cross direct roots. `resolveAllDependencies` records the normalized package identities returned by every successful direct root before producing its final deduplicated list. If another direct root fails, only identities owned exclusively by that failed root are omitted; an identity also owned by a successful root remains. This prevents name/version-based failed-root filtering from removing a package that is needed transitively by a successful root.
+
 ### Marker Evaluation
 
 The existing parenthesis and `and`/`or` expression handling remains. Atomic conditions support equality, inequality, ordered comparison, `in`, and `not in`, including quoted-literal and marker-variable operands. Version-valued markers use the existing PEP 440 comparison helper; string-valued markers use exact or membership comparisons. Parsing failures, unsupported variables, unavailable values, and unsupported operators are false. This fail-closed rule prevents an archive from receiving packages that were not requested for the selected target.
@@ -56,6 +60,7 @@ Regression coverage will verify:
 - A missing, incompatible, metadata-unavailable, or depth-limited required child makes its direct root fail, allowing CLI best-effort mode to skip that root and `--strict` to fail.
 - The newly supported marker variables and `in`/`not in` select or exclude dependencies for a Linux CPython target.
 - Multiple paths requesting different extras for one package expand the union of those extras exactly once per extra.
+- A failed direct root cannot remove an identity that another successful root owns transitively.
 - Unknown variables, unavailable target values, and malformed conditions are excluded.
 - Existing `python_version` patch handling remains `major.minor`, while `requires_python` continues to use the full version.
 
