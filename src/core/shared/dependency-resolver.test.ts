@@ -419,6 +419,38 @@ describe('dependency-resolver', () => {
       expect(result.allPackages).toHaveLength(1);
     });
 
+    it('실패한 직접 루트와 같은 전이 의존성을 성공 루트 결과에 보존한다', async () => {
+      const mockResolver = {
+        resolveDependencies: vi.fn()
+          .mockResolvedValueOnce({
+            root: { package: { type: 'pip', name: 'alpha', version: '1.0.0' }, dependencies: [] },
+            flatList: [
+              { type: 'pip', name: 'alpha', version: '1.0.0' },
+              { type: 'pip', name: 'shared', version: '2.0.0' },
+            ],
+            conflicts: [],
+            totalSize: 0,
+          })
+          .mockRejectedValueOnce(new Error('shared root resolution failed')),
+      };
+      vi.mocked(getPipResolver).mockReturnValue(mockResolver as any);
+
+      const result = await resolveAllDependencies([
+        { id: 'pip-alpha-1.0.0', type: 'pip', name: 'alpha', version: '1.0.0' },
+        { id: 'pip-shared-2.0.0', type: 'pip', name: 'shared', version: '2.0.0' },
+      ]);
+
+      expect(result.failedPackages).toEqual([
+        { name: 'shared', version: '2.0.0', error: 'shared root resolution failed' },
+      ]);
+      expect(result.successfulPackages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'pip', name: 'alpha', version: '1.0.0' }),
+          expect.objectContaining({ type: 'pip', name: 'shared', version: '2.0.0' }),
+        ])
+      );
+    });
+
     it('진행 상황 콜백 호출 (성공)', async () => {
       const mockPipResult = {
         root: { package: { type: 'pip', name: 'flask', version: '2.0.0' }, dependencies: [] },

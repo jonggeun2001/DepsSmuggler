@@ -31,12 +31,12 @@
 - Modify: `src/cli/commands/download.ts`
 - Modify: `src/cli/commands/download.test.ts`
 
-- [ ] Add failing shared-resolver tests where two direct roots resolve the same normalized package identity and one root fails; assert that the package remains available for the successful root.
-- [ ] Add failing CLI tests for default best-effort and `--strict`: default packages only successful root closures, while strict still fails before creating an archive.
-- [ ] Extend the resolver result with normalized package identities or package lists owned by each successful direct root. Build this from each successful `resolveDependencies` call rather than from a global aggregate alone.
-- [ ] Update the CLI to select packages from successful-root ownership and remove the failed-root name/version exclusion that can discard a shared dependency.
-- [ ] Run `npm run test -- --run src/core/shared/dependency-resolver.test.ts src/cli/commands/download.test.ts`.
-- [ ] Commit: `fix: retain packages owned by successful roots`
+- [x] Add failing shared-resolver tests where two direct roots resolve the same normalized package identity and one root fails; assert that the package remains available for the successful root.
+- [x] Add failing CLI tests for default best-effort and `--strict`: default packages only successful root closures, while strict still fails before creating an archive.
+- [x] Extend the resolver result with normalized package identities or package lists owned by each successful direct root. Build this from each successful `resolveDependencies` call rather than from a global aggregate alone.
+- [x] Update the CLI to select packages from successful-root ownership and remove the failed-root name/version exclusion that can discard a shared dependency.
+- [x] Run `npm run test -- --run src/core/shared/dependency-resolver.test.ts src/cli/commands/download.test.ts`.
+- [x] Commit: `fix: retain packages owned by successful roots`
 
 ## Task 2: Fail a Direct Root When a Required Descendant Cannot Resolve
 

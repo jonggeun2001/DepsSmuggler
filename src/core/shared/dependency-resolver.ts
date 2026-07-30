@@ -43,6 +43,8 @@ export interface ResolvedPackageList {
   originalPackages: DownloadPackage[];
   /** 의존성 포함 전체 패키지 목록 */
   allPackages: DownloadPackage[];
+  /** 성공한 직접 루트가 소유한 패키지 목록 */
+  successfulPackages?: DownloadPackage[];
   /** 각 패키지의 의존성 트리 */
   dependencyTrees: DependencyResolutionResult[];
   /** 해결 실패한 패키지 목록 */
@@ -129,6 +131,7 @@ export async function resolveAllDependencies(
   options?: DependencyResolverOptions
 ): Promise<ResolvedPackageList> {
   const resolvedSet = new Map<string, DownloadPackage>();
+  const successfulPackageSet = new Map<string, DownloadPackage>();
   const dependencyTrees: DependencyResolutionResult[] = [];
   const failedPackages: { name: string; version: string; error: string }[] = [];
 
@@ -143,6 +146,7 @@ export async function resolveAllDependencies(
     return {
       originalPackages: packages,
       allPackages: [...packages],
+      successfulPackages: [...packages],
       dependencyTrees,
       failedPackages,
     };
@@ -339,6 +343,13 @@ export async function resolveAllDependencies(
             }
 
             logger.info(`[${currentIndex}/${totalPackages}] ${pkg.type}/${pkg.name}: ${result.packages.length}개 패키지 해결됨`);
+            for (const resolvedPkg of result.packages) {
+              const depKey = `${pkg.type}:${resolvedPkg.name}@${resolvedPkg.version}`;
+              const downloadPkg = resolvedSet.get(depKey);
+              if (downloadPkg) {
+                successfulPackageSet.set(depKey, downloadPkg);
+              }
+            }
             options?.onProgress?.({
               current: currentIndex,
               total: totalPackages,
@@ -366,6 +377,7 @@ export async function resolveAllDependencies(
       } else if (osTypes.includes(pkg.type) || pkg.type === 'docker') {
         // osPackageInfo가 없는 OS 패키지 또는 Docker - 원본만 포함
         logger.info(`[${currentIndex}/${totalPackages}] ${pkg.type}/${pkg.name}@${pkg.version}: 패키지 정보 없음, 원본만 포함`);
+        successfulPackageSet.set(key, pkg);
         options?.onProgress?.({
           current: currentIndex,
           total: totalPackages,
@@ -377,6 +389,7 @@ export async function resolveAllDependencies(
         continue;
       } else {
         logger.warn(`지원하지 않는 패키지 타입: ${pkg.type}`, { package: pkg.name });
+        successfulPackageSet.set(key, pkg);
         options?.onProgress?.({
           current: currentIndex,
           total: totalPackages,
@@ -519,6 +532,13 @@ export async function resolveAllDependencies(
             });
           }
         }
+        for (const depPkg of npmResult.flatList) {
+          const depKey = `npm:${depPkg.name}@${depPkg.version}`;
+          const downloadPkg = resolvedSet.get(depKey);
+          if (downloadPkg) {
+            successfulPackageSet.set(depKey, downloadPkg);
+          }
+        }
 
         // 성공 로그 및 콜백 (npm)
         const npmDepCount = npmResult.flatList.length;
@@ -582,6 +602,13 @@ export async function resolveAllDependencies(
             resolvedSet.set(depKey, downloadPkg);
           }
         }
+        for (const depPkg of result.flatList) {
+          const depKey = `${depPkg.type}:${depPkg.name}@${depPkg.version}`;
+          const downloadPkg = resolvedSet.get(depKey);
+          if (downloadPkg) {
+            successfulPackageSet.set(depKey, downloadPkg);
+          }
+        }
 
         // 성공 로그 및 콜백 (기타 타입)
         const depCount = result.flatList.length;
@@ -618,6 +645,7 @@ export async function resolveAllDependencies(
   return {
     originalPackages: packages,
     allPackages: Array.from(resolvedSet.values()),
+    successfulPackages: Array.from(successfulPackageSet.values()),
     dependencyTrees,
     failedPackages,
   };

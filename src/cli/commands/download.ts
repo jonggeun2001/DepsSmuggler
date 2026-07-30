@@ -162,7 +162,7 @@ async function preparePackagesForDownload(
       skippedRoots.map((pkg) => getNormalizedPackageKey(pkg.name, pkg.version))
     );
 
-    const resolvedPackages = resolved.allPackages
+    const resolvedPackages = resolved.successfulPackages ?? resolved.allPackages
       .filter((pkg) => !skippedRootKeys.has(getNormalizedPackageKey(pkg.name, pkg.version)));
 
     if (resolvedPackages.length === 0) {

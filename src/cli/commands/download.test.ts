@@ -463,6 +463,94 @@ describe('downloadCommand', () => {
     ]);
   });
 
+  it('성공한 루트가 필요로 하는 실패 루트와 동명 패키지를 다운로드한다', async () => {
+    readFile.mockResolvedValue('alpha==1.0.0\nshared==2.0.0\n');
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'pip-alpha-1.0.0',
+          type: 'pip',
+          name: 'alpha',
+          version: '1.0.0',
+          architecture: 'x86_64',
+        },
+        {
+          id: 'pip-shared-2.0.0',
+          type: 'pip',
+          name: 'shared',
+          version: '2.0.0',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'pip-alpha-1.0.0',
+          type: 'pip',
+          name: 'alpha',
+          version: '1.0.0',
+          architecture: 'x86_64',
+        },
+        {
+          id: 'pip-shared-2.0.0',
+          type: 'pip',
+          name: 'shared',
+          version: '2.0.0',
+          architecture: 'x86_64',
+        },
+      ],
+      successfulPackages: [
+        {
+          id: 'pip-alpha-1.0.0',
+          type: 'pip',
+          name: 'alpha',
+          version: '1.0.0',
+          architecture: 'x86_64',
+        },
+        {
+          id: 'pip-shared-2.0.0',
+          type: 'pip',
+          name: 'shared',
+          version: '2.0.0',
+          architecture: 'x86_64',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [
+        {
+          name: 'shared',
+          version: '2.0.0',
+          error: 'shared root resolution failed',
+        },
+      ],
+    });
+
+    await downloadCommand({
+      type: 'pip',
+      pkgVersion: 'latest',
+      arch: 'x86_64',
+      output: './output',
+      format: 'zip',
+      file: 'requirements.txt',
+      deps: true,
+      concurrency: '3',
+    });
+
+    expect(addToQueue).toHaveBeenCalledWith([
+      {
+        type: 'pip',
+        name: 'alpha',
+        version: '1.0.0',
+        arch: 'x86_64',
+      },
+      {
+        type: 'pip',
+        name: 'shared',
+        version: '2.0.0',
+        arch: 'x86_64',
+      },
+    ]);
+  });
+
   it('호환 wheel이 없는 직접 항목도 정상 항목과 함께 best-effort로 건너뛴다', async () => {
     readFile.mockResolvedValue('requests==2.28.0\nnative-only==1.0.0\n');
     vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
