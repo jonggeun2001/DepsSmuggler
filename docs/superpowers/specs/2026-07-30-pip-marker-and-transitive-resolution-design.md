@@ -43,6 +43,8 @@ The resolver derives immutable target values for a resolution run:
 
 `platform_release` and `platform_version` are deliberately unavailable because the application does not collect target OS release information. A marker using an unavailable value evaluates to false. `extra` is the only package-scoped value: root extras do not leak to descendants, and a dependency declared as `child[foo]` evaluates `child` requirements with `foo`.
 
+Package identity remains normalized `name@version`, but requested extras are merged across every path to that identity. The resolver records the extras already expanded for a package and re-expands it when a newly reached path adds an extra. The empty extra is retained for unqualified paths. This produces the union of applicable child requirements without duplicating the package artifact or dependency node.
+
 ### Marker Evaluation
 
 The existing parenthesis and `and`/`or` expression handling remains. Atomic conditions support equality, inequality, ordered comparison, `in`, and `not in`, including quoted-literal and marker-variable operands. Version-valued markers use the existing PEP 440 comparison helper; string-valued markers use exact or membership comparisons. Parsing failures, unsupported variables, unavailable values, and unsupported operators are false. This fail-closed rule prevents an archive from receiving packages that were not requested for the selected target.
@@ -53,6 +55,7 @@ Regression coverage will verify:
 
 - A missing, incompatible, metadata-unavailable, or depth-limited required child makes its direct root fail, allowing CLI best-effort mode to skip that root and `--strict` to fail.
 - The newly supported marker variables and `in`/`not in` select or exclude dependencies for a Linux CPython target.
+- Multiple paths requesting different extras for one package expand the union of those extras exactly once per extra.
 - Unknown variables, unavailable target values, and malformed conditions are excluded.
 - Existing `python_version` patch handling remains `major.minor`, while `requires_python` continues to use the full version.
 
