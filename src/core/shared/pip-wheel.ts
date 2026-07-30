@@ -115,6 +115,190 @@ export function isWheelSupported(wheel: WheelInfo, supportedTags: PlatformTag[])
 }
 
 /**
+ * wheel의 Python/ABI 태그가 대상 CPython 버전과 호환되는지 확인합니다.
+ */
+export function isPythonWheelCompatible(
+  pythonTag: string,
+  abiTag: string,
+  targetPythonVersion: string
+): boolean {
+  const targetMatch = /^(\d+)\.(\d+)(?:\.\d+)?$/.exec(targetPythonVersion);
+  if (!targetMatch) return false;
+
+  const targetMajor = Number(targetMatch[1]);
+  const targetMinor = Number(targetMatch[2]);
+  const targetCpTag = `cp${targetMajor}${targetMinor}`;
+  const abiTags = new Set(abiTag.toLowerCase().split('.'));
+
+  return pythonTag.toLowerCase().split('.').some((tag) => {
+    if (tag === `py${targetMajor}` || tag === `py${targetMajor}${targetMinor}`) {
+      return abiTags.has('none');
+    }
+
+    const cpythonMatch = /^cp(\d)(\d+)$/.exec(tag);
+    if (!cpythonMatch || Number(cpythonMatch[1]) !== targetMajor) {
+      return false;
+    }
+
+    const wheelMinor = Number(cpythonMatch[2]);
+    if (abiTags.has('abi3')) {
+      return wheelMinor <= targetMinor;
+    }
+
+    return wheelMinor === targetMinor && (abiTags.has(targetCpTag) || abiTags.has('none'));
+  });
+}
+
+interface ParsedPythonVersion {
+  epoch: number;
+  release: number[];
+  prerelease: number;
+  prereleaseNumber: number;
+  devrelease: number | null;
+  postrelease: number;
+}
+
+/**
+ * 대상 Python 버전이 Requires-Python PEP 440 specifier set을 만족하는지 확인합니다.
+ */
+export function isPythonRequiresCompatible(
+  requiresPython: string | undefined,
+  targetPythonVersion: string | undefined
+): boolean {
+  if (!requiresPython || !targetPythonVersion) return true;
+
+  const target = parsePythonVersion(targetPythonVersion);
+  if (!target) return false;
+
+  return requiresPython
+    .split(',')
+    .map((specifier) => specifier.trim())
+    .filter(Boolean)
+    .every((specifier) => matchesPythonSpecifier(target, targetPythonVersion, specifier));
+}
+
+function matchesPythonSpecifier(
+  target: ParsedPythonVersion,
+  targetRawVersion: string,
+  specifier: string
+): boolean {
+  const match = /^(===|==|!=|~=|>=|<=|>|<)\s*(.+)$/.exec(specifier);
+  if (!match) return false;
+
+  const [, operator, rawRequirement] = match;
+  if (operator === '===') return targetRawVersion === rawRequirement;
+
+  const hasWildcard = rawRequirement.endsWith('.*');
+  const requirement = parsePythonVersion(
+    hasWildcard ? rawRequirement.slice(0, -2) : rawRequirement
+  );
+  if (!requirement) return false;
+
+  if (hasWildcard) {
+    if (operator !== '==' && operator !== '!=') return false;
+    const matchesPrefix = requirement.release.every(
+      (part, index) => target.release[index] === part
+    );
+    return operator === '==' ? matchesPrefix : !matchesPrefix;
+  }
+
+  const comparison = comparePythonVersions(target, requirement);
+  switch (operator) {
+    case '==':
+      return comparison === 0;
+    case '!=':
+      return comparison !== 0;
+    case '>=':
+      return comparison >= 0;
+    case '<=':
+      return comparison <= 0;
+    case '>':
+      return comparison > 0;
+    case '<':
+      return comparison < 0;
+    case '~=':
+      if (requirement.release.length < 2) return false;
+      return comparison >= 0 && comparePythonVersions(target, compatibleReleaseUpperBound(requirement)) < 0;
+    default:
+      return false;
+  }
+}
+
+function parsePythonVersion(version: string): ParsedPythonVersion | null {
+  const match = /^(?:(\d+)!)?v?(\d+(?:\.\d+)*)(?:[-_.]?(a|b|c|rc|alpha|beta|pre|preview)(\d*)?)?(?:[-_.]?post(\d*)?)?(?:[-_.]?dev(\d*)?)?(?:\+[a-z0-9.-]+)?$/i.exec(
+    version.trim()
+  );
+  if (!match) return null;
+
+  const [
+    ,
+    epoch = '0',
+    release,
+    prereleaseLabel,
+    prereleaseNumber,
+    postreleaseNumber,
+    devreleaseNumber,
+  ] = match;
+  const prereleaseRank: Record<string, number> = {
+    a: 0,
+    alpha: 0,
+    b: 1,
+    beta: 1,
+    c: 2,
+    rc: 2,
+    pre: 2,
+    preview: 2,
+  };
+
+  return {
+    epoch: Number(epoch),
+    release: release.split('.').map(Number),
+    prerelease: prereleaseLabel
+      ? prereleaseRank[prereleaseLabel.toLowerCase()]
+      : devreleaseNumber === undefined
+        ? 3
+        : -1,
+    prereleaseNumber: prereleaseNumber ? Number(prereleaseNumber) : 0,
+    devrelease: devreleaseNumber === undefined ? null : Number(devreleaseNumber || 0),
+    postrelease: postreleaseNumber ? Number(postreleaseNumber) : 0,
+  };
+}
+
+function comparePythonVersions(left: ParsedPythonVersion, right: ParsedPythonVersion): number {
+  if (left.epoch !== right.epoch) return left.epoch - right.epoch;
+
+  const maxLength = Math.max(left.release.length, right.release.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    const difference = (left.release[index] ?? 0) - (right.release[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+
+  if (left.prerelease !== right.prerelease) return left.prerelease - right.prerelease;
+  if (left.prereleaseNumber !== right.prereleaseNumber) {
+    return left.prereleaseNumber - right.prereleaseNumber;
+  }
+  const leftDevrelease = left.devrelease ?? Infinity;
+  const rightDevrelease = right.devrelease ?? Infinity;
+  if (leftDevrelease !== rightDevrelease) return leftDevrelease - rightDevrelease;
+  return left.postrelease - right.postrelease;
+}
+
+function compatibleReleaseUpperBound(requirement: ParsedPythonVersion): ParsedPythonVersion {
+  const upperRelease = requirement.release.slice(0, -1);
+  const lastIndex = upperRelease.length - 1;
+  upperRelease[lastIndex] += 1;
+
+  return {
+    epoch: requirement.epoch,
+    release: upperRelease,
+    prerelease: 3,
+    prereleaseNumber: 0,
+    devrelease: null,
+    postrelease: 0,
+  };
+}
+
+/**
  * Wheel의 최소 지원 인덱스 반환 (pip의 support_index_min)
  * 낮을수록 더 선호됨
  * 호환되지 않으면 -1 반환

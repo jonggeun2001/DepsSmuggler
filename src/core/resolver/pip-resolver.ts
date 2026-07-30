@@ -57,6 +57,11 @@ interface QueueItem {
   indexUrl?: string;
   extras?: string[];
   parentCacheKey?: string; // 부모 패키지 캐시키 (트리 구축용)
+  parent?: {
+    name: string;
+    version: string;
+    versionSpec?: string;
+  };
 }
 
 // 패키지 정보 조회 결과
@@ -113,6 +118,33 @@ function comparePipVersionsDescending(
   return comparePep440Versions(rightVersion, leftVersion);
 }
 
+function isPipVersionCompatible(
+  version: string,
+  versionSpec: string,
+): boolean {
+  if (isVersionCompatible(version, versionSpec)) {
+    return true;
+  }
+
+  if (!isPrereleaseVersion(version) || !explicitlyRequestsPrerelease(versionSpec)) {
+    return false;
+  }
+
+  return versionSpec.split(',').every((rawClause) => {
+    const clause = rawClause.trim();
+    if (isVersionCompatible(version, clause)) {
+      return true;
+    }
+
+    const lessThanMatch = /^<\s*(.+)$/.exec(clause);
+    return Boolean(
+      lessThanMatch &&
+        !isPrereleaseVersion(lessThanMatch[1]) &&
+        comparePep440Versions(version, lessThanMatch[1]) < 0,
+    );
+  });
+}
+
 function getSimpleApiChecksum(
   file: SimpleApiPackageFile | null,
 ): PipArtifactChecksum | undefined {
@@ -147,6 +179,22 @@ function hasMatchingPypiArtifactChecksum(
       digests?.[algorithm];
     return releaseDigest?.toLowerCase() === expectedDigest;
   });
+}
+
+class RequiredDependencyResolutionError extends Error {
+  constructor(
+    parentName: string,
+    parentVersion: string,
+    dependencyName: string,
+    dependencyVersionSpec?: string,
+    reason?: string,
+  ) {
+    const requestedDependency = `${dependencyName}${dependencyVersionSpec ?? ''}`;
+    super(
+      `필수 의존성 해결 실패: ${parentName}@${parentVersion} -> ${requestedDependency}${reason ? ` (${reason})` : ''}`,
+    );
+    this.name = 'RequiredDependencyResolutionError';
+  }
 }
 
 export class PipResolver implements IResolver {
@@ -219,6 +267,7 @@ export class PipResolver implements IResolver {
     }
 
     const maxDepth = options?.maxDepth ?? 10;
+    const skipDependencyExpansion = options?.skipDependencyExpansion ?? false;
     const indexUrl = options?.indexUrl;
     const extras = options?.extras;
 
@@ -242,13 +291,40 @@ export class PipResolver implements IResolver {
       // 루트 캐시키
       let rootCacheKey: string | undefined;
 
+      const addParentChildRelation = (parentKey: string | undefined, childKey: string): void => {
+        if (!parentKey) return;
+
+        const children = parentChildMap.get(parentKey) || [];
+        if (!children.includes(childKey)) {
+          children.push(childKey);
+          parentChildMap.set(parentKey, children);
+        }
+      };
+
       // BFS 반복
       while (queue.length > 0) {
         const current = queue.shift()!;
-        const { name, version: ver, indexUrl: idx, extras: ext, parentCacheKey, depth } = current;
+        const {
+          name,
+          version: ver,
+          indexUrl: idx,
+          extras: ext,
+          parentCacheKey,
+          parent,
+          depth,
+        } = current;
 
         // 최대 깊이 체크
         if (depth > maxDepth) {
+          if (parent) {
+            throw new RequiredDependencyResolutionError(
+              parent.name,
+              parent.version,
+              name,
+              parent.versionSpec,
+              '최대 의존성 탐색 깊이를 초과했습니다'
+            );
+          }
           continue;
         }
 
@@ -259,25 +335,37 @@ export class PipResolver implements IResolver {
             name,
             ver,
             idx,
-            depth < maxDepth,
+            true,
           );
         } catch (error) {
+          logger.warn('패키지 정보 조회 실패', { name, version: ver, error });
           if (!parentCacheKey) {
             throw error;
           }
-          const reason =
-            error instanceof Error ? error.message : String(error);
-          throw new Error(
-            `필수 pip 의존성 아티팩트를 해결할 수 없습니다: ${name}@${ver} (${reason})`,
+          throw new RequiredDependencyResolutionError(
+            parent?.name ?? packageName,
+            parent?.version ?? version,
+            name,
+            parent?.versionSpec,
+            error instanceof Error ? error.message : String(error),
           );
         }
 
-        if (!fetchResult) continue;
+        if (!fetchResult) {
+          if (parent) {
+            throw new RequiredDependencyResolutionError(
+              parent.name,
+              parent.version,
+              name,
+              parent.versionSpec,
+              '패키지 정보를 찾을 수 없습니다',
+            );
+          }
+          continue;
+        }
 
-        const { packageInfo, requiresDist } = fetchResult;
+        const { packageInfo, requiresDist, actualVersion } = fetchResult;
         const cacheKey = getPackageArtifactKey(packageInfo);
-
-        // extra 패키지도 기본 의존성과 선택한 extra 의존성을 함께 가진다.
         const incomingExtras = Array.from(
           new Set([
             '',
@@ -287,16 +375,9 @@ export class PipResolver implements IResolver {
           ]),
         );
 
-        // 이미 해결된 패키지는 새 extra가 있을 때만 의존성을 다시 평가
-        if (resolvedNodes.has(cacheKey)) {
-          if (parentCacheKey) {
-            const children = parentChildMap.get(parentCacheKey) || [];
-            if (!children.includes(cacheKey)) {
-              children.push(cacheKey);
-              parentChildMap.set(parentCacheKey, children);
-            }
-          }
+        addParentChildRelation(parentCacheKey, cacheKey);
 
+        if (resolvedNodes.has(cacheKey)) {
           const processedExtras =
             resolvedExtras.get(cacheKey) ?? new Set<string>();
           const newExtras = incomingExtras.filter(
@@ -310,12 +391,10 @@ export class PipResolver implements IResolver {
           }
           resolvedExtras.set(cacheKey, processedExtras);
         } else {
-          // 루트 캐시키 저장
           if (!rootCacheKey) {
             rootCacheKey = cacheKey;
           }
 
-          // 노드 생성 및 저장
           const node: DependencyNode = {
             package: packageInfo,
             dependencies: [], // 나중에 트리 빌드 시 채움
@@ -323,25 +402,13 @@ export class PipResolver implements IResolver {
           resolvedNodes.set(cacheKey, node);
           this.visited.set(cacheKey, node);
           resolvedExtras.set(cacheKey, new Set(incomingExtras));
-
-          // 부모-자식 관계 저장
-          if (parentCacheKey) {
-            const children = parentChildMap.get(parentCacheKey) || [];
-            children.push(cacheKey);
-            parentChildMap.set(parentCacheKey, children);
-          }
         }
-
-        if (depth >= maxDepth) {
-          continue;
-        }
-
         // 의존성 파싱 및 큐에 추가
         if (requiresDist.length > 0) {
           const parsedDeps = requiresDist
             .map((dep) => this.parseDependencyString(dep))
             .filter(
-              (dep) =>
+              (dep): dep is ParsedDependency =>
                 dep !== null &&
                 this.evaluateMarker(
                   dep.markers,
@@ -349,9 +416,22 @@ export class PipResolver implements IResolver {
                 ),
             );
 
-          for (const dep of parsedDeps) {
-            if (!dep) continue;
+          if (skipDependencyExpansion) {
+            continue;
+          }
 
+          if (depth >= maxDepth && parsedDeps.length > 0) {
+            const firstDependency = parsedDeps[0];
+            throw new RequiredDependencyResolutionError(
+              packageInfo.name,
+              actualVersion,
+              firstDependency.name,
+              firstDependency.versionSpec,
+              '최대 의존성 탐색 깊이를 초과했습니다',
+            );
+          }
+
+          for (const dep of parsedDeps) {
             try {
               // 의존성 버전 조회
               let depVersion: string | null = null;
@@ -371,26 +451,39 @@ export class PipResolver implements IResolver {
               }
 
               if (!depVersion) {
-                throw new Error('호환되는 버전을 찾을 수 없습니다.');
+                throw new RequiredDependencyResolutionError(
+                  packageInfo.name,
+                  actualVersion,
+                  dep.name,
+                  dep.versionSpec,
+                  '만족 가능한 버전을 찾을 수 없습니다',
+                );
               }
 
-              // 저장소/URL/파일/체크섬은 실제 패키지 정보를 조회한 뒤에야
-              // 확정된다. name@version만으로 미리 중복 제거하면 서로 다른
-              // 인덱스의 같은 버전 아티팩트가 합쳐지므로 최종 아티팩트 키는
-              // dequeue 후 packageInfo에서 계산한다.
               queue.push({
                 name: dep.name,
                 version: depVersion,
                 indexUrl: usedIndexUrl,
                 extras: dep.extras,
                 parentCacheKey: cacheKey,
+                parent: {
+                  name: packageInfo.name,
+                  version: actualVersion,
+                  versionSpec: dep.versionSpec,
+                },
                 depth: depth + 1,
               });
             } catch (error) {
-              const reason =
-                error instanceof Error ? error.message : String(error);
-              throw new Error(
-                `필수 pip 의존성 버전을 해결할 수 없습니다: ${name} -> ${dep.name} (${reason})`,
+              if (error instanceof RequiredDependencyResolutionError) {
+                throw error;
+              }
+              logger.warn('의존성 버전 조회 실패', { parent: name, dependency: dep.name, error });
+              throw new RequiredDependencyResolutionError(
+                packageInfo.name,
+                actualVersion,
+                dep.name,
+                dep.versionSpec,
+                error instanceof Error ? error.message : String(error),
               );
             }
           }
@@ -496,27 +589,22 @@ export class PipResolver implements IResolver {
 
       // 최적의 wheel 선택
       const selectedFile = this.selectBestWheelFromSimpleApi(targetFiles);
-      if (this.pipTargetPlatform && !selectedFile) {
+      if (!selectedFile) {
         throw new Error(
           `대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: ${name}@${actualVersion}`,
         );
       }
 
-      // PEP 658 메타데이터에서 의존성 정보 조회. 빈 배열은
-      // "조회 성공 + 의존성 없음"이고 null은 조회 불가다.
+      const wheelMetadata = await fetchWheelMetadata(selectedFile);
       let customMetadataAvailable = false;
-      if (selectedFile?.metadataHash) {
-        const metadataRequiresDist =
-          await fetchWheelMetadata(selectedFile);
-        if (metadataRequiresDist !== null) {
-          requiresDist = metadataRequiresDist;
-          customMetadataAvailable = true;
-        }
-      }
-
-      // PEP 658을 사용할 수 없을 때는 선택한 커스텀 아티팩트와
-      // PyPI 아티팩트의 체크섬이 같을 때만 공개 메타데이터를 사용한다.
-      if (!customMetadataAvailable && selectedFile) {
+      if (wheelMetadata.status === 'available') {
+        requiresDist = wheelMetadata.requiresDist;
+        customMetadataAvailable = true;
+      } else if (wheelMetadata.status === 'unavailable') {
+        throw new Error(
+          `PEP 658 메타데이터를 읽을 수 없습니다: ${name}@${actualVersion} (${wheelMetadata.error})`,
+        );
+      } else {
         try {
           const baseVersion = actualVersion.split('+')[0];
           const pypiResult = await fetchPackageMetadata(name, baseVersion, this.cacheOptions);
@@ -531,13 +619,12 @@ export class PipResolver implements IResolver {
             customMetadataAvailable = true;
           }
         } catch {
-          // 커스텀 전용 패키지일 수 있음
+          // 검증 가능한 공개 메타데이터가 없으면 아래에서 실패 처리한다.
         }
       }
 
       if (
         requireDependencyMetadata &&
-        selectedFile &&
         !customMetadataAvailable
       ) {
         throw new Error(
@@ -552,8 +639,8 @@ export class PipResolver implements IResolver {
         metadata: {
           description: '',
           size: 0,
-          filename: selectedFile?.filename,
-          downloadUrl: selectedFile?.url,
+          filename: selectedFile.filename,
+          downloadUrl: selectedFile.url,
           checksum: getSimpleApiChecksum(selectedFile),
           indexUrl,
         },
@@ -588,12 +675,20 @@ export class PipResolver implements IResolver {
           packageFilename = selectedFile.filename;
           packageDownloadUrl = selectedFile.url;
           packageChecksum = {
-            ...(selectedFile.digests.md5
+            ...(selectedFile.digests?.md5
               ? { md5: selectedFile.digests.md5 }
               : {}),
-            sha256: selectedFile.digests.sha256,
+            ...(selectedFile.digests?.sha256
+              ? { sha256: selectedFile.digests.sha256 }
+              : {}),
           };
         }
+      }
+
+      if (this.pipTargetPlatform && !packageFilename) {
+        throw new Error(
+          `대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: ${name}@${actualVersion}`,
+        );
       }
 
       packageInfo = {
@@ -644,19 +739,25 @@ export class PipResolver implements IResolver {
       // extras 제거 후 이름과 버전 분리
       const withoutExtras = mainPart.replace(/\[[^\]]+\]/, '');
 
-      // 버전 지정자 패턴
-      const versionPattern = /(>=|<=|==|!=|~=|>|<|===)/;
-      const match = withoutExtras.match(versionPattern);
-
       let name: string;
       let versionSpec: string | undefined;
 
-      if (match) {
-        const index = withoutExtras.indexOf(match[0]);
-        name = withoutExtras.substring(0, index).trim();
-        versionSpec = withoutExtras.substring(index).trim();
+      const parenthesizedSpec = withoutExtras.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
+      if (parenthesizedSpec) {
+        name = parenthesizedSpec[1].trim();
+        versionSpec = parenthesizedSpec[2].trim();
       } else {
-        name = withoutExtras.trim();
+        // 버전 지정자 패턴
+        const versionPattern = /(>=|<=|==|!=|~=|>|<|===)/;
+        const match = withoutExtras.match(versionPattern);
+
+        if (match) {
+          const index = withoutExtras.indexOf(match[0]);
+          name = withoutExtras.substring(0, index).trim();
+          versionSpec = withoutExtras.substring(index).trim();
+        } else {
+          name = withoutExtras.trim();
+        }
       }
 
       // 패키지명 정규화 (소문자, 하이픈을 언더스코어로)
@@ -675,8 +776,7 @@ export class PipResolver implements IResolver {
 
   /**
    * 환경 마커 평가
-   * 알려진 대상 환경 값으로 PEP 508 마커를 평가
-   * 알 수 없거나 해석할 수 없는 조건은 의존성 누락을 막기 위해 포함
+   * 알려진 대상 환경 값으로 PEP 508 마커를 평가한다.
    */
   private evaluateMarker(marker?: string, extras?: string[]): boolean {
     // 마커가 없으면 항상 포함
@@ -733,7 +833,6 @@ export class PipResolver implements IResolver {
                 implementation_version: incompleteFullVersion,
               }
             : undefined,
-          unknownResult: true,
         },
       ),
     );
@@ -752,6 +851,7 @@ export class PipResolver implements IResolver {
         // Simple API 사용
         const files = await fetchPackageFiles(indexUrl, name);
         if (files.length === 0) return null;
+        const includeYanked = isExactPinnedVersionSpecifier(versionSpec);
 
         const filesByVersion = new Map<
           string,
@@ -761,7 +861,7 @@ export class PipResolver implements IResolver {
           try {
             const version = extractVersionFromFilename(file.filename);
             if (
-              !file.yanked &&
+              (!file.yanked || includeYanked) &&
               getSimplePackageType(file.filename) !== 'unknown'
             ) {
               const versionFiles = filesByVersion.get(version) ?? [];
@@ -778,7 +878,7 @@ export class PipResolver implements IResolver {
         ).filter(
           ([candidateVersion, versionFiles]) =>
             (!versionSpec ||
-              isVersionCompatible(candidateVersion, versionSpec)) &&
+              isPipVersionCompatible(candidateVersion, versionSpec)) &&
             this.selectBestWheelFromSimpleApi(versionFiles) !== null,
         );
 
@@ -799,13 +899,14 @@ export class PipResolver implements IResolver {
 
         const { data } = cacheResult;
         if (!data.releases) return null;
+        const includeYanked = isExactPinnedVersionSpecifier(versionSpec);
 
         const compatibleVersions = Object.entries(data.releases)
           .filter(
             ([candidateVersion, releases]) =>
               releases.length > 0 &&
               (!versionSpec ||
-                isVersionCompatible(candidateVersion, versionSpec)),
+                isPipVersionCompatible(candidateVersion, versionSpec)),
           )
           .sort(([leftVersion], [rightVersion]) =>
             comparePipVersionsDescending(
@@ -818,6 +919,7 @@ export class PipResolver implements IResolver {
         for (const [candidateVersion, releases] of compatibleVersions) {
           const candidates = releases.filter(
             (release) =>
+              includeYanked ||
               !(release as PyPIRelease & { yanked?: boolean }).yanked,
           );
           const selectedFile = this.selectBestWheel(candidates);
@@ -861,6 +963,7 @@ export class PipResolver implements IResolver {
           const exactCandidates = exactFiles
             .filter(
               (release) =>
+                includeYanked ||
                 !(release as PyPIRelease & { yanked?: boolean })
                   .yanked,
             )
@@ -874,7 +977,6 @@ export class PipResolver implements IResolver {
             return candidateVersion;
           }
         }
-
         return null;
       }
     } catch (error) {
@@ -915,8 +1017,8 @@ export class PipResolver implements IResolver {
         let version = 'latest';
 
         if (parsed.versionSpec) {
-          // ==로 고정된 버전 추출
-          const exactMatch = parsed.versionSpec.match(/^==(.+)$/);
+          // == 또는 ===로 고정된 버전 추출
+          const exactMatch = parsed.versionSpec.match(/^(?:===|==)\s*([^,*\s]+)\s*$/);
           if (exactMatch) {
             version = exactMatch[1];
           } else {
@@ -1362,9 +1464,13 @@ export class PipResolver implements IResolver {
         (file) =>
           getSimplePackageType(file.filename) === 'sdist' &&
           this.isRequiresPythonCompatible(file.requiresPython),
-      ) || null
-    );
+        ) || null
+      );
   }
+}
+
+function isExactPinnedVersionSpecifier(versionSpec: string | undefined): boolean {
+  return versionSpec !== undefined && /^(?:===|==)\s*[^,*\s]+\s*$/.test(versionSpec);
 }
 
 // 싱글톤 인스턴스

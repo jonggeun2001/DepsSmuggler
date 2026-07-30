@@ -40,6 +40,8 @@ export interface ResolverOptions {
   includeDevDependencies?: boolean;
   includeOptionalDependencies?: boolean;
   maxDepth?: number;
+  /** 루트 아티팩트만 검증하고 자식 의존성 탐색은 생략 */
+  skipDependencyExpansion?: boolean;
   architecture?: Architecture;
   targetPlatform?: ResolverTargetPlatform;
   pythonVersion?: string;

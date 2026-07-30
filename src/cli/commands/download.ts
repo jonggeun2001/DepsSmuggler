@@ -2,16 +2,17 @@ import * as path from 'path';
 import chalk from 'chalk';
 import cliProgress from 'cli-progress';
 import * as fs from 'fs-extra';
-import { DownloadManager, OverallProgress } from './download-runner';
-import { getArchivePackager, ArchiveFormat } from '../../core/packager/archive-packager';
-import { getScriptGenerator } from '../../core/packager/script-generator';
-import { DownloadPackage, resolveAllDependencies } from '../../core/shared';
-import { PackageInfo, PackageType, Architecture } from '../../types';
 import {
   hasExplicitTargetEnvironment,
   validateDownloadEnvironmentOptions,
   type CliDownloadEnvironmentOptions,
 } from './download-environment';
+import { DownloadManager, OverallProgress } from './download-runner';
+import { getArchivePackager, ArchiveFormat } from '../../core/packager/archive-packager';
+import { getScriptGenerator } from '../../core/packager/script-generator';
+import { DownloadPackage, resolveAllDependencies } from '../../core/shared';
+import { PackageInfo, PackageType, Architecture } from '../../types';
+import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 
 // 다운로드 옵션
 interface DownloadCommandOptions extends CliDownloadEnvironmentOptions {
@@ -21,6 +22,7 @@ interface DownloadCommandOptions extends CliDownloadEnvironmentOptions {
   format: ArchiveFormat;
   file?: string;
   deps: boolean;
+  strict?: boolean;
   concurrency: string;
 }
 
@@ -31,11 +33,41 @@ interface PreparedPackagesResult {
 }
 
 const CLI_DEPENDENCY_SUPPORTED_TYPES = new Set<PackageType>(['pip', 'conda', 'maven', 'npm']);
+const PIP_TARGET_ARCHITECTURES: Partial<Record<Architecture, PipTargetPlatform['arch']>> = {
+  x86_64: 'x86_64',
+  amd64: 'x86_64',
+  aarch64: 'aarch64',
+  arm64: 'aarch64',
+};
+
+function getNormalizedPackageKey(name: string, version: string): string {
+  return `${name.toLowerCase().replace(/[-_.]+/g, '_')}@${version}`;
+}
+
 const CLI_TARGET_ENVIRONMENT_TYPES = new Set<PackageType>(['pip', 'conda', 'maven']);
 const CLI_ROOT_ARTIFACT_RESOLUTION_TYPES = new Set<PackageType>([
   'pip',
   'conda',
 ]);
+
+function getPipTargetPlatform(
+  options: Pick<DownloadCommandOptions, 'arch' | 'targetOS' | 'pythonVersion'>,
+): PipTargetPlatform | undefined {
+  if (options.targetOS === 'any') {
+    return undefined;
+  }
+
+  const arch = PIP_TARGET_ARCHITECTURES[options.arch];
+  if (!arch) {
+    return undefined;
+  }
+
+  return {
+    os: options.targetOS,
+    arch,
+    pythonVersion: options.pythonVersion,
+  };
+}
 
 function toDownloadPackage(pkg: PackageInfo): DownloadPackage {
   const metadata = pkg.metadata as Record<string, unknown> | undefined;
@@ -108,6 +140,7 @@ async function preparePackagesForDownload(
     | 'condaChannel'
     | 'classifier'
     | 'deps'
+    | 'strict'
   >,
 ): Promise<PreparedPackagesResult> {
   const shouldResolveTargetedRoots =
@@ -141,14 +174,42 @@ async function preparePackagesForDownload(
     cudaVersion: options.cudaVersion,
     condaChannel: options.condaChannel,
     includeDependencies: true,
-    ...(!options.deps ? { maxDepth: 0 } : {}),
+    ...(!options.deps
+      ? { maxDepth: 0, resolveRootArtifactsOnly: true }
+      : {}),
   });
 
   if (resolved.failedPackages.length > 0) {
     const failedList = resolved.failedPackages
       .map((pkg) => `${pkg.name}@${pkg.version}: ${pkg.error}`)
       .join(', ');
-    throw new Error(`의존성 해결 실패: ${failedList}`);
+
+    if (options.strict) {
+      throw new Error(`의존성 해결 실패: ${failedList}`);
+    }
+
+    const failedRootKeys = new Set(
+      resolved.failedPackages.map((pkg) => getNormalizedPackageKey(pkg.name, pkg.version))
+    );
+    const skippedRoots = resolved.originalPackages.filter((pkg) =>
+      failedRootKeys.has(getNormalizedPackageKey(pkg.name, pkg.version))
+    );
+    const skippedRootKeys = new Set(
+      skippedRoots.map((pkg) => getNormalizedPackageKey(pkg.name, pkg.version))
+    );
+
+    const resolvedPackages = resolved.successfulPackages ?? resolved.allPackages
+      .filter((pkg) => !skippedRootKeys.has(getNormalizedPackageKey(pkg.name, pkg.version)));
+
+    if (resolvedPackages.length === 0) {
+      throw new Error(`다운로드할 해결된 패키지가 없습니다: ${failedList}`);
+    }
+
+    return {
+      packages: resolvedPackages.map(toPackageInfo),
+      dependencyResolutionApplied: true,
+      warning: `의존성 해결에 실패한 직접 패키지 ${skippedRoots.length}개를 건너뜁니다: ${failedList}`,
+    };
   }
 
   return {
@@ -163,6 +224,11 @@ async function preparePackagesForDownload(
  * download 명령어 핸들러
  */
 export async function downloadCommand(options: DownloadCommandOptions): Promise<void> {
+  options = {
+    ...options,
+    targetOS: options.targetOS ?? 'any',
+    condaChannel: options.condaChannel ?? 'conda-forge',
+  };
   console.log(chalk.cyan('다운로드 준비 중...'));
 
   try {
@@ -208,6 +274,9 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
     console.log(chalk.green(`✓ ${packages.length}개 패키지 준비 완료`));
 
     const requestedCount = packages.length;
+    const pipTargetPlatform = options.type === 'pip'
+      ? getPipTargetPlatform(options)
+      : undefined;
     const prepared = await preparePackagesForDownload(packages, {
       type: options.type,
       arch: options.arch,
@@ -217,6 +286,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       condaChannel: options.condaChannel,
       classifier: options.classifier,
       deps: options.deps,
+      strict: options.strict,
     });
     packages = prepared.packages;
 
@@ -279,6 +349,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       outputPath,
       concurrency: parseInt(options.concurrency, 10),
       maxRetries: 3,
+      pipTargetPlatform,
     });
 
     multibar.stop();

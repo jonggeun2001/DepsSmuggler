@@ -15,6 +15,7 @@ export interface PyPIRelease {
   packagetype: 'sdist' | 'bdist_wheel' | 'bdist_egg';
   python_version: string;
   requires_python?: string;
+  yanked?: boolean;
 }
 
 /**

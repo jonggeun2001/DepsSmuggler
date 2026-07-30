@@ -35,6 +35,11 @@ export interface SimpleApiPackageFile {
   metadataAvailable?: boolean;
 }
 
+export type WheelMetadataResult =
+  | { status: 'not-advertised' }
+  | { status: 'available'; requiresDist: string[] }
+  | { status: 'unavailable'; error: string };
+
 /**
  * 휠 파일명 파싱 결과
  */
@@ -319,23 +324,25 @@ export function isSourceDistribution(filename: string): boolean {
 /**
  * PEP 658: 휠 메타데이터 파일에서 의존성 정보 가져오기
  *
- * @param file Simple API 파일 정보 (metadataHash가 있어야 함)
- * @returns Requires-Dist 목록. 메타데이터를 가져올 수 없으면 null
+ * @returns 메타데이터 가용 상태와 Requires-Dist 목록
  */
 export async function fetchWheelMetadata(
   file: SimpleApiPackageFile,
-): Promise<string[] | null> {
+): Promise<WheelMetadataResult> {
   if (!file.metadataAvailable && !file.metadataHash) {
     logger.debug('원격 Core Metadata 미지원', {
       filename: file.filename,
     });
-    return null;
+    return { status: 'not-advertised' };
   }
   if (!file.metadataHash) {
     logger.warn('검증할 수 없는 원격 Core Metadata', {
       filename: file.filename,
     });
-    return null;
+    return {
+      status: 'unavailable',
+      error: '검증할 수 없는 원격 Core Metadata입니다',
+    };
   }
 
   try {
@@ -356,40 +363,51 @@ export async function fetchWheelMetadata(
       typeof response.data === 'string'
         ? Buffer.from(response.data, 'utf8')
         : Buffer.from(response.data as ArrayBuffer);
-    if (file.metadataHash) {
-      let actualDigest: string;
-      try {
-        actualDigest = createHash(file.metadataHash.algorithm)
-          .update(metadataBytes)
-          .digest('hex');
-      } catch {
-        logger.warn('지원하지 않는 Core Metadata 해시', {
-          filename: file.filename,
-          algorithm: file.metadataHash.algorithm,
-        });
-        return null;
-      }
+    let actualDigest: string;
+    try {
+      actualDigest = createHash(file.metadataHash.algorithm)
+        .update(metadataBytes)
+        .digest('hex');
+    } catch {
+      logger.warn('지원하지 않는 Core Metadata 해시', {
+        filename: file.filename,
+        algorithm: file.metadataHash.algorithm,
+      });
+      return {
+        status: 'unavailable',
+        error: `지원하지 않는 Core Metadata 해시: ${file.metadataHash.algorithm}`,
+      };
+    }
 
-      if (
-        actualDigest.toLowerCase() !==
-        file.metadataHash.digest.toLowerCase()
-      ) {
-        logger.warn('Core Metadata 체크섬 불일치', {
-          filename: file.filename,
-          algorithm: file.metadataHash.algorithm,
-        });
-        return null;
-      }
+    if (
+      actualDigest.toLowerCase() !==
+      file.metadataHash.digest.toLowerCase()
+    ) {
+      logger.warn('Core Metadata 체크섬 불일치', {
+        filename: file.filename,
+        algorithm: file.metadataHash.algorithm,
+      });
+      return {
+        status: 'unavailable',
+        error: 'Core Metadata 체크섬이 일치하지 않습니다',
+      };
     }
 
     const metadata = metadataBytes.toString('utf8');
-    return parseRequiresDist(metadata);
+    return {
+      status: 'available',
+      requiresDist: parseRequiresDist(metadata),
+    };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     logger.warn('PEP 658 메타데이터 조회 실패', {
       filename: file.filename,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
     });
-    return null;
+    return {
+      status: 'unavailable',
+      error: errorMessage,
+    };
   }
 }
 

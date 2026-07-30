@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { PipDownloader } from './pip';
+import { isPythonRequiresCompatible } from '../shared/pip-wheel';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 import type { PyPIRelease } from '../shared/pip-types';
 
@@ -335,5 +336,59 @@ describe('PipDownloader wheel 호환성', () => {
       const result = testSelectBestRelease(releases, platform);
       expect(result?.filename).toContain('abi3');
     });
+
+    it('Python 3.12에 호환되지 않는 py310 및 미래 abi3 wheel은 선택하지 않아야 함', () => {
+      const releases: PyPIRelease[] = [
+        createWheelRelease('package-1.0.0-py310-none-any.whl'),
+        createWheelRelease('package-1.0.0-cp313-abi3-manylinux_2_28_x86_64.whl'),
+        createSdistRelease('package-1.0.0.tar.gz'),
+      ];
+
+      const platform: PipTargetPlatform = {
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.12',
+        glibcVersion: '2.28',
+      };
+
+      const result = testSelectBestRelease(releases, platform);
+      expect(result?.filename).toContain('.tar.gz');
+    });
+
+    it('파일 requires_python이 대상보다 높으면 wheel과 sdist를 모두 선택하지 않아야 함', () => {
+      const releases: PyPIRelease[] = [
+        {
+          ...createWheelRelease('future-1.0.0-py3-none-any.whl'),
+          requires_python: '>=3.13',
+        },
+        {
+          ...createSdistRelease('future-1.0.0.tar.gz'),
+          requires_python: '>=3.13',
+        },
+      ];
+
+      const platform: PipTargetPlatform = {
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.12',
+      };
+
+      expect(testSelectBestRelease(releases, platform)).toBeNull();
+    });
+  });
+});
+
+describe('Requires-Python PEP 440 호환성', () => {
+  it('범위, compatible release, wildcard, 제외 조건을 대상 Python에 적용한다', () => {
+    expect(isPythonRequiresCompatible('>=3.8, <3.13', '3.12')).toBe(true);
+    expect(isPythonRequiresCompatible('~=3.11.2', '3.12')).toBe(false);
+    expect(isPythonRequiresCompatible('==3.12.*', '3.12.1')).toBe(true);
+    expect(isPythonRequiresCompatible('!=3.12.*', '3.12')).toBe(false);
+    expect(isPythonRequiresCompatible('>3.12.dev1', '3.12')).toBe(true);
+  });
+
+  it('지원하지 않는 Python 버전을 요구하거나 해석할 수 없는 specifier는 거부한다', () => {
+    expect(isPythonRequiresCompatible('>=3.13', '3.12')).toBe(false);
+    expect(isPythonRequiresCompatible('invalid specifier', '3.12')).toBe(false);
   });
 });

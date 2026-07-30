@@ -81,6 +81,7 @@ export type {
 export {
   normalizePackageName,
   parseWheelFilename,
+  isPythonWheelCompatible,
   isWheelSupported,
   getWheelSupportIndex,
   getWheelTagPriority,

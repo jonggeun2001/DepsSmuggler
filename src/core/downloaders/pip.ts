@@ -29,6 +29,7 @@ import {
   PyPIRelease,
   PyPIResponse,
 } from '../shared/pip-types';
+import { isPythonRequiresCompatible, isPythonWheelCompatible } from '../shared/pip-wheel';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 /* eslint-enable import/order */
 
@@ -262,8 +263,15 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
         );
         const { info, urls } = response.data;
 
+        if (!isPythonRequiresCompatible(info.requires_python, this.pipTargetPlatform?.pythonVersion)) {
+          throw new Error(`호환되는 패키지를 찾을 수 없습니다: ${name}@${version}`);
+        }
+
         // 다운로드 URL 선택 (wheel 우선)
         const downloadInfo = this.selectBestRelease(urls);
+        if (urls.length > 0 && !downloadInfo) {
+          throw new Error(`호환되는 패키지를 찾을 수 없습니다: ${name}@${version}`);
+        }
 
         const metadata: PackageMetadata = {
           description: info.summary,
@@ -403,7 +411,11 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
     const response = await this.client.get<PyPIResponse>(
       `/${name}/${version}/json`
     );
-    let releases = response.data.urls;
+    const { info, urls } = response.data;
+    if (pythonVersion && !isPythonRequiresCompatible(info?.requires_python, pythonVersion)) {
+      return [];
+    }
+    let releases = urls;
 
     // OS별 플랫폼 태그 필터링
     if (targetOS && targetOS !== 'any') {
@@ -445,9 +457,10 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
     if (pythonVersion) {
       releases = releases.filter(
         (r) =>
-          r.packagetype === 'sdist' ||
-          r.python_version === 'py3' ||
-          r.python_version.includes(pythonVersion)
+          isPythonRequiresCompatible(r.requires_python, pythonVersion) &&
+          (r.packagetype === 'sdist' ||
+            r.python_version === 'py3' ||
+            r.python_version.includes(pythonVersion))
       );
     }
 
@@ -460,8 +473,12 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
   private selectBestRelease(releases: PyPIRelease[]): PyPIRelease | null {
     if (releases.length === 0) return null;
 
-    const wheels = releases.filter((r) => r.packagetype === 'bdist_wheel');
-    const sdist = releases.find((r) => r.packagetype === 'sdist');
+    const wheels = releases.filter(
+      (release) => release.packagetype === 'bdist_wheel' && this.isWheelCompatible(release)
+    );
+    const sdist = releases.find(
+      (release) => release.packagetype === 'sdist' && this.isWheelCompatible(release)
+    );
 
     // 타겟 플랫폼이 설정되지 않은 경우 기본 동작
     if (!this.pipTargetPlatform) {
@@ -531,7 +548,9 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
     }
 
     // wheel 파일만 필터링
-    const wheels = files.filter((f) => f.filename.endsWith('.whl'));
+    const wheels = files.filter(
+      (file) => file.filename.endsWith('.whl') && this.isSimpleFilePythonCompatible(file)
+    );
 
     for (const wheel of wheels) {
       // wheel 파일명 파싱
@@ -543,18 +562,11 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
       const platformTag = wheelMatch[3].toLowerCase();
 
       // Python 버전 체크
-      if (this.pipTargetPlatform.pythonVersion) {
-        const pyVersion = this.pipTargetPlatform.pythonVersion.replace('.', '');
-        // 정확한 버전(cp312), abi3, py3, py2.py3 호환
-        const isCompatiblePython =
-          pythonTag.includes(`cp${pyVersion}`) ||
-          pythonTag.includes(`py${pyVersion}`) ||
-          pythonTag.includes('py3') ||
-          pythonTag.includes('py2.py3') ||
-          abiTag === 'abi3';
-        if (!isCompatiblePython) {
-          continue;
-        }
+      if (
+        this.pipTargetPlatform.pythonVersion &&
+        !isPythonWheelCompatible(pythonTag, abiTag, this.pipTargetPlatform.pythonVersion)
+      ) {
+        continue;
       }
 
       // 플랫폼 호환성 체크
@@ -599,8 +611,11 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
       }
     }
 
-    // 호환되는 wheel이 없으면 첫 번째 wheel 또는 source dist 반환
-    return wheels[0] || files.find((f) => f.filename.endsWith('.tar.gz')) || files[0];
+    return files.find(
+      (file) =>
+        (file.filename.endsWith('.tar.gz') || file.filename.endsWith('.zip')) &&
+        this.isSimpleFilePythonCompatible(file)
+    ) || null;
   }
 
   /**
@@ -657,6 +672,15 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
    * wheel이 타겟 플랫폼과 호환되는지 확인
    */
   private isWheelCompatible(release: PyPIRelease): boolean {
+    if (
+      !isPythonRequiresCompatible(
+        release.requires_python,
+        this.pipTargetPlatform?.pythonVersion
+      )
+    ) {
+      return false;
+    }
+
     if (!this.pipTargetPlatform) {
       return true;
     }
@@ -671,17 +695,7 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
       if (wheelMatch) {
         const pythonTag = wheelMatch[1];
         const abiTag = wheelMatch[2];
-        const pyVersion = this.pipTargetPlatform.pythonVersion.replace('.', '');
-
-        // 정확한 버전(cp312), abi3, py3, py2.py3 호환
-        const isCompatiblePython =
-          pythonTag.includes(`cp${pyVersion}`) ||
-          pythonTag.includes(`py${pyVersion}`) ||
-          pythonTag.includes('py3') ||
-          pythonTag.includes('py2.py3') ||
-          abiTag === 'abi3';
-
-        if (!isCompatiblePython) {
+        if (!isPythonWheelCompatible(pythonTag, abiTag, this.pipTargetPlatform.pythonVersion)) {
           return false;
         }
       }
@@ -770,6 +784,10 @@ export class PipDownloader extends BaseLanguageDownloader implements IDownloader
     }
 
     return false;
+  }
+
+  private isSimpleFilePythonCompatible(file: SimpleApiPackageFile): boolean {
+    return isPythonRequiresCompatible(file.requiresPython, this.pipTargetPlatform?.pythonVersion);
   }
 }
 

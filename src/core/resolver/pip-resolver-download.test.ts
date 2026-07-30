@@ -134,7 +134,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         url: 'https://index.example/demo-2.0rc1.whl',
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -163,7 +166,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         url: 'https://index.example/demo-2.0rc2.whl',
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -199,7 +205,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
             ]
           : [],
     );
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockImplementation(
       async (name: string, version?: string) => {
         if (name === 'custom-root') {
@@ -273,7 +282,9 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
             ]
           : [],
     );
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue(null);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'not-advertised',
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue({
       data: {
         info: {
@@ -328,12 +339,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     ).rejects.toThrow(
       '검증된 의존성 메타데이터를 찾을 수 없습니다',
     );
-    expect(
-      simpleApiMock.fetchWheelMetadata,
-    ).not.toHaveBeenCalled();
+    expect(simpleApiMock.fetchWheelMetadata).toHaveBeenCalledTimes(1);
   });
 
-  it('no-deps 깊이에서는 검증된 커스텀 의존성 메타데이터를 요구하지 않는다', async () => {
+  it('no-deps 깊이에서도 검증된 커스텀 의존성 메타데이터를 요구한다', async () => {
     simpleApiMock.fetchPackageFiles.mockResolvedValue([
       {
         filename: 'custom_root-1.0.0-py3-none-any.whl',
@@ -344,20 +353,48 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         },
       },
     ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'not-advertised',
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
-    const result = await new PipResolver().resolveDependencies(
-      'custom-root',
-      '1.0.0',
-      {
+    await expect(
+      new PipResolver().resolveDependencies('custom-root', '1.0.0', {
         maxDepth: 0,
         indexUrl: 'https://index.example/simple',
+      }),
+    ).rejects.toThrow('검증된 의존성 메타데이터를 찾을 수 없습니다');
+  });
+
+  it('no-deps 깊이에서는 의존성이 있는 검증된 루트만 반환한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: {
+          name: 'demo',
+          version: '1.0.0',
+          requires_dist: ['child>=1.0'],
+        },
+        urls: [
+          {
+            filename: 'demo-1.0.0-py3-none-any.whl',
+            url: 'https://files.example/demo-1.0.0.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'py3',
+            digests: { sha256: 'demo-sha' },
+            size: 80,
+          },
+        ],
       },
+    });
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      { maxDepth: 0, skipDependencyExpansion: true },
     );
 
-    expect(result.flatList.map((pkg) => pkg.name)).toEqual([
-      'custom-root',
-    ]);
+    expect(result.flatList.map((pkg) => pkg.name)).toEqual(['demo']);
+    expect(pipCacheMock.fetchPackageMetadata).toHaveBeenCalledTimes(1);
   });
 
   it('PEP 658 조회 실패 시 체크섬이 같은 PyPI 메타데이터만 사용한다', async () => {
@@ -377,7 +414,9 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
       async (_indexUrl: string, name: string) =>
         name === 'custom-root' ? [customFile] : [],
     );
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue(null);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'not-advertised',
+    });
     pipCacheMock.fetchPackageMetadata.mockImplementation(
       async (name: string, version?: string) => {
         if (name === 'custom-root') {
@@ -772,7 +811,7 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         targetPlatform: { system: 'Linux', machine: 'x86_64' },
         pythonVersion: '3.12',
       }),
-    ).rejects.toThrow('필수 pip 의존성');
+    ).rejects.toThrow('필수 의존성 해결 실패: demo@1.0.0 -> missing_dependency');
   });
 
   it('선택한 필수 pip 하위 의존성 메타데이터 조회 오류를 전파한다', async () => {
@@ -821,7 +860,7 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         targetPlatform: { system: 'Linux', machine: 'x86_64' },
         pythonVersion: '3.12',
       }),
-    ).rejects.toThrow('필수 pip 의존성 아티팩트');
+    ).rejects.toThrow('필수 의존성 해결 실패: demo@1.0.0 -> brokenchild');
   });
 
   it('PyPI JSON에서 버전 제약과 대상 Python을 모두 만족하는 최신 의존성을 선택한다', async () => {
@@ -1145,7 +1184,7 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         targetPlatform: { system: 'Linux', machine: 'x86_64' },
         pythonVersion: '3.12',
       }),
-    ).rejects.toThrow('필수 pip 의존성');
+    ).rejects.toThrow('필수 의존성 해결 실패: demo@1.0.0 -> strictchild');
   });
 
   it('Simple API에서 버전 제약과 대상 Python을 모두 만족하는 최신 의존성을 선택한다', async () => {
@@ -1192,9 +1231,12 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     );
     simpleApiMock.fetchWheelMetadata.mockImplementation(
       async (file: { filename: string }) =>
-        file.filename.startsWith('demo-')
-          ? ['simplechild<3']
-          : [],
+        ({
+          status: 'available',
+          requiresDist: file.filename.startsWith('demo-')
+            ? ['simplechild<3']
+            : [],
+        }),
     );
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
@@ -1243,9 +1285,12 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     );
     simpleApiMock.fetchWheelMetadata.mockImplementation(
       async (file: { filename: string }) =>
-        file.filename.startsWith('demo-')
-          ? ['strictsimplechild<2']
-          : [],
+        ({
+          status: 'available',
+          requiresDist: file.filename.startsWith('demo-')
+            ? ['strictsimplechild<2']
+            : [],
+        }),
     );
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
@@ -1255,7 +1300,7 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         pythonVersion: '3.12',
         indexUrl: 'https://index.example/simple',
       }),
-    ).rejects.toThrow('필수 pip 의존성');
+    ).rejects.toThrow('필수 의존성 해결 실패: demo@1.0.0 -> strictsimplechild');
   });
 
   it('major.minor Python 대상에서 참인 full-version 의존성을 포함한다', async () => {
@@ -1480,15 +1525,15 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     simpleApiMock.fetchWheelMetadata.mockImplementation(
       async (file: { filename: string }) => {
         if (file.filename.startsWith('root-')) {
-          return [
-            'customparent==1.0.0',
-            'publicparent==1.0.0',
-          ];
+          return {
+            status: 'available',
+            requiresDist: ['customparent==1.0.0', 'publicparent==1.0.0'],
+          };
         }
         if (file.filename.startsWith('customparent-')) {
-          return ['shared==1.0.0'];
+          return { status: 'available', requiresDist: ['shared==1.0.0'] };
         }
-        return [];
+        return { status: 'available', requiresDist: [] };
       },
     );
 
@@ -1561,7 +1606,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'sha256', digest: 'simple-arm-sha' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -1595,7 +1643,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'md5', digest: 'simple-md5' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -1651,7 +1702,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'sha256', digest: 'arm-alias-sha' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -1748,7 +1802,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'sha256', digest: 'simple-macos-sha' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const simpleResult = await new PipResolver().resolveDependencies(
@@ -1840,7 +1897,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'sha256', digest: 'simple-cp37-sha' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -1931,7 +1991,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'sha256', digest: 'simple-cp313-sha' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const simpleResult = await new PipResolver().resolveDependencies(
@@ -2040,7 +2103,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'sha256', digest: 'simple-python312-sha' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -2145,7 +2211,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'sha256', digest: 'simple-included-exact-sha' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const simpleResult = await new PipResolver().resolveDependencies(
@@ -2230,7 +2299,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'sha256', digest: 'simple-included-sha' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -2263,7 +2335,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'sha256', digest: 'simple-sdist-sha' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -2298,7 +2373,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         requiresPython: '>=3.12',
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -2339,7 +2417,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
           requiresPython: '>=3.12,<3.13',
         },
       ]);
-      simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+      simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+        status: 'available',
+        requiresDist: [],
+      });
       pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
       const result = await new PipResolver().resolveDependencies(
@@ -2373,7 +2454,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         requiresPython: '>=3.12',
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     const result = await new PipResolver().resolveDependencies(
@@ -2401,7 +2485,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         hash: { algorithm: 'sha256', digest: 'simple-x86-sha' },
       },
     ]);
-    simpleApiMock.fetchWheelMetadata.mockResolvedValue([]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
     pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
 
     await expect(

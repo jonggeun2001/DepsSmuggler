@@ -149,6 +149,8 @@ export interface ResolvedPackageList {
   originalPackages: DownloadPackage[];
   /** 의존성 포함 전체 패키지 목록 */
   allPackages: DownloadPackage[];
+  /** 성공한 직접 루트가 소유한 패키지 목록 */
+  successfulPackages?: DownloadPackage[];
   /** 각 패키지의 의존성 트리 */
   dependencyTrees: DependencyResolutionResult[];
   /** 해결 실패한 패키지 목록 */
@@ -171,6 +173,8 @@ export interface DependencyResolverOptions {
   includeDependencies?: boolean;
   /** 최대 의존성 탐색 깊이 (기본값: 5) */
   maxDepth?: number;
+  /** 루트 아티팩트만 검증하고 자식 의존성 탐색은 생략 */
+  resolveRootArtifactsOnly?: boolean;
   /** 선택적 의존성 포함 여부 (기본값: false) */
   includeOptional?: boolean;
   /** conda 채널 (기본값: 'conda-forge') */
@@ -181,7 +185,7 @@ export interface DependencyResolverOptions {
   architecture?: string;
   /** 타겟 OS (pip/conda 휠 필터링용, 폐쇄망 OS) */
   targetOS?: 'any' | 'windows' | 'macos' | 'linux';
-  /** Python 버전 (pip 휠 필터링용, 예: '3.11', '3.12') */
+  /** Python 버전 (pip 호환성 필터링용, 예: '3.12', '3.12.2') */
   pythonVersion?: string;
   /** CUDA 버전 (conda 패키지의 __cuda 의존성 필터링용, 예: '11.8', '12.4') */
   cudaVersion?: string | null;
@@ -235,11 +239,13 @@ export async function resolveAllDependencies(
   options?: DependencyResolverOptions
 ): Promise<ResolvedPackageList> {
   const resolvedSet = new Map<string, DownloadPackage>();
+  const successfulPackageSet = new Map<string, DownloadPackage>();
   const dependencyTrees: DependencyResolutionResult[] = [];
   const failedPackages: { name: string; version: string; error: string }[] = [];
 
   const includeDependencies = options?.includeDependencies ?? true;
   const maxDepth = options?.maxDepth ?? 5;
+  const resolveRootArtifactsOnly = options?.resolveRootArtifactsOnly ?? false;
   const includeOptional = options?.includeOptional ?? false;
   const condaChannel = options?.condaChannel ?? 'conda-forge';
   const architecture = options?.architecture ?? 'x86_64';
@@ -255,6 +261,7 @@ export async function resolveAllDependencies(
     return {
       originalPackages: packages,
       allPackages: [...packages],
+      successfulPackages: [...packages],
       dependencyTrees,
       failedPackages,
     };
@@ -451,6 +458,13 @@ export async function resolveAllDependencies(
             }
 
             logger.info(`[${currentIndex}/${totalPackages}] ${pkg.type}/${pkg.name}: ${result.packages.length}개 패키지 해결됨`);
+            for (const resolvedPkg of result.packages) {
+              const depKey = `${pkg.type}:${resolvedPkg.name}@${resolvedPkg.version}`;
+              const downloadPkg = resolvedSet.get(depKey);
+              if (downloadPkg) {
+                successfulPackageSet.set(depKey, downloadPkg);
+              }
+            }
             options?.onProgress?.({
               current: currentIndex,
               total: totalPackages,
@@ -478,6 +492,7 @@ export async function resolveAllDependencies(
       } else if (osTypes.includes(pkg.type) || pkg.type === 'docker') {
         // osPackageInfo가 없는 OS 패키지 또는 Docker - 원본만 포함
         logger.info(`[${currentIndex}/${totalPackages}] ${pkg.type}/${pkg.name}@${pkg.version}: 패키지 정보 없음, 원본만 포함`);
+        successfulPackageSet.set(key, pkg);
         options?.onProgress?.({
           current: currentIndex,
           total: totalPackages,
@@ -489,6 +504,7 @@ export async function resolveAllDependencies(
         continue;
       } else {
         logger.warn(`지원하지 않는 패키지 타입: ${pkg.type}`, { package: pkg.name });
+        successfulPackageSet.set(key, pkg);
         options?.onProgress?.({
           current: currentIndex,
           total: totalPackages,
@@ -529,6 +545,7 @@ export async function resolveAllDependencies(
           pythonVersion: options?.pythonVersion,
           indexUrl: pkg.indexUrl, // 커스텀 인덱스 URL 전파
           extras: pkg.extras, // extras 전달
+          skipDependencyExpansion: resolveRootArtifactsOnly,
         };
       } else if (pkg.type === 'conda') {
         // conda: 채널, 타겟 플랫폼, Python 버전 및 CUDA 버전 전달
@@ -608,6 +625,11 @@ export async function resolveAllDependencies(
         };
         dependencyTrees.push(convertedResult);
 
+        const resolvedRootKey = `npm:${npmResult.root.name}@${npmResult.root.version}`;
+        if (resolvedRootKey !== key) {
+          resolvedSet.delete(key);
+        }
+
         // npm 의존성 목록 추가
         for (const depPkg of npmResult.flatList) {
           const depKey = `npm:${depPkg.name}@${depPkg.version}`;
@@ -621,6 +643,13 @@ export async function resolveAllDependencies(
               size: depPkg.size,
               filename: depPkg.filename,
             });
+          }
+        }
+        for (const depPkg of npmResult.flatList) {
+          const depKey = `npm:${depPkg.name}@${depPkg.version}`;
+          const downloadPkg = resolvedSet.get(depKey);
+          if (downloadPkg) {
+            successfulPackageSet.set(depKey, downloadPkg);
           }
         }
 
@@ -647,6 +676,11 @@ export async function resolveAllDependencies(
         }
 
         dependencyTrees.push(result);
+
+        const resolvedRootKey = `${result.root.package.type}:${result.root.package.name}@${result.root.package.version}`;
+        if (resolvedRootKey !== key) {
+          resolvedSet.delete(key);
+        }
 
         // 평탄화된 의존성 목록 추가
         for (const depPkg of result.flatList) {
@@ -677,6 +711,15 @@ export async function resolveAllDependencies(
             );
           } else {
             resolvedSet.set(depKey, downloadPkg);
+          }
+        }
+        for (const depPkg of result.flatList) {
+          const depKey = getPackageArtifactKey(
+            toResolvedDownloadPackage(depPkg, pkg),
+          );
+          const downloadPkg = resolvedSet.get(depKey);
+          if (downloadPkg) {
+            successfulPackageSet.set(depKey, downloadPkg);
           }
         }
 
@@ -715,6 +758,7 @@ export async function resolveAllDependencies(
   return {
     originalPackages: packages,
     allPackages: Array.from(resolvedSet.values()),
+    successfulPackages: Array.from(successfulPackageSet.values()),
     dependencyTrees,
     failedPackages,
   };

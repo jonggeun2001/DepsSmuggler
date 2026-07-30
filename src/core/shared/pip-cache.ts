@@ -28,6 +28,7 @@ export interface PyPIRelease {
   filename: string;
   url: string;
   packagetype: string;
+  yanked?: boolean;
   python_version: string;
   requires_python?: string;
   digests: {

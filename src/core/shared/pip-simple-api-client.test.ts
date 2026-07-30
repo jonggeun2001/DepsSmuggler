@@ -99,14 +99,32 @@ describe('fetchWheelMetadata', () => {
           digest,
         },
       }),
-    ).resolves.toEqual(['child==1.0.0']);
+    ).resolves.toEqual({
+      status: 'available',
+      requiresDist: ['child==1.0.0'],
+    });
+  });
+
+  it('Requires-Dist가 없는 유효한 Core Metadata를 빈 의존성으로 처리한다', async () => {
+    const metadata = 'Metadata-Version: 2.4\nName: demo\nVersion: 1.0.0\n';
+    const digest = createHash('sha256').update(metadata).digest('hex');
+    mockedAxios.get.mockResolvedValue({ data: metadata });
+
+    await expect(
+      fetchWheelMetadata({
+        filename: 'demo-1.0.0-py3-none-any.whl',
+        url: 'https://index.example/demo.whl',
+        metadataAvailable: true,
+        metadataHash: { algorithm: 'sha256', digest },
+      }),
+    ).resolves.toEqual({ status: 'available', requiresDist: [] });
   });
 
   it.each([
     ['sha256', '0'.repeat(64)],
     ['unsupported-hash', 'abc123'],
   ])(
-    'Core Metadata의 %s 해시를 검증할 수 없으면 null을 반환한다',
+    'Core Metadata의 %s 해시를 검증할 수 없으면 unavailable을 반환한다',
     async (algorithm, digest) => {
       mockedAxios.get.mockResolvedValue({
         data:
@@ -120,7 +138,7 @@ describe('fetchWheelMetadata', () => {
           metadataAvailable: true,
           metadataHash: { algorithm, digest },
         }),
-      ).resolves.toBeNull();
+      ).resolves.toMatchObject({ status: 'unavailable' });
     },
   );
 
@@ -135,7 +153,17 @@ describe('fetchWheelMetadata', () => {
         url: 'https://index.example/demo.whl',
         metadataAvailable: true,
       }),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ status: 'unavailable' });
+    expect(mockedAxios.get).not.toHaveBeenCalled();
+  });
+
+  it('메타데이터가 광고되지 않은 파일은 요청하지 않는다', async () => {
+    await expect(
+      fetchWheelMetadata({
+        filename: 'demo-1.0.0-py3-none-any.whl',
+        url: 'https://index.example/demo.whl',
+      }),
+    ).resolves.toEqual({ status: 'not-advertised' });
     expect(mockedAxios.get).not.toHaveBeenCalled();
   });
 });

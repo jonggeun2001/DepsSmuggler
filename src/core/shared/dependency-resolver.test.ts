@@ -161,6 +161,28 @@ describe('dependency-resolver', () => {
       expect(result.dependencyTrees).toHaveLength(1);
     });
 
+    it('latest root는 해석된 실제 버전으로 교체한다', async () => {
+      const mockResolver = {
+        resolveDependencies: vi.fn().mockResolvedValue({
+          root: {
+            package: { type: 'pip', name: 'idna', version: '3.18' },
+            dependencies: [],
+          },
+          flatList: [{ type: 'pip', name: 'idna', version: '3.18' }],
+          conflicts: [],
+          totalSize: 0,
+        }),
+      };
+      vi.mocked(getPipResolver).mockReturnValue(mockResolver as any);
+
+      const result = await resolveAllDependencies([
+        { id: 'pip-idna-latest', type: 'pip', name: 'idna', version: 'latest' },
+      ]);
+
+      expect(result.allPackages).toHaveLength(1);
+      expect(result.allPackages[0]).toMatchObject({ name: 'idna', version: '3.18' });
+    });
+
     it('includeDependencies가 false면 원본 패키지만 반환', async () => {
       const mockResolver = {
         resolveDependencies: vi.fn(),
@@ -212,6 +234,7 @@ describe('dependency-resolver', () => {
         targetOS: 'linux',
         pythonVersion: '3.11',
         maxDepth: 3,
+        resolveRootArtifactsOnly: true,
       };
 
       await resolveAllDependencies(packages, options);
@@ -221,6 +244,7 @@ describe('dependency-resolver', () => {
         '1.24.0',
         expect.objectContaining({
           maxDepth: 3,
+          skipDependencyExpansion: true,
           targetPlatform: expect.objectContaining({ system: 'Linux' }),
           pythonVersion: '3.11',
         })
@@ -734,6 +758,67 @@ describe('dependency-resolver', () => {
       expect(result.failedPackages[0].error).toBe('Network error');
       // 원본 패키지는 여전히 포함됨
       expect(result.allPackages).toHaveLength(1);
+    });
+
+    it('선택 아티팩트가 있는 성공 루트와 실패 루트의 전이 의존성을 보존한다', async () => {
+      const mockResolver = {
+        resolveDependencies: vi.fn()
+          .mockResolvedValueOnce({
+            root: {
+              package: {
+                type: 'pip',
+                name: 'alpha',
+                version: '1.0.0',
+                metadata: {
+                  filename: 'alpha-1.0.0-py3-none-any.whl',
+                  downloadUrl: 'https://files.example/alpha-1.0.0.whl',
+                  checksum: { sha256: 'alpha-sha' },
+                },
+              },
+              dependencies: [],
+            },
+            flatList: [
+              {
+                type: 'pip',
+                name: 'alpha',
+                version: '1.0.0',
+                metadata: {
+                  filename: 'alpha-1.0.0-py3-none-any.whl',
+                  downloadUrl: 'https://files.example/alpha-1.0.0.whl',
+                  checksum: { sha256: 'alpha-sha' },
+                },
+              },
+              { type: 'pip', name: 'shared', version: '2.0.0' },
+            ],
+            conflicts: [],
+            totalSize: 0,
+          })
+          .mockRejectedValueOnce(new Error('shared root resolution failed')),
+      };
+      vi.mocked(getPipResolver).mockReturnValue(mockResolver as any);
+
+      const result = await resolveAllDependencies([
+        { id: 'pip-alpha-1.0.0', type: 'pip', name: 'alpha', version: '1.0.0' },
+        { id: 'pip-shared-2.0.0', type: 'pip', name: 'shared', version: '2.0.0' },
+      ]);
+
+      expect(result.failedPackages).toEqual([
+        { name: 'shared', version: '2.0.0', error: 'shared root resolution failed' },
+      ]);
+      expect(result.successfulPackages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'pip',
+            name: 'alpha',
+            version: '1.0.0',
+            metadata: expect.objectContaining({
+              filename: 'alpha-1.0.0-py3-none-any.whl',
+              downloadUrl: 'https://files.example/alpha-1.0.0.whl',
+            }),
+          }),
+          expect.objectContaining({ type: 'pip', name: 'shared', version: '2.0.0' }),
+        ])
+      );
     });
 
     it('진행 상황 콜백 호출 (성공)', async () => {

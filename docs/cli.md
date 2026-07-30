@@ -70,9 +70,12 @@ depssmuggler download [옵션]
 | `-f, --format <format>` | 아카이브 형식 (`zip`, `tar.gz`) | 전체 | `zip` |
 | `--file <file>` | 줄 단위 패키지 목록 파일 (`requirements.txt`, Maven 좌표 목록 등) | 전체 | - |
 | `--no-deps` | 전이 의존성 다운로드 비활성화 | 전체 | `false` |
+| `--strict` | 직접 패키지 하나라도 의존성 해결에 실패하면 다운로드 중단 | 라이브러리 타입 | `false` |
 | `--concurrency <num>` | 동시 다운로드 수 | 전체 | `3` |
 
-기본 동작은 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 의존성을 함께 해결해 다운로드하는 것입니다. `--no-deps`를 지정하면 원본 패키지 목록만 다운로드합니다. 라이브러리 패키지의 의존성 해결이 실패하면 명령은 오류로 종료됩니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
+기본 동작은 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 의존성을 함께 해결해 다운로드하는 것입니다. `--no-deps`를 지정하면 원본 패키지 목록만 다운로드합니다. 직접 지정한 패키지 중 일부를 해결하지 못하면 기본 모드는 실패한 직접 패키지만 경고와 함께 건너뛰고, 나머지 해결된 패키지와 의존성을 계속 다운로드합니다. 모든 직접 패키지를 해결하지 못해 남은 다운로드 항목이 없으면 빈 아카이브를 만들지 않고 오류로 종료합니다. 전체 실패 정책이 필요하면 `--strict`를 사용합니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
+
+`pip`에서 `--python-version`을 지정하면 해당 버전의 `python_version` 환경 마커를 평가하고, `--target-os` 및 `--arch`와 호환되는 wheel 태그를 선택합니다. Python 버전은 `major.minor` 형식만 허용합니다. 따라서 `python_full_version`과 `implementation_version`처럼 patch가 필요한 marker는 값을 알 수 없는 조건으로 처리합니다. wheel은 대상 버전의 CPython 태그와 범용 `py3`/`py2.py3` 태그, 또는 대상보다 같거나 낮은 CPython 버전의 `abi3` 태그만 선택합니다. PyPI의 패키지·파일 `requires_python`과 Simple API 파일의 `requiresPython`도 PEP 440 specifier set으로 확인하므로, 대상 Python보다 높은 버전만 지원하는 wheel과 source distribution은 선택하지 않습니다. `latest`와 버전 범위는 PyPI 또는 Simple API에서 대상 Python과 호환되는 산출물이 있는 가장 높은 안정 버전을 선택하고, 철회(yanked) 릴리스는 wildcard가 없는 정확한 버전 고정 외에는 제외합니다. 프리릴리스는 버전 제약이 명시적으로 포함하거나 안정 후보가 없을 때만 선택합니다. 지원하지 않는 marker 문법이나 값이 없는 `platform_release`/`platform_version`은 의존성을 포함하지 않는 것으로 처리합니다.
 
 대상 환경 옵션은 다운로드 전에 검증됩니다.
 
@@ -82,7 +85,7 @@ depssmuggler download [옵션]
 - 표의 적용 타입과 맞지 않는 선택 옵션을 사용하면 오류가 발생합니다. 예를 들어 npm에 `--target-os linux`를 지정하거나 pip에 `--cuda-version 12.4`를 지정할 수 없습니다.
 - 기본값인 `--target-os any`와 `--conda-channel conda-forge`는 적용 대상이 아닌 타입에서 기존 동작을 유지합니다. 그러나 다른 OS나 채널을 명시하면 적용 타입을 검사합니다.
 - pip에서 대상 OS가 `any`이면 특정 OS wheel을 임의로 선택하지 않고 범용 wheel 또는 `Requires-Python` 조건을 만족하는 소스 배포본을 선택합니다. `--python-version`도 생략하면 특정 CPython ABI wheel 대신 Python 버전 독립 wheel 또는 소스 배포본만 선택합니다.
-- pip 의존성의 PEP 508 환경 마커는 지정한 OS, 아키텍처, Python 버전과 extra를 기준으로 평가합니다. `--python-version`은 `major.minor`만 받으므로 `python_full_version`처럼 patch 버전이 필요한 조건은 알 수 없는 값으로 보고 제외합니다. 필요한 대상 값이 없거나 마커를 해석할 수 없으면 해당 조건부 의존성을 임의로 포함하지 않습니다.
+- pip 의존성의 PEP 508 환경 마커는 지정한 OS, 아키텍처, Python 버전과 extra를 기준으로 평가합니다. `--python-version`은 `major.minor`만 받으므로 `python_full_version`처럼 patch 버전이 필요한 조건은 결과를 확정할 수 없을 때 제외합니다. 필요한 대상 값이 없거나 마커를 해석할 수 없으면 해당 조건부 의존성을 임의로 포함하지 않습니다.
 - Conda에서 대상 OS가 `any`이면 특정 플랫폼을 임의로 가정하지 않고 `noarch` 빌드만 조회합니다. 플랫폼별 빌드가 필요하면 `--target-os`를 명시해야 합니다.
 - Conda에서 지정한 OS, 아키텍처, Python/CUDA 조건과 일치하는 대상 subdir 또는 `noarch` 빌드를 찾지 못하면 다른 플랫폼으로 재조회하지 않고 다운로드 전에 실패합니다.
 - pip와 Conda에서 필수 전이 의존성의 호환 버전이나 아티팩트를 찾지 못하면 불완전한 묶음을 만들지 않고 전체 명령이 실패합니다. Conda의 OpenSSL, zlib 같은 런타임 라이브러리도 오프라인 묶음에 포함됩니다.
@@ -99,6 +102,8 @@ depssmuggler download -t maven -p org.springframework:spring-core -V 5.3.0
 depssmuggler download -t npm -p react -V 19.2.0
 depssmuggler download -t docker -p nginx -V latest
 depssmuggler download -t pip --file requirements.txt -o ./packages
+depssmuggler download -t pip --file requirements.txt --python-version 3.12 -o ./packages
+depssmuggler download -t pip --file requirements.txt --python-version 3.12 --strict -o ./packages
 depssmuggler download -t maven --file ./maven-packages.txt
 depssmuggler download -t pip -p flask -f tar.gz
 

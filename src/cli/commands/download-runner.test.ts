@@ -734,6 +734,35 @@ describe('DownloadManager 단위 테스트', () => {
       expect(asTestable(manager).options.maxRetries).toBe(2);
     });
 
+    it('pip 타겟 플랫폼을 지원하는 다운로더에 전달한다', async () => {
+      const setPipTargetPlatform = vi.fn();
+      const pipDownloader = {
+        type: 'pip' as const,
+        setPipTargetPlatform,
+        downloadPackage: vi.fn().mockResolvedValue('/test/output/requests.whl'),
+      } as unknown as IDownloader;
+
+      asTestable(manager).downloaders.set('pip', pipDownloader);
+      manager.addToQueue([
+        { type: 'pip' as const, name: 'requests', version: '2.28.0' },
+      ]);
+
+      await manager.startDownload({
+        outputPath: '/test/output',
+        pipTargetPlatform: {
+          os: 'linux',
+          arch: 'x86_64',
+          pythonVersion: '3.12',
+        },
+      } as DownloadManagerOptions);
+
+      expect(setPipTargetPlatform).toHaveBeenCalledWith({
+        os: 'linux',
+        arch: 'x86_64',
+        pythonVersion: '3.12',
+      });
+    });
+
     it('allComplete 이벤트 발생', async () => {
       const listener = vi.fn();
       manager.on('allComplete', listener);
