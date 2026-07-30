@@ -96,7 +96,7 @@
 - [x] Run focused tests from Tasks 1-4, then `npm run test`, `npm run lint`, `npm run build`, and `git diff --check`.
 - [x] Update CLI and resolver documentation with the direct-root failure policy and supported marker evaluation boundary.
 - [x] Run a real Python 3.12 CLI download with default dependency inclusion and inspect the archive contents and summary.
-- [ ] Review the final diff for behavior outside the accepted specification and update the PR description with exact verification results.
+- [x] Review the final diff for behavior outside the accepted specification and update the PR description with exact verification results.
 - [ ] Push the branch and wait for all required GitHub Actions checks.
 - [ ] Run the independent review gate on the final PR diff. Address findings and repeat verification/review until it reports PASS.
 - [ ] Squash-merge only after required CI and the independent review gate pass; then remove the merged branch and worktree while leaving unrelated worktrees and files untouched.
