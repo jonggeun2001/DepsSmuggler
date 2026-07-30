@@ -64,6 +64,11 @@ interface QueueItem {
   indexUrl?: string;
   extras?: string[];
   parentCacheKey?: string; // 부모 패키지 캐시키 (트리 구축용)
+  parent?: {
+    name: string;
+    version: string;
+    versionSpec?: string;
+  };
 }
 
 // 패키지 정보 조회 결과
@@ -71,6 +76,22 @@ interface FetchedPackageInfo {
   packageInfo: PackageInfo;
   requiresDist: string[];
   actualVersion: string;
+}
+
+class RequiredDependencyResolutionError extends Error {
+  constructor(
+    parentName: string,
+    parentVersion: string,
+    dependencyName: string,
+    dependencyVersionSpec?: string,
+    reason?: string
+  ) {
+    const requestedDependency = `${dependencyName}${dependencyVersionSpec ?? ''}`;
+    super(
+      `필수 의존성 해결 실패: ${parentName}@${parentVersion} -> ${requestedDependency}${reason ? ` (${reason})` : ''}`
+    );
+    this.name = 'RequiredDependencyResolutionError';
+  }
 }
 
 export class PipResolver implements IResolver {
@@ -164,10 +185,27 @@ export class PipResolver implements IResolver {
       // BFS 반복
       while (queue.length > 0) {
         const current = queue.shift()!;
-        const { name, version: ver, indexUrl: idx, extras: ext, parentCacheKey, depth } = current;
+        const {
+          name,
+          version: ver,
+          indexUrl: idx,
+          extras: ext,
+          parentCacheKey,
+          parent,
+          depth,
+        } = current;
 
         // 최대 깊이 체크
         if (depth > maxDepth) {
+          if (parent) {
+            throw new RequiredDependencyResolutionError(
+              parent.name,
+              parent.version,
+              name,
+              parent.versionSpec,
+              '최대 의존성 탐색 깊이를 초과했습니다'
+            );
+          }
           continue;
         }
 
@@ -180,10 +218,27 @@ export class PipResolver implements IResolver {
           if (!parentCacheKey) {
             throw error;
           }
-          continue;
+          throw new RequiredDependencyResolutionError(
+            parent?.name ?? packageName,
+            parent?.version ?? version,
+            name,
+            parent?.versionSpec,
+            error instanceof Error ? error.message : String(error)
+          );
         }
 
-        if (!fetchResult) continue;
+        if (!fetchResult) {
+          if (parent) {
+            throw new RequiredDependencyResolutionError(
+              parent.name,
+              parent.version,
+              name,
+              parent.versionSpec,
+              '패키지 정보를 찾을 수 없습니다'
+            );
+          }
+          continue;
+        }
 
         const { packageInfo, requiresDist, actualVersion } = fetchResult;
         const cacheKey = `${name.toLowerCase()}@${actualVersion}`;
@@ -224,11 +279,23 @@ export class PipResolver implements IResolver {
         if (requiresDist.length > 0) {
           const parsedDeps = requiresDist
             .map((dep) => this.parseDependencyString(dep))
-            .filter((dep) => dep !== null && this.evaluateMarker(dep.markers, ext));
+            .filter(
+              (dep): dep is ParsedDependency =>
+                dep !== null && this.evaluateMarker(dep.markers, ext)
+            );
+
+          if (depth >= maxDepth && parsedDeps.length > 0) {
+            const firstDependency = parsedDeps[0];
+            throw new RequiredDependencyResolutionError(
+              packageInfo.name,
+              actualVersion,
+              firstDependency.name,
+              firstDependency.versionSpec,
+              '최대 의존성 탐색 깊이를 초과했습니다'
+            );
+          }
 
           for (const dep of parsedDeps) {
-            if (!dep) continue;
-
             try {
               // 의존성 버전 조회
               let depVersion: string | null = null;
@@ -247,29 +314,52 @@ export class PipResolver implements IResolver {
                 depVersion = await this.getLatestVersion(dep.name, dep.versionSpec, undefined);
               }
 
-              if (depVersion) {
-                const depCacheKey = `${dep.name.toLowerCase()}@${depVersion}`;
-                // 아직 해결되지 않은 패키지만 큐에 추가
-                if (!resolvedNodes.has(depCacheKey)) {
-                  queue.push({
-                    name: dep.name,
-                    version: depVersion,
-                    indexUrl: usedIndexUrl,
-                    extras: dep.extras,
-                    parentCacheKey: cacheKey,
-                    depth: depth + 1,
-                  });
-                } else {
-                  // 이미 해결된 경우 부모-자식 관계만 추가
-                  const children = parentChildMap.get(cacheKey) || [];
-                  if (!children.includes(depCacheKey)) {
-                    children.push(depCacheKey);
-                    parentChildMap.set(cacheKey, children);
-                  }
+              if (!depVersion) {
+                throw new RequiredDependencyResolutionError(
+                  packageInfo.name,
+                  actualVersion,
+                  dep.name,
+                  dep.versionSpec,
+                  '만족 가능한 버전을 찾을 수 없습니다'
+                );
+              }
+
+              const depCacheKey = `${dep.name.toLowerCase()}@${depVersion}`;
+              // 아직 해결되지 않은 패키지만 큐에 추가
+              if (!resolvedNodes.has(depCacheKey)) {
+                queue.push({
+                  name: dep.name,
+                  version: depVersion,
+                  indexUrl: usedIndexUrl,
+                  extras: dep.extras,
+                  parentCacheKey: cacheKey,
+                  parent: {
+                    name: packageInfo.name,
+                    version: actualVersion,
+                    versionSpec: dep.versionSpec,
+                  },
+                  depth: depth + 1,
+                });
+              } else {
+                // 이미 해결된 경우 부모-자식 관계만 추가
+                const children = parentChildMap.get(cacheKey) || [];
+                if (!children.includes(depCacheKey)) {
+                  children.push(depCacheKey);
+                  parentChildMap.set(cacheKey, children);
                 }
               }
             } catch (error) {
+              if (error instanceof RequiredDependencyResolutionError) {
+                throw error;
+              }
               logger.warn('의존성 버전 조회 실패', { parent: name, dependency: dep.name, error });
+              throw new RequiredDependencyResolutionError(
+                packageInfo.name,
+                actualVersion,
+                dep.name,
+                dep.versionSpec,
+                error instanceof Error ? error.message : String(error)
+              );
             }
           }
         }
@@ -605,18 +695,7 @@ export class PipResolver implements IResolver {
 
         if (compatibleVersion) return compatibleVersion;
 
-        const fallbackVersion = this.selectPreferredVersion(compatiblePythonVersions);
-        if (!fallbackVersion) return null;
-
-        if (versionSpec) {
-          this.conflicts.push({
-            type: 'version',
-            packageName: name,
-            versions: [versionSpec, fallbackVersion],
-            resolvedVersion: fallbackVersion,
-          });
-        }
-        return fallbackVersion;
+        return null;
       } else {
         // PyPI JSON API 사용 (기존 로직)
         // 캐시에서 패키지 메타데이터 조회 (버전 없이 조회해야 releases 포함)
@@ -643,18 +722,7 @@ export class PipResolver implements IResolver {
 
         if (compatibleVersion) return compatibleVersion;
 
-        const fallbackVersion = this.selectPreferredVersion(compatiblePythonVersions);
-        if (!fallbackVersion) return null;
-
-        if (versionSpec) {
-          this.conflicts.push({
-            type: 'version',
-            packageName: name,
-            versions: [versionSpec, fallbackVersion],
-            resolvedVersion: fallbackVersion,
-          });
-        }
-        return fallbackVersion;
+        return null;
       }
     } catch {
       return null;

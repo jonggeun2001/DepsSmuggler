@@ -44,13 +44,13 @@
 - Modify: `src/core/resolver/pip-resolver.ts`
 - Modify: `src/core/resolver/pip-resolver.test.ts`
 
-- [ ] Add failing resolver tests for a required child with no satisfying version, a required child whose metadata fetch fails, and a required child blocked by `maxDepth`.
-- [ ] Add a regression test proving an incompatible child release is not selected as a fallback for an unsatisfied requirement.
-- [ ] Introduce a resolution error carrying the parent/child requirement context. Propagate it through the active direct-root resolution instead of logging and omitting the child.
-- [ ] Define the depth boundary so a dependency that would need expansion beyond `maxDepth` fails the direct root, while valid leaves within the boundary remain valid.
-- [ ] Preserve existing behavior for optional dependencies excluded by markers; they must not create resolution failures.
-- [ ] Run `npm run test -- --run src/core/resolver/pip-resolver.test.ts`.
-- [ ] Commit: `fix: fail pip roots with unresolved required dependencies`
+- [x] Add failing resolver tests for a required child with no satisfying version, a required child whose metadata fetch fails, and a required child blocked by `maxDepth`.
+- [x] Add a regression test proving an incompatible child release is not selected as a fallback for an unsatisfied requirement.
+- [x] Introduce a resolution error carrying the parent/child requirement context. Propagate it through the active direct-root resolution instead of logging and omitting the child.
+- [x] Define the depth boundary so a dependency that would need expansion beyond `maxDepth` fails the direct root, while valid leaves within the boundary remain valid.
+- [x] Preserve existing behavior for optional dependencies excluded by markers; they must not create resolution failures.
+- [x] Run `npm run test -- --run src/core/resolver/pip-resolver.test.ts`.
+- [x] Commit: `fix: fail pip roots with unresolved required dependencies`
 
 ## Task 3: Establish Dependency Metadata or Fail
 

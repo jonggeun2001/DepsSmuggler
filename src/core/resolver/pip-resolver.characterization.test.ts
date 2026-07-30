@@ -180,6 +180,131 @@ describe('PipResolver characterization', () => {
     expect(simplifyResult(result)).toMatchSnapshot();
   });
 
+  it('필수 의존성의 만족 가능한 버전이 없으면 직접 루트를 실패시킨다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        root: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['missing>=1.0.0'] },
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+
+    await expect(resolver.resolveDependencies('root', '1.0.0')).rejects.toThrow(
+      '필수 의존성 해결 실패: root@1.0.0 -> missing'
+    );
+  });
+
+  it('필수 의존성 메타데이터 조회가 실패하면 직접 루트를 실패시킨다', async () => {
+    const respond = createPyPIFixtureResponder({
+      root: {
+        latest: '1.0.0',
+        versions: {
+          '1.0.0': { requiresDist: ['child>=1.0.0'] },
+        },
+      },
+      child: {
+        latest: '1.0.0',
+        versions: {
+          '1.0.0': {},
+        },
+      },
+    });
+    pipCacheMock.fetchPackageMetadata.mockImplementation(async (name: string, version?: string) => {
+      if (name === 'child' && version === '1.0.0') {
+        throw new Error('child metadata unavailable');
+      }
+      return respond(name, version);
+    });
+
+    const resolver = new PipResolver();
+
+    await expect(resolver.resolveDependencies('root', '1.0.0')).rejects.toThrow(
+      '필수 의존성 해결 실패: root@1.0.0 -> child'
+    );
+  });
+
+  it('최대 깊이를 넘어 확장해야 하는 필수 의존성은 직접 루트를 실패시킨다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        root: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['child>=1.0.0'] },
+          },
+        },
+        child: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['grandchild>=1.0.0'] },
+          },
+        },
+        grandchild: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {},
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+
+    await expect(
+      resolver.resolveDependencies('root', '1.0.0', { maxDepth: 1 })
+    ).rejects.toThrow('필수 의존성 해결 실패: child@1.0.0 -> grandchild');
+  });
+
+  it('필수 의존성의 호환되지 않는 버전으로 대체하지 않고 직접 루트를 실패시킨다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        root: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['child>=2.0.0'] },
+          },
+        },
+        child: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': {},
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+
+    await expect(resolver.resolveDependencies('root', '1.0.0')).rejects.toThrow(
+      '필수 의존성 해결 실패: root@1.0.0 -> child'
+    );
+  });
+
+  it('대상 마커로 제외된 의존성은 직접 루트를 실패시키지 않는다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      createPyPIFixtureResponder({
+        root: {
+          latest: '1.0.0',
+          versions: {
+            '1.0.0': { requiresDist: ['missing>=1.0.0 ; sys_platform == "win32"'] },
+          },
+        },
+      })
+    );
+
+    const resolver = new PipResolver();
+    const result = await resolver.resolveDependencies('root', '1.0.0', {
+      targetPlatform: { system: 'Linux', machine: 'x86_64' },
+    });
+
+    expect(result.flatList).toHaveLength(1);
+    expect(result.flatList[0]).toMatchObject({ name: 'root', version: '1.0.0' });
+  });
+
   it('extras fixture의 그래프를 고정한다', async () => {
     pipCacheMock.fetchPackageMetadata.mockImplementation(
       createPyPIFixtureResponder({
@@ -226,7 +351,7 @@ describe('PipResolver characterization', () => {
     expect(simplifyResult(result)).toMatchSnapshot();
   });
 
-  it('conflicts fixture의 그래프를 고정한다', async () => {
+  it('만족 불가능한 필수 버전 제약은 직접 루트를 실패시킨다', async () => {
     pipCacheMock.fetchPackageMetadata.mockImplementation(
       createPyPIFixtureResponder({
         rootpkg: {
@@ -248,9 +373,10 @@ describe('PipResolver characterization', () => {
     );
 
     const resolver = new PipResolver();
-    const result = await resolver.resolveDependencies('rootpkg', '1.0.0');
 
-    expect(simplifyResult(result)).toMatchSnapshot();
+    await expect(resolver.resolveDependencies('rootpkg', '1.0.0')).rejects.toThrow(
+      '필수 의존성 해결 실패: rootpkg@1.0.0 -> urllib3'
+    );
   });
 
   it('markers fixture의 그래프를 고정한다', async () => {

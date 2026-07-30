@@ -1,50 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`PipResolver characterization > conflicts fixture의 그래프를 고정한다 1`] = `
-{
-  "conflicts": [
-    {
-      "packageName": "urllib3",
-      "resolvedVersion": "2.2.1",
-      "type": "version",
-      "versions": [
-        "<1.0",
-        "2.2.1",
-      ],
-    },
-  ],
-  "flatList": [
-    {
-      "filename": "rootpkg-1.0.0.tar.gz",
-      "indexUrl": null,
-      "name": "rootpkg",
-      "version": "1.0.0",
-    },
-    {
-      "filename": "urllib3-2.2.1.tar.gz",
-      "indexUrl": null,
-      "name": "urllib3",
-      "version": "2.2.1",
-    },
-  ],
-  "root": {
-    "dependencies": [
-      {
-        "dependencies": [],
-        "filename": "urllib3-2.2.1.tar.gz",
-        "indexUrl": null,
-        "name": "urllib3",
-        "version": "2.2.1",
-      },
-    ],
-    "filename": "rootpkg-1.0.0.tar.gz",
-    "indexUrl": null,
-    "name": "rootpkg",
-    "version": "1.0.0",
-  },
-}
-`;
-
 exports[`PipResolver characterization > extras fixture의 그래프를 고정한다 1`] = `
 {
   "conflicts": [],
