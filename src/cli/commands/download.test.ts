@@ -209,7 +209,7 @@ describe('downloadCommand', () => {
     );
   });
 
-  it('pip 타겟의 아키텍처와 Python patch 버전을 resolver 및 downloader에서 동일하게 정규화한다', async () => {
+  it('pip 타겟의 Python patch 버전을 requires_python 평가용으로 보존한다', async () => {
     await downloadCommand({
       type: 'pip',
       package: 'requests',
@@ -219,7 +219,7 @@ describe('downloadCommand', () => {
       format: 'zip',
       deps: true,
       concurrency: '3',
-      pythonVersion: '3.12.0',
+      pythonVersion: '3.12.2',
     });
 
     expect(resolveAllDependencies).toHaveBeenCalledWith(
@@ -227,7 +227,7 @@ describe('downloadCommand', () => {
       expect.objectContaining({
         architecture: 'x86_64',
         targetOS: 'linux',
-        pythonVersion: '3.12',
+        pythonVersion: '3.12.2',
       })
     );
     expect(startDownload).toHaveBeenCalledWith(
@@ -235,7 +235,7 @@ describe('downloadCommand', () => {
         pipTargetPlatform: {
           os: 'linux',
           arch: 'x86_64',
-          pythonVersion: '3.12',
+          pythonVersion: '3.12.2',
         },
       })
     );

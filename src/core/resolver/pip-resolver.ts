@@ -537,7 +537,7 @@ export class PipResolver implements IResolver {
     if (variable === 'python_version') {
       if (!this.pythonVersion) return true;
       return matchesComparison(
-        comparePythonVersions(this.pythonVersion, requiredValue),
+        comparePythonVersions(getPythonMarkerVersion(this.pythonVersion), requiredValue),
         operator
       );
     }
@@ -1150,6 +1150,11 @@ function normalizeMachine(machine: string): string {
   if (normalized === 'amd64') return 'x86_64';
   if (normalized === 'aarch64' || normalized === 'arm64') return 'aarch64';
   return normalized;
+}
+
+function getPythonMarkerVersion(pythonVersion: string): string {
+  const match = /^(\d+)\.(\d+)/.exec(pythonVersion.trim());
+  return match ? `${match[1]}.${match[2]}` : pythonVersion;
 }
 
 function isExactPinnedVersionSpecifier(versionSpec: string | undefined): boolean {

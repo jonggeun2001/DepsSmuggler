@@ -56,12 +56,14 @@ function getPipTargetPlatform(arch: Architecture, pythonVersion?: string): PipTa
 }
 
 function normalizePythonVersion(pythonVersion: string): string {
-  const match = pythonVersion.trim().match(/^(\d+)\.(\d+)(?:\.\d+)?$/);
+  const match = pythonVersion.trim().match(/^(\d+)\.(\d+)(?:\.(\d+))?$/);
   if (!match) {
     throw new Error('Python 버전은 major.minor 또는 major.minor.patch 형식이어야 합니다');
   }
 
-  return `${match[1]}.${match[2]}`;
+  return match[3]
+    ? `${match[1]}.${match[2]}.${match[3]}`
+    : `${match[1]}.${match[2]}`;
 }
 
 function toDownloadPackage(pkg: PackageInfo): DownloadPackage {

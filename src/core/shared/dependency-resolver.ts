@@ -75,7 +75,7 @@ export interface DependencyResolverOptions {
   architecture?: string;
   /** 타겟 OS (pip/conda 휠 필터링용, 폐쇄망 OS) */
   targetOS?: 'any' | 'windows' | 'macos' | 'linux';
-  /** Python 버전 (pip 휠 필터링용, 예: '3.11', '3.12') */
+  /** Python 버전 (pip 호환성 필터링용, 예: '3.12', '3.12.2') */
   pythonVersion?: string;
   /** CUDA 버전 (conda 패키지의 __cuda 의존성 필터링용, 예: '11.8', '12.4') */
   cudaVersion?: string | null;
