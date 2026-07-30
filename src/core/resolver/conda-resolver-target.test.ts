@@ -756,21 +756,21 @@ describe('CondaResolver 대상 아티팩트 선택', () => {
           version: '1.0.0',
           build: 'linux_64_0',
           build_number: 0,
-          depends: ['blas 1.0 *_openblas'],
+          depends: ['blas 1.0 abi2.0_*'],
           subdir: 'linux-64',
         },
-        'blas-1.0-mkl_2.conda': {
+        'blas-1.0-abi2x0-bad.conda': {
           name: 'blas',
           version: '1.0',
-          build: 'mkl_2',
+          build: 'abi2x0_bad_2',
           build_number: 2,
           depends: [],
           subdir: 'linux-64',
         },
-        'blas-1.0-h123_openblas.conda': {
+        'blas-1.0-abi2.0-good.conda': {
           name: 'blas',
           version: '1.0',
-          build: 'h123_openblas',
+          build: 'abi2.0_good_1',
           build_number: 1,
           depends: [],
           subdir: 'linux-64',
@@ -789,7 +789,7 @@ describe('CondaResolver 대상 아티팩트 선택', () => {
     expect(
       result.flatList.find((pkg) => pkg.name === 'blas')?.metadata,
     ).toMatchObject({
-      filename: 'blas-1.0-h123_openblas.conda',
+      filename: 'blas-1.0-abi2.0-good.conda',
     });
   });
 

@@ -241,6 +241,23 @@ describe('conda-matchspec', () => {
       expect(matchesBuildSpec('py39_cuda11_0', '*_0')).toBe(true);
       expect(matchesBuildSpec('py39_cuda11_1', '*_0')).toBe(false);
     });
+
+    it('정규식 메타문자를 glob 리터럴로 처리한다', () => {
+      expect(
+        matchesBuildSpec(
+          'py3.12_cuda12.4_h123_0',
+          'py3.12_cuda12.4_*',
+        ),
+      ).toBe(true);
+      expect(
+        matchesBuildSpec(
+          'py3x12_cuda12y4_h123_0',
+          'py3.12_cuda12.4_*',
+        ),
+      ).toBe(false);
+      expect(matchesBuildSpec('cxx+abi[0]_1', 'cxx+abi[0]_*')).toBe(true);
+      expect(matchesBuildSpec('cxxabi0_1', 'cxx+abi[0]_*')).toBe(false);
+    });
   });
 
   describe('matchesSpec', () => {
