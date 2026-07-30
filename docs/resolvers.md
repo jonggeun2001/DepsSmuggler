@@ -318,7 +318,7 @@ interface QueueItem {
 | `parseDependencyString` | Conda 의존성 문자열 파싱 |
 | `getLatestVersion` | 채널별 최신 버전 조회 |
 | `getLatestVersionFromRepoData` | repodata에서 최신 버전 조회 |
-| `isSystemPackage` | 시스템 패키지 여부 확인 (libc 등 제외) |
+| `isSystemPackage` | 외부 Python 런타임 및 Conda 가상 패키지 여부 확인 |
 | `getPythonBuildTag` | Python 버전에서 build 태그 추출 (예: '3.12' -> 'py312') |
 | `isBuildCompatibleWithPython` | build 문자열이 Python 버전과 호환되는지 확인 |
 | `resolvePackageFallback` | Anaconda API fallback 해결 |
@@ -344,7 +344,7 @@ interface QueueItem {
 - **캐싱**: repodata 캐싱으로 중복 요청 방지
 - **Python 버전 필터링**: py312, py311 등 build 태그로 Python 버전에 맞는 패키지 선택
 - **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
-- **시스템 패키지 제외**: libc, libgcc 등 시스템 패키지 자동 제외
+- **런타임 구분**: 외부 Python 런타임과 `__` 가상 패키지만 제외하고 OpenSSL, zlib, libgcc 같은 실제 Conda 패키지는 포함
 - **Anaconda API fallback**: RC 버전 등 특수 라벨 패키지 지원
 
 ### 성능 최적화
@@ -931,7 +931,7 @@ interface DependencyConflict {
 5. **충돌 감지**: 동일 패키지의 다른 버전 요청 시 기록
 6. **버전 해결**: 제약조건에 맞는 최적 버전 선택
 7. **환경 마커 평가**: 플랫폼별 조건부 의존성 필터링 (pip)
-8. **시스템 패키지 제외**: libc 등 시스템 패키지 자동 제외 (conda, OS 패키지)
+8. **가상 패키지 제외**: Conda 외부 Python 런타임과 `__` 가상 패키지만 제외
 
 ```
 패키지 A

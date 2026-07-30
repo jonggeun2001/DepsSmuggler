@@ -2,7 +2,7 @@
  * ArchivePackager 테스트
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
@@ -21,6 +21,7 @@ describe('ArchivePackager', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     // 임시 디렉토리 정리
     if (tempDir && await fs.pathExists(tempDir)) {
       await fs.remove(tempDir);
@@ -41,6 +42,49 @@ describe('ArchivePackager', () => {
   });
 
   describe('createArchive', () => {
+    it('출력 디렉터리 아래의 중첩 아티팩트 경로를 보존한다', async () => {
+      const firstFile = path.join(
+        tempDir,
+        'pip',
+        'first',
+        'demo.whl',
+      );
+      const secondFile = path.join(
+        tempDir,
+        'pip',
+        'second',
+        'demo.whl',
+      );
+      await fs.ensureDir(path.dirname(firstFile));
+      await fs.ensureDir(path.dirname(secondFile));
+      await fs.writeFile(firstFile, 'first');
+      await fs.writeFile(secondFile, 'second');
+      const outputPath = path.join(tempDir, 'output.zip');
+      const createArchiveFromFileEntries = vi
+        .spyOn(packager as any, 'createArchiveFromFileEntries')
+        .mockResolvedValue(outputPath);
+
+      await packager.createArchive(
+        [firstFile, secondFile],
+        outputPath,
+        [],
+        { format: 'zip' },
+      );
+
+      expect(
+        createArchiveFromFileEntries.mock.calls[0][0],
+      ).toEqual([
+        {
+          sourcePath: firstFile,
+          archivePath: 'packages/pip/first/demo.whl',
+        },
+        {
+          sourcePath: secondFile,
+          archivePath: 'packages/pip/second/demo.whl',
+        },
+      ]);
+    });
+
     it('ZIP 형식으로 아카이브를 생성해야 함', async () => {
       // 테스트 파일 생성
       const testFile = path.join(tempDir, 'test.txt');

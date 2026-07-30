@@ -8,11 +8,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { PipResolver } from './pip-resolver';
 
 // PipResolver 인스턴스 생성 및 targetPlatform 설정
-const createResolver = (options?: { targetPlatform?: { system?: string; machine?: string } }) => {
+const createResolver = (options?: {
+  targetPlatform?: { system?: string; machine?: string };
+  pythonVersion?: string;
+}) => {
   const resolver = new PipResolver();
   // targetPlatform은 private 속성이므로 직접 설정
   if (options?.targetPlatform) {
     (resolver as any).targetPlatform = options.targetPlatform;
+  }
+  if (options?.pythonVersion) {
+    (resolver as any).pythonVersion = options.pythonVersion;
   }
   return resolver;
 };
@@ -102,6 +108,19 @@ describe('PipResolver 단위 테스트', () => {
       });
     });
 
+    it('PEP 685 extra 이름을 정규화하고 중복 제거한다', () => {
+      const result = callParseDependencyString(
+        resolver,
+        'requests[Foo.Bar,foo_bar,foo-bar]',
+      );
+      expect(result).toEqual({
+        name: 'requests',
+        versionSpec: undefined,
+        extras: ['foo-bar'],
+        markers: undefined,
+      });
+    });
+
     it('extras와 버전', () => {
       const result = callParseDependencyString(resolver, 'requests[security]==2.28.0');
       expect(result).toEqual({
@@ -143,8 +162,12 @@ describe('PipResolver 단위 테스트', () => {
   });
 
   describe('evaluateMarker', () => {
-    const callEvaluateMarker = (resolver: PipResolver, marker?: string): boolean => {
-      return (resolver as any).evaluateMarker(marker);
+    const callEvaluateMarker = (
+      resolver: PipResolver,
+      marker?: string,
+      extras?: string[],
+    ): boolean => {
+      return (resolver as any).evaluateMarker(marker, extras);
     };
 
     describe('기본 동작', () => {
@@ -156,9 +179,60 @@ describe('PipResolver 단위 테스트', () => {
         expect(callEvaluateMarker(resolver, '')).toBe(true);
       });
 
-      it('targetPlatform이 없고 마커가 있으면 false', () => {
-        // 기본 resolver는 targetPlatform이 없음
-        expect(callEvaluateMarker(resolver, 'sys_platform == "linux"')).toBe(false);
+      it('대상 환경 값이 없으면 의존성을 누락하지 않도록 포함한다', () => {
+        // 대상 OS를 모르면 OS별 의존성을 모두 번들에 포함한다.
+        expect(callEvaluateMarker(resolver, 'sys_platform == "linux"')).toBe(true);
+      });
+
+      it('플랫폼 없이도 지정한 Python 버전 마커를 평가한다', () => {
+        resolver = createResolver({ pythonVersion: '3.12' });
+        expect(
+          callEvaluateMarker(resolver, 'python_version >= "3.11"'),
+        ).toBe(true);
+      });
+
+      it('major.minor 입력의 full version 범위를 보수적으로 평가한다', () => {
+        resolver = createResolver({ pythonVersion: '3.12' });
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_full_version < "3.13.0"',
+          ),
+        ).toBe(true);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'implementation_version >= "3.13.0"',
+          ),
+        ).toBe(false);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_full_version == "3.12.5"',
+          ),
+        ).toBe(true);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'implementation_version < "3.12.1"',
+          ),
+        ).toBe(true);
+      });
+
+      it('patch 버전을 지정하면 full version 마커를 정확히 평가한다', () => {
+        resolver = createResolver({ pythonVersion: '3.12.8' });
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_full_version < "3.12.1"',
+          ),
+        ).toBe(false);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'implementation_version == "3.12.8"',
+          ),
+        ).toBe(true);
       });
     });
 
@@ -166,6 +240,7 @@ describe('PipResolver 단위 테스트', () => {
       beforeEach(() => {
         resolver = createResolver({
           targetPlatform: { system: 'Linux', machine: 'x86_64' },
+          pythonVersion: '3.12',
         });
       });
 
@@ -195,6 +270,39 @@ describe('PipResolver 단위 테스트', () => {
 
       it('platform_machine == "arm64" 실패', () => {
         expect(callEvaluateMarker(resolver, 'platform_machine == "arm64"')).toBe(false);
+      });
+
+      it('복합 Python 버전 범위를 평가한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_version >= "3.10" and python_version < "3.12"',
+          ),
+        ).toBe(false);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_version >= "3.12" and sys_platform != "win32"',
+          ),
+        ).toBe(true);
+      });
+
+      it('괄호가 포함된 and/or 마커를 평가한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            '(sys_platform == "win32" or platform_system == "Linux") and platform_machine != "arm64"',
+          ),
+        ).toBe(true);
+      });
+
+      it('not in 연산자를 평가한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'sys_platform not in "win32 darwin"',
+          ),
+        ).toBe(true);
       });
     });
 
@@ -255,6 +363,16 @@ describe('PipResolver 단위 테스트', () => {
 
       it('extra 마커가 포함되면 제외', () => {
         expect(callEvaluateMarker(resolver, 'extra == "security"')).toBe(false);
+      });
+
+      it('선택한 extra가 복합 마커를 만족하면 포함한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'extra == "security" and sys_platform == "linux"',
+            ['security'],
+          ),
+        ).toBe(true);
       });
     });
   });

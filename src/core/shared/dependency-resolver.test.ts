@@ -230,12 +230,42 @@ describe('dependency-resolver', () => {
     it('conda 패키지 의존성 해결', async () => {
       const mockCondaResult = {
         root: {
-          package: { type: 'conda', name: 'pandas', version: '2.0.0' },
+          package: {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+            metadata: {
+              subdir: 'osx-arm64',
+              filename: 'pandas-2.0.0-py311.conda',
+              downloadUrl:
+                'https://conda.example/osx-arm64/pandas-2.0.0-py311.conda',
+            },
+          },
           dependencies: [],
         },
         flatList: [
-          { type: 'conda', name: 'pandas', version: '2.0.0' },
-          { type: 'conda', name: 'numpy', version: '1.24.0' },
+          {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+            metadata: {
+              subdir: 'osx-arm64',
+              filename: 'pandas-2.0.0-py311.conda',
+              downloadUrl:
+                'https://conda.example/osx-arm64/pandas-2.0.0-py311.conda',
+            },
+          },
+          {
+            type: 'conda',
+            name: 'numpy',
+            version: '1.24.0',
+            metadata: {
+              subdir: 'osx-arm64',
+              filename: 'numpy-1.24.0-py311.conda',
+              downloadUrl:
+                'https://conda.example/osx-arm64/numpy-1.24.0-py311.conda',
+            },
+          },
         ],
         conflicts: [],
         totalSize: 20000000,
@@ -272,14 +302,298 @@ describe('dependency-resolver', () => {
       expect(result.allPackages).toHaveLength(2);
     });
 
-    it('maven 패키지 의존성 해결', async () => {
-      const mockMavenResult = {
+    it('resolver가 선택한 root 메타데이터를 기존 요청 패키지에 병합한다', async () => {
+      const mockCondaResult = {
         root: {
-          package: { type: 'maven', name: 'spring-core', version: '5.3.0' },
+          package: {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+            arch: 'aarch64',
+            metadata: {
+              repository: 'defaults/pandas',
+              subdir: 'linux-aarch64',
+              filename: 'pandas-2.0.0-py312.conda',
+              downloadUrl:
+                'https://conda.example/pandas-2.0.0-py312.conda',
+              checksum: { md5: 'resolved' },
+            },
+          },
           dependencies: [],
         },
         flatList: [
-          { type: 'maven', name: 'spring-core', version: '5.3.0' },
+          {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+            arch: 'aarch64',
+            metadata: {
+              repository: 'defaults/pandas',
+              subdir: 'linux-aarch64',
+              filename: 'pandas-2.0.0-py312.conda',
+              downloadUrl:
+                'https://conda.example/pandas-2.0.0-py312.conda',
+              checksum: { md5: 'resolved' },
+            },
+          },
+        ],
+        conflicts: [],
+        totalSize: 1,
+      };
+      const mockResolver = {
+        resolveDependencies: vi.fn().mockResolvedValue(mockCondaResult),
+      };
+      vi.mocked(getCondaResolver).mockReturnValue(mockResolver as any);
+
+      const [root] = (
+        await resolveAllDependencies([
+          {
+            id: 'request-id',
+            type: 'conda',
+            name: 'pandas',
+            version: 'latest',
+            architecture: 'x86_64',
+            indexUrl: 'https://request.example/simple',
+            extras: ['request-extra'],
+            metadata: {
+              classifier: 'request',
+              checksum: { md5: 'old' },
+            },
+          },
+        ])
+      ).allPackages;
+
+      expect(root).toMatchObject({
+        id: 'request-id',
+        type: 'conda',
+        name: 'pandas',
+        version: '2.0.0',
+        architecture: 'aarch64',
+        downloadUrl: 'https://conda.example/pandas-2.0.0-py312.conda',
+        filename: 'pandas-2.0.0-py312.conda',
+        indexUrl: 'https://request.example/simple',
+        extras: ['request-extra'],
+        metadata: {
+          classifier: 'request',
+          checksum: { md5: 'resolved' },
+          repository: 'defaults/pandas',
+          subdir: 'linux-aarch64',
+          filename: 'pandas-2.0.0-py312.conda',
+          downloadUrl: 'https://conda.example/pandas-2.0.0-py312.conda',
+        },
+      });
+    });
+
+    it('같은 Conda 이름과 버전의 서로 다른 build 아티팩트를 모두 보존한다', async () => {
+      const rootPackage = {
+        type: 'conda' as const,
+        name: 'demo',
+        version: '1.0.0',
+        metadata: {
+          subdir: 'linux-64',
+          filename: 'demo-1.0.0-linux_64_0.conda',
+          downloadUrl:
+            'https://conda.example/demo-1.0.0-linux_64_0.conda',
+        },
+      };
+      const openblas = {
+        type: 'conda' as const,
+        name: 'blas',
+        version: '1.0',
+        metadata: {
+          subdir: 'linux-64',
+          filename: 'blas-1.0-h123_openblas.conda',
+          downloadUrl:
+            'https://conda.example/blas-1.0-h123_openblas.conda',
+        },
+      };
+      const mkl = {
+        type: 'conda' as const,
+        name: 'blas',
+        version: '1.0',
+        metadata: {
+          subdir: 'linux-64',
+          filename: 'blas-1.0-h456_mkl.conda',
+          downloadUrl:
+            'https://conda.example/blas-1.0-h456_mkl.conda',
+        },
+      };
+      vi.mocked(getCondaResolver).mockReturnValue({
+        resolveDependencies: vi.fn().mockResolvedValue({
+          root: {
+            package: rootPackage,
+            dependencies: [
+              { package: openblas, dependencies: [] },
+              { package: mkl, dependencies: [] },
+            ],
+          },
+          flatList: [rootPackage, openblas, mkl],
+          conflicts: [],
+        }),
+      } as any);
+
+      const result = await resolveAllDependencies([
+        {
+          id: 'request-id',
+          type: 'conda',
+          name: 'demo',
+          version: '1.0.0',
+        },
+      ]);
+
+      expect(
+        result.allPackages
+          .filter((pkg) => pkg.name === 'blas')
+          .map((pkg) => pkg.filename)
+          .sort(),
+      ).toEqual([
+        'blas-1.0-h123_openblas.conda',
+        'blas-1.0-h456_mkl.conda',
+      ]);
+    });
+
+    it('앞선 의존성과 같은 Conda root 아티팩트를 중복하지 않는다', async () => {
+      const packageInfo = (
+        name: string,
+        filename: string,
+      ) => ({
+        type: 'conda' as const,
+        name,
+        version: '1.0',
+        metadata: {
+          subdir: 'linux-64',
+          filename,
+          downloadUrl: `https://conda.example/${filename}`,
+        },
+      });
+      const rootA = packageInfo('a', 'a-1.0-linux_64_0.conda');
+      const rootB = packageInfo('b', 'b-1.0-linux_64_0.conda');
+      const resolveDependencies = vi.fn().mockImplementation(
+        async (name: string) =>
+          name === 'a'
+            ? {
+                root: {
+                  package: rootA,
+                  dependencies: [
+                    { package: rootB, dependencies: [] },
+                  ],
+                },
+                flatList: [rootA, rootB],
+                conflicts: [],
+              }
+            : {
+                root: { package: rootB, dependencies: [] },
+                flatList: [rootB],
+                conflicts: [],
+              },
+      );
+      vi.mocked(getCondaResolver).mockReturnValue({
+        resolveDependencies,
+      } as any);
+
+      const result = await resolveAllDependencies([
+        {
+          id: 'request-a',
+          type: 'conda',
+          name: 'a',
+          version: '1.0',
+        },
+        {
+          id: 'request-b',
+          type: 'conda',
+          name: 'b',
+          version: '1.0',
+        },
+      ]);
+
+      expect(result.allPackages).toHaveLength(2);
+      expect(
+        result.allPackages.filter(
+          (pkg) => pkg.filename === 'b-1.0-linux_64_0.conda',
+        ),
+      ).toHaveLength(1);
+      expect(
+        result.allPackages.find((pkg) => pkg.name === 'b')?.id,
+      ).toBe('request-b');
+    });
+
+    it('대상 Conda 아티팩트 메타데이터가 없으면 해결 실패로 기록한다', async () => {
+      const mockCondaResult = {
+        root: {
+          package: {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+          },
+          dependencies: [],
+        },
+        flatList: [
+          {
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+          },
+        ],
+        conflicts: [],
+        totalSize: 0,
+      };
+      const mockResolver = {
+        resolveDependencies: vi.fn().mockResolvedValue(mockCondaResult),
+      };
+      vi.mocked(getCondaResolver).mockReturnValue(mockResolver as any);
+
+      const result = await resolveAllDependencies(
+        [
+          {
+            id: 'request-id',
+            type: 'conda',
+            name: 'pandas',
+            version: '2.0.0',
+            architecture: 'aarch64',
+          },
+        ],
+        {
+          architecture: 'aarch64',
+          targetOS: 'linux',
+          pythonVersion: '3.12',
+        },
+      );
+
+      expect(result.failedPackages).toEqual([
+        expect.objectContaining({
+          name: 'pandas',
+          error: expect.stringContaining(
+            '대상 환경과 호환되는 Conda 아티팩트를 찾을 수 없습니다',
+          ),
+        }),
+      ]);
+      expect(result.allPackages).toEqual([
+        expect.objectContaining({
+          id: 'request-id',
+          name: 'pandas',
+        }),
+      ]);
+      expect(result.allPackages[0]).not.toHaveProperty('downloadUrl');
+    });
+
+    it('maven 패키지 의존성 해결', async () => {
+      const mockMavenResult = {
+        root: {
+          package: {
+            type: 'maven',
+            name: 'spring-core',
+            version: '5.3.0',
+            metadata: { classifier: 'natives-linux' },
+          },
+          dependencies: [],
+        },
+        flatList: [
+          {
+            type: 'maven',
+            name: 'spring-core',
+            version: '5.3.0',
+            metadata: { classifier: 'natives-linux' },
+          },
           { type: 'maven', name: 'spring-jcl', version: '5.3.0' },
         ],
         conflicts: [],
@@ -292,13 +606,38 @@ describe('dependency-resolver', () => {
       vi.mocked(getMavenResolver).mockReturnValue(mockResolver as any);
 
       const packages: DownloadPackage[] = [
-        { id: 'test-1', type: 'maven', name: 'spring-core', version: '5.3.0' },
+        {
+          id: 'test-1',
+          type: 'maven',
+          name: 'spring-core',
+          version: '5.3.0',
+          classifier: 'natives-linux',
+          metadata: { requestSource: 'cli' },
+        },
       ];
 
       const result = await resolveAllDependencies(packages);
 
       expect(getMavenResolver).toHaveBeenCalled();
+      expect(mockResolver.resolveDependencies).toHaveBeenCalledWith(
+        'spring-core',
+        '5.3.0',
+        expect.objectContaining({
+          classifier: 'natives-linux',
+        }),
+      );
+      const resolverOptions = mockResolver.resolveDependencies.mock.calls[0][2];
+      expect(resolverOptions).not.toHaveProperty('targetOS');
+      expect(resolverOptions).not.toHaveProperty('targetArchitecture');
       expect(result.allPackages).toHaveLength(2);
+      expect(result.allPackages[0]).toMatchObject({
+        id: 'test-1',
+        classifier: 'natives-linux',
+        metadata: {
+          classifier: 'natives-linux',
+          requestSource: 'cli',
+        },
+      });
     });
 
     // yum, apt, apk는 별도 IPC 핸들러(os:resolveDependencies)에서 처리되므로 스킵

@@ -202,6 +202,23 @@ describe('pip-cache', () => {
       expect(result).toBeNull();
     });
 
+    it('404가 아닌 API 오류는 호출자에게 전파해야 함', async () => {
+      const error = {
+        isAxiosError: true,
+        message: 'Internal Server Error',
+        response: { status: 500, statusText: 'Internal Server Error' },
+      };
+      mockedAxios.get.mockRejectedValueOnce(error);
+      mockedAxios.isAxiosError.mockReturnValue(true);
+
+      await expect(
+        fetchPackageMetadata('requests', '2.28.0', {
+          cacheDir: testCacheDir,
+          useDiskCache: false,
+        }),
+      ).rejects.toBe(error);
+    });
+
     it('패키지명 정규화 (대소문자, 하이픈/언더스코어)', async () => {
       const mockResponse = createMockPyPIResponse('my-package', '1.0.0');
       mockedAxios.get.mockResolvedValueOnce(mockResponse);

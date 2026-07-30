@@ -7,6 +7,7 @@
  * 참고: https://peps.python.org/pep-0503/
  */
 
+import { createHash } from 'crypto';
 import * as path from 'path';
 import axios from 'axios';
 import { createDiskCache, CacheStore } from './cache/cache-store';
@@ -30,6 +31,8 @@ export interface SimpleApiPackageFile {
     algorithm: string;
     digest: string;
   };
+  /** PEP 658/714: 해시가 없어도 원격 Core Metadata가 제공되는지 여부 */
+  metadataAvailable?: boolean;
 }
 
 /**
@@ -134,7 +137,10 @@ export async function fetchPackageFiles(
  *    data-requires-python="&gt;=3.8"
  *    data-yanked="">torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl</a>
  */
-function parseSimpleApiHtml(html: string, baseUrl: string): SimpleApiPackageFile[] {
+export function parseSimpleApiHtml(
+  html: string,
+  baseUrl: string,
+): SimpleApiPackageFile[] {
   const files: SimpleApiPackageFile[] = [];
 
   // <a> 태그 정규식 매칭
@@ -163,15 +169,20 @@ function parseSimpleApiHtml(html: string, baseUrl: string): SimpleApiPackageFile
 
     let url = hrefMatch[1];
 
-    // SHA256 해시 추출 (URL fragment)
+    // 체크섬 해시 추출 (URL fragment)
     let hash: { algorithm: string; digest: string } | undefined;
-    const hashMatch = url.match(/#sha256=([a-fA-F0-9]+)/);
-    if (hashMatch) {
-      hash = {
-        algorithm: 'sha256',
-        digest: hashMatch[1],
-      };
-      url = url.replace(/#.*$/, ''); // fragment 제거
+    const fragmentIndex = url.indexOf('#');
+    if (fragmentIndex !== -1) {
+      const fragment = url.slice(fragmentIndex + 1);
+      const hashMatch =
+        /^([A-Za-z0-9][A-Za-z0-9_-]*)=([^&]+)/.exec(fragment);
+      if (hashMatch) {
+        hash = {
+          algorithm: hashMatch[1].toLowerCase(),
+          digest: decodeURIComponent(hashMatch[2]),
+        };
+      }
+      url = url.slice(0, fragmentIndex);
     }
 
     // 상대 URL → 절대 URL 변환
@@ -194,14 +205,33 @@ function parseSimpleApiHtml(html: string, baseUrl: string): SimpleApiPackageFile
     // data-yanked 추출
     const yanked = /data-yanked(?:=["'][^"']*["'])?/i.test(attributes);
 
-    // PEP 658: data-dist-info-metadata 추출 (메타데이터 파일 접근 가능 여부)
+    // PEP 658/714: data-core-metadata 우선, legacy 속성 fallback
     let metadataHash: { algorithm: string; digest: string } | undefined;
-    const metadataHashMatch = /data-dist-info-metadata=["']sha256=([a-fA-F0-9]+)["']/i.exec(attributes);
-    if (metadataHashMatch) {
-      metadataHash = {
-        algorithm: 'sha256',
-        digest: metadataHashMatch[1],
-      };
+    let metadataAvailable = false;
+    const coreMetadataMatch =
+      /data-core-metadata=["']([^"']+)["']/i.exec(
+        attributes,
+      );
+    const legacyMetadataMatch =
+      /data-dist-info-metadata=["']([^"']+)["']/i.exec(
+        attributes,
+      );
+    const metadataValue =
+      coreMetadataMatch?.[1] ?? legacyMetadataMatch?.[1];
+    if (metadataValue?.toLowerCase() === 'true') {
+      metadataAvailable = true;
+    } else if (metadataValue) {
+      const metadataHashMatch =
+        /^([A-Za-z0-9][A-Za-z0-9_-]*)=([a-fA-F0-9]+)$/.exec(
+          metadataValue,
+        );
+      if (metadataHashMatch) {
+        metadataAvailable = true;
+        metadataHash = {
+          algorithm: metadataHashMatch[1].toLowerCase(),
+          digest: metadataHashMatch[2],
+        };
+      }
     }
 
     files.push({
@@ -211,6 +241,7 @@ function parseSimpleApiHtml(html: string, baseUrl: string): SimpleApiPackageFile
       yanked,
       hash,
       metadataHash,
+      metadataAvailable,
     });
   }
 
@@ -225,7 +256,7 @@ function parseSimpleApiHtml(html: string, baseUrl: string): SimpleApiPackageFile
  */
 export function extractVersionFromFilename(filename: string): string {
   // 휠 파일명 형식: {name}-{version}[-{build}]-{python}-{abi}-{platform}.whl
-  const wheelMatch = /^([a-zA-Z0-9._-]+)-([a-zA-Z0-9._+]+?)(?:-\d+)?-([a-z0-9]+)-([a-z0-9_]+)-([a-z0-9_]+)\.whl$/i.exec(
+  const wheelMatch = /^([a-zA-Z0-9._-]+?)-([a-zA-Z0-9._+]+?)(?:-\d[0-9a-z_]*)?-([a-z0-9.]+)-([a-z0-9_.]+)-([a-z0-9_.]+)\.whl$/i.exec(
     filename
   );
 
@@ -233,8 +264,11 @@ export function extractVersionFromFilename(filename: string): string {
     return wheelMatch[2]; // version
   }
 
-  // tar.gz / zip 형식: {name}-{version}.{ext}
-  const sourceMatch = /^([a-zA-Z0-9._-]+)-([a-zA-Z0-9._+]+)\.(tar\.gz|zip)$/i.exec(filename);
+  // 소스 배포본 형식: {name}-{version}.{ext}
+  const sourceMatch =
+    /^([a-zA-Z0-9._-]+)-([a-zA-Z0-9._+]+)\.(tar\.gz|zip|tar\.bz2|tar\.xz)$/i.exec(
+      filename,
+    );
   if (sourceMatch) {
     return sourceMatch[2];
   }
@@ -251,7 +285,7 @@ export function extractVersionFromFilename(filename: string): string {
  */
 export function parseWheelFilename(filename: string): WheelInfo {
   const wheelMatch =
-    /^([a-zA-Z0-9._-]+)-([a-zA-Z0-9._+]+?)(?:-\d+)?-([a-z0-9]+)-([a-z0-9_]+)-([a-z0-9_.]+)\.whl$/i.exec(
+    /^([a-zA-Z0-9._-]+?)-([a-zA-Z0-9._+]+?)(?:-\d[0-9a-z_]*)?-([a-z0-9.]+)-([a-z0-9_.]+)-([a-z0-9_.]+)\.whl$/i.exec(
       filename
     );
 
@@ -286,12 +320,22 @@ export function isSourceDistribution(filename: string): boolean {
  * PEP 658: 휠 메타데이터 파일에서 의존성 정보 가져오기
  *
  * @param file Simple API 파일 정보 (metadataHash가 있어야 함)
- * @returns Requires-Dist 목록
+ * @returns Requires-Dist 목록. 메타데이터를 가져올 수 없으면 null
  */
-export async function fetchWheelMetadata(file: SimpleApiPackageFile): Promise<string[]> {
+export async function fetchWheelMetadata(
+  file: SimpleApiPackageFile,
+): Promise<string[] | null> {
+  if (!file.metadataAvailable && !file.metadataHash) {
+    logger.debug('원격 Core Metadata 미지원', {
+      filename: file.filename,
+    });
+    return null;
+  }
   if (!file.metadataHash) {
-    logger.debug('메타데이터 해시 없음, PEP 658 미지원', { filename: file.filename });
-    return [];
+    logger.warn('검증할 수 없는 원격 Core Metadata', {
+      filename: file.filename,
+    });
+    return null;
   }
 
   try {
@@ -305,17 +349,47 @@ export async function fetchWheelMetadata(file: SimpleApiPackageFile): Promise<st
         Accept: 'text/plain',
       },
       timeout: 30000,
-      responseType: 'text',
+      responseType: 'arraybuffer',
     });
 
-    const metadata = response.data as string;
+    const metadataBytes =
+      typeof response.data === 'string'
+        ? Buffer.from(response.data, 'utf8')
+        : Buffer.from(response.data as ArrayBuffer);
+    if (file.metadataHash) {
+      let actualDigest: string;
+      try {
+        actualDigest = createHash(file.metadataHash.algorithm)
+          .update(metadataBytes)
+          .digest('hex');
+      } catch {
+        logger.warn('지원하지 않는 Core Metadata 해시', {
+          filename: file.filename,
+          algorithm: file.metadataHash.algorithm,
+        });
+        return null;
+      }
+
+      if (
+        actualDigest.toLowerCase() !==
+        file.metadataHash.digest.toLowerCase()
+      ) {
+        logger.warn('Core Metadata 체크섬 불일치', {
+          filename: file.filename,
+          algorithm: file.metadataHash.algorithm,
+        });
+        return null;
+      }
+    }
+
+    const metadata = metadataBytes.toString('utf8');
     return parseRequiresDist(metadata);
   } catch (error) {
     logger.warn('PEP 658 메타데이터 조회 실패', {
       filename: file.filename,
       error: error instanceof Error ? error.message : String(error),
     });
-    return [];
+    return null;
   }
 }
 

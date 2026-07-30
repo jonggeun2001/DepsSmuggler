@@ -55,19 +55,41 @@ depssmuggler download [옵션]
 
 ### 옵션
 
-| 옵션 | 설명 | 기본값 |
-|------|------|--------|
-| `-t, --type <type>` | 패키지 타입 (`pip`, `conda`, `maven`, `npm`, `docker`) | `pip` |
-| `-p, --package <name>` | 패키지명 | - |
-| `-V, --pkg-version <version>` | 패키지 버전 | `latest` |
-| `-a, --arch <arch>` | 아키텍처 | `x86_64` |
-| `-o, --output <path>` | 출력 경로 | `./output` |
-| `-f, --format <format>` | 아카이브 형식 (`zip`, `tar.gz`) | `zip` |
-| `--file <file>` | 줄 단위 패키지 목록 파일 (`requirements.txt`, Maven 좌표 목록 등) | - |
-| `--no-deps` | 의존성 해결 비활성화 | `false` |
-| `--concurrency <num>` | 동시 다운로드 수 | `3` |
+| 옵션 | 설명 | 적용 타입 | 기본값 |
+|------|------|-----------|--------|
+| `-t, --type <type>` | 패키지 타입 (`pip`, `conda`, `maven`, `npm`, `docker`) | 전체 | `pip` |
+| `-p, --package <name>` | 패키지명 | 전체 | - |
+| `-V, --pkg-version <version>` | 패키지 버전 | 전체 | `latest` |
+| `-a, --arch <arch>` | 아키텍처. pip/Conda 대상 선택은 `x86_64`, `amd64`, `arm64`, `aarch64` 지원 | 전체 | `x86_64` |
+| `--target-os <os>` | 대상 OS (`any`, `linux`, `windows`, `macos`) | `pip`, `conda`, `maven` (`maven`은 classifier 필요) | `any` |
+| `--python-version <version>` | 대상 Python 버전 (`major.minor`, 예: `3.12`) | `pip`, `conda` | - |
+| `--cuda-version <version>` | 대상 CUDA 버전 (`major.minor`, 예: `12.4`) | `conda` | - |
+| `--conda-channel <channel>` | Conda 채널 | `conda` | `conda-forge` |
+| `--classifier <classifier>` | Maven classifier | `maven` | - |
+| `-o, --output <path>` | 출력 경로 | 전체 | `./output` |
+| `-f, --format <format>` | 아카이브 형식 (`zip`, `tar.gz`) | 전체 | `zip` |
+| `--file <file>` | 줄 단위 패키지 목록 파일 (`requirements.txt`, Maven 좌표 목록 등) | 전체 | - |
+| `--no-deps` | 전이 의존성 다운로드 비활성화 | 전체 | `false` |
+| `--concurrency <num>` | 동시 다운로드 수 | 전체 | `3` |
 
 기본 동작은 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 의존성을 함께 해결해 다운로드하는 것입니다. `--no-deps`를 지정하면 원본 패키지 목록만 다운로드합니다. 라이브러리 패키지의 의존성 해결이 실패하면 명령은 오류로 종료됩니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
+
+대상 환경 옵션은 다운로드 전에 검증됩니다.
+
+- `--python-version`과 `--cuda-version`은 숫자 `major.minor` 형식만 허용합니다. `3.12.1`, `cuda12` 같은 값은 오류입니다.
+- pip와 Conda의 대상 아티팩트 선택에는 `x86_64`, `amd64`, `arm64`, `aarch64`만 허용합니다. 지원하지 않는 값을 다른 64비트 아티팩트로 묵시적으로 바꾸지 않고 오류로 종료합니다.
+- pip에서는 `arm64`와 `aarch64`, `amd64`와 `x86_64`를 같은 아키텍처로 처리합니다. 대상 Python 버전은 wheel 태그(`abi3` 최소 버전 포함)와 저장소의 `Requires-Python` 조건(PEP 440 wildcard 포함)을 모두 만족해야 합니다.
+- 표의 적용 타입과 맞지 않는 선택 옵션을 사용하면 오류가 발생합니다. 예를 들어 npm에 `--target-os linux`를 지정하거나 pip에 `--cuda-version 12.4`를 지정할 수 없습니다.
+- 기본값인 `--target-os any`와 `--conda-channel conda-forge`는 적용 대상이 아닌 타입에서 기존 동작을 유지합니다. 그러나 다른 OS나 채널을 명시하면 적용 타입을 검사합니다.
+- pip에서 대상 OS가 `any`이면 특정 OS wheel을 임의로 선택하지 않고 범용 wheel 또는 `Requires-Python` 조건을 만족하는 소스 배포본을 선택합니다. `--python-version`도 생략하면 특정 CPython ABI wheel 대신 Python 버전 독립 wheel 또는 소스 배포본만 선택합니다.
+- pip 의존성의 PEP 508 환경 마커는 지정한 OS, 아키텍처, Python 버전과 extra를 기준으로 평가합니다. `--python-version`은 `major.minor`만 받으므로 `python_full_version`처럼 patch 버전이 필요한 조건은 알 수 없는 값으로 보고 제외합니다. 필요한 대상 값이 없거나 마커를 해석할 수 없으면 해당 조건부 의존성을 임의로 포함하지 않습니다.
+- Conda에서 대상 OS가 `any`이면 특정 플랫폼을 임의로 가정하지 않고 `noarch` 빌드만 조회합니다. 플랫폼별 빌드가 필요하면 `--target-os`를 명시해야 합니다.
+- Conda에서 지정한 OS, 아키텍처, Python/CUDA 조건과 일치하는 대상 subdir 또는 `noarch` 빌드를 찾지 못하면 다른 플랫폼으로 재조회하지 않고 다운로드 전에 실패합니다.
+- pip와 Conda에서 필수 전이 의존성의 호환 버전이나 아티팩트를 찾지 못하면 불완전한 묶음을 만들지 않고 전체 명령이 실패합니다. Conda의 OpenSSL, zlib 같은 런타임 라이브러리도 오프라인 묶음에 포함됩니다.
+- pip 하위 의존성은 버전 제약과 대상 환경에 호환되는 아티팩트를 함께 만족하는 최신 릴리스를 선택하며, 같은 패키지에 여러 경로로 요청된 기본/extra 컨텍스트는 합쳐서 평가합니다. Conda 하위 의존성은 버전뿐 아니라 build MatchSpec도 실제 파일 선택까지 유지하고, 같은 버전의 서로 다른 build가 필요하면 각 아티팩트를 모두 보존합니다.
+- Maven classifier 형식은 라이브러리마다 다르므로 OS와 아키텍처만으로 자동 생성하지 않습니다. Maven에 `--target-os` 또는 기본값이 아닌 `--arch`를 지정할 때는 실제 네이티브 아티팩트를 선택할 `--classifier`를 함께 지정해야 합니다.
+- pip, Conda, Maven에서 대상 환경을 명시하고 `--no-deps`를 사용하면 해당 환경에 맞는 루트 아티팩트만 선택하고 전이 의존성은 다운로드하지 않습니다. pip/Conda의 기본값이 아닌 `--arch`도 대상 환경 명시로 처리합니다.
+- pip 대상 환경에 호환되는 wheel이 없으면 sdist를 사용하며, sdist도 없으면 다른 아키텍처 wheel로 바꾸지 않고 오류로 종료합니다.
 
 ### 예시
 
@@ -79,6 +101,19 @@ depssmuggler download -t docker -p nginx -V latest
 depssmuggler download -t pip --file requirements.txt -o ./packages
 depssmuggler download -t maven --file ./maven-packages.txt
 depssmuggler download -t pip -p flask -f tar.gz
+
+# Linux ARM64, Python 3.12용 pip 아티팩트
+depssmuggler download -t pip -p cryptography -V 43.0.0 \
+  --target-os linux --python-version 3.12 --arch aarch64
+
+# Linux x86_64, Python 3.12, CUDA 12.4용 Conda 아티팩트
+depssmuggler download -t conda -p pytorch -V 2.5.0 \
+  --target-os linux --python-version 3.12 --cuda-version 12.4 \
+  --conda-channel pytorch --arch x86_64
+
+# Linux 네이티브 Maven JAR
+depssmuggler download -t maven -p org.lwjgl:lwjgl -V 3.3.6 \
+  --target-os linux --arch x86_64 --classifier natives-linux
 ```
 
 참고: `--file`은 현재 XML `pom.xml`을 직접 파싱하지 않고, 줄 단위 텍스트 입력만 처리합니다. Maven은 각 줄에 `groupId:artifactId[:version]` 형식으로 적어야 합니다.

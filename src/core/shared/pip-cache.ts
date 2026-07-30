@@ -278,20 +278,25 @@ export async function fetchPackageMetadata(
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 404) {
       logger.debug('PyPI 패키지 없음', { package: packageName, version });
-    } else {
-      const errorInfo = axios.isAxiosError(error)
-        ? {
-            message: error.message,
-            code: error.code,
-            status: error.response?.status,
-            statusText: error.response?.statusText,
-          }
-        : error instanceof Error
-          ? { message: error.message, name: error.name }
-          : { message: String(error) };
-      logger.warn('PyPI API 요청 실패', { package: packageName, version, error: errorInfo });
+      return null;
     }
-    return null;
+
+    const errorInfo = axios.isAxiosError(error)
+      ? {
+          message: error.message,
+          code: error.code,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+        }
+      : error instanceof Error
+        ? { message: error.message, name: error.name }
+        : { message: String(error) };
+    logger.warn('PyPI API 요청 실패', {
+      package: packageName,
+      version,
+      error: errorInfo,
+    });
+    throw error;
   }
 }
 

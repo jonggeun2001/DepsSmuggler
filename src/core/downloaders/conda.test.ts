@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import { getCondaDownloader } from './conda';
 
 describe('conda downloader', () => {
@@ -6,6 +6,10 @@ describe('conda downloader', () => {
 
   beforeEach(() => {
     downloader = getCondaDownloader();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe('getCondaDownloader', () => {
@@ -42,6 +46,38 @@ describe('conda downloader', () => {
     it('캐시 클리어', () => {
       downloader.clearCache();
       // 에러 없이 실행되어야 함
+    });
+  });
+
+  describe('downloadPackage', () => {
+    it('resolver가 제공한 URL을 메타데이터 재조회 없이 다운로드한다', async () => {
+      const getMetadata = vi.spyOn(downloader, 'getPackageMetadata');
+      const downloadArtifactFile = vi
+        .spyOn(downloader as any, 'downloadArtifactFile')
+        .mockResolvedValue('/tmp/test/numpy.conda');
+
+      await downloader.downloadPackage(
+        {
+          type: 'conda',
+          name: 'numpy',
+          version: '2.0.0',
+          arch: 'aarch64',
+          metadata: {
+            repository: 'defaults/numpy',
+            downloadUrl: 'https://conda.example/numpy.conda',
+          },
+        },
+        '/tmp/test',
+      );
+
+      expect(getMetadata).not.toHaveBeenCalled();
+      expect(downloadArtifactFile).toHaveBeenCalledWith(
+        '/tmp/test',
+        expect.objectContaining({
+          downloadUrl: 'https://conda.example/numpy.conda',
+        }),
+        undefined,
+      );
     });
   });
 });

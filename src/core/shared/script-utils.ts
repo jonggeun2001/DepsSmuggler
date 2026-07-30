@@ -38,6 +38,8 @@ function generateBashScript(packages: DownloadPackage[]): string {
   const pipPackages = packages.filter((p) => p.type === 'pip');
   const condaPackages = packages.filter((p) => p.type === 'conda');
   const mavenPackages = packages.filter((p) => p.type === 'maven');
+  const hasPythonPackages =
+    pipPackages.length > 0 || condaPackages.length > 0;
 
   return `#!/bin/bash
 # DepsSmuggler 설치 스크립트
@@ -49,11 +51,17 @@ echo "Installing packages..."
 
 SCRIPT_DIR="$( cd "$( dirname "\${BASH_SOURCE[0]}" )" && pwd )"
 
+${hasPythonPackages ? `PIP_FIND_LINK_ARGS=()
+while IFS= read -r -d '' directory; do
+    PIP_FIND_LINK_ARGS+=(--find-links="$directory")
+done < <(find "$SCRIPT_DIR/packages" -type d -print0)
+
+` : ''}
 ${pipPackages.length > 0 ? `# pip 패키지 설치
-${pipPackages.map((p) => `pip install --no-index --find-links="$SCRIPT_DIR/packages" ${p.name}==${p.version}`).join('\n')}
+${pipPackages.map((p) => `pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" ${p.name}==${p.version}`).join('\n')}
 ` : ''}
 ${condaPackages.length > 0 ? `# conda 패키지 설치
-${condaPackages.map((p) => `pip install --no-index --find-links="$SCRIPT_DIR/packages" ${p.name}==${p.version}`).join('\n')}
+${condaPackages.map((p) => `pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" ${p.name}==${p.version}`).join('\n')}
 ` : ''}
 ${mavenPackages.length > 0 ? `# Maven 아티팩트 복사
 echo "Maven artifacts are in packages/ directory"
@@ -69,6 +77,8 @@ function generatePowerShellScript(packages: DownloadPackage[]): string {
   const pipPackages = packages.filter((p) => p.type === 'pip');
   const condaPackages = packages.filter((p) => p.type === 'conda');
   const mavenPackages = packages.filter((p) => p.type === 'maven');
+  const hasPythonPackages =
+    pipPackages.length > 0 || condaPackages.length > 0;
 
   return `# DepsSmuggler 설치 스크립트
 # 생성일: ${new Date().toISOString()}
@@ -81,11 +91,18 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $PackagesDir = Join-Path -Path $ScriptDir -ChildPath 'packages'
 
+${hasPythonPackages ? `$PipFindLinkArgs = @("--find-links=$PackagesDir")
+$PipFindLinkArgs += @(
+    Get-ChildItem -Path $PackagesDir -Directory -Recurse |
+        ForEach-Object { "--find-links=$($_.FullName)" }
+)
+
+` : ''}
 ${pipPackages.length > 0 ? `# pip 패키지 설치
-${pipPackages.map((p) => `pip install --no-index --find-links="$PackagesDir" ${p.name}==${p.version}`).join('\n')}
+${pipPackages.map((p) => `pip install --no-index @PipFindLinkArgs ${p.name}==${p.version}`).join('\n')}
 ` : ''}
 ${condaPackages.length > 0 ? `# conda 패키지 설치
-${condaPackages.map((p) => `pip install --no-index --find-links="$PackagesDir" ${p.name}==${p.version}`).join('\n')}
+${condaPackages.map((p) => `pip install --no-index @PipFindLinkArgs ${p.name}==${p.version}`).join('\n')}
 ` : ''}
 ${mavenPackages.length > 0 ? `# Maven 아티팩트 복사
 Write-Host "Maven artifacts are in packages/ directory"

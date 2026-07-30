@@ -3,9 +3,103 @@
  */
 import { DependencyNode, PackageInfo } from '../../types';
 
+interface PackageArtifactDescriptor {
+  type: string;
+  name: string;
+  version: string;
+  filename?: string;
+  downloadUrl?: string;
+  repository?: { baseUrl: string; name?: string };
+  indexUrl?: string;
+  classifier?: string;
+  metadata?: Record<string, unknown>;
+}
+
+function normalizeArtifactIdentityValue(
+  value: unknown,
+): string | undefined {
+  if (typeof value === 'string') {
+    return value || undefined;
+  }
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value)
+    .filter(
+      (entry): entry is [string, string | number | boolean] =>
+        ['string', 'number', 'boolean'].includes(typeof entry[1]),
+    )
+    .sort(([left], [right]) => left.localeCompare(right));
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return entries
+    .map(([key, entryValue]) => `${key}:${String(entryValue)}`)
+    .join(',');
+}
+
+export function getPackageArtifactKey(
+  packageInfo: PackageArtifactDescriptor,
+): string {
+  const metadata = packageInfo.metadata;
+  const filename =
+    packageInfo.filename ??
+    (typeof metadata?.filename === 'string'
+      ? metadata.filename
+      : undefined);
+  const downloadUrl =
+    packageInfo.downloadUrl ??
+    (typeof metadata?.downloadUrl === 'string'
+      ? metadata.downloadUrl
+      : undefined);
+  const repository =
+    normalizeArtifactIdentityValue(packageInfo.repository) ??
+    normalizeArtifactIdentityValue(metadata?.repository) ??
+    packageInfo.indexUrl ??
+    (typeof metadata?.indexUrl === 'string'
+      ? metadata.indexUrl
+      : undefined);
+  const classifier =
+    packageInfo.classifier ??
+    (typeof metadata?.classifier === 'string'
+      ? metadata.classifier
+      : undefined);
+  const checksum = normalizeArtifactIdentityValue(
+    metadata?.checksum,
+  );
+  const artifactIdentity = [
+    ['filename', filename],
+    ['url', downloadUrl],
+    ['repository', repository],
+    ['classifier', classifier],
+    ['checksum', checksum],
+  ]
+    .filter((entry): entry is [string, string] =>
+      Boolean(entry[1]),
+    )
+    .map(
+      ([label, value]) =>
+        `${label}=${encodeURIComponent(value)}`,
+    )
+    .join('&');
+  const packageIdentity =
+    `${packageInfo.type}:${packageInfo.name.toLowerCase()}` +
+    `@${packageInfo.version}`;
+
+  return artifactIdentity
+    ? `${packageIdentity}#${artifactIdentity}`
+    : packageIdentity;
+}
+
 /**
  * DependencyNode 트리를 순회하여 모든 PackageInfo를 평탄화합니다.
- * 중복된 패키지(name@version)는 한 번만 포함됩니다.
+ * 중복된 패키지 아티팩트(name@version#artifact)는 한 번만 포함됩니다.
  * 반복문 기반으로 구현하여 call stack 문제 방지.
  *
  * @param node 루트 DependencyNode
@@ -25,7 +119,7 @@ export function flattenDependencyTree(node: DependencyNode): PackageInfo[] {
     }
     visited.add(current);
 
-    const key = `${current.package.name.toLowerCase()}@${current.package.version}`;
+    const key = getPackageArtifactKey(current.package);
     if (!result.has(key)) {
       result.set(key, current.package);
     }
@@ -61,7 +155,7 @@ export function flattenMultipleDependencyTrees(nodes: DependencyNode[]): Package
     }
     visited.add(current);
 
-    const key = `${current.package.name.toLowerCase()}@${current.package.version}`;
+    const key = getPackageArtifactKey(current.package);
     if (!result.has(key)) {
       result.set(key, current.package);
     }

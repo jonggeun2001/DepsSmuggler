@@ -8,8 +8,11 @@ type PackageFixture = {
       requiresDist?: string[];
       urls?: Array<{
         filename: string;
+        url?: string;
         size?: number;
         packagetype?: string;
+        python_version?: string;
+        digests?: { sha256: string };
       }>;
     }
   >;
@@ -77,7 +80,24 @@ const createPyPIFixtureResponder = (packages: Record<string, PackageFixture>) =>
           releases: Object.fromEntries(
             Object.entries(fixture.versions).map(([currentVersion, currentFixture]) => [
               currentVersion,
-              currentFixture.urls ?? [{ filename: `${name}-${currentVersion}.tar.gz` }],
+              (
+                currentFixture.urls ?? [
+                  { filename: `${name}-${currentVersion}.tar.gz` },
+                ]
+              ).map((file) => ({
+                url:
+                  file.url ??
+                  `https://files.example/${file.filename}`,
+                packagetype:
+                  file.packagetype ??
+                  (file.filename.endsWith('.whl')
+                    ? 'bdist_wheel'
+                    : 'sdist'),
+                python_version: file.python_version ?? 'source',
+                digests: file.digests ?? { sha256: 'fixture-sha' },
+                size: file.size ?? 0,
+                ...file,
+              })),
             ])
           ),
         },
@@ -210,7 +230,7 @@ describe('PipResolver characterization', () => {
     expect(simplifyResult(result)).toMatchSnapshot();
   });
 
-  it('conflicts fixture의 그래프를 고정한다', async () => {
+  it('버전 제약을 만족하지 않는 fixture는 실패한다', async () => {
     pipCacheMock.fetchPackageMetadata.mockImplementation(
       createPyPIFixtureResponder({
         rootpkg: {
@@ -232,9 +252,9 @@ describe('PipResolver characterization', () => {
     );
 
     const resolver = new PipResolver();
-    const result = await resolver.resolveDependencies('rootpkg', '1.0.0');
-
-    expect(simplifyResult(result)).toMatchSnapshot();
+    await expect(
+      resolver.resolveDependencies('rootpkg', '1.0.0'),
+    ).rejects.toThrow('필수 pip 의존성');
   });
 
   it('markers fixture의 그래프를 고정한다', async () => {

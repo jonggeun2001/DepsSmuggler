@@ -453,6 +453,15 @@ describe('MavenDownloader downloadPackage 테스트', () => {
 
       const result = await downloader.downloadPackage(info, '/tmp/test');
       expect(result).toContain('test-1.0.0');
+      expect(mockDownloadArtifact).toHaveBeenCalledWith(
+        'com.example',
+        'test',
+        '1.0.0',
+        '/tmp/test',
+        'jar',
+        undefined,
+        'natives',
+      );
     });
 
     it('progress 콜백 전달', async () => {

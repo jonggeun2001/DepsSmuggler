@@ -946,6 +946,191 @@ describe('PipDownloader downloadPackage', () => {
     vi.restoreAllMocks();
   });
 
+  it('resolver가 제공한 URL을 메타데이터 재조회 없이 다운로드한다', async () => {
+    const getMetadata = vi
+      .spyOn(downloader, 'getPackageMetadata')
+      .mockResolvedValue({
+        type: 'pip',
+        name: 'demo',
+        version: '1.0.0',
+        metadata: {
+          downloadUrl: 'https://files.example/unexpected.whl',
+        },
+      });
+    const verifyChecksum = vi
+      .spyOn(downloader, 'verifyChecksum')
+      .mockResolvedValue(true);
+    const downloadArtifactFile = vi
+      .spyOn(downloader as any, 'downloadArtifactFile')
+      .mockResolvedValue('/tmp/test/demo-cp312.whl');
+
+    await downloader.downloadPackage(
+      {
+        type: 'pip',
+        name: 'demo',
+        version: '1.0.0',
+        metadata: {
+          downloadUrl: 'https://files.example/demo-cp312.whl',
+          checksum: { sha256: 'resolved-sha' },
+        },
+      },
+      '/tmp/test',
+    );
+
+    expect(getMetadata).not.toHaveBeenCalled();
+    expect(downloadArtifactFile).toHaveBeenCalledWith(
+      '/tmp/test',
+      expect.objectContaining({
+        downloadUrl: 'https://files.example/demo-cp312.whl',
+      }),
+      undefined,
+    );
+
+    const artifactOptions = downloadArtifactFile.mock.calls[0][1];
+    await artifactOptions.verifyFile('/tmp/test/demo-cp312.whl');
+    expect(verifyChecksum).toHaveBeenCalledWith(
+      '/tmp/test/demo-cp312.whl',
+      'resolved-sha',
+      'sha256',
+    );
+  });
+
+  it('resolver가 MD5 체크섬만 제공해도 해당 알고리즘으로 검증한다', async () => {
+    const verifyChecksum = vi
+      .spyOn(downloader, 'verifyChecksum')
+      .mockResolvedValue(true);
+    const downloadArtifactFile = vi
+      .spyOn(downloader as any, 'downloadArtifactFile')
+      .mockResolvedValue('/tmp/test/demo.whl');
+
+    await downloader.downloadPackage(
+      {
+        type: 'pip',
+        name: 'demo',
+        version: '1.0.0',
+        metadata: {
+          downloadUrl: 'https://files.example/demo.whl',
+          checksum: { md5: 'resolved-md5' },
+        },
+      },
+      '/tmp/test',
+    );
+
+    const artifactOptions = downloadArtifactFile.mock.calls[0][1];
+    await artifactOptions.verifyFile('/tmp/test/demo.whl');
+    expect(verifyChecksum).toHaveBeenCalledWith(
+      '/tmp/test/demo.whl',
+      'resolved-md5',
+      'md5',
+    );
+  });
+
+  it('여러 체크섬이 있으면 지원 가능한 가장 강한 알고리즘을 사용한다', async () => {
+    const verifyChecksum = vi
+      .spyOn(downloader, 'verifyChecksum')
+      .mockResolvedValue(true);
+    const downloadArtifactFile = vi
+      .spyOn(downloader as any, 'downloadArtifactFile')
+      .mockResolvedValue('/tmp/test/demo.whl');
+
+    await downloader.downloadPackage(
+      {
+        type: 'pip',
+        name: 'demo',
+        version: '1.0.0',
+        metadata: {
+          downloadUrl: 'https://files.example/demo.whl',
+          checksum: {
+            md5: 'resolved-md5',
+            sha256: 'resolved-sha256',
+            sha512: 'resolved-sha512',
+          },
+        },
+      },
+      '/tmp/test',
+    );
+
+    const artifactOptions = downloadArtifactFile.mock.calls[0][1];
+    await artifactOptions.verifyFile('/tmp/test/demo.whl');
+    expect(verifyChecksum).toHaveBeenCalledWith(
+      '/tmp/test/demo.whl',
+      'resolved-sha512',
+      'sha512',
+    );
+  });
+
+  it('같은 파일명의 서로 다른 저장소 아티팩트를 별도 상대 경로에 저장한다', async () => {
+    const downloadArtifactFile = vi
+      .spyOn(downloader as any, 'downloadArtifactFile')
+      .mockResolvedValue('/tmp/test/demo.whl');
+    const packageInfo = (
+      indexUrl: string,
+      downloadUrl: string,
+      checksum: string,
+    ): PackageInfo => ({
+      type: 'pip',
+      name: 'demo',
+      version: '1.0.0',
+      metadata: {
+        filename: 'demo-1.0.0-py3-none-any.whl',
+        downloadUrl,
+        indexUrl,
+        checksum: { sha256: checksum },
+      },
+    });
+
+    await downloader.downloadPackage(
+      packageInfo(
+        'https://first.example/simple',
+        'https://files.example/demo.whl',
+        'first-sha',
+      ),
+      '/tmp/test',
+    );
+    await downloader.downloadPackage(
+      packageInfo(
+        'https://second.example/simple',
+        'https://files.example/demo.whl',
+        'second-sha',
+      ),
+      '/tmp/test',
+    );
+
+    const relativePaths = downloadArtifactFile.mock.calls.map(
+      (call) => call[1].relativeFilePath,
+    );
+    expect(new Set(relativePaths).size).toBe(2);
+    for (const relativePath of relativePaths) {
+      expect(relativePath).toMatch(
+        /^pip\/[a-f0-9]{16}\/demo-1\.0\.0-py3-none-any\.whl$/,
+      );
+    }
+  });
+
+  it('제공된 체크섬 알고리즘을 지원하지 않으면 다운로드 전에 실패한다', async () => {
+    const downloadArtifactFile = vi
+      .spyOn(downloader as any, 'downloadArtifactFile')
+      .mockResolvedValue('/tmp/test/demo.whl');
+
+    await expect(
+      downloader.downloadPackage(
+        {
+          type: 'pip',
+          name: 'demo',
+          version: '1.0.0',
+          metadata: {
+            downloadUrl: 'https://files.example/demo.whl',
+            checksum: {
+              blake2b: 'unsupported-checksum',
+            } as any,
+          },
+        },
+        '/tmp/test',
+      ),
+    ).rejects.toThrow('지원하지 않는 체크섬 알고리즘');
+    expect(downloadArtifactFile).not.toHaveBeenCalled();
+  });
+
   it('다운로드 URL이 없으면 에러 발생', async () => {
     // getPackageMetadata가 downloadUrl 없이 반환하도록 모킹
     mockClient.get.mockResolvedValueOnce({
