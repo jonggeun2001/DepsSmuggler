@@ -714,7 +714,9 @@ export async function resolveAllDependencies(
           }
         }
         for (const depPkg of result.flatList) {
-          const depKey = `${depPkg.type}:${depPkg.name}@${depPkg.version}`;
+          const depKey = getPackageArtifactKey(
+            toResolvedDownloadPackage(depPkg, pkg),
+          );
           const downloadPkg = resolvedSet.get(depKey);
           if (downloadPkg) {
             successfulPackageSet.set(depKey, downloadPkg);

@@ -760,13 +760,34 @@ describe('dependency-resolver', () => {
       expect(result.allPackages).toHaveLength(1);
     });
 
-    it('실패한 직접 루트와 같은 전이 의존성을 성공 루트 결과에 보존한다', async () => {
+    it('선택 아티팩트가 있는 성공 루트와 실패 루트의 전이 의존성을 보존한다', async () => {
       const mockResolver = {
         resolveDependencies: vi.fn()
           .mockResolvedValueOnce({
-            root: { package: { type: 'pip', name: 'alpha', version: '1.0.0' }, dependencies: [] },
+            root: {
+              package: {
+                type: 'pip',
+                name: 'alpha',
+                version: '1.0.0',
+                metadata: {
+                  filename: 'alpha-1.0.0-py3-none-any.whl',
+                  downloadUrl: 'https://files.example/alpha-1.0.0.whl',
+                  checksum: { sha256: 'alpha-sha' },
+                },
+              },
+              dependencies: [],
+            },
             flatList: [
-              { type: 'pip', name: 'alpha', version: '1.0.0' },
+              {
+                type: 'pip',
+                name: 'alpha',
+                version: '1.0.0',
+                metadata: {
+                  filename: 'alpha-1.0.0-py3-none-any.whl',
+                  downloadUrl: 'https://files.example/alpha-1.0.0.whl',
+                  checksum: { sha256: 'alpha-sha' },
+                },
+              },
               { type: 'pip', name: 'shared', version: '2.0.0' },
             ],
             conflicts: [],
@@ -786,7 +807,15 @@ describe('dependency-resolver', () => {
       ]);
       expect(result.successfulPackages).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ type: 'pip', name: 'alpha', version: '1.0.0' }),
+          expect.objectContaining({
+            type: 'pip',
+            name: 'alpha',
+            version: '1.0.0',
+            metadata: expect.objectContaining({
+              filename: 'alpha-1.0.0-py3-none-any.whl',
+              downloadUrl: 'https://files.example/alpha-1.0.0.whl',
+            }),
+          }),
           expect.objectContaining({ type: 'pip', name: 'shared', version: '2.0.0' }),
         ])
       );
