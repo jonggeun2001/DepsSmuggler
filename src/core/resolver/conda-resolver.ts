@@ -63,6 +63,7 @@ export class CondaResolver implements IResolver {
     this.repoDataProcessor = new CondaRepoDataProcessor({
       condaUrl: this.condaUrl,
       targetSubdir: 'linux-64',
+      targetArchitecture: 'x86_64',
       pythonVersion: null,
       cudaVersion: null,
     });
@@ -85,9 +86,11 @@ export class CondaResolver implements IResolver {
     const maxDepth = options?.maxDepth ?? 10;
 
     // 타겟 플랫폼 결정
-    const targetOS = options?.targetPlatform?.system?.toLowerCase() || 'linux';
+    const targetOS = options?.targetPlatform?.system?.toLowerCase();
     const arch = options?.targetPlatform?.machine || 'x86_64';
-    const targetSubdir = getCondaSubdir(targetOS, arch);
+    const targetSubdir = targetOS
+      ? getCondaSubdir(targetOS, arch)
+      : 'noarch';
 
     // Python 버전 설정
     this.pythonVersion = (options as { pythonVersion?: string })?.pythonVersion || null;
@@ -98,6 +101,7 @@ export class CondaResolver implements IResolver {
     // RepoData 프로세서 설정 업데이트
     this.repoDataProcessor.updateConfig({
       targetSubdir,
+      targetArchitecture: arch,
       pythonVersion: this.pythonVersion,
       cudaVersion,
     });
@@ -106,6 +110,7 @@ export class CondaResolver implements IResolver {
     logger.info(`Conda 의존성 해결 시작: ${packageName}@${version}`, {
       channel,
       targetSubdir,
+      targetArchitecture: arch,
       pythonVersion: this.pythonVersion,
     });
 
@@ -116,6 +121,7 @@ export class CondaResolver implements IResolver {
         version: string;
         depth: number;
         parentCacheKey?: string;
+        buildSpec?: string;
       }
 
       const queue: QueueItem[] = [{ name: packageName, version, depth: 0 }];
@@ -125,14 +131,22 @@ export class CondaResolver implements IResolver {
 
       while (queue.length > 0) {
         const current = queue.shift()!;
-        const { name, version: ver, depth, parentCacheKey } = current;
+        const {
+          name,
+          version: ver,
+          depth,
+          parentCacheKey,
+          buildSpec,
+        } = current;
 
         // 최대 깊이 체크
         if (depth > maxDepth) {
           continue;
         }
 
-        const cacheKey = `${channel}/${name.toLowerCase()}@${ver}`;
+        const cacheKey =
+          `${channel}/${name.toLowerCase()}@${ver}` +
+          (buildSpec ? `#${buildSpec}` : '');
 
         // 이미 해결된 패키지면 부모-자식 관계만 추가
         if (resolvedNodes.has(cacheKey)) {
@@ -152,7 +166,12 @@ export class CondaResolver implements IResolver {
         }
 
         // 패키지 정보 조회
-        const pkgInfo = await this.fetchPackageInfoBFS(name, ver, channel);
+        const pkgInfo = await this.fetchPackageInfoBFS(
+          name,
+          ver,
+          channel,
+          buildSpec,
+        );
 
         // 노드 생성
         const node: DependencyNode = {
@@ -167,6 +186,10 @@ export class CondaResolver implements IResolver {
           const children = parentChildMap.get(parentCacheKey) || [];
           children.push(cacheKey);
           parentChildMap.set(parentCacheKey, children);
+        }
+
+        if (depth >= maxDepth) {
+          continue;
         }
 
         // Python 버전 불일치 시 스킵
@@ -185,29 +208,39 @@ export class CondaResolver implements IResolver {
               parsed.name,
               channel,
               parsed.versionSpec,
-              (n, ch, spec) => this.getLatestVersion(n, ch, spec)
+              (n, ch, spec) => this.getLatestVersion(n, ch, spec),
+              parsed.build,
             );
 
-            if (depVersion) {
-              const depCacheKey = `${channel}/${parsed.name.toLowerCase()}@${depVersion}`;
-              if (!resolvedNodes.has(depCacheKey)) {
-                queue.push({
-                  name: parsed.name,
-                  version: depVersion,
-                  depth: depth + 1,
-                  parentCacheKey: cacheKey,
-                });
-              } else {
-                // 이미 해결된 경우 부모-자식 관계만 추가
-                const children = parentChildMap.get(cacheKey) || [];
-                if (!children.includes(depCacheKey)) {
-                  children.push(depCacheKey);
-                  parentChildMap.set(cacheKey, children);
-                }
+            if (!depVersion) {
+              throw new Error('호환되는 버전을 찾을 수 없습니다.');
+            }
+
+            const depCacheKey =
+              `${channel}/${parsed.name.toLowerCase()}@${depVersion}` +
+              (parsed.build ? `#${parsed.build}` : '');
+            if (!resolvedNodes.has(depCacheKey)) {
+              queue.push({
+                name: parsed.name,
+                version: depVersion,
+                depth: depth + 1,
+                parentCacheKey: cacheKey,
+                buildSpec: parsed.build,
+              });
+            } else {
+              // 이미 해결된 경우 부모-자식 관계만 추가
+              const children = parentChildMap.get(cacheKey) || [];
+              if (!children.includes(depCacheKey)) {
+                children.push(depCacheKey);
+                parentChildMap.set(cacheKey, children);
               }
             }
-          } catch {
-            logger.warn('Conda 의존성 패키지 조회 실패', { parent: name, dependency: parsed.name });
+          } catch (error) {
+            const reason =
+              error instanceof Error ? error.message : String(error);
+            throw new Error(
+              `필수 Conda 의존성을 해결할 수 없습니다: ${name} -> ${parsed.name} (${reason})`,
+            );
           }
         }
       }
@@ -255,7 +288,8 @@ export class CondaResolver implements IResolver {
   private async fetchPackageInfoBFS(
     name: string,
     version: string,
-    channel: string
+    channel: string,
+    buildSpec?: string,
   ): Promise<{ packageInfo: PackageInfo; depends: string[]; isPythonMatch: boolean }> {
     // repodata에서 패키지 정보 조회
     let depends: string[] = [];
@@ -272,9 +306,15 @@ export class CondaResolver implements IResolver {
 
     if (repodata) {
       const versionSpec = version === 'latest' ? undefined : `==${version}`;
-      const candidates = this.repoDataProcessor.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
+      const candidates = this.repoDataProcessor.findPackageCandidates(
+        repodata,
+        name,
+        versionSpec,
+        targetCacheKey,
+        buildSpec,
+      );
       if (candidates.length > 0) {
-        isPythonMatch = (candidates[0] as { isPythonMatch?: boolean }).isPythonMatch ?? true;
+        isPythonMatch = candidates[0].isPythonMatch;
         depends = candidates[0].depends;
         resolvedVersion = candidates[0].version;
         resolvedSubdir = candidates[0].subdir;
@@ -283,8 +323,11 @@ export class CondaResolver implements IResolver {
       }
     }
 
-    // noarch도 확인: 후보가 없거나 Python 버전이 맞지 않는 경우
-    if (depends.length === 0 || !isPythonMatch) {
+    // noarch도 확인: 대상 subdir 후보가 없거나 Python 버전이 맞지 않는 경우
+    if (
+      targetSubdir !== 'noarch' &&
+      (!resolvedFilename || !isPythonMatch)
+    ) {
       const noarchCacheKey = `${channel}/noarch`;
       const noarchRepodata = await this.repoDataProcessor.getRepoData(channel, 'noarch');
       if (noarchRepodata) {
@@ -292,10 +335,11 @@ export class CondaResolver implements IResolver {
           noarchRepodata,
           name,
           version === 'latest' ? undefined : `==${version}`,
-          noarchCacheKey
+          noarchCacheKey,
+          buildSpec,
         );
         if (candidates.length > 0) {
-          isPythonMatch = true; // noarch는 항상 호환
+          isPythonMatch = candidates[0].isPythonMatch;
           depends = candidates[0].depends;
           resolvedVersion = candidates[0].version;
           resolvedSubdir = candidates[0].subdir;
@@ -305,10 +349,15 @@ export class CondaResolver implements IResolver {
       }
     }
 
+    if (!resolvedSubdir || !resolvedFilename || !isPythonMatch) {
+      throw new Error(
+        `대상 환경과 호환되는 Conda 아티팩트를 찾을 수 없습니다: ${name}@${version} (${targetSubdir})`,
+      );
+    }
+
     // 다운로드 URL 생성
-    const downloadUrl = resolvedSubdir && resolvedFilename
-      ? `${this.condaUrl}/${channel}/${resolvedSubdir}/${resolvedFilename}`
-      : undefined;
+    const downloadUrl =
+      `${this.condaUrl}/${channel}/${resolvedSubdir}/${resolvedFilename}`;
 
     const packageInfo: PackageInfo = {
       type: 'conda',
@@ -378,40 +427,12 @@ export class CondaResolver implements IResolver {
    * 시스템 패키지 여부 확인 (건너뛸 패키지)
    */
   private isSystemPackage(name: string): boolean {
-    const systemPackages = [
-      'python',
-      'python_abi',
-      'libgcc-ng',
-      'libstdcxx-ng',
-      'libgomp',
-      'openssl',
-      'ca-certificates',
-      'certifi',
-      'ld_impl_linux-64',
-      '_libgcc_mutex',
-      '_openmp_mutex',
-      'libffi',
-      'ncurses',
-      'readline',
-      'sqlite',
-      'tk',
-      'xz',
-      'zlib',
-      'bzip2',
-      'libuuid',
-      'libzlib',
-      'libexpat',
-      'libnsl',
-      'libxcrypt',
-      'libsqlite',
-      '__glibc',
-      '__linux',
-      '__unix',
-      '__win',
-      '__osx',
-      '__macos',
-    ];
-    return systemPackages.includes(name.toLowerCase());
+    const normalizedName = name.toLowerCase();
+    return (
+      normalizedName === 'python' ||
+      normalizedName === 'python_abi' ||
+      normalizedName.startsWith('__')
+    );
   }
 
   /**
@@ -498,7 +519,8 @@ export class CondaResolver implements IResolver {
                   parsed.name,
                   channel,
                   parsed.versionSpec,
-                  (name, ch, spec) => this.getLatestVersion(name, ch, spec)
+                  (name, ch, spec) => this.getLatestVersion(name, ch, spec),
+                  parsed.build,
                 );
                 if (compatVersion) {
                   version = compatVersion;

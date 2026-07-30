@@ -1,13 +1,61 @@
 import { describe, it, expect } from 'vitest';
 import {
   compareVersions,
+  comparePep440Versions,
   isVersionCompatible,
+  isPrereleaseVersion,
   sortVersionsDescending,
   sortVersionsAscending,
   findLatestCompatibleVersion
 } from './version-utils';
 
 describe('version-utils', () => {
+  describe('isPrereleaseVersion', () => {
+    it.each(['2.0rc1', '2.0c1', '2.0b2', '2.0.dev3'])(
+      '%s를 프리릴리스로 판별한다',
+      (version) => {
+        expect(isPrereleaseVersion(version)).toBe(true);
+      },
+    );
+
+    it.each(['2.0', '2.0.post1', '2.0+linux'])(
+      '%s를 안정 릴리스로 판별한다',
+      (version) => {
+        expect(isPrereleaseVersion(version)).toBe(false);
+      },
+    );
+  });
+
+  describe('comparePep440Versions', () => {
+    it('prerelease, final, post release 순서를 비교한다', () => {
+      expect(
+        comparePep440Versions('2.0rc2', '2.0rc1'),
+      ).toBeGreaterThan(0);
+      expect(
+        comparePep440Versions('2.0', '2.0rc2'),
+      ).toBeGreaterThan(0);
+      expect(
+        comparePep440Versions('2.0.post1', '2.0'),
+      ).toBeGreaterThan(0);
+    });
+
+    it('c 별칭을 rc와 같은 prerelease로 비교한다', () => {
+      expect(comparePep440Versions('2.0c1', '2.0rc1')).toBe(0);
+    });
+
+    it('같은 공개 버전의 local segment를 PEP 440 순서로 비교한다', () => {
+      expect(
+        comparePep440Versions('1.0+cpu', '1.0'),
+      ).toBeGreaterThan(0);
+      expect(
+        comparePep440Versions('1.0+cu121', '1.0+cpu'),
+      ).toBeGreaterThan(0);
+      expect(
+        comparePep440Versions('1.0+2', '1.0+cpu'),
+      ).toBeGreaterThan(0);
+    });
+  });
+
   describe('compareVersions', () => {
     it('동일 버전 비교 - 0 반환', () => {
       expect(compareVersions('1.0.0', '1.0.0')).toBe(0);
@@ -73,6 +121,10 @@ describe('version-utils', () => {
       it('이하 조건 미충족', () => {
         expect(isVersionCompatible('2.1.0', '<=2.0.0')).toBe(false);
       });
+
+      it('stable 버전은 같은 release의 prerelease보다 크다', () => {
+        expect(isVersionCompatible('3.12', '<=3.12rc1')).toBe(false);
+      });
     });
 
     describe('> 연산자', () => {
@@ -82,6 +134,25 @@ describe('version-utils', () => {
 
       it('초과 조건 미충족 (같은 경우)', () => {
         expect(isVersionCompatible('1.0.0', '>1.0.0')).toBe(false);
+      });
+
+      it('stable 버전은 같은 release의 prerelease보다 크다', () => {
+        expect(isVersionCompatible('3.12', '>3.12rc1')).toBe(true);
+      });
+
+      it('epoch가 release 번호보다 우선한다', () => {
+        expect(isVersionCompatible('1!2.0', '>2.0')).toBe(true);
+        expect(isVersionCompatible('2.0', '>1!1.0')).toBe(false);
+      });
+
+      it('같은 release의 post-release를 exclusive 비교에서 제외한다', () => {
+        expect(isVersionCompatible('1.0.post1', '>1.0')).toBe(false);
+        expect(isVersionCompatible('1.0.post2', '>1.0.post1')).toBe(true);
+      });
+
+      it('제약 비교에서는 candidate local label을 공개 버전과 동일하게 취급한다', () => {
+        expect(isVersionCompatible('1.0+cpu', '>1.0')).toBe(false);
+        expect(isVersionCompatible('1.0+cpu', '>=1.0')).toBe(true);
       });
     });
 
@@ -93,12 +164,68 @@ describe('version-utils', () => {
       it('미만 조건 미충족 (같은 경우)', () => {
         expect(isVersionCompatible('1.0.0', '<1.0.0')).toBe(false);
       });
+
+      it('PEP 440 suffix 순서를 적용한다', () => {
+        const ascendingVersions = [
+          '1.0.dev1',
+          '1.0a1',
+          '1.0b1',
+          '1.0rc1',
+          '1.0',
+          '1.0.post1',
+        ];
+
+        for (let index = 0; index < ascendingVersions.length - 1; index++) {
+          expect(
+            isVersionCompatible(
+              ascendingVersions[index],
+              `<=${ascendingVersions[index + 1]}`,
+            ),
+          ).toBe(true);
+        }
+      });
+
+      it('같은 release의 prerelease를 exclusive 비교에서 제외한다', () => {
+        expect(isVersionCompatible('1.0rc1', '<1.0')).toBe(false);
+        expect(isVersionCompatible('0.9rc1', '<1.0')).toBe(true);
+        expect(isVersionCompatible('1.0a1', '<1.0rc1')).toBe(true);
+      });
     });
 
     describe('== 연산자', () => {
       it('정확한 매칭', () => {
         expect(isVersionCompatible('1.0.0', '==1.0.0')).toBe(true);
         expect(isVersionCompatible('1.0.1', '==1.0.0')).toBe(false);
+      });
+
+      it('생략된 release segment를 0으로 정규화한다', () => {
+        expect(isVersionCompatible('3.12', '==3.12.0')).toBe(true);
+        expect(isVersionCompatible('3.12.1', '==3.12.0')).toBe(false);
+      });
+
+      it('final 버전과 prerelease 버전을 구분한다', () => {
+        expect(isVersionCompatible('3.12', '==3.12.0rc1')).toBe(false);
+        expect(isVersionCompatible('3.12.0rc1', '==3.12')).toBe(false);
+      });
+
+      it('PEP 440 prerelease 별칭을 정규화한다', () => {
+        expect(isVersionCompatible('3.12.0c1', '==3.12.0rc1')).toBe(true);
+        expect(isVersionCompatible('3.12.0alpha1', '==3.12.0a1')).toBe(true);
+      });
+
+      it('===는 zero-padding 없이 ASCII 대소문자만 무시한다', () => {
+        expect(
+          isVersionCompatible('1.0RC1', '===1.0rc1'),
+        ).toBe(true);
+        expect(
+          isVersionCompatible('1.0', '===1.0.0'),
+        ).toBe(false);
+      });
+
+      it('PEP 440 post 및 local version을 정규화한다', () => {
+        expect(isVersionCompatible('1.0-1', '==1.0.post1')).toBe(true);
+        expect(isVersionCompatible('1.0+linux', '==1.0')).toBe(true);
+        expect(isVersionCompatible('1.0+linux', '==1.0+mac')).toBe(false);
       });
 
       it('와일드카드 매칭', () => {
@@ -115,6 +242,16 @@ describe('version-utils', () => {
 
       it('불일치 조건 미충족', () => {
         expect(isVersionCompatible('1.0.0', '!=1.0.0')).toBe(false);
+      });
+
+      it('생략된 release segment를 0으로 정규화한다', () => {
+        expect(isVersionCompatible('3.12', '!=3.12.0')).toBe(false);
+        expect(isVersionCompatible('3.12.1', '!=3.12.0')).toBe(true);
+      });
+
+      it('final 버전과 prerelease 버전을 구분한다', () => {
+        expect(isVersionCompatible('3.12', '!=3.12.0rc1')).toBe(true);
+        expect(isVersionCompatible('3.12.0rc1', '!=3.12')).toBe(true);
       });
     });
 
@@ -153,6 +290,18 @@ describe('version-utils', () => {
       it('와일드카드 패턴 매칭', () => {
         expect(isVersionCompatible('2.5.0', '2.*')).toBe(true);
         expect(isVersionCompatible('3.0.0', '2.*')).toBe(false);
+      });
+
+      it('major.minor 버전을 equality wildcard와 비교', () => {
+        expect(isVersionCompatible('3.12', '==3.12.*')).toBe(true);
+        expect(isVersionCompatible('3.12', '==3.12.0.*')).toBe(true);
+        expect(isVersionCompatible('3.12', '==3.11.*')).toBe(false);
+      });
+
+      it('major.minor 버전을 exclusion wildcard와 비교', () => {
+        expect(isVersionCompatible('3.12', '!=3.12.*')).toBe(false);
+        expect(isVersionCompatible('3.12', '!=3.12.0.*')).toBe(false);
+        expect(isVersionCompatible('3.12', '!=3.11.*')).toBe(true);
       });
     });
   });

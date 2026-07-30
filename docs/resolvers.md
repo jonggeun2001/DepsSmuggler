@@ -100,7 +100,7 @@ PEP 508 환경 마커를 평가하여 플랫폼별 의존성 필터링:
 
 `pythonVersion`이 설정된 경우 `python_version`은 `major.minor`를, `python_full_version`과 `implementation_version`은 patch까지 포함한 값을 사용합니다. 버전 변수는 PEP 440으로, 나머지 변수는 문자열로 비교합니다. resolver identity는 CPython(`platform_python_implementation = 'CPython'`, `implementation_name = 'cpython'`)으로 고정합니다. `platform_machine` 비교에서는 `amd64`를 `x86_64`로, Linux ARM64의 `arm64`/`aarch64` 별칭을 `aarch64`로 정규화합니다. extra가 선택되지 않으면 빈 값으로 보존하고, 같은 정규화 이름과 버전에 새 extra가 발견되면 해당 extra로만 다시 확장합니다. 이 상태는 한 `resolveDependencies` 호출에만 유지됩니다.
 
-지원하는 marker 조건은 괄호와 `and`/`or`, `===`, `==`, `!=`, `>=`, `<=`, `>`, `<`, `in`, `not in`을 조합할 수 있으며, `and`를 `or`보다 먼저 평가합니다. 리터럴-변수 순서를 바꾼 비교도 지원합니다. `platform_release`, `platform_version`, 알 수 없는 변수, 지원하지 않는 연산자나 문법은 fail-closed로 처리하여 의존성을 포함하지 않습니다. wheel 선택은 대상 CPython 태그, 범용 `py3`/`py2.py3`, 대상보다 같거나 낮은 CPython 버전의 `abi3` 태그만 호환으로 판단합니다. 대상 Python이 지정되면 PyPI의 패키지·파일 `requires_python`과 Simple API 파일의 `requiresPython`도 PEP 440 specifier set으로 평가하며, 호환 wheel과 source distribution이 모두 없으면 해당 직접 패키지는 해결 실패로 반환됩니다. `latest`와 범위 의존성은 호환 산출물이 있는 비철회 릴리스만 후보로 삼아 PEP 440 순서로 가장 높은 안정 버전을 선택합니다. wildcard가 없는 `==`/`===` 정확 고정만 철회 릴리스를 허용하고, 프리릴리스는 제약에 포함됐거나 안정 후보가 없을 때만 후보가 됩니다. 필수 전이 의존성의 버전 선택, 메타데이터 조회 또는 최대 깊이 확장이 실패하면 해당 직접 루트 전체를 해결 실패로 반환합니다.
+지원하는 marker 조건은 괄호와 `and`/`or`, `===`, `==`, `!=`, `~=`, `>=`, `<=`, `>`, `<`, `in`, `not in`을 조합할 수 있으며, `and`를 `or`보다 먼저 평가합니다. 리터럴-변수 순서를 바꾼 비교도 지원합니다. `platform_release`, `platform_version`, 알 수 없는 변수, 지원하지 않는 연산자나 문법은 fail-closed로 처리하여 의존성을 포함하지 않습니다. Python full version의 patch가 제공되지 않아 비교 결과를 확정할 수 없는 marker도 제외합니다. wheel 선택은 대상 CPython 태그, 범용 `py3`/`py2.py3`, 대상보다 같거나 낮은 CPython 버전의 `abi3` 태그만 호환으로 판단합니다. 대상 Python이 지정되면 PyPI의 패키지·파일 `requires_python`과 Simple API 파일의 `requiresPython`도 PEP 440 specifier set으로 평가하며, 호환 wheel과 source distribution이 모두 없으면 해당 직접 패키지는 해결 실패로 반환됩니다. `latest`와 범위 의존성은 호환 산출물이 있는 비철회 릴리스만 후보로 삼아 PEP 440 순서로 가장 높은 안정 버전을 선택합니다. wildcard가 없는 `==`/`===` 정확 고정만 철회 릴리스를 허용하고, 프리릴리스는 제약에 포함됐거나 안정 후보가 없을 때만 후보가 됩니다. 필수 전이 의존성의 버전 선택, 메타데이터 조회 또는 최대 깊이 확장이 실패하면 해당 직접 루트 전체를 해결 실패로 반환합니다.
 
 ### Characterization 회귀 고정
 
@@ -328,7 +328,7 @@ interface QueueItem {
 | `parseDependencyString` | Conda 의존성 문자열 파싱 |
 | `getLatestVersion` | 채널별 최신 버전 조회 |
 | `getLatestVersionFromRepoData` | repodata에서 최신 버전 조회 |
-| `isSystemPackage` | 시스템 패키지 여부 확인 (libc 등 제외) |
+| `isSystemPackage` | 외부 Python 런타임 및 Conda 가상 패키지 여부 확인 |
 | `getPythonBuildTag` | Python 버전에서 build 태그 추출 (예: '3.12' -> 'py312') |
 | `isBuildCompatibleWithPython` | build 문자열이 Python 버전과 호환되는지 확인 |
 | `resolvePackageFallback` | Anaconda API fallback 해결 |
@@ -354,7 +354,7 @@ interface QueueItem {
 - **캐싱**: repodata 캐싱으로 중복 요청 방지
 - **Python 버전 필터링**: py312, py311 등 build 태그로 Python 버전에 맞는 패키지 선택
 - **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
-- **시스템 패키지 제외**: libc, libgcc 등 시스템 패키지 자동 제외
+- **런타임 구분**: 외부 Python 런타임과 `__` 가상 패키지만 제외하고 OpenSSL, zlib, libgcc 같은 실제 Conda 패키지는 포함
 - **Anaconda API fallback**: RC 버전 등 특수 라벨 패키지 지원
 
 ### 성능 최적화
@@ -941,7 +941,7 @@ interface DependencyConflict {
 5. **충돌 감지**: 동일 패키지의 다른 버전 요청 시 기록
 6. **버전 해결**: 제약조건에 맞는 최적 버전 선택
 7. **환경 마커 평가**: 플랫폼별 조건부 의존성 필터링 (pip)
-8. **시스템 패키지 제외**: libc 등 시스템 패키지 자동 제외 (conda, OS 패키지)
+8. **가상 패키지 제외**: Conda 외부 Python 런타임과 `__` 가상 패키지만 제외
 
 ```
 패키지 A

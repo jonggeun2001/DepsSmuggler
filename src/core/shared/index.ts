@@ -8,6 +8,8 @@ export * from './pip-types';
 // 버전 비교 유틸리티
 export {
   compareVersions,
+  comparePep440Versions,
+  isPrereleaseVersion,
   isVersionCompatible,
   sortVersionsDescending,
   sortVersionsAscending,
@@ -252,6 +254,7 @@ export type { MockResponse, MockErrorConfig } from './mock-http-client';
 export {
   flattenDependencyTree,
   flattenMultipleDependencyTrees,
+  getPackageArtifactKey,
   getDependencyTreeDepth,
   getDependencyTreeSize,
 } from './dependency-tree-utils';

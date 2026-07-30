@@ -8,10 +8,15 @@ import { getAptResolver } from '../resolver/apt-resolver';
 import { getApkResolver } from '../resolver/apk-resolver';
 import { getDistributionById } from '../downloaders/os-shared/repos/repository-utils';
 import { DownloadPackage } from './types';
-import { DependencyResolutionResult, PackageType } from '../../types';
+import {
+  DependencyResolutionResult,
+  PackageInfo,
+  PackageType,
+} from '../../types';
 import { NpmResolutionResult } from './npm-types';
 import type { OSPackageInfo, OSArchitecture } from '../downloaders/os-shared/types';
 import logger from '../../utils/logger';
+import { getPackageArtifactKey } from './dependency-tree-utils';
 
 /**
  * 의존성 해결 진행 상황 콜백
@@ -33,6 +38,107 @@ export interface DependencyProgressCallback {
  */
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+}
+
+function isRepositoryMetadata(
+  value: unknown,
+): value is { baseUrl: string; name?: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { baseUrl?: unknown }).baseUrl === 'string'
+  );
+}
+
+function toResolvedDownloadPackage(
+  pkg: PackageInfo,
+  requestedPackage: DownloadPackage,
+): DownloadPackage {
+  const metadata = pkg.metadata as Record<string, unknown> | undefined;
+  const repository = metadata?.repository;
+
+  return {
+    id: generateId(),
+    type: pkg.type,
+    name: pkg.name,
+    version: pkg.version,
+    architecture: pkg.arch || requestedPackage.architecture,
+    ...(typeof metadata?.size === 'number' ? { size: metadata.size } : {}),
+    ...(typeof metadata?.downloadUrl === 'string'
+      ? { downloadUrl: metadata.downloadUrl }
+      : {}),
+    ...(isRepositoryMetadata(repository) ? { repository } : {}),
+    ...(typeof metadata?.location === 'string'
+      ? { location: metadata.location }
+      : {}),
+    ...(typeof metadata?.filename === 'string'
+      ? { filename: metadata.filename }
+      : {}),
+    ...(typeof metadata?.classifier === 'string'
+      ? { classifier: metadata.classifier }
+      : {}),
+    ...(typeof metadata?.indexUrl === 'string' || requestedPackage.indexUrl
+      ? {
+          indexUrl:
+            requestedPackage.indexUrl ||
+            (metadata?.indexUrl as string | undefined),
+        }
+      : {}),
+    ...(Array.isArray(metadata?.extras)
+      ? { extras: metadata.extras as string[] }
+      : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+}
+
+function mergeResolvedPackage(
+  existing: DownloadPackage,
+  resolved: DownloadPackage,
+): DownloadPackage {
+  const metadata = {
+    ...(existing.metadata ?? {}),
+    ...(resolved.metadata ?? {}),
+  };
+
+  return {
+    ...existing,
+    id: existing.id,
+    type: existing.type,
+    name: existing.name,
+    version: resolved.version ?? existing.version,
+    architecture: resolved.architecture ?? existing.architecture,
+    size: resolved.size ?? existing.size,
+    downloadUrl: resolved.downloadUrl ?? existing.downloadUrl,
+    repository: resolved.repository ?? existing.repository,
+    location: resolved.location ?? existing.location,
+    filename: resolved.filename ?? existing.filename,
+    classifier: resolved.classifier ?? existing.classifier,
+    indexUrl: existing.indexUrl ?? resolved.indexUrl,
+    extras: existing.extras ?? resolved.extras,
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+  };
+}
+
+function assertTargetedCondaArtifacts(
+  packages: PackageInfo[],
+): void {
+  const unresolved = packages.find((pkg) => {
+    const metadata = pkg.metadata as Record<string, unknown> | undefined;
+    return (
+      pkg.type === 'conda' &&
+      (
+        typeof metadata?.downloadUrl !== 'string' ||
+        typeof metadata?.filename !== 'string' ||
+        typeof metadata?.subdir !== 'string'
+      )
+    );
+  });
+
+  if (unresolved) {
+    throw new Error(
+      `대상 환경과 호환되는 Conda 아티팩트를 찾을 수 없습니다: ${unresolved.name}@${unresolved.version}`,
+    );
+  }
 }
 
 /**
@@ -141,6 +247,12 @@ export async function resolveAllDependencies(
   const condaChannel = options?.condaChannel ?? 'conda-forge';
   const architecture = options?.architecture ?? 'x86_64';
   const targetOS = options?.targetOS ?? 'any';
+  const hasTargetedCondaEnvironment =
+    targetOS !== 'any' ||
+    architecture !== 'x86_64' ||
+    options?.pythonVersion !== undefined ||
+    options?.cudaVersion !== undefined ||
+    condaChannel !== 'conda-forge';
 
   if (!includeDependencies) {
     return {
@@ -168,7 +280,7 @@ export async function resolveAllDependencies(
     currentIndex++;
 
     // 원본 패키지 추가
-    const key = `${pkg.type}:${pkg.name}@${pkg.version}`;
+    const key = getPackageArtifactKey(pkg);
     resolvedSet.set(key, pkg);
 
     // 타입별 리졸버 선택
@@ -450,12 +562,9 @@ export async function resolveAllDependencies(
           architecture,
         };
       } else if (pkg.type === 'maven') {
-        // maven: 사용자 선택 classifier 또는 targetOS/targetArchitecture 전달
+        // maven: 라이브러리별 형식이 다른 네이티브 아티팩트는 classifier로 선택
         resolverOptions = {
           ...resolverOptions,
-          targetOS: options?.targetOS !== 'any' ? options?.targetOS : undefined,
-          targetArchitecture: architecture,
-          // 사용자가 UI에서 선택한 classifier 전달
           classifier: pkg.classifier,
         };
       }
@@ -558,6 +667,10 @@ export async function resolveAllDependencies(
           resolverOptions
         ) as DependencyResolutionResult;
 
+        if (pkg.type === 'conda' && hasTargetedCondaEnvironment) {
+          assertTargetedCondaArtifacts(result.flatList);
+        }
+
         dependencyTrees.push(result);
 
         const resolvedRootKey = `${result.root.package.type}:${result.root.package.name}@${result.root.package.version}`;
@@ -567,38 +680,32 @@ export async function resolveAllDependencies(
 
         // 평탄화된 의존성 목록 추가
         for (const depPkg of result.flatList) {
-          const depKey = `${depPkg.type}:${depPkg.name}@${depPkg.version}`;
-          if (!resolvedSet.has(depKey)) {
-            const downloadPkg: DownloadPackage = {
-              id: generateId(),
-              type: depPkg.type,
-              name: depPkg.name,
-              version: depPkg.version,
-              architecture: depPkg.arch || pkg.architecture,
-              size: depPkg.metadata?.size as number | undefined,
-            };
+          const downloadPkg = toResolvedDownloadPackage(depPkg, pkg);
+          const depKey = getPackageArtifactKey(downloadPkg);
+          const isRootPackage =
+            depPkg.type === result.root.package.type &&
+            depPkg.name === result.root.package.name &&
+            depPkg.version === result.root.package.version;
 
-            // downloadUrl 전달 (conda, yum, apt, apk 등)
-            if (depPkg.metadata?.downloadUrl) {
-              downloadPkg.downloadUrl = depPkg.metadata.downloadUrl as string;
-            }
+          if (isRootPackage) {
+            const resolvedRoot = mergeResolvedPackage(
+              pkg,
+              downloadPkg,
+            );
+            resolvedSet.delete(key);
+            resolvedSet.delete(depKey);
+            resolvedSet.set(depKey, resolvedRoot);
+            continue;
+          }
 
-            // indexUrl 전달 (pip 커스텀 인덱스)
-            if (depPkg.type === 'pip') {
-              // 부모 패키지의 indexUrl 또는 의존성 메타데이터의 indexUrl 사용
-              downloadPkg.indexUrl = pkg.indexUrl || (depPkg.metadata?.indexUrl as string | undefined);
-            }
+          const existing = resolvedSet.get(depKey);
 
-            // metadata 전달 (conda의 subdir, filename 등)
-            if (depPkg.metadata) {
-              downloadPkg.metadata = depPkg.metadata as Record<string, unknown>;
-
-              // filename을 최상위 필드로 추출 (conda, pip 등에서 사용)
-              if (depPkg.metadata.filename) {
-                downloadPkg.filename = depPkg.metadata.filename as string;
-              }
-            }
-
+          if (existing) {
+            resolvedSet.set(
+              depKey,
+              mergeResolvedPackage(existing, downloadPkg),
+            );
+          } else {
             resolvedSet.set(depKey, downloadPkg);
           }
         }

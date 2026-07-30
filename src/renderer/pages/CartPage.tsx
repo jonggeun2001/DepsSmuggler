@@ -41,6 +41,7 @@ import { DependencyTree } from '../components';
 import { getRendererDataClient } from '../lib/renderer-data-client';
 import { DependencyResolutionResult, DependencyNode, PackageType as CorePackageType } from '../../types';
 import type { DependencyAPI } from '../../types/electron';
+import { getPackageArtifactKey } from '../../core/shared/dependency-tree-utils';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -180,9 +181,16 @@ const CartPage: React.FC = () => {
 
           // 모든 패키지의 flatList 병합 (중복 제거)
           const allFlatList = dependencyTrees.flatMap((tree) => tree.flatList);
+          const seenArtifacts = new Set<string>();
           const uniqueFlatList = allFlatList.filter(
-            (pkg, index, self) =>
-              self.findIndex((p) => p.type === pkg.type && p.name === pkg.name && p.version === pkg.version) === index
+            (pkg) => {
+              const artifactKey = getPackageArtifactKey(pkg);
+              if (seenArtifacts.has(artifactKey)) {
+                return false;
+              }
+              seenArtifacts.add(artifactKey);
+              return true;
+            },
           );
 
           // 디버그: 트리 노드 수 vs flatList 수 비교

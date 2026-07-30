@@ -308,10 +308,12 @@ function matchWildcard(version: string, pattern: string): boolean {
 export function matchesBuildSpec(build: string, spec: string): boolean {
   if (!spec || spec === '*') return true;
 
-  // 와일드카드를 정규식으로 변환
-  const regex = new RegExp(
-    '^' + spec.replace(/\*/g, '.*') + '$'
-  );
+  // 정규식 메타문자는 리터럴로 유지하고 glob의 *만 와일드카드로 변환
+  const regexPattern = spec
+    .split('*')
+    .map((segment) => segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  const regex = new RegExp(`^${regexPattern}$`);
   return regex.test(build);
 }
 

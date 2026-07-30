@@ -2,6 +2,11 @@ import * as path from 'path';
 import chalk from 'chalk';
 import cliProgress from 'cli-progress';
 import * as fs from 'fs-extra';
+import {
+  hasExplicitTargetEnvironment,
+  validateDownloadEnvironmentOptions,
+  type CliDownloadEnvironmentOptions,
+} from './download-environment';
 import { DownloadManager, OverallProgress } from './download-runner';
 import { getArchivePackager, ArchiveFormat } from '../../core/packager/archive-packager';
 import { getScriptGenerator } from '../../core/packager/script-generator';
@@ -10,15 +15,12 @@ import { PackageInfo, PackageType, Architecture } from '../../types';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 
 // 다운로드 옵션
-interface DownloadCommandOptions {
-  type: PackageType;
+interface DownloadCommandOptions extends CliDownloadEnvironmentOptions {
   package?: string;
   pkgVersion: string;
-  arch: Architecture;
   output: string;
   format: ArchiveFormat;
   file?: string;
-  pythonVersion?: string;
   deps: boolean;
   strict?: boolean;
   concurrency: string;
@@ -42,38 +44,50 @@ function getNormalizedPackageKey(name: string, version: string): string {
   return `${name.toLowerCase().replace(/[-_.]+/g, '_')}@${version}`;
 }
 
-function getPipTargetPlatform(arch: Architecture, pythonVersion?: string): PipTargetPlatform {
-  const pipArch = PIP_TARGET_ARCHITECTURES[arch] ?? 'x86_64';
-  const normalizedPythonVersion = pythonVersion
-    ? normalizePythonVersion(pythonVersion)
-    : undefined;
+const CLI_TARGET_ENVIRONMENT_TYPES = new Set<PackageType>(['pip', 'conda', 'maven']);
+const CLI_ROOT_ARTIFACT_RESOLUTION_TYPES = new Set<PackageType>([
+  'pip',
+  'conda',
+]);
+
+function getPipTargetPlatform(
+  options: Pick<DownloadCommandOptions, 'arch' | 'targetOS' | 'pythonVersion'>,
+): PipTargetPlatform | undefined {
+  if (options.targetOS === 'any') {
+    return undefined;
+  }
+
+  const arch = PIP_TARGET_ARCHITECTURES[options.arch];
+  if (!arch) {
+    return undefined;
+  }
 
   return {
-    os: 'linux',
-    arch: pipArch,
-    pythonVersion: normalizedPythonVersion,
+    os: options.targetOS,
+    arch,
+    pythonVersion: options.pythonVersion,
   };
 }
 
-function normalizePythonVersion(pythonVersion: string): string {
-  const match = pythonVersion.trim().match(/^(\d+)\.(\d+)(?:\.(\d+))?$/);
-  if (!match) {
-    throw new Error('Python 버전은 major.minor 또는 major.minor.patch 형식이어야 합니다');
-  }
-
-  return match[3]
-    ? `${match[1]}.${match[2]}.${match[3]}`
-    : `${match[1]}.${match[2]}`;
-}
-
 function toDownloadPackage(pkg: PackageInfo): DownloadPackage {
+  const metadata = pkg.metadata as Record<string, unknown> | undefined;
+
   return {
     id: `${pkg.type}-${pkg.name}-${pkg.version}`,
     type: pkg.type,
     name: pkg.name,
     version: pkg.version,
     architecture: pkg.arch,
-    metadata: pkg.metadata as Record<string, unknown> | undefined,
+    ...(typeof metadata?.indexUrl === 'string'
+      ? { indexUrl: metadata.indexUrl }
+      : {}),
+    ...(Array.isArray(metadata?.extras)
+      ? { extras: metadata.extras as string[] }
+      : {}),
+    ...(typeof metadata?.classifier === 'string'
+      ? { classifier: metadata.classifier }
+      : {}),
+    metadata,
   };
 }
 
@@ -116,11 +130,26 @@ function toPackageInfo(pkg: DownloadPackage): PackageInfo {
 
 async function preparePackagesForDownload(
   packages: PackageInfo[],
-  options: Pick<DownloadCommandOptions, 'type' | 'arch' | 'deps' | 'pythonVersion' | 'strict'> & {
-    pipTargetPlatform?: PipTargetPlatform;
-  }
+  options: Pick<
+    DownloadCommandOptions,
+    | 'type'
+    | 'arch'
+    | 'targetOS'
+    | 'pythonVersion'
+    | 'cudaVersion'
+    | 'condaChannel'
+    | 'classifier'
+    | 'deps'
+    | 'strict'
+  >,
 ): Promise<PreparedPackagesResult> {
-  if (!options.deps) {
+  const shouldResolveTargetedRoots =
+    !options.deps &&
+    (CLI_ROOT_ARTIFACT_RESOLUTION_TYPES.has(options.type) ||
+      (CLI_TARGET_ENVIRONMENT_TYPES.has(options.type) &&
+        hasExplicitTargetEnvironment(options)));
+
+  if (!options.deps && !shouldResolveTargetedRoots) {
     return {
       packages,
       dependencyResolutionApplied: false,
@@ -136,11 +165,16 @@ async function preparePackagesForDownload(
     };
   }
 
-  const resolved = await resolveAllDependencies(packages.map(toDownloadPackage), {
-    architecture: options.pipTargetPlatform?.arch ?? options.arch,
+  const requestedPackages = packages.map(toDownloadPackage);
+  const requestedPackageIds = new Set(requestedPackages.map((pkg) => pkg.id));
+  const resolved = await resolveAllDependencies(requestedPackages, {
+    architecture: options.arch,
+    targetOS: options.targetOS,
+    pythonVersion: options.pythonVersion,
+    cudaVersion: options.cudaVersion,
+    condaChannel: options.condaChannel,
     includeDependencies: true,
-    pythonVersion: options.pipTargetPlatform?.pythonVersion ?? options.pythonVersion,
-    ...(options.pipTargetPlatform ? { targetOS: 'linux' as const } : {}),
+    ...(!options.deps ? { maxDepth: 0 } : {}),
   });
 
   if (resolved.failedPackages.length > 0) {
@@ -177,7 +211,9 @@ async function preparePackagesForDownload(
   }
 
   return {
-    packages: resolved.allPackages.map(toPackageInfo),
+    packages: resolved.allPackages
+      .filter((pkg) => options.deps || requestedPackageIds.has(pkg.id))
+      .map(toPackageInfo),
     dependencyResolutionApplied: true,
   };
 }
@@ -186,9 +222,16 @@ async function preparePackagesForDownload(
  * download 명령어 핸들러
  */
 export async function downloadCommand(options: DownloadCommandOptions): Promise<void> {
+  options = {
+    ...options,
+    targetOS: options.targetOS ?? 'any',
+    condaChannel: options.condaChannel ?? 'conda-forge',
+  };
   console.log(chalk.cyan('다운로드 준비 중...'));
 
   try {
+    validateDownloadEnvironmentOptions(options);
+
     // 패키지 목록 생성
     let packages: PackageInfo[] = [];
 
@@ -211,19 +254,37 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       process.exit(1);
     }
 
+    packages = packages.map((pkg) => ({
+      ...pkg,
+      arch: options.arch,
+    }));
+
+    if (options.classifier !== undefined) {
+      packages = packages.map((pkg) => ({
+        ...pkg,
+        metadata: {
+          ...(pkg.metadata ?? {}),
+          classifier: options.classifier,
+        },
+      }));
+    }
+
     console.log(chalk.green(`✓ ${packages.length}개 패키지 준비 완료`));
 
     const requestedCount = packages.length;
     const pipTargetPlatform = options.type === 'pip'
-      ? getPipTargetPlatform(options.arch, options.pythonVersion)
+      ? getPipTargetPlatform(options)
       : undefined;
     const prepared = await preparePackagesForDownload(packages, {
       type: options.type,
       arch: options.arch,
-      deps: options.deps,
+      targetOS: options.targetOS,
       pythonVersion: options.pythonVersion,
+      cudaVersion: options.cudaVersion,
+      condaChannel: options.condaChannel,
+      classifier: options.classifier,
+      deps: options.deps,
       strict: options.strict,
-      pipTargetPlatform,
     });
     packages = prepared.packages;
 

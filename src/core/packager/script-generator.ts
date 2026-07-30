@@ -115,11 +115,16 @@ export class ScriptGenerator {
       lines.push('        return 1');
       lines.push('    fi');
       lines.push('');
+      lines.push('    PIP_FIND_LINK_ARGS=()');
+      lines.push('    while IFS= read -r -d \'\' directory; do');
+      lines.push('        PIP_FIND_LINK_ARGS+=(--find-links="$directory")');
+      lines.push('    done < <(find "$PACKAGE_DIR" -type d -print0)');
+      lines.push('');
 
       for (const pkg of pipPackages) {
         lines.push(`    # ${pkg.name} 설치`);
         lines.push(`    log_info "${pkg.name}==${pkg.version} 설치 중..."`);
-        lines.push(`    pip install --no-index --find-links="$PACKAGE_DIR" ${pkg.name}==${pkg.version} || {`);
+        lines.push(`    pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" ${pkg.name}==${pkg.version} || {`);
         lines.push(`        log_warn "${pkg.name} 설치 실패, 계속 진행합니다."`);
         lines.push('    }');
         lines.push('');
@@ -148,14 +153,14 @@ export class ScriptGenerator {
       lines.push('    fi');
       lines.push('');
       lines.push('    # 로컬 저장소에 설치');
-      lines.push('    for jar in "$PACKAGE_DIR"/*.jar; do');
-      lines.push('        if [[ -f "$jar" ]]; then');
-      lines.push('            log_info "$(basename "$jar") 설치 중..."');
-      lines.push('            mvn install:install-file -Dfile="$jar" -DgeneratePom=true || {');
-      lines.push('                log_warn "$(basename "$jar") 설치 실패"');
-      lines.push('            }');
-      lines.push('        fi');
-      lines.push('    done');
+      lines.push('    while IFS= read -r -d \'\' jar; do');
+      lines.push('        log_info "$(basename "$jar") 설치 중..."');
+      lines.push('        mvn install:install-file -Dfile="$jar" -DgeneratePom=true || {');
+      lines.push('            log_warn "$(basename "$jar") 설치 실패"');
+      lines.push('        }');
+      lines.push(
+        '    done < <(find "$PACKAGE_DIR" -type f -name \'*.jar\' -print0)',
+      );
       lines.push('');
       lines.push('    log_info "Maven 패키지 설치 완료"');
       lines.push('}');
@@ -362,12 +367,18 @@ export class ScriptGenerator {
       lines.push('        return');
       lines.push('    }');
       lines.push('');
+      lines.push('    $PipFindLinkArgs = @("--find-links=$PackageDir")');
+      lines.push('    $PipFindLinkArgs += @(');
+      lines.push('        Get-ChildItem -Path $PackageDir -Directory -Recurse |');
+      lines.push('            ForEach-Object { "--find-links=$($_.FullName)" }');
+      lines.push('    )');
+      lines.push('');
 
       for (const pkg of pipPackages) {
         lines.push(`    # ${pkg.name} 설치`);
         lines.push(`    Write-Info "${pkg.name}==${pkg.version} 설치 중..."`);
         lines.push('    try {');
-        lines.push(`        pip install --no-index --find-links="$PackageDir" ${pkg.name}==${pkg.version}`);
+        lines.push(`        pip install --no-index @PipFindLinkArgs ${pkg.name}==${pkg.version}`);
         lines.push('    } catch {');
         lines.push(`        Write-Warn "${pkg.name} 설치 실패, 계속 진행합니다."`);
         lines.push('    }');
@@ -395,8 +406,9 @@ export class ScriptGenerator {
       lines.push('    }');
       lines.push('');
       lines.push('    # JAR 파일 설치');
-      lines.push('    $JarPattern = Join-Path -Path $PackageDir -ChildPath "*.jar"');
-      lines.push('    Get-ChildItem $JarPattern | ForEach-Object {');
+      lines.push(
+        '    Get-ChildItem -Path $PackageDir -Filter "*.jar" -File -Recurse | ForEach-Object {',
+      );
       lines.push('        Write-Info "$($_.Name) 설치 중..."');
       lines.push('        try {');
       lines.push('            mvn install:install-file -Dfile="$($_.FullName)" -DgeneratePom=true');

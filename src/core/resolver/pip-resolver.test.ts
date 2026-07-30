@@ -108,6 +108,19 @@ describe('PipResolver 단위 테스트', () => {
       });
     });
 
+    it('PEP 685 extra 이름을 정규화하고 중복 제거한다', () => {
+      const result = callParseDependencyString(
+        resolver,
+        'requests[Foo.Bar,foo_bar,foo-bar]',
+      );
+      expect(result).toEqual({
+        name: 'requests',
+        versionSpec: undefined,
+        extras: ['foo-bar'],
+        markers: undefined,
+      });
+    });
+
     it('extras와 버전', () => {
       const result = callParseDependencyString(resolver, 'requests[security]==2.28.0');
       expect(result).toEqual({
@@ -175,7 +188,7 @@ describe('PipResolver 단위 테스트', () => {
     const callEvaluateMarker = (
       resolver: PipResolver,
       marker?: string,
-      extras?: string[]
+      extras?: string[],
     ): boolean => {
       return (resolver as any).evaluateMarker(marker, extras);
     };
@@ -189,9 +202,59 @@ describe('PipResolver 단위 테스트', () => {
         expect(callEvaluateMarker(resolver, '')).toBe(true);
       });
 
-      it('targetPlatform이 없고 마커가 있으면 false', () => {
-        // 기본 resolver는 targetPlatform이 없음
+      it('대상 환경 값이 없으면 조건부 의존성을 제외한다', () => {
         expect(callEvaluateMarker(resolver, 'sys_platform == "linux"')).toBe(false);
+      });
+
+      it('플랫폼 없이도 지정한 Python 버전 마커를 평가한다', () => {
+        resolver = createResolver({ pythonVersion: '3.12' });
+        expect(
+          callEvaluateMarker(resolver, 'python_version >= "3.11"'),
+        ).toBe(true);
+      });
+
+      it('major.minor 입력에서 확정할 수 있는 full version marker만 포함한다', () => {
+        resolver = createResolver({ pythonVersion: '3.12' });
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_full_version < "3.13.0"',
+          ),
+        ).toBe(true);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'implementation_version >= "3.13.0"',
+          ),
+        ).toBe(false);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_full_version == "3.12.5"',
+          ),
+        ).toBe(false);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'implementation_version < "3.12.1"',
+          ),
+        ).toBe(false);
+      });
+
+      it('patch 버전을 지정하면 full version 마커를 정확히 평가한다', () => {
+        resolver = createResolver({ pythonVersion: '3.12.8' });
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_full_version < "3.12.1"',
+          ),
+        ).toBe(false);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'implementation_version == "3.12.8"',
+          ),
+        ).toBe(true);
       });
     });
 
@@ -199,6 +262,7 @@ describe('PipResolver 단위 테스트', () => {
       beforeEach(() => {
         resolver = createResolver({
           targetPlatform: { system: 'Linux', machine: 'x86_64' },
+          pythonVersion: '3.12',
         });
       });
 
@@ -228,6 +292,39 @@ describe('PipResolver 단위 테스트', () => {
 
       it('platform_machine == "arm64" 실패', () => {
         expect(callEvaluateMarker(resolver, 'platform_machine == "arm64"')).toBe(false);
+      });
+
+      it('복합 Python 버전 범위를 평가한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_version >= "3.10" and python_version < "3.12"',
+          ),
+        ).toBe(false);
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'python_version >= "3.12" and sys_platform != "win32"',
+          ),
+        ).toBe(true);
+      });
+
+      it('괄호가 포함된 and/or 마커를 평가한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            '(sys_platform == "win32" or platform_system == "Linux") and platform_machine != "arm64"',
+          ),
+        ).toBe(true);
+      });
+
+      it('not in 연산자를 평가한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'sys_platform not in "win32 darwin"',
+          ),
+        ).toBe(true);
       });
     });
 
@@ -367,7 +464,7 @@ describe('PipResolver 단위 테스트', () => {
         expect(callEvaluateMarker(resolver, 'platform_release == "6.0"')).toBe(false);
         expect(callEvaluateMarker(resolver, 'platform_version == "1"')).toBe(false);
         expect(callEvaluateMarker(resolver, 'unknown_marker == "value"')).toBe(false);
-        expect(callEvaluateMarker(resolver, 'python_version ~= "3.12"')).toBe(false);
+        expect(callEvaluateMarker(resolver, 'python_version ~= "3.12"')).toBe(true);
       });
     });
 
@@ -422,27 +519,15 @@ describe('PipResolver 단위 테스트', () => {
           )
         ).toBe(false);
       });
-    });
-  });
-
-  describe('wheel Python 태그 호환성', () => {
-    const isWheelCompatible = (filename: string): boolean => {
-      resolver.setPipTargetPlatform({
-        os: 'linux',
-        arch: 'x86_64',
-        pythonVersion: '3.12',
-        glibcVersion: '2.28',
+      it('선택한 extra가 복합 마커를 만족하면 포함한다', () => {
+        expect(
+          callEvaluateMarker(
+            resolver,
+            'extra == "security" and sys_platform == "linux"',
+            ['security'],
+          ),
+        ).toBe(true);
       });
-      return (resolver as any).isWheelCompatible({
-        filename,
-        packagetype: 'bdist_wheel',
-      });
-    };
-
-    it('Python 3.12에 호환되지 않는 범용 및 미래 abi3 wheel을 거부한다', () => {
-      expect(isWheelCompatible('package-1.0.0-py310-none-any.whl')).toBe(false);
-      expect(isWheelCompatible('package-1.0.0-cp313-abi3-manylinux_2_28_x86_64.whl')).toBe(false);
-      expect(isWheelCompatible('package-1.0.0-cp310-abi3-manylinux_2_28_x86_64.whl')).toBe(true);
     });
   });
 

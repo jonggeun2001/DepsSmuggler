@@ -9,10 +9,13 @@ type PackageFixture = {
       requiresPython?: string;
       urls?: Array<{
         filename: string;
+        url?: string;
         size?: number;
         packagetype?: string;
         requires_python?: string;
         yanked?: boolean;
+        python_version?: string;
+        digests?: { sha256: string };
       }>;
     }
   >;
@@ -82,12 +85,24 @@ const createPyPIFixtureResponder = (packages: Record<string, PackageFixture>) =>
           releases: Object.fromEntries(
             Object.entries(fixture.versions).map(([currentVersion, currentFixture]) => [
               currentVersion,
-              currentFixture.urls ?? [
-                {
-                  filename: `${name}-${currentVersion}.tar.gz`,
-                  packagetype: 'sdist',
-                },
-              ],
+              (
+                currentFixture.urls ?? [
+                  { filename: `${name}-${currentVersion}.tar.gz` },
+                ]
+              ).map((file) => ({
+                url:
+                  file.url ??
+                  `https://files.example/${file.filename}`,
+                packagetype:
+                  file.packagetype ??
+                  (file.filename.endsWith('.whl')
+                    ? 'bdist_wheel'
+                    : 'sdist'),
+                python_version: file.python_version ?? 'source',
+                digests: file.digests ?? { sha256: 'fixture-sha' },
+                size: file.size ?? 0,
+                ...file,
+              })),
             ])
           ),
         },
@@ -546,7 +561,6 @@ describe('PipResolver characterization', () => {
     );
 
     const resolver = new PipResolver();
-
     await expect(resolver.resolveDependencies('rootpkg', '1.0.0')).rejects.toThrow(
       '필수 의존성 해결 실패: rootpkg@1.0.0 -> urllib3'
     );
@@ -688,7 +702,7 @@ describe('PipResolver characterization', () => {
         indexUrl: 'https://packages.example.com/simple',
         pythonVersion: '3.12',
       })
-    ).rejects.toThrow('의존성 메타데이터를 확인할 수 없습니다');
+    ).rejects.toThrow('검증된 의존성 메타데이터를 찾을 수 없습니다');
   });
 
   it('빈 PEP 658 메타데이터는 PyPI 대체 없이 의존성 없는 root로 처리한다', async () => {
@@ -736,7 +750,7 @@ describe('PipResolver characterization', () => {
         targetPlatform: { system: 'Linux', machine: 'x86_64' },
         pythonVersion: '3.12',
       })
-    ).rejects.toThrow('호환되는 패키지를 찾을 수 없습니다: native-only@1.0.0');
+    ).rejects.toThrow('대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: native-only@1.0.0');
   });
 
   it('PyPI가 빈 파일 목록을 반환한 root를 해결 실패로 처리한다', async () => {
@@ -755,7 +769,7 @@ describe('PipResolver characterization', () => {
 
     await expect(
       resolver.resolveDependencies('empty', '1.0.0', { pythonVersion: '3.12' })
-    ).rejects.toThrow('호환되는 패키지를 찾을 수 없습니다: empty@1.0.0');
+    ).rejects.toThrow('대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: empty@1.0.0');
   });
 
   it('PyPI 파일의 requires_python이 대상보다 높으면 root를 해결 실패로 처리한다', async () => {
@@ -787,7 +801,7 @@ describe('PipResolver characterization', () => {
 
     await expect(
       resolver.resolveDependencies('future', '1.0.0', { pythonVersion: '3.12' })
-    ).rejects.toThrow('호환되는 패키지를 찾을 수 없습니다: future@1.0.0');
+    ).rejects.toThrow('대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: future@1.0.0');
   });
 
   it('Simple API 파일의 requiresPython이 대상보다 높으면 root를 해결 실패로 처리한다', async () => {
@@ -812,7 +826,7 @@ describe('PipResolver characterization', () => {
         indexUrl: 'https://packages.example.com/simple',
         pythonVersion: '3.12',
       })
-    ).rejects.toThrow('호환되는 패키지를 찾을 수 없습니다: future@1.0.0');
+    ).rejects.toThrow('대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: future@1.0.0');
   });
 
   it('PyPI latest는 대상 Python과 호환되는 이전 릴리스를 선택한다', async () => {
@@ -1218,6 +1232,10 @@ describe('PipResolver characterization', () => {
           requires_dist: [],
         },
       },
+    });
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
     });
 
     const resolver = new PipResolver();

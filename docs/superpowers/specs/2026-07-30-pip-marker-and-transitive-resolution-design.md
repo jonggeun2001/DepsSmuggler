@@ -23,7 +23,7 @@ Prevent pip CLI archives from silently omitting required transitive dependencies
 
 After parsing and marker-filtering `Requires-Dist`, every remaining dependency is required. If no version satisfies its specifier, fetching its metadata fails, or resolution reaches `maxDepth` while another applicable dependency remains, the resolver throws a dependency-resolution error that identifies the parent and child package. Pip resolution no longer substitutes an incompatible fallback version for a required specifier; a fallback is only valid when it satisfies the specifier. `resolveAllDependencies` already turns a resolver error into a failed direct root; the CLI then follows its existing best-effort or `--strict` policy. Marker-filtered dependencies remain optional for the current target and do not cause a failure.
 
-For a custom Simple API artifact, advertised PEP 658 metadata must be fetched and parsed successfully. When PEP 658 metadata is not advertised, the resolver attempts the public PyPI metadata fallback. If neither source can establish `Requires-Dist`, resolution fails rather than assuming an empty dependency list. A successfully fetched empty `Requires-Dist` remains a valid dependency-free package.
+For a custom Simple API artifact, advertised PEP 658 metadata must be fetched and parsed successfully. When PEP 658 metadata is not advertised, the resolver attempts the public PyPI metadata fallback only when the selected artifact checksum matches the PyPI artifact. If neither source can establish `Requires-Dist`, resolution fails rather than assuming an empty dependency list. A successfully fetched empty `Requires-Dist` remains a valid dependency-free package.
 
 ### Marker Environment
 
@@ -51,7 +51,7 @@ Each `PipResolver.resolveDependencies` call owns one direct-root resolution tree
 
 ### Marker Evaluation
 
-The existing parenthesis and `and`/`or` expression handling remains. Atomic conditions support equality, inequality, ordered comparison, `in`, and `not in`, including quoted-literal and marker-variable operands. Version-valued markers use the existing PEP 440 comparison helper; string-valued markers use exact or membership comparisons. Parsing failures, unsupported variables, unavailable values, and unsupported operators are false. This fail-closed rule prevents an archive from receiving packages that were not requested for the selected target.
+The existing parenthesis and `and`/`or` expression handling remains. Atomic conditions support equality, inequality, compatible-release (`~=`), ordered comparison, `in`, and `not in`, including quoted-literal and marker-variable operands. Version-valued markers use the existing PEP 440 comparison helper; string-valued markers use exact or membership comparisons. Parsing failures, unsupported variables, unavailable values, and unsupported operators are false. This fail-closed rule prevents an archive from receiving packages that were not requested for the selected target.
 
 ### Tests And Documentation
 
