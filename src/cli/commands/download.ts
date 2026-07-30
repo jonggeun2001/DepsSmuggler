@@ -174,7 +174,9 @@ async function preparePackagesForDownload(
     cudaVersion: options.cudaVersion,
     condaChannel: options.condaChannel,
     includeDependencies: true,
-    ...(!options.deps ? { maxDepth: 0 } : {}),
+    ...(!options.deps
+      ? { maxDepth: 0, resolveRootArtifactsOnly: true }
+      : {}),
   });
 
   if (resolved.failedPackages.length > 0) {

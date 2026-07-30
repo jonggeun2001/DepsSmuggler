@@ -274,6 +274,7 @@ describe('downloadCommand', () => {
         architecture: 'x86_64',
         targetOS: 'any',
         maxDepth: 0,
+        resolveRootArtifactsOnly: true,
       }),
     );
     expect(addToQueue).toHaveBeenCalledWith([

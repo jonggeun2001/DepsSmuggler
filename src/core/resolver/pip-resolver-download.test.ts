@@ -366,6 +366,37 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     ).rejects.toThrow('검증된 의존성 메타데이터를 찾을 수 없습니다');
   });
 
+  it('no-deps 깊이에서는 의존성이 있는 검증된 루트만 반환한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: {
+          name: 'demo',
+          version: '1.0.0',
+          requires_dist: ['child>=1.0'],
+        },
+        urls: [
+          {
+            filename: 'demo-1.0.0-py3-none-any.whl',
+            url: 'https://files.example/demo-1.0.0.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'py3',
+            digests: { sha256: 'demo-sha' },
+            size: 80,
+          },
+        ],
+      },
+    });
+
+    const result = await new PipResolver().resolveDependencies(
+      'demo',
+      '1.0.0',
+      { maxDepth: 0, skipDependencyExpansion: true },
+    );
+
+    expect(result.flatList.map((pkg) => pkg.name)).toEqual(['demo']);
+    expect(pipCacheMock.fetchPackageMetadata).toHaveBeenCalledTimes(1);
+  });
+
   it('PEP 658 조회 실패 시 체크섬이 같은 PyPI 메타데이터만 사용한다', async () => {
     const customFile = {
       filename: 'custom_root-1.0.0-py3-none-any.whl',

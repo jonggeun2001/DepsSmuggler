@@ -173,6 +173,8 @@ export interface DependencyResolverOptions {
   includeDependencies?: boolean;
   /** 최대 의존성 탐색 깊이 (기본값: 5) */
   maxDepth?: number;
+  /** 루트 아티팩트만 검증하고 자식 의존성 탐색은 생략 */
+  resolveRootArtifactsOnly?: boolean;
   /** 선택적 의존성 포함 여부 (기본값: false) */
   includeOptional?: boolean;
   /** conda 채널 (기본값: 'conda-forge') */
@@ -243,6 +245,7 @@ export async function resolveAllDependencies(
 
   const includeDependencies = options?.includeDependencies ?? true;
   const maxDepth = options?.maxDepth ?? 5;
+  const resolveRootArtifactsOnly = options?.resolveRootArtifactsOnly ?? false;
   const includeOptional = options?.includeOptional ?? false;
   const condaChannel = options?.condaChannel ?? 'conda-forge';
   const architecture = options?.architecture ?? 'x86_64';
@@ -542,6 +545,7 @@ export async function resolveAllDependencies(
           pythonVersion: options?.pythonVersion,
           indexUrl: pkg.indexUrl, // 커스텀 인덱스 URL 전파
           extras: pkg.extras, // extras 전달
+          skipDependencyExpansion: resolveRootArtifactsOnly,
         };
       } else if (pkg.type === 'conda') {
         // conda: 채널, 타겟 플랫폼, Python 버전 및 CUDA 버전 전달

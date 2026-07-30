@@ -267,6 +267,7 @@ export class PipResolver implements IResolver {
     }
 
     const maxDepth = options?.maxDepth ?? 10;
+    const skipDependencyExpansion = options?.skipDependencyExpansion ?? false;
     const indexUrl = options?.indexUrl;
     const extras = options?.extras;
 
@@ -414,6 +415,10 @@ export class PipResolver implements IResolver {
                   Array.from(resolvedExtras.get(cacheKey) ?? []),
                 ),
             );
+
+          if (skipDependencyExpansion) {
+            continue;
+          }
 
           if (depth >= maxDepth && parsedDeps.length > 0) {
             const firstDependency = parsedDeps[0];

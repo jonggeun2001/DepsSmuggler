@@ -234,6 +234,7 @@ describe('dependency-resolver', () => {
         targetOS: 'linux',
         pythonVersion: '3.11',
         maxDepth: 3,
+        resolveRootArtifactsOnly: true,
       };
 
       await resolveAllDependencies(packages, options);
@@ -243,6 +244,7 @@ describe('dependency-resolver', () => {
         '1.24.0',
         expect.objectContaining({
           maxDepth: 3,
+          skipDependencyExpansion: true,
           targetPlatform: expect.objectContaining({ system: 'Linux' }),
           pythonVersion: '3.11',
         })
