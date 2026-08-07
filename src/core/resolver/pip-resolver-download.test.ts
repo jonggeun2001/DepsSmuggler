@@ -24,9 +24,9 @@ vi.mock('./pip-simple-api', async (importOriginal) => {
   };
 });
 
-import { PipDownloader } from '../downloaders/pip';
 import { PipResolver } from './pip-resolver';
 import logger from '../../utils/logger';
+import { PipDownloader } from '../downloaders/pip';
 
 async function expectSelectedArtifactIsDownloaded(
   packageInfo: Awaited<
