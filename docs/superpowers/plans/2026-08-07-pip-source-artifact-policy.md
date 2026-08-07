@@ -4,7 +4,7 @@
 
 **Goal:** 대상 Python·OS·아키텍처용 wheel이 없을 때 PyPI sdist를 반입하고, sdist도 없으면 직접 루트를 안전하게 skip 또는 strict 실패로 처리한다.
 
-**Architecture:** `PipResolver`가 PyPI JSON API와 Simple API의 후보 선택 결과를 하나의 대상-아티팩트 진단으로 정규화한다. version spec(`latest`, 범위, 정확 버전)을 유지한 채 호환 release를 선택하고, 선택된 sdist의 URL·파일명·checksum은 기존 resolver→downloader 경로로 전달한다. 의존성을 확장하지 않는 `--no-deps`는 Simple API Core Metadata가 없어도 checksum이 있는 sdist를 반입하지만, 일반 의존성 해결은 기존 fail-closed 정책을 유지한다.
+**Architecture:** `PipResolver`가 PyPI JSON API와 Simple API의 후보 선택 결과를 하나의 대상-아티팩트 진단으로 정규화한다. version spec(`latest`, 범위, 정확 버전)을 유지한 채 호환 release를 선택하고, 선택된 sdist의 URL·파일명·checksum은 기존 resolver→downloader 경로로 전달한다. 의존성을 확장하지 않는 `--no-deps`는 Simple API Core Metadata가 없어도 checksum이 있는 **sdist만** 반입하지만, wheel과 일반 의존성 해결은 기존 fail-closed 정책을 유지한다.
 
 **Tech Stack:** TypeScript, Commander, Vitest, PyPI JSON API, PEP 440, PEP 658/714 Simple API metadata.
 
@@ -41,13 +41,15 @@ await expect(
 
 Fixture에는 `cp312-cp312-manylinux_*_x86_64.whl`만 넣고 `sdist`를 넣지 않는다. 메시지에 `Python 3.13`, `linux`, `x86_64`과 sdist 부재가 포함되는지도 검증한다.
 
-- [ ] **Step 2: `latest`와 범위 요청의 실패 테스트를 작성한다.**
+- [ ] **Step 2: 모든 version spec의 실패·성공 선택 테스트를 작성한다.**
 
-PyPI JSON과 Simple API 각각에서 `latest`, `>=1,<2`가 CPython 3.13 호환 파일을 전혀 찾지 못하는 fixture를 만든다. 오류는 존재하지 않는 release version이 아니라 사용자가 요청한 `latest` 또는 `>=1,<2`를 포함해야 한다.
+PyPI JSON과 Simple API 각각에서 정확 버전, `latest`, `>=1,<2`가 CPython 3.13 호환 파일을 전혀 찾지 못하는 fixture를 만든다. 오류는 존재하지 않는 release version이 아니라 사용자가 요청한 spec을 포함해야 한다. 특히 Simple API 정확 버전 diagnostic도 별도로 고정한다.
+
+각 API에서 `>=1,<2`가 여러 release 중 실제 호환 artifact가 있는 release를 선택하는 positive fixture도 만든다. 이 테스트는 direct-root 범위 spec이 보존되고 `getLatestVersion` 경로가 실제 패키지를 반환함을 고정한다.
 
 - [ ] **Step 3: CLI requirements 파서와 종료 정책 테스트를 작성한다.**
 
-`native-only>=1,<2`가 resolver에 `>=1,<2`로 전달되는지 확인한다. 기본 모드는 실패한 root만 경고로 제외하고, 모든 root가 실패하면 `다운로드할 해결된 패키지가 없습니다`로 종료하며, `strict: true`는 즉시 실패하는 기존 정책을 유지함을 확인한다.
+`native-only>=1,<2`가 resolver에 `>=1,<2`로 전달되는지 확인한다. 기본 모드는 실패한 root만 경고로 제외하고, 모든 root가 실패하면 `다운로드할 해결된 패키지가 없습니다`로 종료하며 `createArchive`를 호출하지 않음을 확인한다. `strict: true`는 즉시 실패하고 다운로드 queue·`downloadPackage`·archive 생성 부작용이 없음을 확인한다.
 
 - [ ] **Step 4: 새 테스트가 현재 구현에서 실패하는지 확인한다.**
 
@@ -118,19 +120,19 @@ git add src/core/resolver/pip-resolver.ts src/cli/commands/download.ts \
 git commit -m "fix: pip source artifact 부재를 명확히 진단"
 ```
 
-### Task 3: Simple API `--no-deps` sdist 반입 경계를 구현
+### Task 3: JSON/Simple sdist 전달과 Simple API `--no-deps` 신뢰 경계를 구현
 
 **Files:**
 - Modify: `src/core/resolver/pip-resolver.ts:334, 598-647`
 - Modify: `src/core/resolver/pip-resolver-download.test.ts`
 
-- [ ] **Step 1: Simple API sdist 테스트를 작성한다.**
+- [ ] **Step 1: JSON/Simple API sdist artifact 보존 테스트를 작성한다.**
 
-Core Metadata가 `not-advertised`인 hash 보유 `.tar.gz`, `.zip`, `.tar.bz2`, `.tar.xz` fixture를 만든다. `maxDepth: 0`, `skipDependencyExpansion: true`는 각 sdist의 filename·URL·checksum을 반환해야 하고, 일반 모드(`skipDependencyExpansion: false`)는 기존 `검증된 의존성 메타데이터` 오류를 유지해야 한다.
+PyPI JSON과 Simple API 각각에 `.tar.gz`, `.zip`, `.tar.bz2`, `.tar.xz` fixture를 만든다. 각 경로는 선택한 sdist의 filename·URL·checksum을 반환해야 한다. Simple API fixture의 Core Metadata는 `not-advertised`와 artifact hash를 사용하고, `maxDepth: 0`, `skipDependencyExpansion: true`에서만 해당 sdist 반입을 허용한다. 일반 모드(`skipDependencyExpansion: false`)는 기존 `검증된 의존성 메타데이터` 오류를 유지한다.
 
 - [ ] **Step 2: downloader 전달 테스트를 확장한다.**
 
-선택된 각 sdist가 `PipDownloader.downloadPackage`에 전달될 때 resolver가 저장한 URL을 재조회 없이 사용하고 sha256 checksum verifier를 설정하는지 `expectSelectedArtifactIsDownloaded` helper로 검증한다.
+JSON·Simple API의 선택된 각 sdist가 `PipDownloader.downloadPackage`에 전달될 때 resolver가 저장한 URL을 재조회 없이 사용하고 sha256 checksum verifier를 설정하는지 `expectSelectedArtifactIsDownloaded` helper로 검증한다. 따라서 두 API × 네 sdist 형식 각각에서 filename, URL, checksum, 실제 downloader 사용을 검증한다.
 
 - [ ] **Step 3: 현재 구현에서 `--no-deps` case가 실패하는지 확인한다.**
 
@@ -142,9 +144,9 @@ npm test -- --run src/core/resolver/pip-resolver-download.test.ts
 
 Expected: `not-advertised` metadata를 가진 `skipDependencyExpansion` sdist case가 `검증된 의존성 메타데이터를 찾을 수 없습니다`로 FAIL.
 
-- [ ] **Step 4: metadata 요구 여부를 의존성 확장 여부와 연결한다.**
+- [ ] **Step 4: metadata 예외를 root-only sdist에만 한정한다.**
 
-`resolveDependencies`가 root artifact만 검사하는 경우에는 `fetchPackageInfo(..., requireDependencyMetadata: false)`를 호출한다. 일반 모드는 `true`를 유지한다. artifact checksum 보존·downloader checksum 검증은 변경하지 않는다.
+`resolveDependencies`는 root artifact만 검사할 때 `fetchPackageInfo`에 “unverified sdist 허용” 의도를 전달한다. `fetchPackageInfo`는 최종 selected artifact가 sdist일 때만 Core Metadata 부재를 허용하며, 같은 `--no-deps` 경로라도 wheel은 검증된 metadata가 없으면 기존처럼 실패한다. 일반 모드는 artifact 종류와 관계없이 `true`를 유지한다. artifact checksum 보존·downloader checksum 검증은 변경하지 않는다.
 
 - [ ] **Step 5: focused 테스트를 통과시키고 커밋한다.**
 
@@ -166,7 +168,7 @@ git commit -m "fix: no-deps pip sdist를 반입"
 
 - [ ] **Step 2: resolver 후보 선택과 trust boundary를 문서화한다.**
 
-`docs/resolvers.md`에 wheel → Requires-Python 호환 sdist → no candidate 순서를 추가하고, JSON/Simple API 모두에서 동일한 진단을 사용함을 기록한다. Simple API는 `--no-deps` sdist의 artifact hash만으로 반입할 수 있지만 의존성 확장에는 검증된 Core Metadata가 필요함을 명시한다.
+`docs/resolvers.md`에 wheel → Requires-Python 호환 sdist → no candidate 순서를 추가하고, JSON/Simple API 모두에서 동일한 진단을 사용함을 기록한다. Simple API는 `--no-deps`의 **sdist**만 artifact hash로 반입할 수 있고 wheel 및 의존성 확장에는 검증된 Core Metadata가 필요함을 명시한다.
 
 - [ ] **Step 3: 문서 diff를 확인하고 커밋한다.**
 
@@ -228,4 +230,3 @@ git status --short
 git add scripts/verify-worktree.sh
 git commit -m "test: worktree 검증 스크립트 추가"
 ```
-
