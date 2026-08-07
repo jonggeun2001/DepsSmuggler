@@ -335,7 +335,7 @@ export class PipResolver implements IResolver {
             name,
             ver,
             idx,
-            true,
+            skipDependencyExpansion,
           );
         } catch (error) {
           logger.warn('패키지 정보 조회 실패', { name, version: ver, error });
@@ -539,7 +539,7 @@ export class PipResolver implements IResolver {
     name: string,
     version: string,
     indexUrl?: string,
-    requireDependencyMetadata = true,
+    allowUnverifiedSourceArtifact = false,
   ): Promise<FetchedPackageInfo | null> {
     logger.debug('📦 패키지 정보 조회', {
       name,
@@ -547,15 +547,20 @@ export class PipResolver implements IResolver {
       indexUrl: indexUrl ? indexUrl.substring(0, 50) + '...' : 'PyPI',
     });
 
-    // "latest" 버전인 경우 실제 최신 버전 조회
+    // "latest" 또는 version specifier는 실제 호환 버전으로 변환한다.
     let actualVersion = version;
-    if (version === 'latest' || !version) {
-      const latestVersion = await this.getLatestVersion(name, undefined, indexUrl);
+    if (version === 'latest' || !version || this.isVersionSpecifier(version)) {
+      const versionSpec = version === 'latest' || !version ? undefined : version;
+      const latestVersion = await this.getLatestVersion(name, versionSpec, indexUrl);
       if (!latestVersion) {
         throw new Error(`패키지를 찾을 수 없음: ${name}@${version}`);
       }
       actualVersion = latestVersion;
-      logger.debug('"latest" 버전을 실제 버전으로 변환', { name, version, actualVersion });
+      logger.debug('pip version 요청을 실제 버전으로 변환', {
+        name,
+        version,
+        actualVersion,
+      });
     }
 
     let packageInfo: PackageInfo;
@@ -583,16 +588,14 @@ export class PipResolver implements IResolver {
           name,
           actualVersion,
           undefined,
-          requireDependencyMetadata,
+          allowUnverifiedSourceArtifact,
         );
       }
 
       // 최적의 wheel 선택
       const selectedFile = this.selectBestWheelFromSimpleApi(targetFiles);
       if (!selectedFile) {
-        throw new Error(
-          `대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: ${name}@${actualVersion}`,
-        );
+        throw this.createTargetArtifactNotFoundError(name, version);
       }
 
       const wheelMetadata = await fetchWheelMetadata(selectedFile);
@@ -623,9 +626,11 @@ export class PipResolver implements IResolver {
         }
       }
 
+      const isSourceDistribution =
+        getSimplePackageType(selectedFile.filename) === 'sdist';
       if (
-        requireDependencyMetadata &&
-        !customMetadataAvailable
+        !customMetadataAvailable &&
+        !(allowUnverifiedSourceArtifact && isSourceDistribution)
       ) {
         throw new Error(
           `검증된 의존성 메타데이터를 찾을 수 없습니다: ${name}@${actualVersion}`,
@@ -666,9 +671,7 @@ export class PipResolver implements IResolver {
         }));
         const selectedFile = this.selectBestWheel(releaseCandidates);
         if (this.pipTargetPlatform && !selectedFile) {
-          throw new Error(
-            `대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: ${name}@${actualVersion}`,
-          );
+          throw this.createTargetArtifactNotFoundError(name, version);
         }
         if (selectedFile) {
           packageSize = selectedFile.size || 0;
@@ -686,9 +689,7 @@ export class PipResolver implements IResolver {
       }
 
       if (this.pipTargetPlatform && !packageFilename) {
-        throw new Error(
-          `대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: ${name}@${actualVersion}`,
-        );
+        throw this.createTargetArtifactNotFoundError(name, version);
       }
 
       packageInfo = {
@@ -712,6 +713,24 @@ export class PipResolver implements IResolver {
       requiresDist,
       actualVersion,
     };
+  }
+
+  private isVersionSpecifier(version: string): boolean {
+    return /^(?:===|==|!=|~=|>=|<=|>|<)/.test(version);
+  }
+
+  private createTargetArtifactNotFoundError(
+    name: string,
+    requestedSpec: string,
+  ): Error {
+    const target = this.pipTargetPlatform;
+    const targetDescription = target
+      ? ` (대상: Python ${target.pythonVersion ?? '미지정'}, ${target.os} ${target.arch}; 호환 wheel 없음; 호환 source distribution 없음)`
+      : ' (호환 wheel 없음; 호환 source distribution 없음)';
+
+    return new Error(
+      `대상 환경과 호환되는 pip wheel 또는 source distribution을 찾을 수 없습니다: ${name}@${requestedSpec}${targetDescription}`,
+    );
   }
 
   /**
@@ -883,7 +902,10 @@ export class PipResolver implements IResolver {
         );
 
         if (compatibleVersions.length === 0) {
-          return null;
+          throw this.createTargetArtifactNotFoundError(
+            name,
+            versionSpec ?? 'latest',
+          );
         }
 
         return compatibleVersions
@@ -976,6 +998,12 @@ export class PipResolver implements IResolver {
           if (this.selectBestWheel(exactCandidates)) {
             return candidateVersion;
           }
+        }
+        if (compatibleVersions.length > 0 || Object.keys(data.releases).length > 0) {
+          throw this.createTargetArtifactNotFoundError(
+            name,
+            versionSpec ?? 'latest',
+          );
         }
         return null;
       }

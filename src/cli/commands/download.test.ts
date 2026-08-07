@@ -538,6 +538,26 @@ describe('downloadCommand', () => {
     ]);
   });
 
+  it('requirements 파일의 pip 범위 version spec을 resolver에 그대로 전달한다', async () => {
+    readFile.mockResolvedValueOnce('native-only>=1,<2\n');
+
+    await downloadCommand(commandOptions({
+      file: 'requirements.txt',
+      package: undefined,
+    }));
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          type: 'pip',
+          name: 'native-only',
+          version: '>=1,<2',
+        }),
+      ],
+      expect.any(Object),
+    );
+  });
+
   it('기본 모드에서 모든 직접 항목 해결에 실패하면 빈 아카이브를 만들지 않는다', async () => {
     const exitSpy = vi
       .spyOn(process, 'exit')
@@ -589,6 +609,7 @@ describe('downloadCommand', () => {
 
     expect(addToQueue).not.toHaveBeenCalled();
     expect(startDownload).not.toHaveBeenCalled();
+    expect(createArchive).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
     exitSpy.mockRestore();
   });
@@ -633,6 +654,9 @@ describe('downloadCommand', () => {
       downloadCommand(commandOptions({ strict: true })),
     ).rejects.toThrow('process.exit');
 
+    expect(addToQueue).not.toHaveBeenCalled();
+    expect(startDownload).not.toHaveBeenCalled();
+    expect(createArchive).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
     exitSpy.mockRestore();
   });
@@ -796,6 +820,16 @@ describe('downloadCommand', () => {
         },
       ],
       allPackages: [
+        {
+          id: 'pip-requests-2.28.0',
+          type: 'pip',
+          name: 'requests',
+          version: '2.28.0',
+          architecture: 'arm64',
+          downloadUrl: 'https://files.example.com/requests-arm64.whl',
+        },
+      ],
+      successfulPackages: [
         {
           id: 'pip-requests-2.28.0',
           type: 'pip',

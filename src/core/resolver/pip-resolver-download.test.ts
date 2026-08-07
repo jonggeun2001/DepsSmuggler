@@ -2498,7 +2498,343 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
         targetPlatform: { system: 'Linux', machine: 'aarch64' },
         pythonVersion: '3.12',
       }),
-    ).rejects.toThrow('호환되는 pip 아티팩트');
+    ).rejects.toThrow(
+      '대상 환경과 호환되는 pip wheel 또는 source distribution을 찾을 수 없습니다',
+    );
+  });
+
+  it('PyPI JSON 정확 버전에서 대상 artifact가 없으면 대상과 sdist 부재를 진단한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: { name: 'native-only', version: '1.0.0', requires_dist: [] },
+        urls: [
+          {
+            filename:
+              'native_only-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+            url: 'https://files.example/native-only-cp312.whl',
+            packagetype: 'bdist_wheel',
+            python_version: 'cp312',
+            digests: { sha256: 'native-only-sha' },
+            size: 80,
+          },
+        ],
+      },
+    });
+
+    await expect(
+      new PipResolver().resolveDependencies('native-only', '1.0.0', {
+        maxDepth: 0,
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.13',
+      }),
+    ).rejects.toThrow(
+      '대상 환경과 호환되는 pip wheel 또는 source distribution을 찾을 수 없습니다: native-only@1.0.0 (대상: Python 3.13, linux x86_64; 호환 wheel 없음; 호환 source distribution 없음)',
+    );
+  });
+
+  it.each(['latest', '>=1,<2'])(
+    'PyPI JSON %s 요청에서 대상 artifact가 없으면 요청 spec을 보존해 진단한다',
+    async (requestedSpec) => {
+      const foreignWheel = {
+        filename:
+          'native_only-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+        url: 'https://files.example/native-only-cp312.whl',
+        packagetype: 'bdist_wheel',
+        python_version: 'cp312',
+        digests: { sha256: 'native-only-sha' },
+        size: 80,
+      };
+      pipCacheMock.fetchPackageMetadata.mockImplementation(
+        async (_name: string, version?: string) => ({
+          data: {
+            info: { name: 'native-only', version: version ?? '1.0.0' },
+            ...(version === undefined
+              ? { releases: { '1.0.0': [foreignWheel] } }
+              : { urls: [foreignWheel] }),
+          },
+        }),
+      );
+
+      await expect(
+        new PipResolver().resolveDependencies('native-only', requestedSpec, {
+          maxDepth: 0,
+          targetPlatform: { system: 'Linux', machine: 'x86_64' },
+          pythonVersion: '3.13',
+        }),
+      ).rejects.toThrow(
+        `대상 환경과 호환되는 pip wheel 또는 source distribution을 찾을 수 없습니다: native-only@${requestedSpec}`,
+      );
+    },
+  );
+
+  it('Simple API 정확 버전에서 대상 artifact가 없으면 source distribution 부재를 진단한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename:
+          'native_only-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+        url: 'https://index.example/native-only-cp312.whl',
+      },
+    ]);
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    await expect(
+      new PipResolver().resolveDependencies('native-only', '1.0.0', {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.13',
+      }),
+    ).rejects.toThrow(
+      '대상 환경과 호환되는 pip wheel 또는 source distribution을 찾을 수 없습니다: native-only@1.0.0',
+    );
+  });
+
+  it.each(['latest', '>=1,<2'])(
+    'Simple API %s 요청에서 대상 artifact가 없으면 요청 spec을 보존해 진단한다',
+    async (requestedSpec) => {
+      simpleApiMock.fetchPackageFiles.mockResolvedValue([
+        {
+          filename:
+            'native_only-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+          url: 'https://index.example/native-only-cp312.whl',
+        },
+      ]);
+      pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+      await expect(
+        new PipResolver().resolveDependencies('native-only', requestedSpec, {
+          maxDepth: 0,
+          indexUrl: 'https://index.example/simple',
+          targetPlatform: { system: 'Linux', machine: 'x86_64' },
+          pythonVersion: '3.13',
+        }),
+      ).rejects.toThrow(
+        `대상 환경과 호환되는 pip wheel 또는 source distribution을 찾을 수 없습니다: native-only@${requestedSpec}`,
+      );
+    },
+  );
+
+  it.each([
+    { api: 'PyPI JSON', indexUrl: undefined },
+    { api: 'Simple API', indexUrl: 'https://index.example/simple' },
+  ])(
+    '$api direct-root 범위 요청은 호환 artifact가 있는 가장 높은 release를 선택한다',
+    async ({ indexUrl }) => {
+      const release = (version: string) => ({
+        filename: `demo-${version}-py3-none-any.whl`,
+        url: `https://files.example/demo-${version}.whl`,
+        packagetype: 'bdist_wheel',
+        python_version: 'py3',
+        digests: { sha256: `${version}-sha` },
+        size: 80,
+      });
+
+      if (indexUrl) {
+        simpleApiMock.fetchPackageFiles.mockResolvedValue([
+          {
+            filename: 'demo-1.0.0-py3-none-any.whl',
+            url: 'https://index.example/demo-1.0.0.whl',
+            hash: { algorithm: 'sha256', digest: '1.0.0-sha' },
+          },
+          {
+            filename: 'demo-1.9.0-py3-none-any.whl',
+            url: 'https://index.example/demo-1.9.0.whl',
+            hash: { algorithm: 'sha256', digest: '1.9.0-sha' },
+          },
+        ]);
+        simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+          status: 'available',
+          requiresDist: [],
+        });
+      } else {
+        pipCacheMock.fetchPackageMetadata.mockImplementation(
+          async (_name: string, version?: string) => ({
+            data: {
+              info: { name: 'demo', version: version ?? '1.9.0', requires_dist: [] },
+              ...(version === undefined
+                ? { releases: { '1.0.0': [release('1.0.0')], '1.9.0': [release('1.9.0')] } }
+                : { urls: [release(version)] }),
+            },
+          }),
+        );
+      }
+
+      const result = await new PipResolver().resolveDependencies(
+        'demo',
+        '>=1,<2',
+        {
+          maxDepth: 0,
+          ...(indexUrl ? { indexUrl } : {}),
+          targetPlatform: { system: 'Linux', machine: 'x86_64' },
+          pythonVersion: '3.13',
+        },
+      );
+
+      expect(result.root.package).toMatchObject({
+        version: '1.9.0',
+        metadata: {
+          filename: 'demo-1.9.0-py3-none-any.whl',
+        },
+      });
+    },
+  );
+
+  it('Simple API의 Core Metadata가 없는 sdist는 --no-deps에서 checksum으로 반입한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.0.0.tar.gz',
+        url: 'https://index.example/demo-1.0.0.tar.gz',
+        hash: { algorithm: 'sha256', digest: 'simple-sdist-sha' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'not-advertised',
+    });
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    const result = await new PipResolver().resolveDependencies('demo', '1.0.0', {
+      maxDepth: 0,
+      skipDependencyExpansion: true,
+      indexUrl: 'https://index.example/simple',
+      targetPlatform: { system: 'Linux', machine: 'x86_64' },
+      pythonVersion: '3.13',
+    });
+
+    expect(result.root.package.metadata).toMatchObject({
+      filename: 'demo-1.0.0.tar.gz',
+      downloadUrl: 'https://index.example/demo-1.0.0.tar.gz',
+      checksum: { sha256: 'simple-sdist-sha' },
+    });
+    await expectSelectedArtifactIsDownloaded(
+      result.root.package,
+      'https://index.example/demo-1.0.0.tar.gz',
+      'simple-sdist-sha',
+    );
+  });
+
+  it.each(['tar.gz', 'zip', 'tar.bz2', 'tar.xz'])(
+    'PyPI JSON %s sdist의 artifact metadata를 downloader까지 보존한다',
+    async (extension) => {
+      const filename = `demo-1.0.0.${extension}`;
+      const downloadUrl = `https://files.example/${filename}`;
+      pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+        data: {
+          info: { name: 'demo', version: '1.0.0', requires_dist: [] },
+          urls: [
+            {
+              filename,
+              url: downloadUrl,
+              packagetype: 'sdist',
+              python_version: 'source',
+              digests: { sha256: `pypi-${extension}-sha` },
+              size: 80,
+            },
+          ],
+        },
+      });
+
+      const result = await new PipResolver().resolveDependencies('demo', '1.0.0', {
+        maxDepth: 0,
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.13',
+      });
+
+      expect(result.root.package.metadata).toMatchObject({
+        filename,
+        downloadUrl,
+        checksum: { sha256: `pypi-${extension}-sha` },
+      });
+      await expectSelectedArtifactIsDownloaded(
+        result.root.package,
+        downloadUrl,
+        `pypi-${extension}-sha`,
+      );
+    },
+  );
+
+  it.each(['tar.gz', 'zip', 'tar.bz2', 'tar.xz'])(
+    'Simple API %s sdist의 artifact metadata를 downloader까지 보존한다',
+    async (extension) => {
+      const filename = `demo-1.0.0.${extension}`;
+      const downloadUrl = `https://index.example/${filename}`;
+      simpleApiMock.fetchPackageFiles.mockResolvedValue([
+        {
+          filename,
+          url: downloadUrl,
+          hash: { algorithm: 'sha256', digest: `simple-${extension}-sha` },
+        },
+      ]);
+      simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+        status: 'available',
+        requiresDist: [],
+      });
+      pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+      const result = await new PipResolver().resolveDependencies('demo', '1.0.0', {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.13',
+      });
+
+      expect(result.root.package.metadata).toMatchObject({
+        filename,
+        downloadUrl,
+        checksum: { sha256: `simple-${extension}-sha` },
+      });
+      await expectSelectedArtifactIsDownloaded(
+        result.root.package,
+        downloadUrl,
+        `simple-${extension}-sha`,
+      );
+    },
+  );
+
+  it('Simple API의 Core Metadata가 없는 sdist는 의존성 확장 모드에서 실패한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.0.0.tar.gz',
+        url: 'https://index.example/demo-1.0.0.tar.gz',
+        hash: { algorithm: 'sha256', digest: 'simple-sdist-sha' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'not-advertised',
+    });
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    await expect(
+      new PipResolver().resolveDependencies('demo', '1.0.0', {
+        maxDepth: 0,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.13',
+      }),
+    ).rejects.toThrow('검증된 의존성 메타데이터를 찾을 수 없습니다: demo@1.0.0');
+  });
+
+  it('Simple API의 Core Metadata가 없는 wheel은 --no-deps에서도 실패한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.0.0-py3-none-any.whl',
+        url: 'https://index.example/demo-1.0.0.whl',
+        hash: { algorithm: 'sha256', digest: 'simple-wheel-sha' },
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'not-advertised',
+    });
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    await expect(
+      new PipResolver().resolveDependencies('demo', '1.0.0', {
+        maxDepth: 0,
+        skipDependencyExpansion: true,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.13',
+      }),
+    ).rejects.toThrow('검증된 의존성 메타데이터를 찾을 수 없습니다: demo@1.0.0');
   });
 
   it('다음 resolve 호출에 이전 대상 환경을 재사용하지 않는다', async () => {
