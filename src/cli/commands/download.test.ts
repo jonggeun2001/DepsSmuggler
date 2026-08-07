@@ -154,6 +154,7 @@ describe('downloadCommand', () => {
       expect.objectContaining({
         architecture: 'x86_64',
         includeDependencies: true,
+        maxDepth: 5,
       }),
     );
     expect(addToQueue).toHaveBeenCalledWith([
@@ -170,6 +171,36 @@ describe('downloadCommand', () => {
         arch: 'x86_64',
       },
     ]);
+  });
+
+  it('명시한 최대 의존성 탐색 깊이를 resolver에 전달한다', async () => {
+    await downloadCommand(commandOptions({ maxDepth: '8' }));
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ maxDepth: 8 }),
+    );
+  });
+
+  it.each(['', ' ', '-1', '1.5', 'abc'])('잘못된 최대 깊이는 부작용 전에 실패한다: %j', async (maxDepth) => {
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => {
+        throw new Error('process.exit');
+      }) as never);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(downloadCommand(commandOptions({ maxDepth }))).rejects.toThrow('process.exit');
+
+    expect(resolveAllDependencies).not.toHaveBeenCalled();
+    expect(addToQueue).not.toHaveBeenCalled();
+    expect(ensureDir).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('--max-depth는 0 이상의 정수여야 합니다.'),
+    );
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 
   it('명시한 pip 대상 환경을 resolver와 downloader에 전달한다', async () => {
