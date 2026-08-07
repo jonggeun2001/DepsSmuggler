@@ -71,9 +71,12 @@ depssmuggler download [옵션]
 | `--file <file>` | 줄 단위 패키지 목록 파일 (`requirements.txt`, Maven 좌표 목록 등) | 전체 | - |
 | `--no-deps` | 전이 의존성 다운로드 비활성화 | 전체 | `false` |
 | `--strict` | 직접 패키지 하나라도 의존성 해결에 실패하면 다운로드 중단 | 라이브러리 타입 | `false` |
+| `--max-depth <num>` | 라이브러리 패키지 의존성 해결의 최대 탐색 깊이. `0`이면 루트만 포함 | 라이브러리 타입 | `5` |
 | `--concurrency <num>` | 동시 다운로드 수 | 전체 | `3` |
 
-기본 동작은 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 의존성을 함께 해결해 다운로드하는 것입니다. `--no-deps`를 지정하면 루트 패키지의 대상 아티팩트만 선택해 다운로드합니다. 직접 지정한 패키지 중 일부를 해결하지 못하면 기본 모드는 실패한 직접 패키지만 경고와 함께 건너뛰고, 나머지 해결된 패키지와 의존성을 계속 다운로드합니다. 모든 직접 패키지를 해결하지 못해 남은 다운로드 항목이 없으면 빈 아카이브를 만들지 않고 오류로 종료합니다. 전체 실패 정책이 필요하면 `--strict`를 사용합니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
+기본 의존성 포함 다운로드는 라이브러리 패키지(`pip`, `conda`, `maven`, `npm`)에 대해 `--max-depth`로 지정한 깊이까지 해결된 모든 패키지와 의존성을 다운로드하는 것입니다. 기본 깊이는 `5`입니다. pip에서 경계 깊이에 도달한 노드에 적용 가능한 의존성이 더 있으면 그 노드까지는 결과에 포함하고 하위 노드 확장만 중단하며, 깊이와 생략한 의존성 수를 담은 경고를 애플리케이션 로그에 기록합니다. 이 경계 도달만으로 직접 루트를 해결 실패로 처리하지 않습니다.
+
+`--no-deps`는 의도적으로 루트 패키지의 대상 아티팩트만 선택해 다운로드하는 옵션입니다. 전이 의존성을 탐색하지 않으며 최대 깊이 경고도 기록하지 않으므로, `--no-deps` 결과를 깊이 제한으로 인한 경고나 실패로 해석하면 안 됩니다. 직접 지정한 패키지 중 실제로 해결하지 못한 항목이 있으면 기본 모드는 실패한 직접 패키지만 경고와 함께 건너뛰고, 나머지 해결된 패키지와 의존성을 계속 다운로드합니다. 모든 직접 패키지를 해결하지 못해 남은 다운로드 항목이 없으면 빈 아카이브를 만들지 않고 오류로 종료합니다. 전체 실패 정책이 필요하면 `--strict`를 사용합니다. OS 패키지 의존성 다운로드는 `depssmuggler os download` 경로를 사용합니다.
 
 `pip`에서 `--python-version`을 지정하면 해당 버전의 `python_version` 환경 마커를 평가하고, `--target-os` 및 `--arch`와 호환되는 wheel 태그를 선택합니다. Python 버전은 `major.minor` 형식만 허용합니다. 따라서 `python_full_version`과 `implementation_version`처럼 patch가 필요한 marker는 값을 알 수 없는 조건으로 처리합니다. wheel은 대상 버전의 CPython 태그와 범용 `py3`/`py2.py3` 태그, 또는 대상보다 같거나 낮은 CPython 버전의 `abi3` 태그만 선택합니다. PyPI의 패키지·파일 `requires_python`과 Simple API 파일의 `requiresPython`도 PEP 440 specifier set으로 확인하므로, 대상 Python보다 높은 버전만 지원하는 wheel과 source distribution은 선택하지 않습니다. `latest`와 버전 범위는 PyPI 또는 Simple API에서 대상 Python과 호환되는 산출물이 있는 가장 높은 안정 버전을 선택하고, 철회(yanked) 릴리스는 wildcard가 없는 정확한 버전 고정 외에는 제외합니다. 프리릴리스는 버전 제약이 명시적으로 포함하거나 안정 후보가 없을 때만 선택합니다. 지원하지 않는 marker 문법이나 값이 없는 `platform_release`/`platform_version`은 의존성을 포함하지 않는 것으로 처리합니다.
 
@@ -89,6 +92,7 @@ depssmuggler download [옵션]
 - Conda에서 대상 OS가 `any`이면 특정 플랫폼을 임의로 가정하지 않고 `noarch` 빌드만 조회합니다. 플랫폼별 빌드가 필요하면 `--target-os`를 명시해야 합니다.
 - Conda에서 지정한 OS, 아키텍처, Python/CUDA 조건과 일치하는 대상 subdir 또는 `noarch` 빌드를 찾지 못하면 다른 플랫폼으로 재조회하지 않고 다운로드 전에 실패합니다.
 - pip와 Conda에서 필수 전이 의존성의 호환 버전이나 아티팩트를 찾지 못하면 해당 직접 루트의 해결이 실패합니다. 기본 모드는 그 직접 루트만 건너뛰고, `--strict`는 명령 전체를 실패 처리합니다. Conda의 OpenSSL, zlib 같은 런타임 라이브러리도 성공한 루트의 오프라인 묶음에 포함됩니다.
+- 깊이 경계 도달은 위 규칙에 따른 정상적인 bounded traversal이며 직접 루트 실패가 아닙니다. 반대로 호환되는 필수 의존성 버전을 찾지 못한 경우, 의존성 메타데이터 조회가 실패한 경우, 네트워크 오류가 발생한 경우처럼 실제 필수 의존성 해결 오류는 직접 루트 실패로 처리됩니다.
 - pip 하위 의존성은 버전 제약과 대상 환경에 호환되는 아티팩트를 함께 만족하는 최신 릴리스를 선택하며, 같은 패키지에 여러 경로로 요청된 기본/extra 컨텍스트는 합쳐서 평가합니다. Conda 하위 의존성은 버전뿐 아니라 build MatchSpec도 실제 파일 선택까지 유지하고, 같은 버전의 서로 다른 build가 필요하면 각 아티팩트를 모두 보존합니다.
 - Maven classifier 형식은 라이브러리마다 다르므로 OS와 아키텍처만으로 자동 생성하지 않습니다. Maven에 `--target-os` 또는 기본값이 아닌 `--arch`를 지정할 때는 실제 네이티브 아티팩트를 선택할 `--classifier`를 함께 지정해야 합니다.
 - pip, Conda, Maven에서 대상 환경을 명시하고 `--no-deps`를 사용하면 해당 환경에 맞는 루트 아티팩트만 선택하고 전이 의존성은 다운로드하지 않습니다. pip/Conda의 기본값이 아닌 `--arch`도 대상 환경 명시로 처리합니다.
@@ -105,6 +109,7 @@ depssmuggler download -t docker -p nginx -V latest
 depssmuggler download -t pip --file requirements.txt -o ./packages
 depssmuggler download -t pip --file requirements.txt --python-version 3.12 -o ./packages
 depssmuggler download -t pip --file requirements.txt --python-version 3.12 --strict -o ./packages
+depssmuggler download -t pip -p flask --max-depth 8 -o ./packages
 depssmuggler download -t maven --file ./maven-packages.txt
 depssmuggler download -t pip -p flask -f tar.gz
 
