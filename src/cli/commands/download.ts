@@ -213,9 +213,13 @@ async function preparePackagesForDownload(
   }
 
   return {
-    packages: resolved.allPackages
-      .filter((pkg) => options.deps || requestedPackageIds.has(pkg.id))
-      .map(toPackageInfo),
+    packages: (
+      options.deps
+        ? resolved.allPackages
+        : resolved.successfulPackages ?? resolved.allPackages.filter(
+            (pkg) => requestedPackageIds.has(pkg.id),
+          )
+    ).map(toPackageInfo),
     dependencyResolutionApplied: true,
   };
 }
@@ -420,12 +424,14 @@ async function parsePackageFile(filePath: string, type: PackageType): Promise<Pa
 
     if (type === 'pip') {
       // requirements.txt 형식
-      const match = trimmed.match(/^([a-zA-Z0-9._-]+)(?:[=<>!~]+(.+))?$/);
+      const match = trimmed.match(
+        /^([a-zA-Z0-9._-]+)((?:===|==|!=|~=|>=|<=|>|<).+)?$/,
+      );
       if (match) {
         packages.push({
           type: 'pip',
           name: match[1],
-          version: match[2] || 'latest',
+          version: match[2]?.trim() || 'latest',
         });
       }
     } else if (type === 'maven') {
