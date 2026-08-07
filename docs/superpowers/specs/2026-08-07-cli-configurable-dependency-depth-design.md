@@ -2,9 +2,9 @@
 
 ## Goal
 
-Fix issue #47: a `depssmuggler download --deps` run must keep the packages
-resolved up to the configured dependency depth instead of dropping the entire
-direct root when a required dependency would exceed that boundary.
+Fix issue #47: `depssmuggler download`의 기본 의존성 포함 다운로드는
+필수 의존성이 설정한 깊이를 초과하더라도 직접 루트 전체를 버리지 않고,
+설정된 깊이까지 해결한 패키지를 유지해야 한다.
 
 ## Scope
 
@@ -30,9 +30,9 @@ direct root when a required dependency would exceed that boundary.
 
 ### CLI contract
 
-`depssmuggler download --deps --max-depth 8` resolves dependencies through
-depth 8. Omitting the option uses 5. Invalid values fail command-option
-validation before downloads begin.
+`depssmuggler download --max-depth 8`은 기본 의존성 포함 다운로드에서
+깊이 8까지 의존성을 해결한다. 옵션을 생략하면 5를 사용하며, 잘못된 값은
+다운로드를 시작하기 전에 명령 옵션 검증 단계에서 실패한다.
 
 ### Resolution flow
 
