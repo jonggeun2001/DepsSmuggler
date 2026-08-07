@@ -58,6 +58,7 @@ vi.mock('./pip-simple-api', async (importOriginal) => {
 });
 
 import { PipResolver } from './pip-resolver';
+import logger from '../../utils/logger';
 
 const createPyPIFixtureResponder = (packages: Record<string, PackageFixture>) =>
   async (name: string, version?: string) => {
@@ -244,7 +245,7 @@ describe('PipResolver characterization', () => {
     );
   });
 
-  it('최대 깊이를 넘어 확장해야 하는 필수 의존성은 직접 루트를 실패시킨다', async () => {
+  it('최대 깊이 경계의 패키지를 유지하고 후손 확장을 생략한다', async () => {
     pipCacheMock.fetchPackageMetadata.mockImplementation(
       createPyPIFixtureResponder({
         root: {
@@ -269,10 +270,21 @@ describe('PipResolver characterization', () => {
     );
 
     const resolver = new PipResolver();
+    const warnSpy = vi.spyOn(logger, 'warn');
 
-    await expect(
-      resolver.resolveDependencies('root', '1.0.0', { maxDepth: 1 })
-    ).rejects.toThrow('필수 의존성 해결 실패: child@1.0.0 -> grandchild');
+    const result = await resolver.resolveDependencies('root', '1.0.0', { maxDepth: 1 });
+
+    expect(result.flatList.map((pkg) => pkg.name)).toEqual(['root', 'child']);
+    expect(result.root.dependencies).toHaveLength(1);
+    expect(result.root.dependencies[0].dependencies).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('최대 의존성 탐색 깊이'),
+      expect.objectContaining({
+        depth: 1,
+        maxDepth: 1,
+        omittedDependencyCount: 1,
+      }),
+    );
   });
 
   it('필수 의존성의 호환되지 않는 버전으로 대체하지 않고 직접 루트를 실패시킨다', async () => {
