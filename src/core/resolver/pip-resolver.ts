@@ -316,15 +316,6 @@ export class PipResolver implements IResolver {
 
         // 최대 깊이 체크
         if (depth > maxDepth) {
-          if (parent) {
-            throw new RequiredDependencyResolutionError(
-              parent.name,
-              parent.version,
-              name,
-              parent.versionSpec,
-              '최대 의존성 탐색 깊이를 초과했습니다'
-            );
-          }
           continue;
         }
 
@@ -421,14 +412,14 @@ export class PipResolver implements IResolver {
           }
 
           if (depth >= maxDepth && parsedDeps.length > 0) {
-            const firstDependency = parsedDeps[0];
-            throw new RequiredDependencyResolutionError(
-              packageInfo.name,
-              actualVersion,
-              firstDependency.name,
-              firstDependency.versionSpec,
-              '최대 의존성 탐색 깊이를 초과했습니다',
-            );
+            logger.warn('최대 의존성 탐색 깊이에 도달하여 하위 의존성 확장을 생략합니다', {
+              packageName: packageInfo.name,
+              version: actualVersion,
+              depth,
+              maxDepth,
+              omittedDependencyCount: parsedDeps.length,
+            });
+            continue;
           }
 
           for (const dep of parsedDeps) {

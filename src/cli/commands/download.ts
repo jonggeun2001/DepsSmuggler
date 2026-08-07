@@ -23,6 +23,7 @@ interface DownloadCommandOptions extends CliDownloadEnvironmentOptions {
   file?: string;
   deps: boolean;
   strict?: boolean;
+  maxDepth?: string;
   concurrency: string;
 }
 
@@ -42,6 +43,19 @@ const PIP_TARGET_ARCHITECTURES: Partial<Record<Architecture, PipTargetPlatform['
 
 function getNormalizedPackageKey(name: string, version: string): string {
   return `${name.toLowerCase().replace(/[-_.]+/g, '_')}@${version}`;
+}
+
+function parseMaxDepth(value: string): number {
+  if (!/^[0-9]+$/.test(value)) {
+    throw new Error('--max-depth는 0 이상의 정수여야 합니다.');
+  }
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error('--max-depth는 0 이상의 정수여야 합니다.');
+  }
+
+  return parsed;
 }
 
 const CLI_TARGET_ENVIRONMENT_TYPES = new Set<PackageType>(['pip', 'conda', 'maven']);
@@ -141,7 +155,7 @@ async function preparePackagesForDownload(
     | 'classifier'
     | 'deps'
     | 'strict'
-  >,
+  > & { maxDepth: number },
 ): Promise<PreparedPackagesResult> {
   const shouldResolveTargetedRoots =
     !options.deps &&
@@ -174,6 +188,7 @@ async function preparePackagesForDownload(
     cudaVersion: options.cudaVersion,
     condaChannel: options.condaChannel,
     includeDependencies: true,
+    maxDepth: options.deps ? options.maxDepth : 0,
     ...(!options.deps
       ? { maxDepth: 0, resolveRootArtifactsOnly: true }
       : {}),
@@ -232,11 +247,13 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
     ...options,
     targetOS: options.targetOS ?? 'any',
     condaChannel: options.condaChannel ?? 'conda-forge',
+    maxDepth: options.maxDepth ?? '5',
   };
   console.log(chalk.cyan('다운로드 준비 중...'));
 
   try {
     validateDownloadEnvironmentOptions(options);
+    const maxDepth = parseMaxDepth(options.maxDepth ?? '5');
 
     // 패키지 목록 생성
     let packages: PackageInfo[] = [];
@@ -291,6 +308,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       classifier: options.classifier,
       deps: options.deps,
       strict: options.strict,
+      maxDepth,
     });
     packages = prepared.packages;
 

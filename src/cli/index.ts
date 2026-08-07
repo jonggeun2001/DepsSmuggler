@@ -44,6 +44,7 @@ program
   .option('--file <file>', '줄 단위 패키지 목록 파일 (requirements.txt, Maven 좌표 목록 등)')
   .option('--no-deps', '의존성 포함하지 않음')
   .option('--strict', '의존성 해결 실패 시 다운로드하지 않음')
+  .option('--max-depth <num>', '최대 의존성 탐색 깊이', '5')
   .option('--concurrency <num>', '동시 다운로드 수', '3')
   .action(async (options) => {
     const { downloadCommand } = await import('./commands/download');

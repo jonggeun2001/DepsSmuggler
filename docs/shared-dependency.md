@@ -99,6 +99,8 @@ interface ResolvedPackageList {
 ```typescript
 interface DependencyResolverOptions {
   maxDepth?: number;        // 최대 탐색 깊이 (기본: 5)
+  // pip에만 전달되는 루트 전용 처리 힌트
+  resolveRootArtifactsOnly?: boolean;
   includeOptional?: boolean; // 선택적 의존성 포함 (기본: false)
   condaChannel?: string;    // conda 채널 (기본: 'conda-forge')
   yumRepoUrl?: string;      // yum 저장소 URL
@@ -119,6 +121,8 @@ interface OSDistributionSetting {
   architecture: string; // 아키텍처 (예: 'x86_64', 'amd64')
 }
 ```
+
+`resolveAllDependencies`의 `maxDepth` 기본값은 `5`이며 CLI 기본 의존성 포함 다운로드가 사용하는 값입니다. 각 리졸버는 이 깊이까지 해결된 패키지를 결과에 포함합니다. pip는 경계 노드에 적용 가능한 의존성이 남아 있으면 하위 확장을 생략하고 깊이 정보를 담은 경고를 애플리케이션 로그에 기록하지만, 직접 루트를 실패로 처리하지 않습니다. `resolveRootArtifactsOnly`는 shared resolver에서 pip의 `skipDependencyExpansion`으로만 전달되는 루트 전용 처리 힌트입니다. CLI의 `--no-deps`는 이 힌트와 `maxDepth: 0`을 함께 전달하므로 pip와 Conda 모두 루트 아티팩트만 조회하며, 깊이 제한 경고 없이 조용히 종료합니다. pip `PipResolver.resolveDependencies`를 직접 호출할 때의 `maxDepth` 기본값은 `10`입니다.
 
 ### DependencyProgressCallback
 

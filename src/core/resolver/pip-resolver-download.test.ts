@@ -24,8 +24,9 @@ vi.mock('./pip-simple-api', async (importOriginal) => {
   };
 });
 
-import { PipDownloader } from '../downloaders/pip';
 import { PipResolver } from './pip-resolver';
+import logger from '../../utils/logger';
+import { PipDownloader } from '../downloaders/pip';
 
 async function expectSelectedArtifactIsDownloaded(
   packageInfo: Awaited<
@@ -387,6 +388,7 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
       },
     });
 
+    const warnSpy = vi.spyOn(logger, 'warn');
     const result = await new PipResolver().resolveDependencies(
       'demo',
       '1.0.0',
@@ -395,6 +397,10 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
 
     expect(result.flatList.map((pkg) => pkg.name)).toEqual(['demo']);
     expect(pipCacheMock.fetchPackageMetadata).toHaveBeenCalledTimes(1);
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('최대 의존성 탐색 깊이'),
+      expect.anything(),
+    );
   });
 
   it('PEP 658 조회 실패 시 체크섬이 같은 PyPI 메타데이터만 사용한다', async () => {
