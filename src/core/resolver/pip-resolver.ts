@@ -407,6 +407,10 @@ export class PipResolver implements IResolver {
                 ),
             );
 
+          if (skipDependencyExpansion) {
+            continue;
+          }
+
           if (depth >= maxDepth && parsedDeps.length > 0) {
             logger.warn('최대 의존성 탐색 깊이에 도달하여 하위 의존성 확장을 생략합니다', {
               packageName: packageInfo.name,
@@ -415,10 +419,6 @@ export class PipResolver implements IResolver {
               maxDepth,
               omittedDependencyCount: parsedDeps.length,
             });
-            continue;
-          }
-
-          if (skipDependencyExpansion) {
             continue;
           }
 
