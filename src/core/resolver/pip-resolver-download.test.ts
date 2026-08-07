@@ -2712,6 +2712,29 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
     );
   });
 
+  it('Simple API의 Core Metadata와 hash가 모두 없는 sdist는 --no-deps에서도 실패한다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'demo-1.0.0.tar.gz',
+        url: 'https://index.example/demo-1.0.0.tar.gz',
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'not-advertised',
+    });
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue(null);
+
+    await expect(
+      new PipResolver().resolveDependencies('demo', '1.0.0', {
+        maxDepth: 0,
+        skipDependencyExpansion: true,
+        indexUrl: 'https://index.example/simple',
+        targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        pythonVersion: '3.13',
+      }),
+    ).rejects.toThrow('검증된 의존성 메타데이터를 찾을 수 없습니다: demo@1.0.0');
+  });
+
   it.each(['tar.gz', 'zip', 'tar.bz2', 'tar.xz'])(
     'PyPI JSON %s sdist의 artifact metadata를 downloader까지 보존한다',
     async (extension) => {

@@ -628,9 +628,14 @@ export class PipResolver implements IResolver {
 
       const isSourceDistribution =
         getSimplePackageType(selectedFile.filename) === 'sdist';
+      const artifactChecksum = getSimpleApiChecksum(selectedFile);
       if (
         !customMetadataAvailable &&
-        !(allowUnverifiedSourceArtifact && isSourceDistribution)
+        !(
+          allowUnverifiedSourceArtifact &&
+          isSourceDistribution &&
+          artifactChecksum
+        )
       ) {
         throw new Error(
           `검증된 의존성 메타데이터를 찾을 수 없습니다: ${name}@${actualVersion}`,
@@ -646,7 +651,7 @@ export class PipResolver implements IResolver {
           size: 0,
           filename: selectedFile.filename,
           downloadUrl: selectedFile.url,
-          checksum: getSimpleApiChecksum(selectedFile),
+          checksum: artifactChecksum,
           indexUrl,
         },
       };
