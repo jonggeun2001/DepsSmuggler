@@ -750,7 +750,9 @@ describe('PipResolver characterization', () => {
         targetPlatform: { system: 'Linux', machine: 'x86_64' },
         pythonVersion: '3.12',
       })
-    ).rejects.toThrow('대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: native-only@1.0.0');
+    ).rejects.toThrow(
+      '대상 환경과 호환되는 pip wheel 또는 source distribution을 찾을 수 없습니다: native-only@1.0.0',
+    );
   });
 
   it('PyPI가 빈 파일 목록을 반환한 root를 해결 실패로 처리한다', async () => {
@@ -769,7 +771,9 @@ describe('PipResolver characterization', () => {
 
     await expect(
       resolver.resolveDependencies('empty', '1.0.0', { pythonVersion: '3.12' })
-    ).rejects.toThrow('대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: empty@1.0.0');
+    ).rejects.toThrow(
+      '대상 환경과 호환되는 pip wheel 또는 source distribution을 찾을 수 없습니다: empty@1.0.0',
+    );
   });
 
   it('PyPI 파일의 requires_python이 대상보다 높으면 root를 해결 실패로 처리한다', async () => {
@@ -801,7 +805,9 @@ describe('PipResolver characterization', () => {
 
     await expect(
       resolver.resolveDependencies('future', '1.0.0', { pythonVersion: '3.12' })
-    ).rejects.toThrow('대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: future@1.0.0');
+    ).rejects.toThrow(
+      '대상 환경과 호환되는 pip wheel 또는 source distribution을 찾을 수 없습니다: future@1.0.0',
+    );
   });
 
   it('Simple API 파일의 requiresPython이 대상보다 높으면 root를 해결 실패로 처리한다', async () => {
@@ -826,7 +832,9 @@ describe('PipResolver characterization', () => {
         indexUrl: 'https://packages.example.com/simple',
         pythonVersion: '3.12',
       })
-    ).rejects.toThrow('대상 환경과 호환되는 pip 아티팩트를 찾을 수 없습니다: future@1.0.0');
+    ).rejects.toThrow(
+      '대상 환경과 호환되는 pip wheel 또는 source distribution을 찾을 수 없습니다: future@1.0.0',
+    );
   });
 
   it('PyPI latest는 대상 Python과 호환되는 이전 릴리스를 선택한다', async () => {
