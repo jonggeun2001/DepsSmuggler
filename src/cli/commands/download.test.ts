@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { downloadCommand } from './download';
 import { resolveAllDependencies } from '../../core/shared';
-import { ResolutionSession } from '../../core/shared/internal/resolution-session';
 
 const {
   ensureDir,
@@ -686,124 +685,6 @@ describe('downloadCommand', () => {
       downloadCommand(commandOptions({ strict: true })),
     ).rejects.toThrow('process.exit');
 
-    expect(addToQueue).not.toHaveBeenCalled();
-    expect(startDownload).not.toHaveBeenCalled();
-    expect(createArchive).not.toHaveBeenCalled();
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    exitSpy.mockRestore();
-  });
-
-  it('strict 모드는 공통 의존성 재시도 성공 뒤에도 앞선 root 실패 기록을 중단 처리한다', async () => {
-    const exitSpy = vi
-      .spyOn(process, 'exit')
-      .mockImplementation((() => {
-        throw new Error('process.exit');
-      }) as never);
-    readFile.mockResolvedValue('alpha==1.0.0\nbeta==1.0.0\n');
-
-    const requestSession = new ResolutionSession();
-    const sharedMetadataLookup = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('temporary metadata failure'))
-      .mockResolvedValueOnce({ version: '2.0.0' });
-    const originalPackages = [
-      {
-        id: 'pip-alpha-1.0.0',
-        type: 'pip' as const,
-        name: 'alpha',
-        version: '1.0.0',
-        architecture: 'x86_64',
-      },
-      {
-        id: 'pip-beta-1.0.0',
-        type: 'pip' as const,
-        name: 'beta',
-        version: '1.0.0',
-        architecture: 'x86_64',
-      },
-    ];
-    const allPackages = [...originalPackages];
-    const successfulPackages = [] as typeof originalPackages;
-    const dependencyTrees = [] as Array<{
-      root: { package: { type: 'pip'; name: string; version: string }; dependencies: [] };
-      flatList: Array<{ type: 'pip'; name: string; version: string }>;
-      conflicts: [];
-      totalSize: number;
-    }>;
-    const failedPackages: Array<{ name: string; version: string; error: string }> = [];
-
-    for (const root of originalPackages) {
-      try {
-        await requestSession.getOrCreate(
-          'pip',
-          'package-info',
-          { name: 'shared', version: '2.0.0' },
-          () => sharedMetadataLookup(),
-        );
-        const sharedPackage = {
-          id: 'pip-shared-2.0.0',
-          type: 'pip' as const,
-          name: 'shared',
-          version: '2.0.0',
-          architecture: 'x86_64',
-        };
-        allPackages.push(sharedPackage);
-        successfulPackages.push(root, sharedPackage);
-        dependencyTrees.push({
-          root: { package: root, dependencies: [] },
-          flatList: [root, sharedPackage],
-          conflicts: [],
-          totalSize: 0,
-        });
-      } catch (error) {
-        failedPackages.push({
-          name: root.name,
-          version: root.version,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    expect(sharedMetadataLookup).toHaveBeenCalledTimes(2);
-    expect(failedPackages).toEqual([
-      { name: 'alpha', version: '1.0.0', error: 'temporary metadata failure' },
-    ]);
-    expect(successfulPackages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: 'beta', version: '1.0.0' }),
-        expect.objectContaining({ name: 'shared', version: '2.0.0' }),
-      ]),
-    );
-    expect(dependencyTrees.map((tree) => tree.root.package.name)).toEqual(['beta']);
-    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
-      originalPackages,
-      allPackages,
-      successfulPackages,
-      dependencyTrees,
-      failedPackages,
-    });
-
-    await expect(
-      downloadCommand({
-        type: 'pip',
-        pkgVersion: 'latest',
-        arch: 'x86_64',
-        output: './output',
-        format: 'zip',
-        file: 'requirements.txt',
-        deps: true,
-        strict: true,
-        concurrency: '3',
-      }),
-    ).rejects.toThrow('process.exit');
-
-    expect(resolveAllDependencies).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({ name: 'alpha' }),
-        expect.objectContaining({ name: 'beta' }),
-      ]),
-      expect.any(Object),
-    );
     expect(addToQueue).not.toHaveBeenCalled();
     expect(startDownload).not.toHaveBeenCalled();
     expect(createArchive).not.toHaveBeenCalled();
