@@ -2,13 +2,33 @@ export type ResolutionOperation = 'latest-version' | 'package-info' | 'packument
 
 type ResolverName = 'pip' | 'conda' | 'maven' | 'npm';
 
+type ResolutionContextPrimitive = string | number | boolean | null | undefined;
+
+export type ResolutionContextValue =
+  | ResolutionContextPrimitive
+  | ResolutionContextValue[]
+  | ResolutionContext;
+
+export interface ResolutionContext {
+  [key: string]: ResolutionContextValue;
+}
+
 interface ResolutionSessionStats {
   hits: number;
   misses: number;
   joins: number;
 }
 
-function stableSerialize(value: unknown): string {
+function unsupportedContextValue(): never {
+  throw new TypeError('Resolution context must be JSON-like');
+}
+
+function isArrayIndex(key: string): boolean {
+  const index = Number(key);
+  return Number.isInteger(index) && index >= 0 && index < 2 ** 32 - 1 && String(index) === key;
+}
+
+function stableSerialize(value: unknown, ancestors = new WeakSet<object>()): string {
   if (value === undefined) {
     return 'undefined';
   }
@@ -30,35 +50,79 @@ function stableSerialize(value: unknown): string {
       return `number:${value}`;
     case 'string':
       return `string:${JSON.stringify(value)}`;
-    case 'bigint':
-      return `bigint:${value}`;
-    case 'symbol':
-      return `symbol:${String(value)}`;
-    case 'function':
-      return `function:${String(value)}`;
     case 'object':
-      if (Array.isArray(value)) {
-        return `array:[${Array.from(value, stableSerialize).join(',')}]`;
+      if (ancestors.has(value)) {
+        throw new TypeError('Resolution context must not contain cyclic references');
       }
 
-      return `object:{${Object.keys(value)
-        .sort()
-        .map((key) => `${stableSerialize(key)}:${stableSerialize(value[key as keyof typeof value])}`)
-        .join(',')}}`;
+      ancestors.add(value);
+      try {
+        if (Array.isArray(value)) {
+          if (Object.getPrototypeOf(value) !== Array.prototype) {
+            return unsupportedContextValue();
+          }
+
+          for (const key of Reflect.ownKeys(value)) {
+            if (key === 'length') {
+              continue;
+            }
+
+            const descriptor = Object.getOwnPropertyDescriptor(value, key);
+            if (
+              typeof key !== 'string' ||
+              !isArrayIndex(key) ||
+              !descriptor?.enumerable ||
+              !('value' in descriptor)
+            ) {
+              return unsupportedContextValue();
+            }
+          }
+
+          return `array:[${Array.from({ length: value.length }, (_, index) => {
+            const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+            if (!descriptor?.enumerable || !('value' in descriptor)) {
+              return unsupportedContextValue();
+            }
+
+            return stableSerialize(descriptor.value, ancestors);
+          }).join(',')}]`;
+        }
+
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype !== Object.prototype && prototype !== null) {
+          return unsupportedContextValue();
+        }
+
+        const plainObject = value as Record<string, unknown>;
+        for (const key of Reflect.ownKeys(value)) {
+          const descriptor = Object.getOwnPropertyDescriptor(value, key);
+          if (typeof key !== 'string' || !descriptor?.enumerable || !('value' in descriptor)) {
+            return unsupportedContextValue();
+          }
+        }
+
+        return `object:{${Object.keys(value)
+          .sort()
+          .map((key) => `${stableSerialize(key)}:${stableSerialize(plainObject[key], ancestors)}`)
+          .join(',')}}`;
+      } finally {
+        ancestors.delete(value);
+      }
     default:
-      throw new TypeError('Unsupported context value type');
+      return unsupportedContextValue();
   }
 }
 
 export class ResolutionSession {
   private readonly entries = new Map<string, Promise<unknown>>();
   private readonly inFlightKeys = new Set<string>();
+  private readonly cacheabilityFailures = new WeakMap<Promise<unknown>, { error: unknown }>();
   private readonly stats: ResolutionSessionStats = { hits: 0, misses: 0, joins: 0 };
 
   getOrCreate<T>(
     resolver: ResolverName,
     operation: ResolutionOperation,
-    context: Record<string, unknown>,
+    context: ResolutionContext,
     producer: () => Promise<T>,
     options?: { isCacheable?: (value: T) => boolean },
   ): Promise<T> {
@@ -72,7 +136,7 @@ export class ResolutionSession {
         this.stats.hits += 1;
       }
 
-      return cached.then((value) => structuredClone(value));
+      return this.cloneForConsumer(cached);
     }
 
     this.stats.misses += 1;
@@ -84,8 +148,15 @@ export class ResolutionSession {
     void canonical.then(
       (value) => {
         this.inFlightKeys.delete(key);
-        if (!isCacheable(value) && this.entries.get(key) === canonical) {
-          this.entries.delete(key);
+        try {
+          if (!isCacheable(value) && this.entries.get(key) === canonical) {
+            this.entries.delete(key);
+          }
+        } catch (error) {
+          this.cacheabilityFailures.set(canonical, { error });
+          if (this.entries.get(key) === canonical) {
+            this.entries.delete(key);
+          }
         }
       },
       () => {
@@ -96,10 +167,21 @@ export class ResolutionSession {
       },
     );
 
-    return canonical.then((value) => structuredClone(value));
+    return this.cloneForConsumer(canonical);
   }
 
   getStats(): ResolutionSessionStats {
     return { ...this.stats };
+  }
+
+  private cloneForConsumer<T>(canonical: Promise<T>): Promise<T> {
+    return canonical.then((value) => {
+      const cacheabilityFailure = this.cacheabilityFailures.get(canonical);
+      if (cacheabilityFailure) {
+        throw cacheabilityFailure.error;
+      }
+
+      return structuredClone(value);
+    });
   }
 }

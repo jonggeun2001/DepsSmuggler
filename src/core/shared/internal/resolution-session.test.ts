@@ -26,10 +26,15 @@ describe('ResolutionSession', () => {
 
     deferred.resolve();
 
-    await expect(Promise.all([first, second])).resolves.toEqual([
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect([firstResult, secondResult]).toEqual([
       { package: { name: 'requests', version: '2.32.0' } },
       { package: { name: 'requests', version: '2.32.0' } },
     ]);
+    firstResult.package.version = '2.33.0';
+    expect(secondResult.package.version).toBe('2.32.0');
+    expect(secondResult.package).not.toBe(firstResult.package);
     expect(producerCalls).toBe(1);
   });
 
@@ -112,6 +117,56 @@ describe('ResolutionSession', () => {
     expect([withoutVersion, withUndefinedVersion]).toEqual([1, 2]);
   });
 
+  it.each([
+    ['Date', { value: new Date('2026-01-01T00:00:00.000Z') }],
+    ['Map', { value: new Map([['name', 'requests']]) }],
+    ['Set', { value: new Set(['requests']) }],
+    ['Symbol', { value: Symbol('requests') }],
+    ['function', { value: () => 'requests' }],
+  ])('%s context를 거부하고 producer를 실행하지 않는다', async (_kind, invalidContext) => {
+    const session = new ResolutionSession();
+    let producerCalls = 0;
+    const producer = async () => {
+      producerCalls += 1;
+      return { version: '2.32.0' };
+    };
+
+    expect(() =>
+      session.getOrCreate(
+        'pip',
+        'latest-version',
+        invalidContext as never,
+        producer,
+      ),
+    ).toThrow('Resolution context must be JSON-like');
+    await Promise.resolve();
+
+    expect(producerCalls).toBe(0);
+  });
+
+  it('cyclic context를 거부하고 producer를 실행하지 않는다', async () => {
+    const session = new ResolutionSession();
+    const cyclicContext: Record<string, unknown> = { name: 'requests' };
+    cyclicContext.self = cyclicContext;
+    let producerCalls = 0;
+    const producer = async () => {
+      producerCalls += 1;
+      return { version: '2.32.0' };
+    };
+
+    expect(() =>
+      session.getOrCreate(
+        'pip',
+        'latest-version',
+        cyclicContext as never,
+        producer,
+      ),
+    ).toThrow('Resolution context must not contain cyclic references');
+    await Promise.resolve();
+
+    expect(producerCalls).toBe(0);
+  });
+
   it('reject된 producer 결과를 저장하지 않는다', async () => {
     const session = new ResolutionSession();
     let producerCalls = 0;
@@ -185,6 +240,30 @@ describe('ResolutionSession', () => {
     await session.getOrCreate('npm', 'latest-version', { name: 'empty-version' }, producer);
 
     expect(producerCalls).toBe(1);
+  });
+
+  it('isCacheable predicate 오류를 consumer에 전파하고 entry를 제거한다', async () => {
+    const session = new ResolutionSession();
+    const predicateError = new Error('cacheability check failed');
+    let producerCalls = 0;
+    const producer = async () => {
+      producerCalls += 1;
+      return { version: '2.32.0' };
+    };
+    const options = {
+      isCacheable: () => {
+        throw predicateError;
+      },
+    };
+
+    await expect(
+      session.getOrCreate('pip', 'latest-version', { name: 'requests' }, producer, options),
+    ).rejects.toBe(predicateError);
+    await expect(
+      session.getOrCreate('pip', 'latest-version', { name: 'requests' }, producer, options),
+    ).rejects.toBe(predicateError);
+
+    expect(producerCalls).toBe(2);
   });
 
   it('cache hit, miss, in-flight join 통계를 제공한다', async () => {
