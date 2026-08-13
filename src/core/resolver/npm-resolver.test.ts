@@ -12,9 +12,14 @@ import {
 } from './npm-resolver';
 import { NpmVersionResolver } from './npm-version-resolver';
 import { NpmTreeManager } from './npm-tree-manager';
+import { fetchPackument } from '../shared/npm-cache';
 import { NpmPackument, NpmNode, DependencyType, DepsQueueItem, NpmPackageVersion, NpmFlatPackage, NpmResolvedNode, NpmDist } from '../shared/npm-types';
 import { ResolutionSession } from '../shared/internal/resolution-session';
 import { getAttachedResolutionSession } from '../shared/internal/resolution-session-registry';
+
+vi.mock('../shared/npm-cache', () => ({
+  fetchPackument: vi.fn(),
+}));
 
 /**
  * 테스트용 NpmResolver 인터페이스
@@ -105,6 +110,8 @@ const createResolver = () => {
   return new NpmResolver();
 };
 
+const fetchPackumentMock = vi.mocked(fetchPackument);
+
 describe('NpmResolver 단위 테스트', () => {
   let resolver: NpmResolver;
 
@@ -125,6 +132,59 @@ describe('NpmResolver 단위 테스트', () => {
     expect(
       getAttachedResolutionSession(asTestable(legacyResolver).versionResolver),
     ).toBeUndefined();
+  });
+
+  it('공통 transitive dependency를 처리할 때 request resolver 두 개가 remote packument와 candidate 선택을 재사용한다', async () => {
+    const shared = createPackument('shared', {
+      '1.2.0': {
+        name: 'shared',
+        dist: { tarball: 'https://registry.example/shared-1.2.0.tgz', shasum: 'shared' },
+      },
+    });
+    const rootA = createPackument('root-a', {
+      '1.0.0': {
+        name: 'root-a',
+        dependencies: { shared: '^1.0.0' },
+        dist: { tarball: 'https://registry.example/root-a-1.0.0.tgz', shasum: 'root-a' },
+      },
+    });
+    const rootB = createPackument('root-b', {
+      '1.0.0': {
+        name: 'root-b',
+        dependencies: { shared: '^1.0.0' },
+        dist: { tarball: 'https://registry.example/root-b-1.0.0.tgz', shasum: 'root-b' },
+      },
+    });
+    const packuments = new Map([
+      ['root-a', rootA],
+      ['root-b', rootB],
+      ['shared', shared],
+    ]);
+    fetchPackumentMock.mockImplementation(async (name) => {
+      const packument = packuments.get(name.toLowerCase());
+      if (!packument) {
+        throw new Error(`Unknown package: ${name}`);
+      }
+      return structuredClone(packument);
+    });
+    const resolveVersion = vi.spyOn(NpmVersionResolver.prototype, 'resolveVersion');
+    const session = new ResolutionSession();
+    const first = createRequestNpmResolver(session);
+    const second = createRequestNpmResolver(session);
+
+    const firstResult = await first.resolveDependencies('root-a', '1.0.0');
+    const secondResult = await second.resolveDependencies('root-b', '1.0.0');
+
+    expect(firstResult.flatList).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'shared', version: '1.2.0' })]),
+    );
+    expect(secondResult.flatList).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'shared', version: '1.2.0' })]),
+    );
+    expect(fetchPackumentMock.mock.calls.filter(([name]) => name.toLowerCase() === 'shared')).toHaveLength(1);
+    expect(
+      resolveVersion.mock.calls.filter(([, packument]) => packument.name === 'shared'),
+    ).toHaveLength(1);
   });
 
   describe('resolveVersion', () => {
