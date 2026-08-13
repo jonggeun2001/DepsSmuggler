@@ -84,7 +84,7 @@ export function getAttachedResolutionSession(owner: object): ResolutionSession |
 
 - [ ] **Step 2: 테스트가 기능 부재로 실패하는지 확인한다.**
 
-Run: `npx vitest run src/core/shared/internal/resolution-session.test.ts`
+Run: `npx vitest run src/core/shared/internal/resolution-session.test.ts src/core/shared/internal/resolution-session-registry.test.ts`
 
 Expected: FAIL — 내부 `resolution-session` 모듈을 찾지 못한다.
 
@@ -113,7 +113,7 @@ export class ResolutionSession {
 
 - [ ] **Step 4: 세션 단위 테스트가 통과하는지 확인한다.**
 
-Run: `npx vitest run src/core/shared/internal/resolution-session.test.ts`
+Run: `npx vitest run src/core/shared/internal/resolution-session.test.ts src/core/shared/internal/resolution-session-registry.test.ts`
 
 Expected: PASS — producer 1회, snapshot 격리, namespace 분리, reject/null/empty 재시도가 확인된다.
 
@@ -134,6 +134,9 @@ git commit -m "feat: 요청 단위 의존성 세션 추가"
 - Modify: `src/core/resolver/npm-resolver.ts`
 - Modify: `src/core/shared/dependency-resolver.ts`
 - Modify: `src/core/shared/dependency-resolver.test.ts`
+- Modify: `src/core/resolver/pip-resolver.test.ts`
+- Modify: `src/core/resolver/maven-resolver.test.ts`
+- Modify: `src/core/resolver/npm-resolver.test.ts`
 
 - [ ] **Step 1: factory 사용과 동시 요청 격리의 실패 테스트를 작성한다.**
 
@@ -141,7 +144,7 @@ git commit -m "feat: 요청 단위 의존성 세션 추가"
 
 - [ ] **Step 2: 테스트가 기존 singleton 흐름 때문에 실패하는지 확인한다.**
 
-Run: `npx vitest run src/core/shared/dependency-resolver.test.ts src/core/resolver/pip-resolver.test.ts src/core/resolver/maven-resolver.test.ts`
+Run: `npx vitest run src/core/shared/dependency-resolver.test.ts src/core/resolver/pip-resolver.test.ts src/core/resolver/maven-resolver.test.ts src/core/resolver/npm-resolver.test.ts`
 
 Expected: FAIL — 요청 factory export가 없거나 `getPipResolver()` singleton이 호출된다.
 
@@ -165,14 +168,14 @@ Pip/Maven에는 `getCacheOptions()`를 추가해 `{ ...this.cacheOptions }` 복�
 
 - [ ] **Step 4: factory·동시 요청 테스트를 통과시킨다.**
 
-Run: `npx vitest run src/core/shared/dependency-resolver.test.ts src/core/resolver/pip-resolver.test.ts src/core/resolver/maven-resolver.test.ts`
+Run: `npx vitest run src/core/shared/dependency-resolver.test.ts src/core/resolver/pip-resolver.test.ts src/core/resolver/maven-resolver.test.ts src/core/resolver/npm-resolver.test.ts`
 
 Expected: PASS — 타입당 요청 factory 1회, 요청 간 상태 분리, cache option snapshot을 확인한다.
 
 - [ ] **Step 5: 두 번째 단위를 커밋한다.**
 
 ```bash
-git add src/core/shared/dependency-resolver.ts src/core/shared/dependency-resolver.test.ts src/core/resolver/pip-resolver.ts src/core/resolver/pip-resolver.test.ts src/core/resolver/conda-resolver.ts src/core/resolver/maven-resolver.ts src/core/resolver/maven-resolver.test.ts src/core/resolver/npm-resolver.ts
+git add src/core/shared/dependency-resolver.ts src/core/shared/dependency-resolver.test.ts src/core/shared/internal/resolution-session-registry.ts src/core/shared/internal/resolution-session-registry.test.ts src/core/resolver/pip-resolver.ts src/core/resolver/pip-resolver.test.ts src/core/resolver/conda-resolver.ts src/core/resolver/maven-resolver.ts src/core/resolver/maven-resolver.test.ts src/core/resolver/npm-resolver.ts src/core/resolver/npm-resolver.test.ts
 git commit -m "feat: 의존성 요청별 resolver 상태 격리"
 ```
 
