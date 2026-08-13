@@ -36,7 +36,10 @@ import {
   normalizeExtraName,
 } from '../shared/pep508-marker';
 import type { ResolutionSession } from '../shared/internal/resolution-session';
-import { attachResolutionSession } from '../shared/internal/resolution-session-registry';
+import {
+  attachResolutionSession,
+  getAttachedResolutionSession,
+} from '../shared/internal/resolution-session-registry';
 
 // 의존성 파싱 결과
 interface ParsedDependency {
@@ -145,6 +148,10 @@ function isPipVersionCompatible(
         comparePep440Versions(version, lessThanMatch[1]) < 0,
     );
   });
+}
+
+function normalizePep503PackageName(name: string): string {
+  return name.trim().toLowerCase().replace(/[-_.]+/g, '-');
 }
 
 function getSimpleApiChecksum(
@@ -541,6 +548,27 @@ export class PipResolver implements IResolver {
     indexUrl?: string,
     allowUnverifiedSourceArtifact = false,
   ): Promise<FetchedPackageInfo | null> {
+    return this.sessionGet(
+      'package-info',
+      name,
+      version,
+      indexUrl,
+      allowUnverifiedSourceArtifact,
+      () => this.fetchPackageInfoUncached(
+        name,
+        version,
+        indexUrl,
+        allowUnverifiedSourceArtifact,
+      ),
+    );
+  }
+
+  private async fetchPackageInfoUncached(
+    name: string,
+    version: string,
+    indexUrl?: string,
+    allowUnverifiedSourceArtifact = false,
+  ): Promise<FetchedPackageInfo | null> {
     logger.debug('📦 패키지 정보 조회', {
       name,
       version,
@@ -868,6 +896,22 @@ export class PipResolver implements IResolver {
   private async getLatestVersion(
     name: string,
     versionSpec?: string,
+    indexUrl?: string,
+  ): Promise<string | null> {
+    return this.sessionGet(
+      'latest-version',
+      name,
+      versionSpec,
+      indexUrl,
+      false,
+      () => this.getLatestVersionUncached(name, versionSpec, indexUrl),
+      (version) => Boolean(version),
+    );
+  }
+
+  private async getLatestVersionUncached(
+    name: string,
+    versionSpec?: string,
     indexUrl?: string
   ): Promise<string | null> {
     try {
@@ -1021,6 +1065,62 @@ export class PipResolver implements IResolver {
       });
       throw error;
     }
+  }
+
+  private sessionGet<T>(
+    operation: 'latest-version' | 'package-info',
+    name: string,
+    versionSpec: string | undefined,
+    indexUrl: string | undefined,
+    allowUnverifiedSourceArtifact: boolean,
+    producer: () => Promise<T>,
+    isCacheable?: (value: T) => boolean,
+  ): Promise<T> {
+    const session = getAttachedResolutionSession(this);
+    if (!session) {
+      return producer();
+    }
+
+    return session.getOrCreate(
+      'pip',
+      operation,
+      this.getSessionContext(
+        name,
+        versionSpec,
+        indexUrl,
+        allowUnverifiedSourceArtifact,
+      ),
+      producer,
+      isCacheable ? { isCacheable } : undefined,
+    );
+  }
+
+  private getSessionContext(
+    name: string,
+    versionSpec: string | undefined,
+    indexUrl: string | undefined,
+    allowUnverifiedSourceArtifact: boolean,
+  ) {
+    const target = this.pipTargetPlatform;
+
+    return {
+      name: normalizePep503PackageName(name),
+      versionSpec: versionSpec ?? null,
+      indexUrl: indexUrl ?? null,
+      target: target
+        ? {
+            os: target.os,
+            arch: target.arch,
+            pythonVersion: target.pythonVersion ?? null,
+            linuxDistro: target.linuxDistro ?? null,
+            glibcVersion: target.glibcVersion ?? null,
+            macosVersion: target.macosVersion ?? null,
+          }
+        : null,
+      pythonVersion: this.pythonVersion ?? null,
+      baseUrl: this.cacheOptions.baseUrl ?? this.baseUrl,
+      allowUnverifiedSourceArtifact,
+    };
   }
 
   /**

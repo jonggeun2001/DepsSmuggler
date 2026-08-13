@@ -24,9 +24,13 @@ vi.mock('./pip-simple-api', async (importOriginal) => {
   };
 });
 
-import { PipResolver } from './pip-resolver';
+import {
+  createRequestPipResolver,
+  PipResolver,
+} from './pip-resolver';
 import logger from '../../utils/logger';
 import { PipDownloader } from '../downloaders/pip';
+import { ResolutionSession } from '../shared/internal/resolution-session';
 
 async function expectSelectedArtifactIsDownloaded(
   packageInfo: Awaited<
@@ -2913,5 +2917,180 @@ describe('PipResolver에서 PipDownloader까지 선택 아티팩트 전달', () 
       filename: 'demo-1.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
       downloadUrl: 'https://files.example/demo-x86_64.whl',
     });
+  });
+});
+
+describe('PipResolver 요청 세션 조회 재사용', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const release = (name: string, version: string) => ({
+    filename: `${name}-${version}-py3-none-any.whl`,
+    url: `https://files.example/${name}-${version}.whl`,
+    packagetype: 'bdist_wheel',
+    python_version: 'py3',
+    digests: { sha256: `${name}-${version}-sha` },
+    size: 80,
+  });
+
+  it('요청 세션에서 PEP 503 별칭의 공통 전이 의존성 후보와 metadata를 한 번만 조회한다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockImplementation(
+      async (name: string, version?: string) => {
+        if (name === 'alpha' || name === 'beta') {
+          return {
+            data: {
+              info: {
+                name,
+                version,
+                requires_dist: [
+                  name === 'alpha' ? 'Shared_Pkg>=1.0.0' : 'shared.pkg>=1.0.0',
+                ],
+              },
+              urls: [release(name, version ?? '1.0.0')],
+            },
+          };
+        }
+
+        if (['shared_pkg', 'shared.pkg'].includes(name) && version === undefined) {
+          return {
+            data: {
+              info: { name: 'shared-pkg', version: '1.0.0' },
+              releases: { '1.0.0': [release('shared-pkg', '1.0.0')] },
+            },
+          };
+        }
+
+        if (['shared_pkg', 'shared.pkg'].includes(name) && version === '1.0.0') {
+          return {
+            data: {
+              info: {
+                name: 'shared-pkg',
+                version: '1.0.0',
+                requires_dist: [],
+              },
+              urls: [release('shared-pkg', '1.0.0')],
+            },
+          };
+        }
+
+        throw new Error(`unexpected package lookup: ${name}@${version}`);
+      },
+    );
+    const session = new ResolutionSession();
+
+    await createRequestPipResolver(session).resolveDependencies('alpha', '1.0.0');
+    await createRequestPipResolver(session).resolveDependencies('beta', '1.0.0');
+
+    const sharedLookups = pipCacheMock.fetchPackageMetadata.mock.calls.filter(
+      ([name]) => ['shared_pkg', 'shared.pkg'].includes(name),
+    );
+    expect(sharedLookups.filter(([, version]) => version === undefined)).toHaveLength(1);
+    expect(sharedLookups.filter(([, version]) => version === '1.0.0')).toHaveLength(1);
+  });
+
+  it('요청 세션에서 같은 artifact metadata의 동시 조회를 합친다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: { name: 'shared', version: '1.0.0', requires_dist: [] },
+        urls: [release('shared', '1.0.0')],
+      },
+    });
+    const session = new ResolutionSession();
+    const first = createRequestPipResolver(session);
+    const second = createRequestPipResolver(session);
+
+    await Promise.all([
+      (first as any).fetchPackageInfo('shared', '1.0.0'),
+      (second as any).fetchPackageInfo('shared', '1.0.0'),
+    ]);
+
+    expect(pipCacheMock.fetchPackageMetadata).toHaveBeenCalledTimes(1);
+  });
+
+  it('대상 Python 버전이 다르면 요청 세션에서 artifact metadata를 재사용하지 않는다', async () => {
+    pipCacheMock.fetchPackageMetadata.mockResolvedValue({
+      data: {
+        info: { name: 'shared', version: '1.0.0', requires_dist: [] },
+        urls: [release('shared', '1.0.0')],
+      },
+    });
+    const session = new ResolutionSession();
+
+    await createRequestPipResolver(session).resolveDependencies('shared', '1.0.0', {
+      targetPlatform: { system: 'Linux', machine: 'x86_64' },
+      pythonVersion: '3.12',
+    });
+    await createRequestPipResolver(session).resolveDependencies('shared', '1.0.0', {
+      targetPlatform: { system: 'Linux', machine: 'aarch64' },
+      pythonVersion: '3.13',
+    });
+
+    expect(pipCacheMock.fetchPackageMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it('index URL과 source artifact 검증 모드가 다르면 조회를 재사용하지 않는다', async () => {
+    simpleApiMock.fetchPackageFiles.mockResolvedValue([
+      {
+        filename: 'shared-1.0.0-py3-none-any.whl',
+        url: 'https://index.example/shared-1.0.0.whl',
+      },
+    ]);
+    simpleApiMock.fetchWheelMetadata.mockResolvedValue({
+      status: 'available',
+      requiresDist: [],
+    });
+    const session = new ResolutionSession();
+    const first = createRequestPipResolver(session);
+    const second = createRequestPipResolver(session);
+    const third = createRequestPipResolver(session);
+
+    await (first as any).fetchPackageInfo(
+      'shared',
+      '1.0.0',
+      'https://first.example/simple',
+      false,
+    );
+    await (second as any).fetchPackageInfo(
+      'shared',
+      '1.0.0',
+      'https://second.example/simple',
+      false,
+    );
+    await (third as any).fetchPackageInfo(
+      'shared',
+      '1.0.0',
+      'https://second.example/simple',
+      true,
+    );
+
+    expect(simpleApiMock.fetchPackageFiles).toHaveBeenCalledTimes(3);
+  });
+
+  it('실패한 후보 조회는 세션에 남기지 않아 다음 resolver가 재시도한다', async () => {
+    pipCacheMock.fetchPackageMetadata
+      .mockRejectedValueOnce(new Error('temporary registry failure'))
+      .mockResolvedValueOnce({
+        data: {
+          info: { name: 'retry-pkg', version: '1.0.0' },
+          releases: { '1.0.0': [release('retry-pkg', '1.0.0')] },
+        },
+      });
+    const session = new ResolutionSession();
+
+    await expect(
+      (createRequestPipResolver(session) as any).getLatestVersion(
+        'retry-pkg',
+        undefined,
+      ),
+    ).rejects.toThrow('temporary registry failure');
+
+    await expect(
+      (createRequestPipResolver(session) as any).getLatestVersion(
+        'retry_pkg',
+        undefined,
+      ),
+    ).resolves.toBe('1.0.0');
+    expect(pipCacheMock.fetchPackageMetadata).toHaveBeenCalledTimes(2);
   });
 });
