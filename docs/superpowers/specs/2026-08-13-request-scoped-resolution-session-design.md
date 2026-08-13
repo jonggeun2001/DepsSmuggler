@@ -65,6 +65,10 @@ memoizer를 제공한다. 예를 들어 pip의 `latest-version`과 `package-info
   실패를 받지만, 이후 직접 루트는 다시 조회한다. 따라서 일시적 네트워크 실패가
   뒤의 루트 성공 기회를 없애지 않는다. 각 resolver의 기존 오류 감싸기와
   `failedPackages` 기록도 그대로 유지한다.
+- producer가 `null`, 빈 문자열, 또는 해당 operation의 유효성 조건을 만족하지
+  않는 후보를 반환해도 항목을 저장하지 않는다. 후보 없음과 일시적 빈 응답은
+  기존처럼 다음 직접 루트에서 다시 확인한다. resolver는 실제로 유효한 후보와
+  metadata snapshot만 성공 값으로 memoize한다.
 - 세션에는 canonical snapshot만 저장하고, memoizer는 consumer마다 clone-on-read
   값을 반환한다. resolver는 매 호출마다 새 `DependencyNode`와 부모-자식 관계를
   구성하므로 한 트리의 변경이 다른 트리에 새지 않는다.
@@ -151,8 +155,9 @@ resolver의 공개 사용 경로와 기존 테스트를 유지한다.
 
 ## 검증 계획
 
-1. `ResolutionSession` 단위 테스트로 success, in-flight 공유, reject 후 재시도,
-   clone-on-read, resolver type·operation kind·문맥이 다른 키 분리를 검증한다.
+1. `ResolutionSession` 단위 테스트로 success, in-flight 공유, reject·null·빈 값
+   뒤 재시도, clone-on-read, resolver type·operation kind·문맥이 다른 키 분리를
+   검증한다.
 2. pip·conda·Maven·npm resolver 테스트에서 두 직접 루트가 공통 전이
    의존성을 가질 때 `getLatestVersion`을 포함한 공통 metadata/candidate producer가
    한 번만 호출되는지 검증한다.
