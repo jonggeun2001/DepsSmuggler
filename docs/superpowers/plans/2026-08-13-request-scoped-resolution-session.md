@@ -140,7 +140,7 @@ git commit -m "feat: 요청 단위 의존성 세션 추가"
 
 - [ ] **Step 1: factory 사용과 동시 요청 격리의 실패 테스트를 작성한다.**
 
-기존 `dependency-resolver.test.ts` module mock에 `createRequestPipResolver`, `createRequestCondaResolver`, `createRequestMavenResolver`, `createRequestNpmResolver`를 추가한다. pip root 두 개의 같은 요청은 `createRequestPipResolver` 1회와 해당 resolver의 `resolveDependencies` 2회를 기대한다. linux/arm64와 windows/x86_64의 `resolveAllDependencies()`를 동시에 실행해 서로 다른 factory 반환값과 resolver options가 섞이지 않는지 검증한다. Pip/Maven resolver 단위 테스트에는 singleton의 `setCacheOptions()` 이후 factory 결과가 같은 값을 복사하고 factory resolver 변경이 singleton에 역전파되지 않는 검증을 추가한다. Npm resolver test에는 factory가 private `NpmVersionResolver`까지 같은 session을 연결해 두 별도 root resolver의 packument producer가 공유되는 검증을 추가한다.
+기존 `dependency-resolver.test.ts` module mock에 `createRequestPipResolver`, `createRequestCondaResolver`, `createRequestMavenResolver`, `createRequestNpmResolver`를 추가한다. pip root 두 개의 같은 요청은 `createRequestPipResolver` 1회와 해당 resolver의 `resolveDependencies` 2회를 기대한다. linux/arm64와 windows/x86_64의 `resolveAllDependencies()`를 동시에 실행해 서로 다른 factory 반환값과 resolver options가 섞이지 않는지 검증한다. Pip/Maven resolver 단위 테스트에는 singleton의 `setCacheOptions()` 이후 factory 결과가 같은 값을 복사하고 factory resolver 변경이 singleton에 역전파되지 않는 검증을 추가한다. Npm resolver test에는 factory가 private `NpmVersionResolver`에 session을 연결하고, session 없는 legacy resolver에는 registry 연결이 없는지만 검증한다. packument producer 공유 검증은 Task 6에서 session-aware 조회와 함께 추가한다.
 
 - [ ] **Step 2: 테스트가 기존 singleton 흐름 때문에 실패하는지 확인한다.**
 
@@ -307,7 +307,7 @@ git commit -m "feat: Maven POM 조회를 요청 세션에서 재사용"
 
 - [ ] **Step 1: npm 공통 dependency의 실패 테스트를 작성한다.**
 
-내부 factory로 연결한 별도 `NpmResolver` 두 개가 같은 transitive `shared@^1`을 처리할 때 `fetchPackument`와 비동기 version candidate producer가 각각 한 번 실행되는지 검증한다. registry URL 또는 name/spec이 다르면 재사용하지 않는 테스트, `Shared`/`shared`가 npm canonical lowercase name 하나로 재사용되는 테스트, 없는 version(`null`) 뒤 두 번째 resolver가 재시도하는 테스트를 추가한다. OS/architecture는 session key에 새로 추가하지 않고 기존 `NpmResolver`의 package `os`/`cpu` 필터가 root별로 유지되는지도 검증한다.
+내부 factory로 연결한 별도 `NpmResolver` 두 개가 같은 transitive `shared@^1`을 처리할 때 `fetchPackument`와 비동기 version candidate producer가 각각 한 번 실행되는지 검증한다. 이 검증으로 factory가 private `NpmVersionResolver`에 연결한 session을 실제 조회가 읽는지도 함께 확인한다. registry URL 또는 name/spec이 다르면 재사용하지 않는 테스트, `Shared`/`shared`가 npm canonical lowercase name 하나로 재사용되는 테스트, 없는 version(`null`) 뒤 두 번째 resolver가 재시도하는 테스트를 추가한다. OS/architecture는 session key에 새로 추가하지 않고 기존 `NpmResolver`의 package `os`/`cpu` 필터가 root별로 유지되는지도 검증한다.
 
 - [ ] **Step 2: 테스트가 packument와 version resolution을 반복하며 실패하는지 확인한다.**
 
