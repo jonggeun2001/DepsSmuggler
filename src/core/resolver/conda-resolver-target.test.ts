@@ -1,6 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CondaRepoDataProcessor } from './conda-repodata-processor';
-import { CondaResolver } from './conda-resolver';
+import {
+  createRequestCondaResolver,
+  getCondaResolver,
+  CondaResolver,
+} from './conda-resolver';
+import { ResolutionSession } from '../shared/internal/resolution-session';
+import { getAttachedResolutionSession } from '../shared/internal/resolution-session-registry';
+
+describe('CondaResolver 요청 session 연결', () => {
+  it('request resolver에만 supplied session을 연결하고 legacy singleton은 연결하지 않는다', () => {
+    const session = new ResolutionSession();
+    const legacyResolver = getCondaResolver();
+    const requestResolver = createRequestCondaResolver(session);
+
+    expect(getAttachedResolutionSession(requestResolver)).toBe(session);
+    expect(getAttachedResolutionSession(legacyResolver)).toBeUndefined();
+  });
+});
 
 describe('CondaRepoDataProcessor Python 호환성', () => {
   it('pyhd noarch 빌드의 Python 의존성 범위를 평가한다', () => {

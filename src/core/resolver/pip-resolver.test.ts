@@ -563,6 +563,7 @@ describe('PipResolver 단위 테스트', () => {
       });
       expect(requestResolver.getCacheOptions()).not.toBe(singleton.getCacheOptions());
       expect(getAttachedResolutionSession(requestResolver)).toBe(session);
+      expect(getAttachedResolutionSession(singleton)).toBeUndefined();
 
       requestResolver.setCacheOptions({ memoryTtl: 60 });
       expect(singleton.getCacheOptions()).toEqual({
