@@ -14,8 +14,8 @@
 
 | 파일 | 책임 |
 | --- | --- |
-| `src/core/shared/resolution-session.ts` | 요청 수명 memoizer, namespace key, clone-on-read, hit/miss 통계 |
-| `src/core/shared/resolution-session.test.ts` | 세션의 동시성·실패·키·불변성 계약 |
+| `src/core/shared/internal/resolution-session.ts` | 내부 요청 수명 memoizer, namespace key, clone-on-read, hit/miss 통계 |
+| `src/core/shared/internal/resolution-session.test.ts` | 내부 세션의 동시성·실패·키·불변성 계약 |
 | `src/core/resolver/{pip,conda,maven,npm}-resolver.ts` | 요청 전용 factory 및 resolver별 session 적용 |
 | `src/core/shared/npm-version-resolver.ts` | npm packument/후보 선택 session 적용 |
 | `src/core/shared/dependency-resolver.ts` | 세션·요청 전용 resolver 묶음 생성과 통계 로그 |
@@ -26,13 +26,12 @@
 
 **Files:**
 
-- Create: `src/core/shared/resolution-session.ts`
-- Create: `src/core/shared/resolution-session.test.ts`
-- Modify: `src/core/shared/index.ts`
+- Create: `src/core/shared/internal/resolution-session.ts`
+- Create: `src/core/shared/internal/resolution-session.test.ts`
 
 - [ ] **Step 1: 실패하는 세션 단위 테스트를 작성한다.**
 
-`resolution-session.test.ts`에 다음을 각각 독립 테스트로 추가한다.
+`internal/resolution-session.test.ts`에 다음을 각각 독립 테스트로 추가한다.
 
 ```ts
 it('동일 resolver·operation·문맥의 in-flight producer를 한 번만 실행한다', async () => {
@@ -74,13 +73,13 @@ it('reject·null·빈 후보는 저장하지 않고 다음 조회에서 재시�
 
 - [ ] **Step 2: 테스트가 기능 부재로 실패하는지 확인한다.**
 
-Run: `npx vitest run src/core/shared/resolution-session.test.ts`
+Run: `npx vitest run src/core/shared/internal/resolution-session.test.ts`
 
-Expected: FAIL — `resolution-session` 모듈 또는 `ResolutionSession` export를 찾지 못한다.
+Expected: FAIL — 내부 `resolution-session` 모듈을 찾지 못한다.
 
 - [ ] **Step 3: 최소 세션 구현을 작성한다.**
 
-`resolution-session.ts`에 다음 공개 API를 만든다.
+`internal/resolution-session.ts`에 내부 API를 만든다. `src/core/shared/index.ts` 또는 `src/core/index.ts`에는 export하지 않는다.
 
 ```ts
 export type ResolutionOperation = 'latest-version' | 'package-info' | 'packument' | 'pom';
@@ -99,18 +98,18 @@ export class ResolutionSession {
 
 `stableSerialize()`는 object key를 재귀 정렬하고 `undefined`를 일관되게 표현한다. map에는 canonical producer Promise만 저장한다. 새 항목은 `Promise.resolve().then(producer)`로 등록한다. reject 또는 `isCacheable(value) === false`일 때는 **map에 같은 Promise가 남아 있을 때만** 제거한다. 반환은 항상 `canonical.then((value) => structuredClone(value))`여야 한다. 기본 cacheable 규칙은 `value !== null && value !== undefined`; 후보 선택 caller는 `Boolean(value)` predicate를 전달해 빈 문자열도 제거한다. 복제 불가능한 값을 공유하지 말고 오류를 전파한다.
 
-`shared/index.ts`에서 세션 type과 클래스를 export한다.
+세션은 `resolveAllDependencies()`와 resolver module 내부 factory만 import한다. `ResolverOptions`에 session 필드를 추가하거나 public resolver constructor에 session 인자를 추가하지 않는다. 외부 호출 경로는 요청 session을 전달·보존할 수 없다.
 
 - [ ] **Step 4: 세션 단위 테스트가 통과하는지 확인한다.**
 
-Run: `npx vitest run src/core/shared/resolution-session.test.ts`
+Run: `npx vitest run src/core/shared/internal/resolution-session.test.ts`
 
 Expected: PASS — producer 1회, snapshot 격리, namespace 분리, reject/null/empty 재시도가 확인된다.
 
 - [ ] **Step 5: 첫 단위를 커밋한다.**
 
 ```bash
-git add src/core/shared/resolution-session.ts src/core/shared/resolution-session.test.ts src/core/shared/index.ts
+git add src/core/shared/internal/resolution-session.ts src/core/shared/internal/resolution-session.test.ts
 git commit -m "feat: 요청 단위 의존성 세션 추가"
 ```
 
@@ -137,17 +136,19 @@ Expected: FAIL — 요청 factory export가 없거나 `getPipResolver()` singlet
 
 - [ ] **Step 3: 요청 전용 factory를 최소 구현한다.**
 
-각 library resolver module에 `createRequest*Resolver(session: ResolutionSession)` export를 추가한다. Factory는 매번 새 instance를 만들고 constructor로 session을 주입한다.
+각 library resolver module에는 `/** @internal */`로 표시하고 public barrel에서는 re-export하지 않는 `createRequest*Resolver(session)` helper를 추가한다. Factory는 매번 새 instance를 만든다. session은 public constructor/`ResolverOptions`가 아니라 module-private `WeakMap<Resolver, ResolutionSession>`에 factory가 연결하고 resolver의 private accessor만 읽는다.
 
 ```ts
+/** @internal dependency-resolver 전용 factory */
 export function createRequestPipResolver(session: ResolutionSession): PipResolver {
-  const resolver = new PipResolver(session);
+  const resolver = new PipResolver();
+  requestSessions.set(resolver, session);
   resolver.setCacheOptions(getPipResolver().getCacheOptions());
   return resolver;
 }
 ```
 
-Pip/Maven에는 `getCacheOptions()`를 추가해 `{ ...this.cacheOptions }` 복사본을 반환한다. Conda/Npm도 매번 새 resolver를 반환한다. 기존 singleton accessor와 session 없는 constructor의 동작은 유지한다.
+Pip/Maven에는 `getCacheOptions()`를 추가해 `{ ...this.cacheOptions }` 복사본을 반환한다. Conda/Npm도 매번 새 resolver를 반환한다. Factory와 `ResolutionSession`은 `src/core/index.ts`와 public shared barrel에 export하지 않으며, `dependency-resolver.ts`만 이 internal module path를 사용한다. 기존 singleton accessor와 public constructor는 session 없는 동작을 유지한다.
 
 `dependency-resolver.ts`에서는 함수 시작 시 session과 library resolver 묶음을 한 번 생성한다. `getResolverByType`은 OS/Docker 특수 경로를 건드리지 않고 pip/conda/Maven/npm만 묶음에서 반환한다. 종료 시 hit이 1 이상일 때만 hit/miss/join 통계를 `logger.info`로 남긴다. `includeDependencies: false` 조기 반환은 세션/factory를 만들지 않는다.
 
@@ -173,7 +174,7 @@ git commit -m "feat: 의존성 요청별 resolver 상태 격리"
 
 - [ ] **Step 1: 공통 전이 pip 의존성 재사용의 실패 테스트를 작성한다.**
 
-두 직접 root `alpha`와 `beta`가 `shared>=1`을 요구하도록 PyPI JSON mock을 구성한다. 하나의 `ResolutionSession`을 주입한 별도 `PipResolver` 두 개를 순차 실행하고 `shared`의 release lookup과 exact artifact metadata lookup이 각각 1회인지 검증한다. Simple API와 JSON 경로를 모두 포함한다. 다른 `indexUrl`, Python 버전 또는 `skipDependencyExpansion`의 source-artifact 검증 모드에서는 shared 조회가 재사용되지 않는 테스트도 작성한다. 첫 호출의 null/empty 후보 또는 reject 뒤 두 번째 root가 producer를 다시 호출하는 테스트를 추가한다.
+두 직접 root `alpha`와 `beta`가 `shared>=1`을 요구하도록 PyPI JSON mock을 구성한다. 하나의 내부 `ResolutionSession`을 factory로 연결한 별도 resolver 두 개를 순차 실행하고 `shared`의 release lookup과 exact artifact metadata lookup이 각각 1회인지 검증한다. Simple API와 JSON 경로를 모두 포함한다. 다른 `indexUrl`, Python 버전 또는 `skipDependencyExpansion`의 source-artifact 검증 모드에서는 shared 조회가 재사용되지 않는 테스트도 작성한다. `Shared_Pkg`, `shared-pkg`, `shared.pkg`가 PEP 503 canonical name 하나로 재사용되는 테스트와 첫 호출의 null/empty 후보 또는 reject 뒤 두 번째 root가 producer를 다시 호출하는 테스트를 추가한다.
 
 - [ ] **Step 2: 테스트가 중복 조회를 보여 주며 실패하는지 확인한다.**
 
@@ -187,7 +188,7 @@ Expected: FAIL — shared의 latest-version/package-info producer가 두 번 실
 
 ```ts
 {
-  name: normalize(name), versionSpec: versionSpec ?? null, indexUrl: indexUrl ?? null,
+  name: pep503Normalize(name), versionSpec: versionSpec ?? null, indexUrl: indexUrl ?? null,
   target: this.pipTargetPlatform, pythonVersion: this.pythonVersion,
   baseUrl: this.cacheOptions.baseUrl ?? null,
   allowUnverifiedSourceArtifact,
@@ -219,7 +220,7 @@ git commit -m "feat: pip 의존성 조회를 요청 세션에서 재사용"
 
 - [ ] **Step 1: conda 공통 전이 의존성의 실패 테스트를 작성한다.**
 
-두 root가 같은 `shared` Conda dependency를 갖는 fixture를 만들고, 두 요청 전용 `CondaResolver(session)` 실행에서 `getLatestVersionFromRepoData`와 candidate selection이 한 번만 수행되는지 spy한다. channel, targetSubdir, Python, CUDA, build가 달라지면 재사용하지 않는 테스트와 null 후보 뒤 두 번째 resolver가 repodata candidate producer를 다시 실행하는 테스트를 추가한다.
+두 root가 같은 `shared` Conda dependency를 갖는 fixture를 만들고, 내부 factory로 연결한 두 요청 전용 resolver 실행에서 `getLatestVersionFromRepoData`와 candidate selection이 한 번만 수행되는지 spy한다. channel, targetSubdir, Python, CUDA, build가 달라지면 재사용하지 않는 테스트와 `Shared`/`shared`가 하나의 canonical key를 쓰는 테스트, null 후보 뒤 두 번째 resolver가 repodata candidate producer를 다시 실행하는 테스트를 추가한다.
 
 - [ ] **Step 2: 테스트가 중복 candidate selection으로 실패하는지 확인한다.**
 
@@ -229,7 +230,7 @@ Expected: FAIL — 같은 channel/subdir 후보 탐색이 root마다 반복된�
 
 - [ ] **Step 3: resolver helper를 통해 conda 세션 적용 지점을 단일화한다.**
 
-`CondaResolver`에 `getLatestVersionFromRepoDataWithSession()`와 `fetchPackageInfoBFSWithSession()` helper를 만든다. 전자는 processor의 `getLatestVersionFromRepoData()` 호출을 `'conda'/'latest-version'`으로, 후자는 현재 `fetchPackageInfoBFS()` body를 `'conda'/'package-info'`으로 감싼다. 두 key는 `{ name, versionSpec/version, buildSpec, channel, targetSubdir, targetArchitecture, pythonVersion, cudaVersion }`을 포함한다. null/latest 후보와 대상 artifact 오류는 cache하지 않는다. processor의 disk/memory repodata cache와 Conda BFS parent-child map은 변경하지 않는다.
+`CondaResolver`에 `getLatestVersionFromRepoDataWithSession()`와 `fetchPackageInfoBFSWithSession()` helper를 만든다. 전자는 processor의 `getLatestVersionFromRepoData()` 호출을 `'conda'/'latest-version'`으로, 후자는 현재 `fetchPackageInfoBFS()` body를 `'conda'/'package-info'`으로 감싼다. 두 key는 `{ name: name.toLowerCase(), versionSpec/version, buildSpec, channel, targetSubdir, targetArchitecture, pythonVersion, cudaVersion }`을 포함한다. null/latest 후보와 대상 artifact 오류는 cache하지 않는다. processor의 disk/memory repodata cache와 Conda BFS parent-child map은 변경하지 않는다.
 
 - [ ] **Step 4: conda 회귀 테스트를 통과시킨다.**
 
@@ -254,7 +255,7 @@ git commit -m "feat: conda 후보 탐색을 요청 세션에서 재사용"
 
 - [ ] **Step 1: Maven POM sharing·prefetch의 실패 테스트를 작성한다.**
 
-`MavenResolver(session)` 두 개가 같은 GAV POM을 읽을 때 raw POM producer가 한 번만 호출되는 테스트를 만든다. 한 resolver의 `fetchPomWithCache` 결과를 mutate한 뒤 다른 resolver 결과는 원본인 clone-on-read 테스트를 추가한다. prefetch 직후 동일 coordinate 단건 fetch가 같은 in-flight producer를 사용하는 테스트와, prefetch 실패가 실제 resolve의 오류 정책을 바꾸지 않는 테스트를 추가한다. 같은 GAV라도 classifier가 다른 root는 raw POM 한 번을 공유하면서 각 root artifact selection은 독립적인 assertion을 넣는다.
+내부 factory로 연결한 Maven resolver 두 개가 같은 GAV POM을 읽을 때 raw POM producer가 한 번만 호출되는 테스트를 만든다. `setCacheOptions({ repoUrl: 'https://repo-a.example/maven2' })`와 다른 `repoUrl`인 resolver는 raw POM을 공유하지 않는 테스트를 추가한다. 한 resolver의 `fetchPomWithCache` 결과를 mutate한 뒤 다른 resolver 결과는 원본인 clone-on-read 테스트를 추가한다. prefetch 직후 동일 coordinate 단건 fetch가 같은 in-flight producer를 사용하는 테스트와, prefetch 실패가 실제 resolve의 오류 정책을 바꾸지 않는 테스트를 추가한다. 같은 GAV라도 classifier가 다른 root는 raw POM 한 번을 공유하면서 각 root artifact selection은 독립적인 assertion을 넣는다.
 
 - [ ] **Step 2: 테스트가 POM producer 중복 호출로 실패하는지 확인한다.**
 
@@ -264,7 +265,7 @@ Expected: FAIL — session-aware POM producer가 없고 prefetch가 별도 cache
 
 - [ ] **Step 3: Maven 세션 producer를 단일화한다.**
 
-`fetchPomWithCache()`를 `'maven'/'pom'` session operation으로 감싼다. context는 `{ repoUrl, groupId, artifactId, version }`만 포함하고 classifier/type은 포함하지 않는다. `getLatestVersion()`은 `'maven'/'latest-version'`으로 분리해 빈 문자열을 cache하지 않는다.
+`fetchPomWithCache()`를 `'maven'/'pom'` session operation으로 감싼다. context에는 실제 `fetchPomFromCache()`가 쓰는 `effectiveRepoUrl = this.cacheOptions.repoUrl ?? this.repoUrl`와 `{ groupId, artifactId, version }`만 포함하고 classifier/type은 포함하지 않는다. `getLatestVersion()`은 `'maven'/'latest-version'`으로 분리해 빈 문자열을 cache하지 않는다. repository URL 격리와 동일 GAV/classifier 재사용을 각각 테스트로 고정한다.
 
 `prefetchPomsParallelInternal()`은 `prefetchPomsParallel()` 직접 호출 대신 같은 `fetchPomWithCache()`를 `parallelThreads` 제한으로 fire-and-forget 호출한다. 각 task 오류는 debug log로 소비해 best-effort prefetch 의미를 유지하고, 이후 실제 fetch의 오류는 기존 호출자가 처리한다. POM/BOM을 소비하는 scope/exclusion, dependency-management, classifier/type 선택 로직은 session 밖에 둔다.
 
@@ -292,7 +293,7 @@ git commit -m "feat: Maven POM 조회를 요청 세션에서 재사용"
 
 - [ ] **Step 1: npm 공통 dependency의 실패 테스트를 작성한다.**
 
-공유 session을 받는 별도 `NpmResolver` 두 개가 같은 transitive `shared@^1`을 처리할 때 `fetchPackument`와 비동기 version candidate producer가 각각 한 번 실행되는지 검증한다. registry URL 또는 name/spec이 다르면 재사용하지 않는 테스트, 없는 version(`null`) 뒤 두 번째 resolver가 재시도하는 테스트를 추가한다. OS/architecture는 session key에 새로 추가하지 않고 기존 `NpmResolver`의 package `os`/`cpu` 필터가 root별로 유지되는지도 검증한다.
+내부 factory로 연결한 별도 `NpmResolver` 두 개가 같은 transitive `shared@^1`을 처리할 때 `fetchPackument`와 비동기 version candidate producer가 각각 한 번 실행되는지 검증한다. registry URL 또는 name/spec이 다르면 재사용하지 않는 테스트, `Shared`/`shared`가 npm canonical lowercase name 하나로 재사용되는 테스트, 없는 version(`null`) 뒤 두 번째 resolver가 재시도하는 테스트를 추가한다. OS/architecture는 session key에 새로 추가하지 않고 기존 `NpmResolver`의 package `os`/`cpu` 필터가 root별로 유지되는지도 검증한다.
 
 - [ ] **Step 2: 테스트가 packument와 version resolution을 반복하며 실패하는지 확인한다.**
 
@@ -302,7 +303,7 @@ Expected: FAIL — `fetchPackument`과 선택 함수가 두 resolver에서 각�
 
 - [ ] **Step 3: NpmVersionResolver에 session-aware async accessor를 추가한다.**
 
-기존 synchronous `resolveVersion()` public API는 유지한다. `fetchPackument()`은 `'npm'/'packument'` session operation으로 감싸고 context에 `{ registryUrl, name }`을 넣는다. 새 `resolveVersionForRequest(spec, packument)`은 `'npm'/'latest-version'` operation으로 `{ registryUrl, name: packument.name, spec }`을 key로 사용하며 `Boolean(version)` predicate를 전달한다. `NpmResolver.resolveDependencies()`와 `processDepItem()`만 새 async accessor를 await한다. `NpmVersionResolver` constructor에는 optional session을 추가하고 Npm request factory는 이를 주입한다. `NpmTreeManager`, peer/optional 처리, hoisting 및 현재 target OS/architecture mapping은 변경하지 않는다.
+기존 synchronous `resolveVersion()` public API는 유지한다. `fetchPackument()`은 `'npm'/'packument'` session operation으로 감싸고 context에 `{ registryUrl, name: name.toLowerCase() }`을 넣는다. 새 `resolveVersionForRequest(spec, packument)`은 `'npm'/'latest-version'` operation으로 `{ registryUrl, name: packument.name.toLowerCase(), spec }`을 key로 사용하며 `Boolean(version)` predicate를 전달한다. `NpmResolver.resolveDependencies()`와 `processDepItem()`만 새 async accessor를 await한다. `NpmVersionResolver`는 resolver module의 private session accessor만 사용하고 public constructor/공개 API에는 session을 추가하지 않는다. `NpmTreeManager`, peer/optional 처리, hoisting 및 현재 target OS/architecture mapping은 변경하지 않는다.
 
 - [ ] **Step 4: npm 회귀 테스트를 통과시킨다.**
 

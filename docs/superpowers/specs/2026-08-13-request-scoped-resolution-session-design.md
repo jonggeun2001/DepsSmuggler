@@ -50,7 +50,7 @@
 
 ### 공통 세션
 
-`src/core/shared/resolution-session.ts`에 요청 수명과 같은 `ResolutionSession`을
+`src/core/shared/internal/resolution-session.ts`에 요청 수명과 같은 `ResolutionSession`을
 둔다. 세션은 `resolver type + operation kind + 안정적으로 직렬화한 문맥`으로
 구성한 namespace key와 성공 값을 위한 canonical `Promise<T>`를 저장하는
 memoizer를 제공한다. 예를 들어 pip의 `latest-version`과 `package-info`는 같은
@@ -88,8 +88,10 @@ snapshot으로 복사해 요청 인스턴스에 설정한다. 이 snapshot gette
 반환하고, 새 instance의 옵션 변경은 singleton에 역전파하지 않는다. 따라서 기존
 TTL·cache 설정 동작과 요청 간 상태 격리를 함께 보존한다.
 
-세션은 이 요청 전용 인스턴스의 resolver 옵션으로만 전달하며, 외부 호출자가
-세션을 전달하거나 보존할 수 없게 하여 요청 경계를 강제한다.
+세션은 public `ResolverOptions`나 public resolver constructor로 전달하지 않는다. 내부
+request factory가 module-private 연결(예: `WeakMap`)으로 요청 전용 instance에만
+연결하며, `src/core/shared/index.ts`와 `src/core/index.ts`는 세션·factory를 export하지
+않는다. 따라서 외부 호출자가 세션을 전달하거나 보존할 수 없고 요청 경계가 강제된다.
 
 ### 키 격리
 
@@ -98,10 +100,10 @@ TTL·cache 설정 동작과 요청 간 상태 격리를 함께 보존한다.
 
 | 유형 | 세션 키 문맥 |
 | --- | --- |
-| pip | 정규화 이름, 요청 버전 조건, index URL, 대상 OS/아키텍처, Python 버전, source artifact 검증 모드 |
-| conda | 정규화 이름, 버전 조건·build, channel, subdir/아키텍처, Python·CUDA 버전 |
-| Maven | 원시 POM/BOM에는 group:artifact:version 좌표와 저장소 URL |
-| npm | 정규화 이름, 버전 조건, 현재 resolver가 실제로 받는 registry/host 환경 입력 |
+| pip | PEP 503 정규화 이름, 요청 버전 조건, index URL, 대상 OS/아키텍처, Python 버전, source artifact 검증 모드 |
+| conda | 소문자 정규화 이름, 버전 조건·build, channel, subdir/아키텍처, Python·CUDA 버전 |
+| Maven | 원시 POM/BOM에는 group:artifact:version 좌표와 실제 cache option 적용 후 저장소 URL |
+| npm | 소문자 정규화 이름, 버전 조건, 현재 resolver가 실제로 받는 registry/host 환경 입력 |
 
 extras, Maven scope/exclusion, npm peer/optional/dev 플래그처럼 **부모에서
 나오는 간선**을 바꾸는 값은 manifest 캐시 키가 아니라 각 resolver의 기존
@@ -120,7 +122,8 @@ extras, Maven scope/exclusion, npm peer/optional/dev 플래그처럼 **부모에
   감싼다. 단건 `fetchPomWithCache()`와 비동기 `prefetchPomsParallel()` 모두 같은
   `maven:pom` canonical producer로 등록한다. prefetch는 기존처럼 해결을 실패시키지
   않는 best-effort 동작을 유지하되, 이후 실제 fetch는 같은 in-flight/success
-  snapshot을 사용한다. classifier/type 기반 아티팩트 선택, scope, exclusion,
+  snapshot을 사용한다. POM key의 저장소 URL은 `cacheOptions.repoUrl`가 있으면 그 값을
+  우선 사용한다. classifier/type 기반 아티팩트 선택, scope, exclusion,
   dependency management 적용은 호출별 queue processor가 수행한다.
 - **npm**: registry manifest와 선택된 버전 조회를 세션으로 감싼다. hoisting과
   peer dependency 배치는 기존 root별 tree manager가 구성한다. 공통 resolver가
@@ -161,9 +164,10 @@ resolver의 공개 사용 경로와 기존 테스트를 유지한다.
 2. pip·conda·Maven·npm resolver 테스트에서 두 직접 루트가 공통 전이
    의존성을 가질 때 `getLatestVersion`을 포함한 공통 metadata/candidate producer가
    한 번만 호출되는지 검증한다.
-3. pip index/대상 환경, conda channel/subdir, Maven 좌표·classifier 경계가 다른
-   경우 재사용하지 않거나 원시 POM만 재사용하는 회귀 테스트를 추가한다. npm은
-   현재 전달되는 입력만 키에 반영하는 테스트를 추가한다.
+3. pip PEP 503, conda/npm 소문자 canonical name 재사용과 pip index/대상 환경,
+   conda channel/subdir, Maven 실제 저장소 URL·좌표·classifier 경계가 다른 경우
+   재사용하지 않거나 원시 POM만 재사용하는 회귀 테스트를 추가한다. npm은 현재
+   전달되는 입력만 키에 반영하는 테스트를 추가한다.
 4. 공통 의존성의 일시적 실패가 다음 직접 루트에서 재시도되고, 각 직접 루트의
    best-effort/`--strict` 정책 및 오류 문맥을 유지하는지 검증한다.
 5. Maven prefetch와 이후 단건 fetch가 동일 canonical POM producer를 공유하고,
