@@ -710,7 +710,24 @@ download-handlers.ts
 - 다운로드 시 추가 API 호출 불필요
 - 플랫폼/Python 버전 일치 보장
 
-## 8. 참고 자료
+## 8. 요청 단위 조회 재사용
+
+`resolveAllDependencies()`의 한 요청 안에서는 공통 Conda 전이 의존성의
+repodata 호환 후보 선택과 선택된 artifact 정보를 재사용합니다. 조회 키는
+소문자로 정규화한 이름, 최신 선택용 버전 조건 또는 정확 artifact 버전, build,
+channel, target subdir·아키텍처, Python 버전, CUDA 버전을 포함합니다. 따라서
+channel이나 대상 환경, build 조건이 다르면 결과를 공유하지 않습니다.
+
+동일 키의 in-flight 조회는 한 번만 실행하고 consumer마다 복제한 결과를
+반환합니다. 후보가 없거나 오류가 나면 결과를 남기지 않으므로 다음 직접 루트가
+기존 방식으로 다시 후보를 찾습니다. repodata의 메모리·디스크 cache와
+noarch/fallback 처리도 그대로 사용합니다.
+
+이 재사용은 후보와 artifact metadata에 한정됩니다. 각 직접 루트의 BFS 상태,
+부모-자식 관계, Python 호환성 판단과 최종 다운로드 목록은 계속 별도로
+구성되며, 다른 `resolveAllDependencies()` 요청에는 세션이 유지되지 않습니다.
+
+## 9. 참고 자료
 
 - [conda Deep Dive: Solvers](https://docs.conda.io/projects/conda/en/4.13.x/dev-guide/deep-dive-solvers.html)
 - [conda Package Specification](https://conda.io/projects/conda/en/latest/user-guide/concepts/pkg-specs.html)

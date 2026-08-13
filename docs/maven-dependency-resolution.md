@@ -908,3 +908,22 @@ if (!packaging) {
 ```
 
 **적용 시점**: `downloadPackage` 호출 시 `metadata.packaging`이 없는 경우
+
+## 13. 요청 단위 POM·버전 조회 재사용
+
+여러 Maven 직접 루트를 하나의 `resolveAllDependencies()` 요청으로 처리하면
+공통 전이 좌표의 원시 POM/BOM 조회·파싱과 최신 버전 metadata 조회를 재사용합니다.
+POM key는 실제 적용 저장소 URL(설정된 cache option의 저장소 URL이 있으면 그 값)과
+`groupId:artifactId:version`으로 구성됩니다. 버전 조회는 같은 실제 저장소 URL과
+`groupId:artifactId`를 사용합니다.
+
+병렬 POM prefetch와 이후의 일반 POM 조회도 같은 요청 세션의 producer를
+사용하므로 동시에 발생해도 중복 원격 요청을 만들지 않습니다. prefetch 오류는
+기존처럼 best-effort로 처리하고, 실패·빈 결과는 저장하지 않아 후속 실제 조회나
+다음 직접 루트가 재시도할 수 있습니다. 각 consumer에는 복제한 POM snapshot이
+전달됩니다.
+
+classifier/type 기반 artifact 선택, scope·exclusion, parent/BOM의
+dependencyManagement 적용과 각 루트의 dependency tree는 재사용하지 않습니다.
+따라서 metadata를 절약하면서도 기존 Maven 간선 및 최종 다운로드 선택 규칙을
+유지하며, 요청이 끝나면 세션도 폐기됩니다.

@@ -609,3 +609,20 @@ workspaces/arborist/
 
 - https://github.com/npm/cli
 - https://github.com/npm/arborist (npm/cli에 통합됨)
+
+## 14. 요청 단위 packument·버전 조회 재사용
+
+하나의 `resolveAllDependencies()` 요청에서 여러 npm 직접 루트가 같은 전이
+패키지를 요구하면 registry packument 조회와 그 packument에서 실제 버전을
+선택하는 작업을 재사용합니다. 키는 소문자로 정규화한 패키지명, 버전 조건,
+현재 resolver에 전달된 registry URL로 구성하므로 다른 registry의 응답은
+공유하지 않습니다. 이 변경은 기존 host 기반 동작에 새로운 target OS/아키텍처
+매핑을 추가하지 않습니다.
+
+동일 키의 in-flight 조회는 하나로 합치고 각 resolver는 복제한 snapshot을
+받습니다. 조회가 실패하거나 유효한 후보를 선택하지 못하면 저장하지 않아 다음
+직접 루트에서 재시도합니다. 세션은 요청 종료 시 폐기됩니다.
+
+packument와 버전 선택만 공유하며, dependency/optional/peer dependency 해석,
+peer 배치와 hoisting, 각 루트의 트리 및 최종 tarball 목록은 기존처럼 호출별로
+처리합니다.
