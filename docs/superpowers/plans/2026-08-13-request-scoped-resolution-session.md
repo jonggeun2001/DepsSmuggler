@@ -16,6 +16,8 @@
 | --- | --- |
 | `src/core/shared/internal/resolution-session.ts` | 내부 요청 수명 memoizer, namespace key, clone-on-read, hit/miss 통계 |
 | `src/core/shared/internal/resolution-session.test.ts` | 내부 세션의 동시성·실패·키·불변성 계약 |
+| `src/core/shared/internal/resolution-session-registry.ts` | resolver와 내부 resolver service를 요청 세션에 연결하는 private `WeakMap` |
+| `src/core/shared/internal/resolution-session-registry.test.ts` | owner별 session 연결·분리 계약 |
 | `src/core/resolver/{pip,conda,maven,npm}-resolver.ts` | 요청 전용 factory 및 resolver별 session 적용 |
 | `src/core/shared/npm-version-resolver.ts` | npm packument/후보 선택 session 적용 |
 | `src/core/shared/dependency-resolver.ts` | 세션·요청 전용 resolver 묶음 생성과 통계 로그 |
@@ -28,6 +30,8 @@
 
 - Create: `src/core/shared/internal/resolution-session.ts`
 - Create: `src/core/shared/internal/resolution-session.test.ts`
+- Create: `src/core/shared/internal/resolution-session-registry.ts`
+- Create: `src/core/shared/internal/resolution-session-registry.test.ts`
 
 - [ ] **Step 1: 실패하는 세션 단위 테스트를 작성한다.**
 
@@ -71,6 +75,13 @@ it('reject·null·빈 후보는 저장하지 않고 다음 조회에서 재시�
 
 `getStats()`가 miss/hit/in-flight join을 올바르게 집계하는 테스트도 추가한다.
 
+registry test에는 plain object owner A/B에 각각 다른 session을 연결했을 때 `getAttachedResolutionSession(owner)`가 해당 session만 반환하고, 연결하지 않은 owner는 `undefined`를 반환하는 검증을 추가한다. registry의 내부 API는 아래와 같다.
+
+```ts
+export function attachResolutionSession(owner: object, session: ResolutionSession): void;
+export function getAttachedResolutionSession(owner: object): ResolutionSession | undefined;
+```
+
 - [ ] **Step 2: 테스트가 기능 부재로 실패하는지 확인한다.**
 
 Run: `npx vitest run src/core/shared/internal/resolution-session.test.ts`
@@ -79,7 +90,7 @@ Expected: FAIL — 내부 `resolution-session` 모듈을 찾지 못한다.
 
 - [ ] **Step 3: 최소 세션 구현을 작성한다.**
 
-`internal/resolution-session.ts`에 내부 API를 만든다. `src/core/shared/index.ts` 또는 `src/core/index.ts`에는 export하지 않는다.
+`internal/resolution-session.ts`와 `internal/resolution-session-registry.ts`에 내부 API를 만든다. `src/core/shared/index.ts` 또는 `src/core/index.ts`에는 export하지 않는다.
 
 ```ts
 export type ResolutionOperation = 'latest-version' | 'package-info' | 'packument' | 'pom';
@@ -109,7 +120,7 @@ Expected: PASS — producer 1회, snapshot 격리, namespace 분리, reject/null
 - [ ] **Step 5: 첫 단위를 커밋한다.**
 
 ```bash
-git add src/core/shared/internal/resolution-session.ts src/core/shared/internal/resolution-session.test.ts
+git add src/core/shared/internal/resolution-session.ts src/core/shared/internal/resolution-session.test.ts src/core/shared/internal/resolution-session-registry.ts src/core/shared/internal/resolution-session-registry.test.ts
 git commit -m "feat: 요청 단위 의존성 세션 추가"
 ```
 
@@ -126,7 +137,7 @@ git commit -m "feat: 요청 단위 의존성 세션 추가"
 
 - [ ] **Step 1: factory 사용과 동시 요청 격리의 실패 테스트를 작성한다.**
 
-기존 `dependency-resolver.test.ts` module mock에 `createRequestPipResolver`, `createRequestCondaResolver`, `createRequestMavenResolver`, `createRequestNpmResolver`를 추가한다. pip root 두 개의 같은 요청은 `createRequestPipResolver` 1회와 해당 resolver의 `resolveDependencies` 2회를 기대한다. linux/arm64와 windows/x86_64의 `resolveAllDependencies()`를 동시에 실행해 서로 다른 factory 반환값과 resolver options가 섞이지 않는지 검증한다. Pip/Maven resolver 단위 테스트에는 singleton의 `setCacheOptions()` 이후 factory 결과가 같은 값을 복사하고 factory resolver 변경이 singleton에 역전파되지 않는 검증을 추가한다.
+기존 `dependency-resolver.test.ts` module mock에 `createRequestPipResolver`, `createRequestCondaResolver`, `createRequestMavenResolver`, `createRequestNpmResolver`를 추가한다. pip root 두 개의 같은 요청은 `createRequestPipResolver` 1회와 해당 resolver의 `resolveDependencies` 2회를 기대한다. linux/arm64와 windows/x86_64의 `resolveAllDependencies()`를 동시에 실행해 서로 다른 factory 반환값과 resolver options가 섞이지 않는지 검증한다. Pip/Maven resolver 단위 테스트에는 singleton의 `setCacheOptions()` 이후 factory 결과가 같은 값을 복사하고 factory resolver 변경이 singleton에 역전파되지 않는 검증을 추가한다. Npm resolver test에는 factory가 private `NpmVersionResolver`까지 같은 session을 연결해 두 별도 root resolver의 packument producer가 공유되는 검증을 추가한다.
 
 - [ ] **Step 2: 테스트가 기존 singleton 흐름 때문에 실패하는지 확인한다.**
 
@@ -136,19 +147,19 @@ Expected: FAIL — 요청 factory export가 없거나 `getPipResolver()` singlet
 
 - [ ] **Step 3: 요청 전용 factory를 최소 구현한다.**
 
-각 library resolver module에는 `/** @internal */`로 표시하고 public barrel에서는 re-export하지 않는 `createRequest*Resolver(session)` helper를 추가한다. Factory는 매번 새 instance를 만든다. session은 public constructor/`ResolverOptions`가 아니라 module-private `WeakMap<Resolver, ResolutionSession>`에 factory가 연결하고 resolver의 private accessor만 읽는다.
+각 library resolver module에는 `/** @internal */`로 표시하고 public barrel에서는 re-export하지 않는 `createRequest*Resolver(session)` helper를 추가한다. Factory는 매번 새 instance를 만든다. session은 public constructor/`ResolverOptions`가 아니라 `resolution-session-registry.ts`의 private `WeakMap<object, ResolutionSession>`에 factory가 연결하고 resolver의 private accessor만 읽는다.
 
 ```ts
 /** @internal dependency-resolver 전용 factory */
 export function createRequestPipResolver(session: ResolutionSession): PipResolver {
   const resolver = new PipResolver();
-  requestSessions.set(resolver, session);
+  attachResolutionSession(resolver, session);
   resolver.setCacheOptions(getPipResolver().getCacheOptions());
   return resolver;
 }
 ```
 
-Pip/Maven에는 `getCacheOptions()`를 추가해 `{ ...this.cacheOptions }` 복사본을 반환한다. Conda/Npm도 매번 새 resolver를 반환한다. Factory와 `ResolutionSession`은 `src/core/index.ts`와 public shared barrel에 export하지 않으며, `dependency-resolver.ts`만 이 internal module path를 사용한다. 기존 singleton accessor와 public constructor는 session 없는 동작을 유지한다.
+Pip/Maven에는 `getCacheOptions()`를 추가해 `{ ...this.cacheOptions }` 복사본을 반환한다. Conda factory는 resolver instance를 registry에 연결한다. Npm factory는 새 `NpmResolver`의 `/** @internal */ attachRequestSession(session)`만 호출하고, 이 method가 registry에 `NpmResolver`와 private `NpmVersionResolver` service를 모두 연결한다. `NpmVersionResolver`는 constructor 인자나 공개 setter 없이 `getAttachedResolutionSession(this)`로만 session을 읽는다. Factory와 내부 session registry는 `src/core/index.ts`와 public shared barrel에 export하지 않으며, `dependency-resolver.ts`만 direct internal module path로 factory를 사용한다. 기존 singleton accessor와 public constructor는 session 없는 동작을 유지한다.
 
 `dependency-resolver.ts`에서는 함수 시작 시 session과 library resolver 묶음을 한 번 생성한다. `getResolverByType`은 OS/Docker 특수 경로를 건드리지 않고 pip/conda/Maven/npm만 묶음에서 반환한다. 종료 시 hit이 1 이상일 때만 hit/miss/join 통계를 `logger.info`로 남긴다. `includeDependencies: false` 조기 반환은 세션/factory를 만들지 않는다.
 

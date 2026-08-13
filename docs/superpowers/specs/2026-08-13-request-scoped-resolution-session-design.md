@@ -176,7 +176,8 @@ resolver의 공개 사용 경로와 기존 테스트를 유지한다.
    snapshot으로 전달되고 역전파되지 않는지 검증한다.
 7. 서로 다른 환경 옵션으로 동시에 두 `resolveAllDependencies()`를 실행해
    요청별 resolver 인스턴스와 세션 상태가 섞이지 않는지 검증한다.
-8. 전체 test, lint, typecheck, build와 PR CI를 실행한다.
+8. 전체 test, lint, typecheck와 PR CI를 실행한다. 로컬 build는 별도 사용자 요청이
+   있을 때만 실행한다.
 
 ## 영향 문서
 
