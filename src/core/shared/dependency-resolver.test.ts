@@ -9,25 +9,39 @@ import {
   DependencyProgressCallback,
 } from './dependency-resolver';
 import { DownloadPackage } from './types';
+import { ResolutionSession } from './internal/resolution-session';
+import logger from '../../utils/logger';
 
 // Mock all resolvers
-vi.mock('../resolver/pip-resolver', () => ({
-  getPipResolver: vi.fn(() => ({
+vi.mock('../resolver/pip-resolver', () => {
+  const getPipResolver = vi.fn(() => ({
     resolveDependencies: vi.fn(),
-  })),
-}));
+  }));
+  return {
+    getPipResolver,
+    createRequestPipResolver: vi.fn(() => getPipResolver()),
+  };
+});
 
-vi.mock('../resolver/maven-resolver', () => ({
-  getMavenResolver: vi.fn(() => ({
+vi.mock('../resolver/maven-resolver', () => {
+  const getMavenResolver = vi.fn(() => ({
     resolveDependencies: vi.fn(),
-  })),
-}));
+  }));
+  return {
+    getMavenResolver,
+    createRequestMavenResolver: vi.fn(() => getMavenResolver()),
+  };
+});
 
-vi.mock('../resolver/conda-resolver', () => ({
-  getCondaResolver: vi.fn(() => ({
+vi.mock('../resolver/conda-resolver', () => {
+  const getCondaResolver = vi.fn(() => ({
     resolveDependencies: vi.fn(),
-  })),
-}));
+  }));
+  return {
+    getCondaResolver,
+    createRequestCondaResolver: vi.fn(() => getCondaResolver()),
+  };
+});
 
 vi.mock('../resolver/yum-resolver', () => ({
   getYumResolver: vi.fn(() => ({
@@ -35,22 +49,42 @@ vi.mock('../resolver/yum-resolver', () => ({
   })),
 }));
 
-vi.mock('../resolver/npm-resolver', () => ({
-  getNpmResolver: vi.fn(() => ({
+vi.mock('../resolver/npm-resolver', () => {
+  const getNpmResolver = vi.fn(() => ({
     resolveDependencies: vi.fn(),
-  })),
-}));
+  }));
+  return {
+    getNpmResolver,
+    createRequestNpmResolver: vi.fn(() => getNpmResolver()),
+  };
+});
 
 // Import mocked modules
-import { getPipResolver } from '../resolver/pip-resolver';
-import { getMavenResolver } from '../resolver/maven-resolver';
-import { getCondaResolver } from '../resolver/conda-resolver';
+import {
+  createRequestPipResolver,
+  getPipResolver,
+} from '../resolver/pip-resolver';
+import {
+  createRequestMavenResolver,
+  getMavenResolver,
+} from '../resolver/maven-resolver';
+import {
+  createRequestCondaResolver,
+  getCondaResolver,
+} from '../resolver/conda-resolver';
 import { getYumResolver } from '../resolver/yum-resolver';
-import { getNpmResolver } from '../resolver/npm-resolver';
+import {
+  createRequestNpmResolver,
+  getNpmResolver,
+} from '../resolver/npm-resolver';
 
 describe('dependency-resolver', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(createRequestPipResolver).mockImplementation(() => getPipResolver());
+    vi.mocked(createRequestMavenResolver).mockImplementation(() => getMavenResolver());
+    vi.mocked(createRequestCondaResolver).mockImplementation(() => getCondaResolver());
+    vi.mocked(createRequestNpmResolver).mockImplementation(() => getNpmResolver());
   });
 
   afterEach(() => {
@@ -161,6 +195,80 @@ describe('dependency-resolver', () => {
       expect(result.dependencyTrees).toHaveLength(1);
     });
 
+    it('한 요청의 여러 pip root는 하나의 request resolver를 공유한다', async () => {
+      const createResult = (name: string, version: string) => ({
+        root: { package: { type: 'pip' as const, name, version }, dependencies: [] },
+        flatList: [{ type: 'pip' as const, name, version }],
+        conflicts: [],
+        totalSize: 0,
+      });
+      const requestResolver = {
+        resolveDependencies: vi.fn(async (name: string, version: string) =>
+          createResult(name, version),
+        ),
+      };
+      vi.mocked(createRequestPipResolver).mockReturnValue(requestResolver as any);
+
+      await resolveAllDependencies([
+        { id: 'pip-1', type: 'pip', name: 'requests', version: '2.28.0' },
+        { id: 'pip-2', type: 'pip', name: 'flask', version: '2.2.0' },
+      ]);
+
+      expect(createRequestPipResolver).toHaveBeenCalledTimes(1);
+      expect(requestResolver.resolveDependencies).toHaveBeenCalledTimes(2);
+    });
+
+    it('동시 요청은 서로 다른 request resolver와 target environment options를 사용한다', async () => {
+      const createResult = (name: string, version: string) => ({
+        root: { package: { type: 'pip' as const, name, version }, dependencies: [] },
+        flatList: [{ type: 'pip' as const, name, version }],
+        conflicts: [],
+        totalSize: 0,
+      });
+      const firstResolver = {
+        resolveDependencies: vi.fn(async (name: string, version: string) =>
+          createResult(name, version),
+        ),
+      };
+      const secondResolver = {
+        resolveDependencies: vi.fn(async (name: string, version: string) =>
+          createResult(name, version),
+        ),
+      };
+      vi.mocked(createRequestPipResolver)
+        .mockReturnValueOnce(firstResolver as any)
+        .mockReturnValueOnce(secondResolver as any);
+
+      await Promise.all([
+        resolveAllDependencies(
+          [{ id: 'linux', type: 'pip', name: 'linux-root', version: '1.0.0' }],
+          { targetOS: 'linux', architecture: 'x86_64', pythonVersion: '3.11' },
+        ),
+        resolveAllDependencies(
+          [{ id: 'windows', type: 'pip', name: 'windows-root', version: '1.0.0' }],
+          { targetOS: 'windows', architecture: 'arm64', pythonVersion: '3.12' },
+        ),
+      ]);
+
+      expect(createRequestPipResolver).toHaveBeenCalledTimes(2);
+      expect(firstResolver.resolveDependencies).toHaveBeenCalledWith(
+        'linux-root',
+        '1.0.0',
+        expect.objectContaining({
+          pythonVersion: '3.11',
+          targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        }),
+      );
+      expect(secondResolver.resolveDependencies).toHaveBeenCalledWith(
+        'windows-root',
+        '1.0.0',
+        expect.objectContaining({
+          pythonVersion: '3.12',
+          targetPlatform: { system: 'Windows', machine: 'arm64' },
+        }),
+      );
+    });
+
     it('latest root는 해석된 실제 버전으로 교체한다', async () => {
       const mockResolver = {
         resolveDependencies: vi.fn().mockResolvedValue({
@@ -208,6 +316,37 @@ describe('dependency-resolver', () => {
       expect(result.allPackages).toEqual(packages);
       expect(result.dependencyTrees).toEqual([]);
       expect(result.failedPackages).toEqual([]);
+      expect(createRequestPipResolver).not.toHaveBeenCalled();
+      expect(createRequestCondaResolver).not.toHaveBeenCalled();
+      expect(createRequestMavenResolver).not.toHaveBeenCalled();
+      expect(createRequestNpmResolver).not.toHaveBeenCalled();
+    });
+
+    it('zero-hit request session statistics는 로그로 남기지 않는다', async () => {
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      await resolveAllDependencies([]);
+
+      expect(
+        infoSpy.mock.calls.some(([message]) => message === '의존성 요청 세션 통계'),
+      ).toBe(false);
+    });
+
+    it('hit이 있는 request session statistics는 종료 시 로그로 남긴다', async () => {
+      vi.spyOn(ResolutionSession.prototype, 'getStats').mockReturnValue({
+        hits: 1,
+        misses: 2,
+        joins: 3,
+      });
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      await resolveAllDependencies([]);
+
+      expect(infoSpy).toHaveBeenCalledWith('의존성 요청 세션 통계', {
+        hits: 1,
+        misses: 2,
+        joins: 3,
+      });
     });
 
     it('pip 패키지에 targetOS와 pythonVersion 옵션 전달', async () => {

@@ -21,6 +21,8 @@ import {
   CondaRepoDataProcessor,
   PackageCandidate,
 } from './conda-repodata-processor';
+import type { ResolutionSession } from '../shared/internal/resolution-session';
+import { attachResolutionSession } from '../shared/internal/resolution-session-registry';
 
 // Resolver 전용 CondaPackageInfo (files, versions 추가 필드)
 interface CondaPackageInfo {
@@ -568,4 +570,13 @@ export function getCondaResolver(): CondaResolver {
     condaResolverInstance = new CondaResolver();
   }
   return condaResolverInstance;
+}
+
+/** @internal */
+export function createRequestCondaResolver(
+  session: ResolutionSession,
+): CondaResolver {
+  const resolver = new CondaResolver();
+  attachResolutionSession(resolver, session);
+  return resolver;
 }

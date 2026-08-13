@@ -49,6 +49,8 @@ import {
 import { MavenBomProcessor } from '../shared/maven-bom-processor';
 import { MAVEN_CONSTANTS } from '../constants/maven';
 import { isNativeArtifact } from '../shared/maven-utils';
+import type { ResolutionSession } from '../shared/internal/resolution-session';
+import { attachResolutionSession } from '../shared/internal/resolution-session-registry';
 
 /** Maven Resolver 옵션 */
 export interface MavenResolverOptions extends ResolverOptions {
@@ -598,7 +600,14 @@ export class MavenResolver implements IResolver {
    * 캐시 옵션 설정
    */
   setCacheOptions(options: MavenCacheOptions): void {
-    this.cacheOptions = options;
+    this.cacheOptions = { ...options };
+  }
+
+  /**
+   * 캐시 옵션 조회
+   */
+  getCacheOptions(): MavenCacheOptions {
+    return { ...this.cacheOptions };
   }
 
   /**
@@ -617,4 +626,14 @@ export function getMavenResolver(): MavenResolver {
     mavenResolverInstance = new MavenResolver();
   }
   return mavenResolverInstance;
+}
+
+/** @internal */
+export function createRequestMavenResolver(
+  session: ResolutionSession,
+): MavenResolver {
+  const resolver = new MavenResolver();
+  resolver.setCacheOptions(getMavenResolver().getCacheOptions());
+  attachResolutionSession(resolver, session);
+  return resolver;
 }

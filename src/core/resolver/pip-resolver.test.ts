@@ -5,7 +5,13 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { PipResolver } from './pip-resolver';
+import {
+  createRequestPipResolver,
+  getPipResolver,
+  PipResolver,
+} from './pip-resolver';
+import { ResolutionSession } from '../shared/internal/resolution-session';
+import { getAttachedResolutionSession } from '../shared/internal/resolution-session-registry';
 
 // PipResolver 인스턴스 생성 및 targetPlatform 설정
 const createResolver = (options?: {
@@ -541,6 +547,28 @@ describe('PipResolver 단위 테스트', () => {
 
     it('setCacheOptions 호출 시 에러 없음', () => {
       expect(() => resolver.setCacheOptions({ maxSize: 100 })).not.toThrow();
+    });
+
+    it('요청 resolver는 singleton cache options의 독립 snapshot과 session을 사용한다', () => {
+      const singleton = getPipResolver();
+      singleton.setCacheOptions({ memoryTtl: 120, useDiskCache: true });
+      const session = new ResolutionSession();
+
+      const requestResolver = createRequestPipResolver(session);
+
+      expect(requestResolver).not.toBe(singleton);
+      expect(requestResolver.getCacheOptions()).toEqual({
+        memoryTtl: 120,
+        useDiskCache: true,
+      });
+      expect(requestResolver.getCacheOptions()).not.toBe(singleton.getCacheOptions());
+      expect(getAttachedResolutionSession(requestResolver)).toBe(session);
+
+      requestResolver.setCacheOptions({ memoryTtl: 60 });
+      expect(singleton.getCacheOptions()).toEqual({
+        memoryTtl: 120,
+        useDiskCache: true,
+      });
     });
   });
 

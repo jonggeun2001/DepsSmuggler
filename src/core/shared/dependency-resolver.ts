@@ -1,8 +1,8 @@
 // 공통 의존성 해결 모듈
-import { getPipResolver } from '../resolver/pip-resolver';
-import { getMavenResolver } from '../resolver/maven-resolver';
-import { getCondaResolver } from '../resolver/conda-resolver';
-import { getNpmResolver } from '../resolver/npm-resolver';
+import { createRequestPipResolver } from '../resolver/pip-resolver';
+import { createRequestMavenResolver } from '../resolver/maven-resolver';
+import { createRequestCondaResolver } from '../resolver/conda-resolver';
+import { createRequestNpmResolver } from '../resolver/npm-resolver';
 import { getYumResolver } from '../resolver/yum-resolver';
 import { getAptResolver } from '../resolver/apt-resolver';
 import { getApkResolver } from '../resolver/apk-resolver';
@@ -17,6 +17,7 @@ import { NpmResolutionResult } from './npm-types';
 import type { OSPackageInfo, OSArchitecture } from '../downloaders/os-shared/types';
 import logger from '../../utils/logger';
 import { getPackageArtifactKey } from './dependency-tree-utils';
+import { ResolutionSession } from './internal/resolution-session';
 
 /**
  * 의존성 해결 진행 상황 콜백
@@ -204,16 +205,26 @@ export interface DependencyResolverOptions {
 /**
  * 패키지 타입별 리졸버 반환
  */
-function getResolverByType(type: string) {
+type RequestLibraryResolvers = {
+  pip: ReturnType<typeof createRequestPipResolver>;
+  conda: ReturnType<typeof createRequestCondaResolver>;
+  maven: ReturnType<typeof createRequestMavenResolver>;
+  npm: ReturnType<typeof createRequestNpmResolver>;
+};
+
+function getResolverByType(
+  type: string,
+  requestResolvers: RequestLibraryResolvers,
+) {
   switch (type) {
     case 'pip':
-      return getPipResolver();
+      return requestResolvers.pip;
     case 'conda':
-      return getCondaResolver();
+      return requestResolvers.conda;
     case 'maven':
-      return getMavenResolver();
+      return requestResolvers.maven;
     case 'npm':
-      return getNpmResolver();
+      return requestResolvers.npm;
     // OS 패키지 (yum, apt, apk)는 distribution 정보가 필요하므로
     // 별도 IPC 핸들러(os:resolveDependencies)에서 처리됨
     // 여기서는 null을 반환하여 패키지만 결과에 포함되고 의존성은 건너뜀
@@ -267,6 +278,14 @@ export async function resolveAllDependencies(
     };
   }
 
+  const resolutionSession = new ResolutionSession();
+  const requestResolvers: RequestLibraryResolvers = {
+    pip: createRequestPipResolver(resolutionSession),
+    conda: createRequestCondaResolver(resolutionSession),
+    maven: createRequestMavenResolver(resolutionSession),
+    npm: createRequestNpmResolver(resolutionSession),
+  };
+
   // targetOS를 targetPlatform으로 변환 (pip/conda 환경 마커 평가용)
   const targetPlatformMap: Record<string, { system?: 'Linux' | 'Windows' | 'Darwin' }> = {
     any: {},
@@ -287,7 +306,7 @@ export async function resolveAllDependencies(
     resolvedSet.set(key, pkg);
 
     // 타입별 리졸버 선택
-    const resolver = getResolverByType(pkg.type);
+    const resolver = getResolverByType(pkg.type, requestResolvers);
     if (!resolver) {
       // OS 패키지(yum, apt, apk) 처리 - osPackageInfo가 있으면 의존성 해결
       const osTypes = ['yum', 'apt', 'apk'];
@@ -753,6 +772,11 @@ export async function resolveAllDependencies(
       });
       // 실패해도 원본 패키지는 이미 추가되어 있으므로 계속 진행
     }
+  }
+
+  const sessionStats = resolutionSession.getStats();
+  if (sessionStats.hits > 0) {
+    logger.info('의존성 요청 세션 통계', { ...sessionStats });
   }
 
   return {

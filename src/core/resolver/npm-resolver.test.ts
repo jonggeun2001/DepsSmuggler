@@ -5,10 +5,12 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { NpmResolver } from './npm-resolver';
+import { createRequestNpmResolver, NpmResolver } from './npm-resolver';
 import { NpmVersionResolver } from './npm-version-resolver';
 import { NpmTreeManager } from './npm-tree-manager';
 import { NpmPackument, NpmNode, DependencyType, DepsQueueItem, NpmPackageVersion, NpmFlatPackage, NpmResolvedNode, NpmDist } from '../shared/npm-types';
+import { ResolutionSession } from '../shared/internal/resolution-session';
+import { getAttachedResolutionSession } from '../shared/internal/resolution-session-registry';
 
 /**
  * 테스트용 NpmResolver 인터페이스
@@ -104,6 +106,21 @@ describe('NpmResolver 단위 테스트', () => {
 
   beforeEach(() => {
     resolver = createResolver();
+  });
+
+  it('요청 factory는 npm resolver와 private version resolver 모두에 session을 연결한다', () => {
+    const session = new ResolutionSession();
+    const requestResolver = createRequestNpmResolver(session);
+    const legacyResolver = new NpmResolver();
+
+    expect(getAttachedResolutionSession(requestResolver)).toBe(session);
+    expect(
+      getAttachedResolutionSession(asTestable(requestResolver).versionResolver),
+    ).toBe(session);
+    expect(getAttachedResolutionSession(legacyResolver)).toBeUndefined();
+    expect(
+      getAttachedResolutionSession(asTestable(legacyResolver).versionResolver),
+    ).toBeUndefined();
   });
 
   describe('resolveVersion', () => {

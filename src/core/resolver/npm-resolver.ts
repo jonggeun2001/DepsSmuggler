@@ -25,6 +25,8 @@ import { NpmTreeManager, TreeManagerOptions } from './npm-tree-manager';
 import { NpmVersionResolver } from './npm-version-resolver';
 import { NPM_CONSTANTS } from '../constants/npm';
 import logger from '../../utils/logger';
+import type { ResolutionSession } from '../shared/internal/resolution-session';
+import { attachResolutionSession } from '../shared/internal/resolution-session-registry';
 
 /**
  * 플랫폼 매핑 (설정값 → npm 값)
@@ -96,6 +98,12 @@ export class NpmResolver {
   constructor(registryUrl = 'https://registry.npmjs.org') {
     this.versionResolver = new NpmVersionResolver(registryUrl);
     this.treeManager = new NpmTreeManager();
+  }
+
+  /** @internal */
+  attachRequestSession(session: ResolutionSession): void {
+    attachResolutionSession(this, session);
+    attachResolutionSession(this.versionResolver, session);
   }
 
   /**
@@ -529,6 +537,15 @@ export function getNpmResolver(): NpmResolver {
     npmResolverInstance = new NpmResolver();
   }
   return npmResolverInstance;
+}
+
+/** @internal */
+export function createRequestNpmResolver(
+  session: ResolutionSession,
+): NpmResolver {
+  const resolver = new NpmResolver();
+  resolver.attachRequestSession(session);
+  return resolver;
 }
 
 export { npmResolverInstance };

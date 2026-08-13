@@ -35,6 +35,8 @@ import {
   evaluatePep508Marker,
   normalizeExtraName,
 } from '../shared/pep508-marker';
+import type { ResolutionSession } from '../shared/internal/resolution-session';
+import { attachResolutionSession } from '../shared/internal/resolution-session-registry';
 
 // 의존성 파싱 결과
 interface ParsedDependency {
@@ -211,7 +213,14 @@ export class PipResolver implements IResolver {
    * 캐시 옵션 설정
    */
   setCacheOptions(options: PipCacheOptions): void {
-    this.cacheOptions = options;
+    this.cacheOptions = { ...options };
+  }
+
+  /**
+   * 캐시 옵션 조회
+   */
+  getCacheOptions(): PipCacheOptions {
+    return { ...this.cacheOptions };
   }
 
   /**
@@ -1505,4 +1514,14 @@ export function getPipResolver(): PipResolver {
     pipResolverInstance = new PipResolver();
   }
   return pipResolverInstance;
+}
+
+/** @internal */
+export function createRequestPipResolver(
+  session: ResolutionSession,
+): PipResolver {
+  const resolver = new PipResolver();
+  resolver.setCacheOptions(getPipResolver().getCacheOptions());
+  attachResolutionSession(resolver, session);
+  return resolver;
 }

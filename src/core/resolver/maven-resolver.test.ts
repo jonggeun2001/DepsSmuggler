@@ -5,7 +5,13 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MavenResolver } from './maven-resolver';
+import {
+  createRequestMavenResolver,
+  getMavenResolver,
+  MavenResolver,
+} from './maven-resolver';
+import { ResolutionSession } from '../shared/internal/resolution-session';
+import { getAttachedResolutionSession } from '../shared/internal/resolution-session-registry';
 // 분리된 유틸리티 함수 import
 import {
   resolveProperty,
@@ -24,6 +30,28 @@ describe('MavenResolver 단위 테스트', () => {
 
   beforeEach(() => {
     resolver = createResolver();
+  });
+
+  it('요청 resolver는 singleton cache options의 독립 snapshot과 session을 사용한다', () => {
+    const singleton = getMavenResolver();
+    singleton.setCacheOptions({ memoryTtl: 120, useDiskCache: true });
+    const session = new ResolutionSession();
+
+    const requestResolver = createRequestMavenResolver(session);
+
+    expect(requestResolver).not.toBe(singleton);
+    expect(requestResolver.getCacheOptions()).toEqual({
+      memoryTtl: 120,
+      useDiskCache: true,
+    });
+    expect(requestResolver.getCacheOptions()).not.toBe(singleton.getCacheOptions());
+    expect(getAttachedResolutionSession(requestResolver)).toBe(session);
+
+    requestResolver.setCacheOptions({ memoryTtl: 60 });
+    expect(singleton.getCacheOptions()).toEqual({
+      memoryTtl: 120,
+      useDiskCache: true,
+    });
   });
 
   describe('resolveProperty (유틸리티 함수)', () => {
