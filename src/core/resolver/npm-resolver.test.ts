@@ -5,7 +5,11 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createRequestNpmResolver, NpmResolver } from './npm-resolver';
+import {
+  createRequestNpmResolver,
+  getNpmResolver,
+  NpmResolver,
+} from './npm-resolver';
 import { NpmVersionResolver } from './npm-version-resolver';
 import { NpmTreeManager } from './npm-tree-manager';
 import { NpmPackument, NpmNode, DependencyType, DepsQueueItem, NpmPackageVersion, NpmFlatPackage, NpmResolvedNode, NpmDist } from '../shared/npm-types';
@@ -108,10 +112,10 @@ describe('NpmResolver 단위 테스트', () => {
     resolver = createResolver();
   });
 
-  it('요청 factory는 npm resolver와 private version resolver 모두에 session을 연결한다', () => {
+  it('요청 factory는 legacy singleton을 건드리지 않고 npm resolver와 private version resolver에 session을 연결한다', () => {
     const session = new ResolutionSession();
+    const legacyResolver = getNpmResolver();
     const requestResolver = createRequestNpmResolver(session);
-    const legacyResolver = new NpmResolver();
 
     expect(getAttachedResolutionSession(requestResolver)).toBe(session);
     expect(
