@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ResolutionSession } from '../../core/shared/internal/resolution-session';
 import { downloadCommand } from './download';
+import { ResolutionSession } from '../../core/shared/internal/resolution-session';
 
 const {
   ensureDir,
