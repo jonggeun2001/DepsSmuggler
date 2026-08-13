@@ -5,9 +5,10 @@
  */
 
 import * as semver from 'semver';
-import { fetchPackument } from './npm-cache';
+import { fetchPackument as fetchPackumentFromCache } from './npm-cache';
 import { NpmPackument, NpmPackageVersion } from './npm-types';
 import { NPM_CONSTANTS } from '../constants/npm';
+import { getAttachedResolutionSession } from './internal/resolution-session-registry';
 
 // 로거 타입 (프로젝트 공통 로거 사용)
 const logger = {
@@ -45,7 +46,19 @@ export class NpmVersionResolver {
    * packument 조회 (캐싱)
    */
   async fetchPackument(name: string): Promise<NpmPackument> {
-    return fetchPackument(name, { registryUrl: this.registryUrl });
+    const fetch = () => fetchPackumentFromCache(name, { registryUrl: this.registryUrl });
+    const session = getAttachedResolutionSession(this);
+
+    if (!session) {
+      return fetch();
+    }
+
+    return session.getOrCreate(
+      'npm',
+      'packument',
+      { registryUrl: this.registryUrl, name: name.toLowerCase() },
+      fetch,
+    );
   }
 
   /**
@@ -80,6 +93,29 @@ export class NpmVersionResolver {
     }
 
     return resolved;
+  }
+
+  /**
+   * 요청 범위에서 버전 스펙을 실제 버전으로 해결한다.
+   *
+   * 세션이 없는 공개 사용 경로에서는 기존 synchronous resolveVersion()과 같은
+   * 결과를 Promise로 반환한다.
+   */
+  async resolveVersionForRequest(spec: string, packument: NpmPackument): Promise<string | null> {
+    const resolve = async () => this.resolveVersion(spec, packument);
+    const session = getAttachedResolutionSession(this);
+
+    if (!session) {
+      return resolve();
+    }
+
+    return session.getOrCreate(
+      'npm',
+      'latest-version',
+      { registryUrl: this.registryUrl, name: packument.name.toLowerCase(), spec },
+      resolve,
+      { isCacheable: Boolean },
+    );
   }
 
   /**

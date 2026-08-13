@@ -138,7 +138,7 @@ export class NpmResolver {
     try {
       // 1. 루트 패키지 정보 조회
       const packument = await this.versionResolver.fetchPackument(packageName);
-      const resolvedVersion = this.versionResolver.resolveVersion(version, packument);
+      const resolvedVersion = await this.versionResolver.resolveVersionForRequest(version, packument);
 
       if (!resolvedVersion) {
         throw new Error(`버전을 찾을 수 없습니다: ${packageName}@${version}`);
@@ -250,7 +250,7 @@ export class NpmResolver {
 
     // 패키지 정보 조회
     const packument = await this.versionResolver.fetchPackument(name);
-    const resolvedVersion = this.versionResolver.resolveVersion(spec, packument);
+    const resolvedVersion = await this.versionResolver.resolveVersionForRequest(spec, packument);
 
     if (!resolvedVersion) {
       throw new Error(`호환 버전을 찾을 수 없습니다: ${name}@${spec}`);
