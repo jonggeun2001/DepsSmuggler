@@ -33,7 +33,6 @@ import {
 import { DependencyResolutionSkipper } from '../shared/maven-dedupe-index';
 import {
   fetchPom as fetchPomFromCache,
-  prefetchPomsParallel,
   clearMemoryCache as clearMavenCache,
   MavenCacheOptions,
 } from '../shared/maven-cache';
@@ -50,7 +49,10 @@ import { MavenBomProcessor } from '../shared/maven-bom-processor';
 import { MAVEN_CONSTANTS } from '../constants/maven';
 import { isNativeArtifact } from '../shared/maven-utils';
 import type { ResolutionSession } from '../shared/internal/resolution-session';
-import { attachResolutionSession } from '../shared/internal/resolution-session-registry';
+import {
+  attachResolutionSession,
+  getAttachedResolutionSession,
+} from '../shared/internal/resolution-session-registry';
 
 /** Maven Resolver 옵션 */
 export interface MavenResolverOptions extends ResolverOptions {
@@ -398,31 +400,52 @@ export class MavenResolver implements IResolver {
    * POM 캐시와 함께 조회 (공유 캐시 모듈 사용)
    */
   private async fetchPomWithCache(coordinate: MavenCoordinate): Promise<PomProject> {
-    return fetchPomFromCache(coordinate, {
-      repoUrl: this.repoUrl,
-      memoryTtl: this.defaultOptions.pomCacheTtl,
-      ...this.cacheOptions,
-    });
+    const effectiveRepoUrl = this.getEffectiveRepoUrl();
+    return this.sessionGet(
+      'pom',
+      {
+        repoUrl: effectiveRepoUrl,
+        groupId: coordinate.groupId,
+        artifactId: coordinate.artifactId,
+        version: coordinate.version,
+      },
+      () => fetchPomFromCache(coordinate, this.getPomCacheOptions()),
+    );
   }
 
   /**
    * 여러 POM 병렬 프리페치
    */
   private prefetchPomsParallelInternal(coordinates: MavenCoordinate[]): void {
-    prefetchPomsParallel(coordinates, {
-      repoUrl: this.repoUrl,
-      memoryTtl: this.defaultOptions.pomCacheTtl,
-      batchSize: this.defaultOptions.parallelThreads,
-      ...this.cacheOptions,
-    });
+    const limit = pLimit(this.defaultOptions.parallelThreads ?? 5);
+
+    for (const coordinate of coordinates) {
+      void limit(() => this.fetchPomWithCache(coordinate)).catch((error) => {
+        logger.debug('Maven POM 프리페치 실패', { coordinate: coordinateToString(coordinate), error });
+      });
+    }
   }
 
   /**
    * 최신 버전 조회
    */
   async getLatestVersion(groupId: string, artifactId: string): Promise<string> {
+    const effectiveRepoUrl = this.getEffectiveRepoUrl();
+    return this.sessionGet(
+      'latest-version',
+      { repoUrl: effectiveRepoUrl, groupId, artifactId },
+      () => this.getLatestVersionUncached(groupId, artifactId, effectiveRepoUrl),
+      Boolean,
+    );
+  }
+
+  private async getLatestVersionUncached(
+    groupId: string,
+    artifactId: string,
+    effectiveRepoUrl: string,
+  ): Promise<string> {
     const groupPath = groupId.replace(/\./g, '/');
-    const url = `${this.repoUrl}/${groupPath}/${artifactId}/maven-metadata.xml`;
+    const url = `${effectiveRepoUrl}/${groupPath}/${artifactId}/maven-metadata.xml`;
 
     try {
       const response = await this.axiosInstance.get<string>(url);
@@ -433,6 +456,38 @@ export class MavenResolver implements IResolver {
     } catch {
       throw new Error(`버전 조회 실패: ${groupId}:${artifactId}`);
     }
+  }
+
+  private getEffectiveRepoUrl(): string {
+    return this.cacheOptions.repoUrl ?? this.repoUrl;
+  }
+
+  private getPomCacheOptions(): MavenCacheOptions {
+    return {
+      ...this.cacheOptions,
+      memoryTtl: this.cacheOptions.memoryTtl ?? this.defaultOptions.pomCacheTtl,
+      repoUrl: this.getEffectiveRepoUrl(),
+    };
+  }
+
+  private sessionGet<T>(
+    operation: 'pom' | 'latest-version',
+    context: Record<string, string>,
+    producer: () => Promise<T>,
+    isCacheable?: (value: T) => boolean,
+  ): Promise<T> {
+    const session = getAttachedResolutionSession(this);
+    if (!session) {
+      return producer();
+    }
+
+    return session.getOrCreate(
+      'maven',
+      operation,
+      context,
+      producer,
+      isCacheable ? { isCacheable } : undefined,
+    );
   }
 
   /**
