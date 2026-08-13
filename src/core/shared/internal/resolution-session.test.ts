@@ -121,6 +121,8 @@ describe('ResolutionSession', () => {
     ['Date', { value: new Date('2026-01-01T00:00:00.000Z') }],
     ['Map', { value: new Map([['name', 'requests']]) }],
     ['Set', { value: new Set(['requests']) }],
+    ['RegExp', { value: /requests/i }],
+    ['class instance', { value: new (class PackageContext {})() }],
     ['Symbol', { value: Symbol('requests') }],
     ['function', { value: () => 'requests' }],
   ])('%s context를 거부하고 producer를 실행하지 않는다', async (_kind, invalidContext) => {
@@ -264,6 +266,64 @@ describe('ResolutionSession', () => {
     ).rejects.toBe(predicateError);
 
     expect(producerCalls).toBe(2);
+  });
+
+  it('in-flight consumer 모두에 isCacheable predicate 오류를 전파하고 entry를 제거한다', async () => {
+    const session = new ResolutionSession();
+    const deferred = createDeferred();
+    const predicateError = new Error('cacheability check failed');
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => {
+      unhandledRejections.push(reason);
+    };
+    let producerCalls = 0;
+    const producer = async () => {
+      producerCalls += 1;
+      await deferred.promise;
+      return { version: '2.32.0' };
+    };
+    const options = {
+      isCacheable: () => {
+        throw predicateError;
+      },
+    };
+
+    process.on('unhandledRejection', onUnhandledRejection);
+    try {
+      const first = session.getOrCreate('pip', 'latest-version', { name: 'requests' }, producer, options);
+      const second = session.getOrCreate('pip', 'latest-version', { name: 'requests' }, producer, options);
+      const firstError = first.then(
+        () => undefined,
+        (error) => error,
+      );
+      const secondError = second.then(
+        () => undefined,
+        (error) => error,
+      );
+
+      deferred.resolve();
+
+      const [firstReason, secondReason] = await Promise.all([firstError, secondError]);
+      expect(firstReason).toBe(predicateError);
+      expect(secondReason).toBe(predicateError);
+      expect((firstReason as Error).message).toBe('cacheability check failed');
+      expect((secondReason as Error).message).toBe('cacheability check failed');
+      expect(producerCalls).toBe(1);
+
+      const retryReason = await session
+        .getOrCreate('pip', 'latest-version', { name: 'requests' }, producer, options)
+        .then(
+          () => undefined,
+          (error) => error,
+        );
+      expect(retryReason).toBe(predicateError);
+      expect(producerCalls).toBe(2);
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(unhandledRejections).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
   });
 
   it('cache hit, miss, in-flight join 통계를 제공한다', async () => {
