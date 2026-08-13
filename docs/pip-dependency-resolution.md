@@ -292,7 +292,25 @@ if (urls && urls.length > 0) {
 2. `sdist` (소스 배포) - wheel이 없는 경우 폴백
 3. 첫 번째 URL - 둘 다 없는 경우
 
-### 7.4 참고 링크
+### 7.4 요청 단위 조회 재사용
+
+`resolveAllDependencies()`로 여러 pip 직접 루트를 해결할 때에는 한 요청 안에서
+PEP 503 정규화 이름이 같은 공통 전이 의존성의 조회를 재사용합니다. 재사용 대상은
+버전 조건에 맞는 최신 후보 선택과 정확 버전의 PyPI JSON/Simple API
+artifact·Core Metadata 조회입니다.
+
+조회 키에는 정규화 이름, 버전 조건, index URL과 base URL, 대상 OS·아키텍처·
+Python 및 세부 플랫폼 정보, source distribution을 검증 없이 허용하는 모드를
+포함합니다. 따라서 서로 다른 저장소나 대상 환경의 결과가 섞이지 않습니다.
+동일 키의 동시 요청은 한 번만 원격 조회하고 각 호출자는 독립 snapshot을 받습니다.
+후보 없음·빈 값·조회 실패는 저장하지 않으므로 뒤의 직접 루트에서 다시 조회합니다.
+
+extras와 PEP 508 marker 평가, BFS 큐와 부모-자식 관계 구성, 최대 깊이와 직접
+루트 실패 의미는 호출별로 계속 처리합니다. 공개 `PipResolver`를 직접 쓰는
+경로와 서로 다른 `resolveAllDependencies()` 호출 사이에는 이 재사용 세션이
+공유되지 않습니다.
+
+### 7.5 참고 링크
 
 - [resolvelib GitHub](https://github.com/sarugaku/resolvelib)
 - [pip GitHub](https://github.com/pypa/pip)

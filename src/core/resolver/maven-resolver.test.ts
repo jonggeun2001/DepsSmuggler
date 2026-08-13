@@ -4,8 +4,16 @@
  * 네트워크 호출 없이 MavenResolver의 핵심 로직을 테스트합니다.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { MavenResolver } from './maven-resolver';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import {
+  createRequestMavenResolver,
+  getMavenResolver,
+  MavenResolver,
+} from './maven-resolver';
+import { ResolutionSession } from '../shared/internal/resolution-session';
+import { getAttachedResolutionSession } from '../shared/internal/resolution-session-registry';
+import * as mavenCache from '../shared/maven-cache';
+import { MavenCoordinate, PomProject } from '../shared/maven-types';
 // 분리된 유틸리티 함수 import
 import {
   resolveProperty,
@@ -13,6 +21,37 @@ import {
   extractExclusions,
   extractDependencies,
 } from '../shared/maven-pom-utils';
+
+vi.mock('../shared/maven-cache', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../shared/maven-cache')>();
+
+  return {
+    ...actual,
+    fetchPom: vi.fn(),
+    prefetchPomsParallel: vi.fn(),
+  };
+});
+
+const fetchPomFromCacheMock = vi.mocked(mavenCache.fetchPom);
+const defaultRepoUrl = 'https://repo1.maven.org/maven2';
+const sharedCoordinate: MavenCoordinate = {
+  groupId: 'org.example',
+  artifactId: 'shared',
+  version: '1.0.0',
+};
+
+function createSharedPom(): PomProject {
+  return {
+    groupId: sharedCoordinate.groupId,
+    artifactId: sharedCoordinate.artifactId,
+    version: sharedCoordinate.version,
+    properties: { source: 'registry' },
+  };
+}
+
+function fetchRawPom(resolver: MavenResolver, coordinate: MavenCoordinate): Promise<PomProject> {
+  return (resolver as any).fetchPomWithCache(coordinate);
+}
 
 // MavenResolver 인스턴스 생성
 const createResolver = () => {
@@ -24,6 +63,205 @@ describe('MavenResolver 단위 테스트', () => {
 
   beforeEach(() => {
     resolver = createResolver();
+    fetchPomFromCacheMock.mockReset();
+    getMavenResolver().setCacheOptions({});
+  });
+
+  it('요청 resolver는 singleton cache options의 독립 snapshot과 session을 사용한다', () => {
+    const singleton = getMavenResolver();
+    singleton.setCacheOptions({ memoryTtl: 120, useDiskCache: true });
+    const session = new ResolutionSession();
+
+    const requestResolver = createRequestMavenResolver(session);
+
+    expect(requestResolver).not.toBe(singleton);
+    expect(requestResolver.getCacheOptions()).toEqual({
+      memoryTtl: 120,
+      useDiskCache: true,
+    });
+    expect(requestResolver.getCacheOptions()).not.toBe(singleton.getCacheOptions());
+    expect(getAttachedResolutionSession(requestResolver)).toBe(session);
+    expect(getAttachedResolutionSession(singleton)).toBeUndefined();
+
+    requestResolver.setCacheOptions({ memoryTtl: 60 });
+    expect(singleton.getCacheOptions()).toEqual({
+      memoryTtl: 120,
+      useDiskCache: true,
+    });
+  });
+
+  describe('요청 세션 Maven metadata 재사용', () => {
+    it('동일 GAV의 raw POM은 두 요청 resolver에서 한 번 조회하고 consumer별 clone을 반환한다', async () => {
+      fetchPomFromCacheMock.mockResolvedValue(createSharedPom());
+      const session = new ResolutionSession();
+      const first = createRequestMavenResolver(session);
+      const second = createRequestMavenResolver(session);
+
+      const [firstPom, secondPom] = await Promise.all([
+        fetchRawPom(first, sharedCoordinate),
+        fetchRawPom(second, sharedCoordinate),
+      ]);
+
+      firstPom.properties!.source = 'mutated-by-first-root';
+
+      expect(fetchPomFromCacheMock).toHaveBeenCalledTimes(1);
+      expect(secondPom.properties?.source).toBe('registry');
+    });
+
+    it('classifier가 다른 root는 raw POM은 공유하지만 artifact 선택 결과는 독립적이다', async () => {
+      fetchPomFromCacheMock.mockResolvedValue(createSharedPom());
+      const session = new ResolutionSession();
+      const first = createRequestMavenResolver(session);
+      const second = createRequestMavenResolver(session);
+      const linuxCoordinate = { ...sharedCoordinate, classifier: 'linux-x86_64' };
+      const macCoordinate = { ...sharedCoordinate, classifier: 'osx-aarch_64' };
+
+      await Promise.all([
+        fetchRawPom(first, linuxCoordinate),
+        fetchRawPom(second, macCoordinate),
+      ]);
+
+      const linuxNode = (first as any).createDependencyNode(linuxCoordinate, 'compile');
+      const macNode = (second as any).createDependencyNode(macCoordinate, 'compile');
+
+      expect(fetchPomFromCacheMock).toHaveBeenCalledTimes(1);
+      expect(linuxNode.package.metadata.classifier).toBe('linux-x86_64');
+      expect(macNode.package.metadata.classifier).toBe('osx-aarch_64');
+      expect(linuxNode.package.metadata.filename).toContain('linux-x86_64');
+      expect(macNode.package.metadata.filename).toContain('osx-aarch_64');
+    });
+
+    it('기본 저장소와 명시한 기본 저장소 URL은 같은 raw POM producer를 사용한다', async () => {
+      fetchPomFromCacheMock.mockResolvedValue(createSharedPom());
+      const session = new ResolutionSession();
+      const implicitDefault = createRequestMavenResolver(session);
+      const explicitDefault = createRequestMavenResolver(session);
+      explicitDefault.setCacheOptions({ repoUrl: defaultRepoUrl });
+
+      await Promise.all([
+        fetchRawPom(implicitDefault, sharedCoordinate),
+        fetchRawPom(explicitDefault, sharedCoordinate),
+      ]);
+
+      expect(fetchPomFromCacheMock).toHaveBeenCalledTimes(1);
+      expect(fetchPomFromCacheMock).toHaveBeenCalledWith(
+        sharedCoordinate,
+        expect.objectContaining({ repoUrl: defaultRepoUrl }),
+      );
+    });
+
+    it('서로 다른 저장소는 같은 GAV raw POM을 공유하지 않는다', async () => {
+      fetchPomFromCacheMock.mockResolvedValue(createSharedPom());
+      const session = new ResolutionSession();
+      const repoA = createRequestMavenResolver(session);
+      const repoB = createRequestMavenResolver(session);
+      repoA.setCacheOptions({ repoUrl: 'https://repo-a.example/maven2' });
+      repoB.setCacheOptions({ repoUrl: 'https://repo-b.example/maven2' });
+
+      await Promise.all([
+        fetchRawPom(repoA, sharedCoordinate),
+        fetchRawPom(repoB, sharedCoordinate),
+      ]);
+
+      expect(fetchPomFromCacheMock).toHaveBeenCalledTimes(2);
+      expect(fetchPomFromCacheMock).toHaveBeenCalledWith(
+        sharedCoordinate,
+        expect.objectContaining({ repoUrl: 'https://repo-a.example/maven2' }),
+      );
+      expect(fetchPomFromCacheMock).toHaveBeenCalledWith(
+        sharedCoordinate,
+        expect.objectContaining({ repoUrl: 'https://repo-b.example/maven2' }),
+      );
+    });
+
+    it('prefetch와 이후 단건 조회는 진행 중인 같은 raw POM producer를 공유한다', async () => {
+      let release!: (pom: PomProject) => void;
+      const pendingPom = new Promise<PomProject>((resolve) => {
+        release = resolve;
+      });
+      fetchPomFromCacheMock.mockReturnValue(pendingPom);
+      const resolver = createRequestMavenResolver(new ResolutionSession());
+
+      (resolver as any).prefetchPomsParallelInternal([sharedCoordinate]);
+      await vi.waitFor(() => expect(fetchPomFromCacheMock).toHaveBeenCalledTimes(1));
+      const requestedPom = fetchRawPom(resolver, sharedCoordinate);
+      release(createSharedPom());
+
+      await expect(requestedPom).resolves.toEqual(createSharedPom());
+      expect(fetchPomFromCacheMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('prefetch 실패는 소비되며 이후 단건 조회가 다시 시도할 수 있다', async () => {
+      let reject!: (error: Error) => void;
+      const pendingPom = new Promise<PomProject>((_resolve, rejectPromise) => {
+        reject = rejectPromise;
+      });
+      fetchPomFromCacheMock
+        .mockReturnValueOnce(pendingPom)
+        .mockResolvedValueOnce(createSharedPom());
+      const resolver = createRequestMavenResolver(new ResolutionSession());
+
+      (resolver as any).prefetchPomsParallelInternal([sharedCoordinate]);
+      await vi.waitFor(() => expect(fetchPomFromCacheMock).toHaveBeenCalledTimes(1));
+      reject(new Error('prefetch repository failure'));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await expect(fetchRawPom(resolver, sharedCoordinate)).resolves.toEqual(createSharedPom());
+      expect(fetchPomFromCacheMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('진행 중인 최신 버전 metadata 조회는 요청 resolver 사이에서 한 번만 호출한다', async () => {
+      let release!: (value: { data: string }) => void;
+      const pendingMetadata = new Promise<{ data: string }>((resolve) => {
+        release = resolve;
+      });
+      const get = vi.fn(() => pendingMetadata);
+      const session = new ResolutionSession();
+      const first = createRequestMavenResolver(session);
+      const second = createRequestMavenResolver(session);
+      second.setCacheOptions({ repoUrl: defaultRepoUrl });
+      (first as any).axiosInstance.get = get;
+      (second as any).axiosInstance.get = get;
+
+      const versions = Promise.all([
+        first.getLatestVersion('org.example', 'shared'),
+        second.getLatestVersion('org.example', 'shared'),
+      ]);
+      await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+      release({
+        data: '<metadata><versioning><release>1.0.0</release></versioning></metadata>',
+      });
+
+      await expect(versions).resolves.toEqual(['1.0.0', '1.0.0']);
+    });
+
+    it('실패한 raw POM 조회는 세션에서 제거되어 다음 root가 재시도한다', async () => {
+      fetchPomFromCacheMock
+        .mockRejectedValueOnce(new Error('temporary repository failure'))
+        .mockResolvedValueOnce(createSharedPom());
+      const session = new ResolutionSession();
+
+      await expect(
+        fetchRawPom(createRequestMavenResolver(session), sharedCoordinate),
+      ).rejects.toThrow('temporary repository failure');
+      await expect(
+        fetchRawPom(createRequestMavenResolver(session), sharedCoordinate),
+      ).resolves.toEqual(createSharedPom());
+
+      expect(fetchPomFromCacheMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('legacy singleton은 요청 세션 없이 raw POM 조회를 기존처럼 각각 수행한다', async () => {
+      fetchPomFromCacheMock.mockResolvedValue(createSharedPom());
+      const legacyResolver = getMavenResolver();
+
+      expect(getAttachedResolutionSession(legacyResolver)).toBeUndefined();
+      await fetchRawPom(legacyResolver, sharedCoordinate);
+      await fetchRawPom(legacyResolver, sharedCoordinate);
+
+      expect(fetchPomFromCacheMock).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('resolveProperty (유틸리티 함수)', () => {

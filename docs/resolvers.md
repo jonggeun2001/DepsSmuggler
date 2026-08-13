@@ -6,6 +6,30 @@
 
 ---
 
+## 요청 단위 원격 조회 재사용
+
+공통 `resolveAllDependencies()`는 의존성 포함 요청마다 pip·Conda·Maven·npm의
+새 resolver 묶음과 내부 조회 세션을 만듭니다. 같은 요청 안에서 공통 전이
+의존성이 같은 원격 조회 문맥을 다시 요구하면 후보 선택·metadata/manifest
+조회만 재사용합니다. 동일한 in-flight 조회도 하나의 작업으로 합쳐지고 각
+consumer에는 독립 복제본이 반환됩니다.
+
+세션은 요청 종료와 함께 사라집니다. 실패, `null`, 빈 후보는 저장하지 않아
+뒤의 직접 루트가 재시도할 수 있습니다. 이는 최종 패키지 목록이나 전역 그래프를
+공유하는 기능이 아니므로 각 루트의 BFS 상태, pip extras·marker, Maven
+scope·exclusion·dependencyManagement, npm peer dependency·hoisting 규칙은
+그대로 유지됩니다. OS 패키지(yum/apt/apk)와 Docker는 대상이 아닙니다.
+
+키에는 resolver별 결과에 영향을 주는 입력만 넣습니다. pip은 PEP 503 이름·
+버전 조건·저장소·대상 환경·source 검증 모드, Conda는 이름·버전/build·channel·
+subdir/아키텍처·Python/CUDA, Maven은 실제 저장소 URL과 좌표, npm은 소문자 이름·
+버전 조건·registry URL을 사용합니다. pip과 Maven의 cache option은 요청 시작 시
+전용 resolver에 snapshot으로 복사되며 legacy singleton과 요청 상태를 공유하지
+않습니다. 상세 경계는 [공통 의존성 해결 문서](./shared-dependency.md)와 각
+resolver 문서를 참고합니다.
+
+---
+
 ## PipResolver
 
 ### 개요

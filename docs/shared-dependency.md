@@ -124,6 +124,37 @@ interface OSDistributionSetting {
 
 `resolveAllDependencies`의 `maxDepth` 기본값은 `5`이며 CLI 기본 의존성 포함 다운로드가 사용하는 값입니다. 각 리졸버는 이 깊이까지 해결된 패키지를 결과에 포함합니다. pip는 경계 노드에 적용 가능한 의존성이 남아 있으면 하위 확장을 생략하고 깊이 정보를 담은 경고를 애플리케이션 로그에 기록하지만, 직접 루트를 실패로 처리하지 않습니다. `resolveRootArtifactsOnly`는 shared resolver에서 pip의 `skipDependencyExpansion`으로만 전달되는 루트 전용 처리 힌트입니다. CLI의 `--no-deps`는 이 힌트와 `maxDepth: 0`을 함께 전달하므로 pip와 Conda 모두 루트 아티팩트만 조회하며, 깊이 제한 경고 없이 조용히 종료합니다. pip `PipResolver.resolveDependencies`를 직접 호출할 때의 `maxDepth` 기본값은 `10`입니다.
 
+### 요청 단위 원격 조회 재사용
+
+`includeDependencies`가 활성화된 `resolveAllDependencies()` 호출은 한 번의
+요청에만 살아 있는 내부 조회 세션과 pip·Conda·Maven·npm 전용 resolver를 하나씩
+만듭니다. requirements.txt처럼 여러 직접 루트가 공통 전이 의존성을 가질 때,
+같은 조회 문맥의 **원격 후보 선택과 metadata/manifest 조회 성공 결과**만
+재사용합니다. 함수가 반환되면 세션은 폐기되므로 별도의
+`resolveAllDependencies()` 호출 사이에는 결과를 보존하지 않으며, 이를 제어하는
+새 CLI 옵션이나 설정도 없습니다.
+
+| 타입 | 재사용하는 원격 조회 | 같은 조회로 판단하는 주요 문맥 |
+| --- | --- | --- |
+| pip | 호환 최신 버전, 정확 버전 artifact·metadata | PEP 503 정규화 이름, 버전 조건, index/base URL, 대상 Python·플랫폼, source artifact 검증 모드 |
+| conda | repodata의 호환 후보, 선택된 artifact 정보 | 소문자 이름, 버전 조건/정확 버전, build, channel, subdir·아키텍처, Python·CUDA |
+| Maven | 버전 metadata, 원시 POM/BOM | 실제 적용 저장소 URL, groupId:artifactId:version 좌표 |
+| npm | registry packument, 선택된 버전 | 소문자 이름, 버전 조건, registry URL |
+
+동일 키의 동시 조회는 하나의 원격 작업을 공유하고, 각 소비자에게는 복제한
+snapshot을 돌려주므로 한 트리의 수정이 다른 트리에 영향을 주지 않습니다.
+reject, `null`, 빈 후보처럼 유효하지 않은 결과는 남기지 않아 다음 직접 루트가
+다시 조회할 수 있습니다. 완료된 재사용 hit가 있으면 애플리케이션 info 로그에
+세션 hit/miss/join 통계를 남깁니다.
+
+이 최적화는 전역 의존성 solver가 아닙니다. 직접 루트별 dependency tree,
+best-effort/`--strict` 실패 처리, pip extras·marker, Maven scope·exclusion·
+dependencyManagement, npm peer·hoisting, 최종 다운로드 아티팩트 중복 제거는 기존
+규칙대로 각 호출 경로에서 계속 처리합니다. yum/apt/apk와 Docker는 이 세션 대상이
+아닙니다. pip·Maven의 기존 cache option은 요청 시작 시 전용 resolver에 복사한
+snapshot을 사용하므로, 요청 중 변경이 legacy singleton 설정으로 역전파되지
+않습니다.
+
 ### DependencyProgressCallback
 
 의존성 해결 진행 상황을 실시간으로 전달하는 콜백

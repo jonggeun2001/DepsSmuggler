@@ -25,6 +25,8 @@ import { NpmTreeManager, TreeManagerOptions } from './npm-tree-manager';
 import { NpmVersionResolver } from './npm-version-resolver';
 import { NPM_CONSTANTS } from '../constants/npm';
 import logger from '../../utils/logger';
+import type { ResolutionSession } from '../shared/internal/resolution-session';
+import { attachResolutionSession } from '../shared/internal/resolution-session-registry';
 
 /**
  * 플랫폼 매핑 (설정값 → npm 값)
@@ -98,6 +100,12 @@ export class NpmResolver {
     this.treeManager = new NpmTreeManager();
   }
 
+  /** @internal */
+  attachRequestSession(session: ResolutionSession): void {
+    attachResolutionSession(this, session);
+    attachResolutionSession(this.versionResolver, session);
+  }
+
   /**
    * 의존성 해결 메인 메서드
    */
@@ -130,7 +138,7 @@ export class NpmResolver {
     try {
       // 1. 루트 패키지 정보 조회
       const packument = await this.versionResolver.fetchPackument(packageName);
-      const resolvedVersion = this.versionResolver.resolveVersion(version, packument);
+      const resolvedVersion = await this.versionResolver.resolveVersionForRequest(version, packument);
 
       if (!resolvedVersion) {
         throw new Error(`버전을 찾을 수 없습니다: ${packageName}@${version}`);
@@ -242,7 +250,7 @@ export class NpmResolver {
 
     // 패키지 정보 조회
     const packument = await this.versionResolver.fetchPackument(name);
-    const resolvedVersion = this.versionResolver.resolveVersion(spec, packument);
+    const resolvedVersion = await this.versionResolver.resolveVersionForRequest(spec, packument);
 
     if (!resolvedVersion) {
       throw new Error(`호환 버전을 찾을 수 없습니다: ${name}@${spec}`);
@@ -529,6 +537,15 @@ export function getNpmResolver(): NpmResolver {
     npmResolverInstance = new NpmResolver();
   }
   return npmResolverInstance;
+}
+
+/** @internal */
+export function createRequestNpmResolver(
+  session: ResolutionSession,
+): NpmResolver {
+  const resolver = new NpmResolver();
+  resolver.attachRequestSession(session);
+  return resolver;
 }
 
 export { npmResolverInstance };

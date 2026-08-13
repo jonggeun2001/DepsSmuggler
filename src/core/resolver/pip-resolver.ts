@@ -35,6 +35,11 @@ import {
   evaluatePep508Marker,
   normalizeExtraName,
 } from '../shared/pep508-marker';
+import type { ResolutionSession } from '../shared/internal/resolution-session';
+import {
+  attachResolutionSession,
+  getAttachedResolutionSession,
+} from '../shared/internal/resolution-session-registry';
 
 // 의존성 파싱 결과
 interface ParsedDependency {
@@ -145,6 +150,10 @@ function isPipVersionCompatible(
   });
 }
 
+function normalizePep503PackageName(name: string): string {
+  return name.trim().toLowerCase().replace(/[-_.]+/g, '-');
+}
+
 function getSimpleApiChecksum(
   file: SimpleApiPackageFile | null,
 ): PipArtifactChecksum | undefined {
@@ -211,7 +220,14 @@ export class PipResolver implements IResolver {
    * 캐시 옵션 설정
    */
   setCacheOptions(options: PipCacheOptions): void {
-    this.cacheOptions = options;
+    this.cacheOptions = { ...options };
+  }
+
+  /**
+   * 캐시 옵션 조회
+   */
+  getCacheOptions(): PipCacheOptions {
+    return { ...this.cacheOptions };
   }
 
   /**
@@ -527,6 +543,27 @@ export class PipResolver implements IResolver {
    * 단일 패키지 정보 조회 (비재귀 - BFS에서 사용)
    */
   private async fetchPackageInfo(
+    name: string,
+    version: string,
+    indexUrl?: string,
+    allowUnverifiedSourceArtifact = false,
+  ): Promise<FetchedPackageInfo | null> {
+    return this.sessionGet(
+      'package-info',
+      name,
+      version,
+      indexUrl,
+      allowUnverifiedSourceArtifact,
+      () => this.fetchPackageInfoUncached(
+        name,
+        version,
+        indexUrl,
+        allowUnverifiedSourceArtifact,
+      ),
+    );
+  }
+
+  private async fetchPackageInfoUncached(
     name: string,
     version: string,
     indexUrl?: string,
@@ -859,6 +896,22 @@ export class PipResolver implements IResolver {
   private async getLatestVersion(
     name: string,
     versionSpec?: string,
+    indexUrl?: string,
+  ): Promise<string | null> {
+    return this.sessionGet(
+      'latest-version',
+      name,
+      versionSpec,
+      indexUrl,
+      false,
+      () => this.getLatestVersionUncached(name, versionSpec, indexUrl),
+      (version) => Boolean(version),
+    );
+  }
+
+  private async getLatestVersionUncached(
+    name: string,
+    versionSpec?: string,
     indexUrl?: string
   ): Promise<string | null> {
     try {
@@ -1012,6 +1065,62 @@ export class PipResolver implements IResolver {
       });
       throw error;
     }
+  }
+
+  private sessionGet<T>(
+    operation: 'latest-version' | 'package-info',
+    name: string,
+    versionSpec: string | undefined,
+    indexUrl: string | undefined,
+    allowUnverifiedSourceArtifact: boolean,
+    producer: () => Promise<T>,
+    isCacheable?: (value: T) => boolean,
+  ): Promise<T> {
+    const session = getAttachedResolutionSession(this);
+    if (!session) {
+      return producer();
+    }
+
+    return session.getOrCreate(
+      'pip',
+      operation,
+      this.getSessionContext(
+        name,
+        versionSpec,
+        indexUrl,
+        allowUnverifiedSourceArtifact,
+      ),
+      producer,
+      isCacheable ? { isCacheable } : undefined,
+    );
+  }
+
+  private getSessionContext(
+    name: string,
+    versionSpec: string | undefined,
+    indexUrl: string | undefined,
+    allowUnverifiedSourceArtifact: boolean,
+  ) {
+    const target = this.pipTargetPlatform;
+
+    return {
+      name: normalizePep503PackageName(name),
+      versionSpec: versionSpec ?? null,
+      indexUrl: indexUrl ?? null,
+      target: target
+        ? {
+            os: target.os,
+            arch: target.arch,
+            pythonVersion: target.pythonVersion ?? null,
+            linuxDistro: target.linuxDistro ?? null,
+            glibcVersion: target.glibcVersion ?? null,
+            macosVersion: target.macosVersion ?? null,
+          }
+        : null,
+      pythonVersion: this.pythonVersion ?? null,
+      baseUrl: this.cacheOptions.baseUrl ?? this.baseUrl,
+      allowUnverifiedSourceArtifact,
+    };
   }
 
   /**
@@ -1505,4 +1614,14 @@ export function getPipResolver(): PipResolver {
     pipResolverInstance = new PipResolver();
   }
   return pipResolverInstance;
+}
+
+/** @internal */
+export function createRequestPipResolver(
+  session: ResolutionSession,
+): PipResolver {
+  const resolver = new PipResolver();
+  resolver.setCacheOptions(getPipResolver().getCacheOptions());
+  attachResolutionSession(resolver, session);
+  return resolver;
 }

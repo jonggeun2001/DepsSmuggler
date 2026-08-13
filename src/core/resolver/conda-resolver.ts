@@ -19,8 +19,12 @@ import {
 } from '../shared';
 import {
   CondaRepoDataProcessor,
-  PackageCandidate,
 } from './conda-repodata-processor';
+import type { ResolutionSession } from '../shared/internal/resolution-session';
+import {
+  attachResolutionSession,
+  getAttachedResolutionSession,
+} from '../shared/internal/resolution-session-registry';
 
 // Resolver 전용 CondaPackageInfo (files, versions 추가 필드)
 interface CondaPackageInfo {
@@ -58,6 +62,8 @@ export class CondaResolver implements IResolver {
 
   // Python 버전 설정 (프로세서에도 전달)
   private pythonVersion: string | null = null;
+  private targetArchitecture: string | null = 'x86_64';
+  private cudaVersion: string | null = null;
 
   constructor() {
     this.repoDataProcessor = new CondaRepoDataProcessor({
@@ -97,6 +103,8 @@ export class CondaResolver implements IResolver {
 
     // CUDA 버전 설정
     const cudaVersion = (options as { cudaVersion?: string })?.cudaVersion || null;
+    this.targetArchitecture = arch;
+    this.cudaVersion = cudaVersion;
 
     // RepoData 프로세서 설정 업데이트
     this.repoDataProcessor.updateConfig({
@@ -166,7 +174,7 @@ export class CondaResolver implements IResolver {
         }
 
         // 패키지 정보 조회
-        const pkgInfo = await this.fetchPackageInfoBFS(
+        const pkgInfo = await this.fetchPackageInfoBFSWithSession(
           name,
           ver,
           channel,
@@ -204,11 +212,10 @@ export class CondaResolver implements IResolver {
           if (!parsed || this.isSystemPackage(parsed.name)) continue;
 
           try {
-            const depVersion = await this.repoDataProcessor.getLatestVersionFromRepoData(
+            const depVersion = await this.getLatestVersionFromRepoDataWithSession(
               parsed.name,
               channel,
               parsed.versionSpec,
-              (n, ch, spec) => this.getLatestVersion(n, ch, spec),
               parsed.build,
             );
 
@@ -375,6 +382,94 @@ export class CondaResolver implements IResolver {
     return { packageInfo, depends, isPythonMatch };
   }
 
+  private async fetchPackageInfoBFSWithSession(
+    name: string,
+    version: string,
+    channel: string,
+    buildSpec?: string,
+  ): Promise<{ packageInfo: PackageInfo; depends: string[]; isPythonMatch: boolean }> {
+    const selectedPackage = await this.sessionGet(
+      'package-info',
+      name,
+      version,
+      channel,
+      buildSpec,
+      () => this.fetchPackageInfoBFS(name, version, channel, buildSpec),
+    );
+
+    // 후보 선택은 공유하되, 호출별 package 표기와 repository metadata는 보존한다.
+    return {
+      ...selectedPackage,
+      packageInfo: {
+        ...selectedPackage.packageInfo,
+        name,
+        metadata: {
+          ...selectedPackage.packageInfo.metadata,
+          repository: `${channel}/${name}`,
+        },
+      },
+    };
+  }
+
+  private async getLatestVersionFromRepoDataWithSession(
+    name: string,
+    channel: string,
+    versionSpec?: string,
+    buildSpec?: string,
+  ): Promise<string | null> {
+    return this.sessionGet(
+      'latest-version',
+      name,
+      versionSpec,
+      channel,
+      buildSpec,
+      () => this.repoDataProcessor.getLatestVersionFromRepoData(
+        name,
+        channel,
+        versionSpec,
+        (fallbackName, fallbackChannel, fallbackVersionSpec) =>
+          this.getLatestVersion(fallbackName, fallbackChannel, fallbackVersionSpec),
+        buildSpec,
+      ),
+      Boolean,
+    );
+  }
+
+  private sessionGet<T>(
+    operation: 'latest-version' | 'package-info',
+    name: string,
+    versionOrSpec: string | undefined,
+    channel: string,
+    buildSpec: string | undefined,
+    producer: () => Promise<T>,
+    isCacheable?: (value: T) => boolean,
+  ): Promise<T> {
+    const session = getAttachedResolutionSession(this);
+    if (!session) {
+      return producer();
+    }
+
+    return session.getOrCreate(
+      'conda',
+      operation,
+      {
+        name: name.toLowerCase(),
+        version:
+          operation === 'package-info' ? versionOrSpec ?? null : null,
+        versionSpec:
+          operation === 'latest-version' ? versionOrSpec ?? null : null,
+        buildSpec: buildSpec ?? null,
+        channel,
+        targetSubdir: this.repoDataProcessor.targetSubdir,
+        targetArchitecture: this.targetArchitecture,
+        pythonVersion: this.pythonVersion,
+        cudaVersion: this.cudaVersion,
+      },
+      producer,
+      isCacheable ? { isCacheable } : undefined,
+    );
+  }
+
   /**
    * Anaconda API 폴백 (repodata 조회 실패시)
    */
@@ -515,11 +610,10 @@ export class CondaResolver implements IResolver {
               } else {
                 // 호환 버전 조회
                 const channel = env.channels?.[0] || this.defaultChannel;
-                const compatVersion = await this.repoDataProcessor.getLatestVersionFromRepoData(
+                const compatVersion = await this.getLatestVersionFromRepoDataWithSession(
                   parsed.name,
                   channel,
                   parsed.versionSpec,
-                  (name, ch, spec) => this.getLatestVersion(name, ch, spec),
                   parsed.build,
                 );
                 if (compatVersion) {
@@ -568,4 +662,13 @@ export function getCondaResolver(): CondaResolver {
     condaResolverInstance = new CondaResolver();
   }
   return condaResolverInstance;
+}
+
+/** @internal */
+export function createRequestCondaResolver(
+  session: ResolutionSession,
+): CondaResolver {
+  const resolver = new CondaResolver();
+  attachResolutionSession(resolver, session);
+  return resolver;
 }

@@ -9,25 +9,39 @@ import {
   DependencyProgressCallback,
 } from './dependency-resolver';
 import { DownloadPackage } from './types';
+import { ResolutionSession } from './internal/resolution-session';
+import logger from '../../utils/logger';
 
 // Mock all resolvers
-vi.mock('../resolver/pip-resolver', () => ({
-  getPipResolver: vi.fn(() => ({
+vi.mock('../resolver/pip-resolver', () => {
+  const getPipResolver = vi.fn(() => ({
     resolveDependencies: vi.fn(),
-  })),
-}));
+  }));
+  return {
+    getPipResolver,
+    createRequestPipResolver: vi.fn(() => getPipResolver()),
+  };
+});
 
-vi.mock('../resolver/maven-resolver', () => ({
-  getMavenResolver: vi.fn(() => ({
+vi.mock('../resolver/maven-resolver', () => {
+  const getMavenResolver = vi.fn(() => ({
     resolveDependencies: vi.fn(),
-  })),
-}));
+  }));
+  return {
+    getMavenResolver,
+    createRequestMavenResolver: vi.fn(() => getMavenResolver()),
+  };
+});
 
-vi.mock('../resolver/conda-resolver', () => ({
-  getCondaResolver: vi.fn(() => ({
+vi.mock('../resolver/conda-resolver', () => {
+  const getCondaResolver = vi.fn(() => ({
     resolveDependencies: vi.fn(),
-  })),
-}));
+  }));
+  return {
+    getCondaResolver,
+    createRequestCondaResolver: vi.fn(() => getCondaResolver()),
+  };
+});
 
 vi.mock('../resolver/yum-resolver', () => ({
   getYumResolver: vi.fn(() => ({
@@ -35,22 +49,42 @@ vi.mock('../resolver/yum-resolver', () => ({
   })),
 }));
 
-vi.mock('../resolver/npm-resolver', () => ({
-  getNpmResolver: vi.fn(() => ({
+vi.mock('../resolver/npm-resolver', () => {
+  const getNpmResolver = vi.fn(() => ({
     resolveDependencies: vi.fn(),
-  })),
-}));
+  }));
+  return {
+    getNpmResolver,
+    createRequestNpmResolver: vi.fn(() => getNpmResolver()),
+  };
+});
 
 // Import mocked modules
-import { getPipResolver } from '../resolver/pip-resolver';
-import { getMavenResolver } from '../resolver/maven-resolver';
-import { getCondaResolver } from '../resolver/conda-resolver';
+import {
+  createRequestPipResolver,
+  getPipResolver,
+} from '../resolver/pip-resolver';
+import {
+  createRequestMavenResolver,
+  getMavenResolver,
+} from '../resolver/maven-resolver';
+import {
+  createRequestCondaResolver,
+  getCondaResolver,
+} from '../resolver/conda-resolver';
 import { getYumResolver } from '../resolver/yum-resolver';
-import { getNpmResolver } from '../resolver/npm-resolver';
+import {
+  createRequestNpmResolver,
+  getNpmResolver,
+} from '../resolver/npm-resolver';
 
 describe('dependency-resolver', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(createRequestPipResolver).mockImplementation(() => getPipResolver());
+    vi.mocked(createRequestMavenResolver).mockImplementation(() => getMavenResolver());
+    vi.mocked(createRequestCondaResolver).mockImplementation(() => getCondaResolver());
+    vi.mocked(createRequestNpmResolver).mockImplementation(() => getNpmResolver());
   });
 
   afterEach(() => {
@@ -161,6 +195,80 @@ describe('dependency-resolver', () => {
       expect(result.dependencyTrees).toHaveLength(1);
     });
 
+    it('한 요청의 여러 pip root는 하나의 request resolver를 공유한다', async () => {
+      const createResult = (name: string, version: string) => ({
+        root: { package: { type: 'pip' as const, name, version }, dependencies: [] },
+        flatList: [{ type: 'pip' as const, name, version }],
+        conflicts: [],
+        totalSize: 0,
+      });
+      const requestResolver = {
+        resolveDependencies: vi.fn(async (name: string, version: string) =>
+          createResult(name, version),
+        ),
+      };
+      vi.mocked(createRequestPipResolver).mockReturnValue(requestResolver as any);
+
+      await resolveAllDependencies([
+        { id: 'pip-1', type: 'pip', name: 'requests', version: '2.28.0' },
+        { id: 'pip-2', type: 'pip', name: 'flask', version: '2.2.0' },
+      ]);
+
+      expect(createRequestPipResolver).toHaveBeenCalledTimes(1);
+      expect(requestResolver.resolveDependencies).toHaveBeenCalledTimes(2);
+    });
+
+    it('동시 요청은 서로 다른 request resolver와 target environment options를 사용한다', async () => {
+      const createResult = (name: string, version: string) => ({
+        root: { package: { type: 'pip' as const, name, version }, dependencies: [] },
+        flatList: [{ type: 'pip' as const, name, version }],
+        conflicts: [],
+        totalSize: 0,
+      });
+      const firstResolver = {
+        resolveDependencies: vi.fn(async (name: string, version: string) =>
+          createResult(name, version),
+        ),
+      };
+      const secondResolver = {
+        resolveDependencies: vi.fn(async (name: string, version: string) =>
+          createResult(name, version),
+        ),
+      };
+      vi.mocked(createRequestPipResolver)
+        .mockReturnValueOnce(firstResolver as any)
+        .mockReturnValueOnce(secondResolver as any);
+
+      await Promise.all([
+        resolveAllDependencies(
+          [{ id: 'linux', type: 'pip', name: 'linux-root', version: '1.0.0' }],
+          { targetOS: 'linux', architecture: 'x86_64', pythonVersion: '3.11' },
+        ),
+        resolveAllDependencies(
+          [{ id: 'windows', type: 'pip', name: 'windows-root', version: '1.0.0' }],
+          { targetOS: 'windows', architecture: 'arm64', pythonVersion: '3.12' },
+        ),
+      ]);
+
+      expect(createRequestPipResolver).toHaveBeenCalledTimes(2);
+      expect(firstResolver.resolveDependencies).toHaveBeenCalledWith(
+        'linux-root',
+        '1.0.0',
+        expect.objectContaining({
+          pythonVersion: '3.11',
+          targetPlatform: { system: 'Linux', machine: 'x86_64' },
+        }),
+      );
+      expect(secondResolver.resolveDependencies).toHaveBeenCalledWith(
+        'windows-root',
+        '1.0.0',
+        expect.objectContaining({
+          pythonVersion: '3.12',
+          targetPlatform: { system: 'Windows', machine: 'arm64' },
+        }),
+      );
+    });
+
     it('latest root는 해석된 실제 버전으로 교체한다', async () => {
       const mockResolver = {
         resolveDependencies: vi.fn().mockResolvedValue({
@@ -208,6 +316,208 @@ describe('dependency-resolver', () => {
       expect(result.allPackages).toEqual(packages);
       expect(result.dependencyTrees).toEqual([]);
       expect(result.failedPackages).toEqual([]);
+      expect(createRequestPipResolver).not.toHaveBeenCalled();
+      expect(createRequestCondaResolver).not.toHaveBeenCalled();
+      expect(createRequestMavenResolver).not.toHaveBeenCalled();
+      expect(createRequestNpmResolver).not.toHaveBeenCalled();
+    });
+
+    it('zero-hit request session statistics는 로그로 남기지 않는다', async () => {
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      await resolveAllDependencies([]);
+
+      expect(
+        infoSpy.mock.calls.some(([message]) => message === '의존성 요청 세션 통계'),
+      ).toBe(false);
+    });
+
+    it('hit이 있는 request session statistics는 종료 시 로그로 남긴다', async () => {
+      vi.spyOn(ResolutionSession.prototype, 'getStats').mockReturnValue({
+        hits: 1,
+        misses: 2,
+        joins: 3,
+      });
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      await resolveAllDependencies([]);
+
+      expect(infoSpy).toHaveBeenCalledWith('의존성 요청 세션 통계', {
+        hits: 1,
+        misses: 2,
+        joins: 3,
+      });
+    });
+
+    it('한 요청의 모든 라이브러리 root는 같은 session을 공유하고 요청 간에는 분리한다', async () => {
+      const sessions: ResolutionSession[] = [];
+      const resolutionResult = (type: 'pip' | 'conda' | 'maven', name: string) => ({
+        root: { package: { type, name, version: '1.0.0' }, dependencies: [] },
+        flatList: [{ type, name, version: '1.0.0' }],
+        conflicts: [],
+        totalSize: 0,
+      });
+
+      vi.mocked(createRequestPipResolver).mockImplementation((session) => {
+        sessions.push(session);
+        return {
+          resolveDependencies: vi.fn((name: string) =>
+            Promise.resolve(resolutionResult('pip', name)),
+          ),
+        } as any;
+      });
+      vi.mocked(createRequestCondaResolver).mockImplementation((session) => {
+        sessions.push(session);
+        return {
+          resolveDependencies: vi.fn((name: string) =>
+            Promise.resolve(resolutionResult('conda', name)),
+          ),
+        } as any;
+      });
+      vi.mocked(createRequestMavenResolver).mockImplementation((session) => {
+        sessions.push(session);
+        return {
+          resolveDependencies: vi.fn((name: string) =>
+            Promise.resolve(resolutionResult('maven', name)),
+          ),
+        } as any;
+      });
+      vi.mocked(createRequestNpmResolver).mockImplementation((session) => {
+        sessions.push(session);
+        return {
+          resolveDependencies: vi.fn((name: string) =>
+            Promise.resolve({
+              root: { name, version: '1.0.0' },
+              flatList: [
+                {
+                  name,
+                  version: '1.0.0',
+                  hoistedPath: `node_modules/${name}`,
+                  size: 0,
+                },
+              ],
+              conflicts: [],
+              totalSize: 0,
+            }),
+          ),
+        } as any;
+      });
+
+      await resolveAllDependencies([
+        { id: 'pip', type: 'pip', name: 'pip-root', version: '1.0.0' },
+        { id: 'conda', type: 'conda', name: 'conda-root', version: '1.0.0' },
+        { id: 'maven', type: 'maven', name: 'maven-root', version: '1.0.0' },
+        { id: 'npm', type: 'npm', name: 'npm-root', version: '1.0.0' },
+      ]);
+      await resolveAllDependencies([
+        { id: 'next-pip', type: 'pip', name: 'next-root', version: '1.0.0' },
+      ]);
+
+      expect(sessions).toHaveLength(8);
+      expect(sessions[0]).toBeInstanceOf(ResolutionSession);
+      expect(new Set(sessions.slice(0, 4))).toEqual(new Set([sessions[0]]));
+      expect(new Set(sessions.slice(4, 8))).toEqual(new Set([sessions[4]]));
+      expect(sessions[4]).not.toBe(sessions[0]);
+    });
+
+    it('공통 의존성 snapshot은 root별 트리를 보존하면서 한 번만 다운로드 목록에 포함하고 재사용 통계를 남긴다', async () => {
+      let session: ResolutionSession | undefined;
+      const sharedMetadataLookup = vi.fn().mockResolvedValue({ version: '2.0.0' });
+      const requestResolver = {
+        resolveDependencies: vi.fn(async (name: string) => {
+          await session?.getOrCreate(
+            'pip',
+            'package-info',
+            { name: 'shared', version: '2.0.0' },
+            () => sharedMetadataLookup(),
+          );
+          const root = { type: 'pip' as const, name, version: '1.0.0' };
+          const shared = { type: 'pip' as const, name: 'shared', version: '2.0.0' };
+          return {
+            root: { package: root, dependencies: [{ package: shared, dependencies: [] }] },
+            flatList: [root, shared],
+            conflicts: [],
+            totalSize: 0,
+          };
+        }),
+      };
+      vi.mocked(createRequestPipResolver).mockImplementation((requestSession) => {
+        session = requestSession;
+        return requestResolver as any;
+      });
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      const result = await resolveAllDependencies([
+        { id: 'alpha', type: 'pip', name: 'alpha', version: '1.0.0' },
+        { id: 'beta', type: 'pip', name: 'beta', version: '1.0.0' },
+      ]);
+
+      expect(sharedMetadataLookup).toHaveBeenCalledTimes(1);
+      expect(result.dependencyTrees.map((tree) => tree.root.package.name)).toEqual([
+        'alpha',
+        'beta',
+      ]);
+      expect(result.allPackages.filter((pkg) => pkg.name === 'shared')).toHaveLength(1);
+      expect(result.successfulPackages?.filter((pkg) => pkg.name === 'shared')).toHaveLength(1);
+      expect(infoSpy).toHaveBeenCalledWith('의존성 요청 세션 통계', {
+        hits: 1,
+        misses: 1,
+        joins: 0,
+      });
+    });
+
+    it('첫 root의 일시적 공통 의존성 조회 실패 뒤 다음 root가 같은 session에서 재시도해 성공한다', async () => {
+      let session: ResolutionSession | undefined;
+      const sharedMetadataLookup = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('temporary metadata failure'))
+        .mockResolvedValueOnce({ version: '2.0.0' });
+      const requestResolver = {
+        resolveDependencies: vi.fn(async (name: string) => {
+          await session?.getOrCreate(
+            'pip',
+            'package-info',
+            { name: 'shared', version: '2.0.0' },
+            () => sharedMetadataLookup(),
+          );
+          const root = { type: 'pip' as const, name, version: '1.0.0' };
+          const shared = { type: 'pip' as const, name: 'shared', version: '2.0.0' };
+          return {
+            root: { package: root, dependencies: [{ package: shared, dependencies: [] }] },
+            flatList: [root, shared],
+            conflicts: [],
+            totalSize: 0,
+          };
+        }),
+      };
+      vi.mocked(createRequestPipResolver).mockImplementation((requestSession) => {
+        session = requestSession;
+        return requestResolver as any;
+      });
+
+      const result = await resolveAllDependencies([
+        { id: 'alpha', type: 'pip', name: 'alpha', version: '1.0.0' },
+        { id: 'beta', type: 'pip', name: 'beta', version: '1.0.0' },
+      ]);
+
+      expect(sharedMetadataLookup).toHaveBeenCalledTimes(2);
+      expect(result.failedPackages).toEqual([
+        {
+          name: 'alpha',
+          version: '1.0.0',
+          error: 'temporary metadata failure',
+        },
+      ]);
+      expect(result.dependencyTrees.map((tree) => tree.root.package.name)).toEqual(['beta']);
+      expect(result.successfulPackages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'beta', version: '1.0.0' }),
+          expect.objectContaining({ name: 'shared', version: '2.0.0' }),
+        ]),
+      );
+      expect(result.successfulPackages).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: 'alpha' })]),
+      );
     });
 
     it('pip 패키지에 targetOS와 pythonVersion 옵션 전달', async () => {
