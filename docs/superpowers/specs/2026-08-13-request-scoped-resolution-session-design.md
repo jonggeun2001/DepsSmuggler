@@ -51,12 +51,16 @@
 ### 공통 세션
 
 `src/core/shared/resolution-session.ts`에 요청 수명과 같은 `ResolutionSession`을
-둔다. 세션은 문자열 키와 성공 값을 위한 `Promise<T>`를 저장하는 memoizer를
-제공한다.
+둔다. 세션은 `resolver type + operation kind + 안정적으로 직렬화한 문맥`으로
+구성한 namespace key와 성공 값을 위한 canonical `Promise<T>`를 저장하는
+memoizer를 제공한다. 예를 들어 pip의 `latest-version`과 `package-info`는 같은
+패키지 문맥이어도 서로 다른 key다. 따라서 `fetchPackageInfo(latest)`가 내부에서
+`getLatestVersion(latest)`를 호출해도 자기 Promise를 재진입 대기하지 않는다.
 
-- 최초 호출은 producer Promise를 저장하고 실행한다.
-- 후속 호출은 같은 Promise를 반환한다. 완료 전 동시 호출도 중복 네트워크
-  작업을 만들지 않는다.
+- 최초 호출은 canonical producer Promise를 저장하고 실행한다.
+- 후속 호출은 canonical Promise에 연결되지만, `then(clone)`으로 각 consumer에
+  독립 snapshot을 반환한다. 완료 전 동시 호출도 중복 네트워크 작업을 만들지
+  않으며, 어느 consumer도 다른 consumer의 객체를 바꿀 수 없다.
 - producer가 reject되면 캐시 항목을 즉시 제거한다. 같은 시점의 호출자는 같은
   실패를 받지만, 이후 직접 루트는 다시 조회한다. 따라서 일시적 네트워크 실패가
   뒤의 루트 성공 기회를 없애지 않는다. 각 resolver의 기존 오류 감싸기와
@@ -74,6 +78,11 @@
 한 요청에 하나씩 만든다. 이로써 resolver 인스턴스 필드(visited, queue, conflicts,
 tree manager, 대상 환경)가 동시 다운로드 요청 사이에 섞이지 않는다. 원격 metadata
 cache는 기존 모듈 수준 캐시를 계속 사용한다.
+
+pip·Maven factory는 legacy singleton에 `setCacheOptions()`로 설정된 값을 읽기 전용
+snapshot으로 복사해 요청 인스턴스에 설정한다. 이 snapshot getter는 복사본만
+반환하고, 새 instance의 옵션 변경은 singleton에 역전파하지 않는다. 따라서 기존
+TTL·cache 설정 동작과 요청 간 상태 격리를 함께 보존한다.
 
 세션은 이 요청 전용 인스턴스의 resolver 옵션으로만 전달하며, 외부 호출자가
 세션을 전달하거나 보존할 수 없게 하여 요청 경계를 강제한다.
@@ -104,8 +113,11 @@ extras, Maven scope/exclusion, npm peer/optional/dev 플래그처럼 **부모에
   repodata 후보 선택 결과를 세션으로 감싼다. build와 target subdir을 키에
   포함한다.
 - **Maven**: 좌표의 원시 POM/BOM 조회·파싱과 version range 선택을 세션으로
-  감싼다. classifier/type 기반 아티팩트 선택, scope, exclusion, dependency
-  management 적용은 호출별 queue processor가 수행한다.
+  감싼다. 단건 `fetchPomWithCache()`와 비동기 `prefetchPomsParallel()` 모두 같은
+  `maven:pom` canonical producer로 등록한다. prefetch는 기존처럼 해결을 실패시키지
+  않는 best-effort 동작을 유지하되, 이후 실제 fetch는 같은 in-flight/success
+  snapshot을 사용한다. classifier/type 기반 아티팩트 선택, scope, exclusion,
+  dependency management 적용은 호출별 queue processor가 수행한다.
 - **npm**: registry manifest와 선택된 버전 조회를 세션으로 감싼다. hoisting과
   peer dependency 배치는 기존 root별 tree manager가 구성한다. 공통 resolver가
   npm에 `targetOS`/`architecture`를 새로 매핑하지는 않으며, 현재 host 기반 선택
@@ -140,7 +152,7 @@ resolver의 공개 사용 경로와 기존 테스트를 유지한다.
 ## 검증 계획
 
 1. `ResolutionSession` 단위 테스트로 success, in-flight 공유, reject 후 재시도,
-   clone-on-read, 서로 다른 키 분리를 검증한다.
+   clone-on-read, resolver type·operation kind·문맥이 다른 키 분리를 검증한다.
 2. pip·conda·Maven·npm resolver 테스트에서 두 직접 루트가 공통 전이
    의존성을 가질 때 `getLatestVersion`을 포함한 공통 metadata/candidate producer가
    한 번만 호출되는지 검증한다.
@@ -149,9 +161,13 @@ resolver의 공개 사용 경로와 기존 테스트를 유지한다.
    현재 전달되는 입력만 키에 반영하는 테스트를 추가한다.
 4. 공통 의존성의 일시적 실패가 다음 직접 루트에서 재시도되고, 각 직접 루트의
    best-effort/`--strict` 정책 및 오류 문맥을 유지하는지 검증한다.
-5. 서로 다른 환경 옵션으로 동시에 두 `resolveAllDependencies()`를 실행해
+5. Maven prefetch와 이후 단건 fetch가 동일 canonical POM producer를 공유하고,
+   prefetch 오류가 기존 해결 오류 정책을 바꾸지 않는지 검증한다.
+6. legacy singleton에 설정한 pip·Maven cache options가 요청별 인스턴스에
+   snapshot으로 전달되고 역전파되지 않는지 검증한다.
+7. 서로 다른 환경 옵션으로 동시에 두 `resolveAllDependencies()`를 실행해
    요청별 resolver 인스턴스와 세션 상태가 섞이지 않는지 검증한다.
-6. 전체 test, lint, typecheck, build와 PR CI를 실행한다.
+8. 전체 test, lint, typecheck, build와 PR CI를 실행한다.
 
 ## 영향 문서
 
