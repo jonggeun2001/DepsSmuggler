@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CondaRepoDataProcessor } from './conda-repodata-processor';
 import {
   createRequestCondaResolver,
@@ -16,6 +16,207 @@ describe('CondaResolver 요청 session 연결', () => {
 
     expect(getAttachedResolutionSession(requestResolver)).toBe(session);
     expect(getAttachedResolutionSession(legacyResolver)).toBeUndefined();
+  });
+});
+
+describe('CondaResolver 요청 세션 후보 재사용', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('공통 전이 의존성의 최신 후보와 아티팩트 선택을 한 번만 수행한다', async () => {
+    const repodata = {
+      info: { subdir: 'linux-64' },
+      packages: {
+        'alpha-1.0.0-0.tar.bz2': {
+          name: 'alpha',
+          version: '1.0.0',
+          build: '0',
+          build_number: 0,
+          depends: ['Shared >=1.0'],
+          subdir: 'linux-64',
+        },
+        'beta-1.0.0-0.tar.bz2': {
+          name: 'beta',
+          version: '1.0.0',
+          build: '0',
+          build_number: 0,
+          depends: ['shared >=1.0'],
+          subdir: 'linux-64',
+        },
+        'shared-1.0.0-0.tar.bz2': {
+          name: 'shared',
+          version: '1.0.0',
+          build: '0',
+          build_number: 0,
+          depends: [],
+          subdir: 'linux-64',
+        },
+      },
+    };
+    vi.spyOn(CondaRepoDataProcessor.prototype, 'getRepoData').mockResolvedValue(
+      repodata,
+    );
+    const findCandidates = vi.spyOn(
+      CondaRepoDataProcessor.prototype,
+      'findPackageCandidates',
+    );
+    const session = new ResolutionSession();
+
+    const alpha = await createRequestCondaResolver(session).resolveDependencies('alpha', '1.0.0', {
+      targetPlatform: { system: 'Linux', machine: 'x86_64' },
+    });
+    const beta = await createRequestCondaResolver(session).resolveDependencies('beta', '1.0.0', {
+      targetPlatform: { system: 'Linux', machine: 'x86_64' },
+    });
+
+    // alpha, beta의 root 선택 2회와 shared의 후보·아티팩트 선택 각 1회
+    expect(findCandidates).toHaveBeenCalledTimes(4);
+    expect(alpha.flatList.find((pkg) => pkg.name === 'Shared')).toBeDefined();
+    expect(beta.flatList.find((pkg) => pkg.name === 'shared')).toBeDefined();
+  });
+
+  it('동일 후보 선택의 in-flight 조회를 합친다', async () => {
+    let release!: (value: string | null) => void;
+    const pending = new Promise<string | null>((resolve) => {
+      release = resolve;
+    });
+    const getLatestVersion = vi
+      .spyOn(CondaRepoDataProcessor.prototype, 'getLatestVersionFromRepoData')
+      .mockReturnValue(pending);
+    const session = new ResolutionSession();
+    const first = createRequestCondaResolver(session);
+    const second = createRequestCondaResolver(session);
+
+    const firstLookup = (first as any).getLatestVersionFromRepoDataWithSession(
+      'Shared',
+      'conda-forge',
+      '>=1.0',
+      'build_*',
+    );
+    const secondLookup = (second as any).getLatestVersionFromRepoDataWithSession(
+      'shared',
+      'conda-forge',
+      '>=1.0',
+      'build_*',
+    );
+    await Promise.resolve();
+
+    expect(getLatestVersion).toHaveBeenCalledTimes(1);
+    release('1.2.3');
+    await expect(Promise.all([firstLookup, secondLookup])).resolves.toEqual([
+      '1.2.3',
+      '1.2.3',
+    ]);
+  });
+
+  it('channel, 대상 환경, build와 version spec이 다르면 후보를 재사용하지 않는다', async () => {
+    const rootRepoData = {
+      info: { subdir: 'linux-64' },
+      packages: {
+        'root-1.0.0-0.tar.bz2': {
+          name: 'root',
+          version: '1.0.0',
+          build: '0',
+          build_number: 0,
+          depends: [],
+          subdir: 'linux-64',
+        },
+      },
+    };
+    vi.spyOn(CondaRepoDataProcessor.prototype, 'getRepoData').mockResolvedValue(
+      rootRepoData,
+    );
+    const getLatestVersion = vi
+      .spyOn(CondaRepoDataProcessor.prototype, 'getLatestVersionFromRepoData')
+      .mockResolvedValue('1.2.3');
+    const session = new ResolutionSession();
+    const linuxX64 = createRequestCondaResolver(session);
+    const linuxArm = createRequestCondaResolver(session);
+    const pythonChanged = createRequestCondaResolver(session);
+    const cudaChanged = createRequestCondaResolver(session);
+
+    await linuxX64.resolveDependencies('root', '1.0.0', {
+      maxDepth: 0,
+      targetPlatform: { system: 'Linux', machine: 'x86_64' },
+      pythonVersion: '3.12',
+      cudaVersion: '12.4',
+    });
+    await linuxArm.resolveDependencies('root', '1.0.0', {
+      maxDepth: 0,
+      targetPlatform: { system: 'Linux', machine: 'aarch64' },
+      pythonVersion: '3.12',
+      cudaVersion: '12.4',
+    });
+    await pythonChanged.resolveDependencies('root', '1.0.0', {
+      maxDepth: 0,
+      targetPlatform: { system: 'Linux', machine: 'aarch64' },
+      pythonVersion: '3.13',
+      cudaVersion: '12.4',
+    });
+    await cudaChanged.resolveDependencies('root', '1.0.0', {
+      maxDepth: 0,
+      targetPlatform: { system: 'Linux', machine: 'aarch64' },
+      pythonVersion: '3.13',
+      cudaVersion: '11.8',
+    });
+
+    await (linuxX64 as any).getLatestVersionFromRepoDataWithSession(
+      'shared', 'conda-forge', '>=1.0', 'build-a',
+    );
+    await (linuxArm as any).getLatestVersionFromRepoDataWithSession(
+      'shared', 'conda-forge', '>=1.0', 'build-a',
+    );
+    await (pythonChanged as any).getLatestVersionFromRepoDataWithSession(
+      'shared', 'conda-forge', '>=1.0', 'build-a',
+    );
+    await (cudaChanged as any).getLatestVersionFromRepoDataWithSession(
+      'shared', 'conda-forge', '>=1.0', 'build-a',
+    );
+    await (cudaChanged as any).getLatestVersionFromRepoDataWithSession(
+      'shared', 'other-channel', '>=1.0', 'build-a',
+    );
+    await (cudaChanged as any).getLatestVersionFromRepoDataWithSession(
+      'shared', 'other-channel', '>=1.0', 'build-b',
+    );
+    await (cudaChanged as any).getLatestVersionFromRepoDataWithSession(
+      'shared', 'other-channel', '>=2.0', 'build-b',
+    );
+
+    expect(getLatestVersion).toHaveBeenCalledTimes(7);
+  });
+
+  it('실패하거나 빈 후보이면 다음 resolver가 다시 조회한다', async () => {
+    const getLatestVersion = vi
+      .spyOn(CondaRepoDataProcessor.prototype, 'getLatestVersionFromRepoData')
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('1.2.3');
+    const session = new ResolutionSession();
+    const lookup = () => (createRequestCondaResolver(session) as any)
+      .getLatestVersionFromRepoDataWithSession('shared', 'conda-forge', '>=1.0');
+
+    await expect(lookup()).rejects.toThrow('temporary failure');
+    await expect(lookup()).resolves.toBeNull();
+    await expect(lookup()).resolves.toBe('1.2.3');
+    expect(getLatestVersion).toHaveBeenCalledTimes(3);
+  });
+
+  it('세션 없는 legacy resolver는 후보를 자체적으로 다시 조회한다', async () => {
+    const getLatestVersion = vi
+      .spyOn(CondaRepoDataProcessor.prototype, 'getLatestVersionFromRepoData')
+      .mockResolvedValue('1.2.3');
+    const resolver = new CondaResolver();
+
+    await (resolver as any).getLatestVersionFromRepoDataWithSession(
+      'shared', 'conda-forge', '>=1.0',
+    );
+    await (resolver as any).getLatestVersionFromRepoDataWithSession(
+      'shared', 'conda-forge', '>=1.0',
+    );
+
+    expect(getAttachedResolutionSession(resolver)).toBeUndefined();
+    expect(getLatestVersion).toHaveBeenCalledTimes(2);
   });
 });
 
