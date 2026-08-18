@@ -1,7 +1,5 @@
 # CLI Download Environment Options Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** `depssmuggler download`에서 대상 OS, 아키텍처, Python/CUDA 버전, Conda 채널과 Maven classifier를 검증하고 의존성 해결부터 실제 아티팩트 다운로드까지 일관되게 적용한다.
 
 **Architecture:** CLI 환경 옵션의 런타임 검증과 비기본값 판별을 작은 전용 모듈로 분리한다. `downloadCommand`는 검증된 값을 공용 dependency resolver에 전달하고, resolver는 기존 요청 패키지에 실제 선택된 root 메타데이터를 병합한다. 각 downloader는 resolver가 선택한 URL 또는 classifier를 우선 사용하고 기존 조회 로직은 폴백으로 유지한다.
