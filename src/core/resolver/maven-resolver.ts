@@ -632,6 +632,7 @@ export class MavenResolver implements IResolver {
               groupId: dep.groupId,
               artifactId: dep.artifactId,
               scope: dep.scope,
+              type: dep.type,
             },
           });
         }

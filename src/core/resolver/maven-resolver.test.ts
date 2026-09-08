@@ -637,6 +637,36 @@ describe('MavenResolver 단위 테스트', () => {
       expect(springCore).toBeDefined();
     });
 
+    it('POM 전용 의존성의 type을 다운로드 메타데이터에 보존한다', async () => {
+      const pomText = `<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.apache.flink</groupId>
+  <artifactId>flink-streaming-java</artifactId>
+  <version>1.20.5</version>
+  <dependencies>
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-metrics</artifactId>
+      <version>1.20.5</version>
+      <type>pom</type>
+    </dependency>
+  </dependencies>
+</project>`;
+
+      const result = await resolver.parseFromText(pomText);
+      const flinkMetrics = result.find((pkg) => pkg.name === 'org.apache.flink:flink-metrics');
+
+      expect(flinkMetrics).toMatchObject({
+        version: '1.20.5',
+        metadata: {
+          groupId: 'org.apache.flink',
+          artifactId: 'flink-metrics',
+          type: 'pom',
+        },
+      });
+    });
+
     it('의존성 없는 pom.xml은 프로젝트 자체만 반환', async () => {
       const pomText = `<?xml version="1.0" encoding="UTF-8"?>
 <project>

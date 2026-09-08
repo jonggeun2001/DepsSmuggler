@@ -629,6 +629,12 @@ const deps = resolver.parseFromText(`
 `);
 ```
 
+### 텍스트 입력의 의존성 type 보존
+
+`parseFromText()`는 각 `<dependency>`의 `<type>` 값을 다운로드 메타데이터에 보존합니다. 따라서 POM을 붙여넣어 추가할 때 `org.apache.flink:flink-metrics:1.20.5`처럼 `<type>pom</type>`으로 선언된 의존성도 JAR 기본값으로 바뀌지 않고 `.pom` 및 해당 체크섬 파일로 다운로드됩니다.
+
+이 동작은 `npx vitest run src/core/resolver/maven-resolver.test.ts`의 POM 전용 의존성 회귀 테스트로 검증합니다.
+
 ---
 
 ## YumResolver
