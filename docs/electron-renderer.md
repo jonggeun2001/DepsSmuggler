@@ -134,6 +134,7 @@
 
 - Electron 환경에서는 settings store가 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화되며, 레거시 `defaultOutputFormat/defaultArchiveType` 조합은 로드 시 `zip | tar.gz`로 정규화됩니다.
 - 설정 로드 시 잘못된 숫자·불리언·목록·중첩 객체는 기존 기본값으로 복구하며, 파일의 데이터가 스토어 액션 함수를 덮어쓰지 못하게 합니다. 정상 Windows/macOS pip 타겟의 선택적 필드와 알 수 없는 기존 데이터 필드는 유지합니다. 브라우저 백업 저장소의 접근/용량 오류는 메모리 갱신과 Electron 파일 저장을 막지 않으며, `config:set`의 실패 응답도 로그로 남깁니다. `[settings-store:*]` 로그와 `settings-store.test.ts`로 로드/저장 실패를 추적·검증합니다.
+- 초기 설정 로드·정규화와 기본값 대체는 메모리에만 반영합니다. Electron 파일이나 브라우저 백업을 자동으로 덮어쓰지 않고, 사용자의 설정 변경/초기화부터 저장합니다. 정상/손상/읽기 실패 및 브라우저 초기화의 저장 호출 여부를 `settings-store.test.ts`에서 검증합니다.
 - 설정 화면의 캐시 위젯은 현재 `cache:*` IPC 기준 패키지 메타데이터 캐시만 집계/삭제합니다.
 - `src/renderer/pages/settings/` 아래 `DeliverySettingsSection`, `CacheSettingsSection`, `UpdateSettingsSection`, `use-settings-form-actions.ts`가 `SettingsPage`의 세부 책임을 분리합니다.
 - SMTP 테스트 버튼은 `testSmtpConnection` IPC가 있으면 실제 연결 테스트를 실행하고, 브라우저 개발 환경에서는 시뮬레이션, IPC가 빠진 Electron 빌드에서는 경고와 비활성화 상태를 노출합니다.

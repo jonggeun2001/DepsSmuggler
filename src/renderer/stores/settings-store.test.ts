@@ -24,12 +24,12 @@ const createStorageMock = (): StorageMock => {
   };
 };
 
-const loadSettingsStore = async (fileConfig?: Record<string, unknown>) => {
+const loadSettingsStore = async (fileConfig?: Record<string, unknown> | Error) => {
   vi.resetModules();
   const localStorage = createStorageMock();
   const electronAPI = {
     config: {
-      get: vi.fn().mockResolvedValue(fileConfig ?? null),
+      get: fileConfig instanceof Error ? vi.fn().mockRejectedValue(fileConfig) : vi.fn().mockResolvedValue(fileConfig ?? null),
       set: vi.fn().mockResolvedValue(undefined),
       reset: vi.fn().mockResolvedValue(undefined),
     },
@@ -53,6 +53,24 @@ describe('settings-store', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    ['정상 설정', { concurrentDownloads: 6 }, 6],
+    ['잘못된 설정', { concurrentDownloads: -1 }, 3],
+    ['읽지 못한 설정', undefined, 3],
+    ['IPC 읽기 실패', new Error('EACCES'), 3],
+  ] as const)('%s 초기 로드는 원본 저장소를 수정하지 않고 명시적 변경부터 저장한다', async (_name, config, expected) => {
+    const { useSettingsStore, electronAPI, localStorage } = await loadSettingsStore(config);
+    await useSettingsStore.getState().initializeFromFile();
+    expect(useSettingsStore.getState()).toMatchObject({ _initialized: true, concurrentDownloads: expected });
+    expect(electronAPI.config.set).not.toHaveBeenCalled();
+    expect(localStorage.setItem).not.toHaveBeenCalled();
+
+    useSettingsStore.getState().updateSettings({ concurrentDownloads: 8 });
+    expect(electronAPI.config.set).toHaveBeenCalledTimes(1);
+    expect(electronAPI.config.set).toHaveBeenCalledWith(expect.objectContaining({ concurrentDownloads: 8 }));
+    expect(localStorage.setItem).toHaveBeenCalledTimes(1);
+  });
+
   it('손상된 설정은 기본값으로 복구하고 액션 함수를 덮어쓰지 않는다', async () => {
     const { useSettingsStore } = await loadSettingsStore({
       concurrentDownloads: -1, smtpPort: 99999, downloadRenderInterval: -2,
@@ -71,6 +89,24 @@ describe('settings-store', () => {
     expect(() => useSettingsStore.getState().addCustomPipIndexUrl('test', 'https://example.com')).not.toThrow();
     expect(typeof useSettingsStore.getState().updateSettings).toBe('function');
     expect(typeof useSettingsStore.getState().resetSettings).toBe('function');
+  });
+
+  it('브라우저 초기화도 기존 백업을 덮어쓰지 않고 이후 변경은 저장한다', async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    const localStorage = createStorageMock();
+    vi.stubGlobal('localStorage', localStorage);
+    vi.stubGlobal('window', { localStorage });
+    try {
+      const { useSettingsStore } = await import('./settings-store');
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(useSettingsStore.getState()._initialized).toBe(true);
+      expect(localStorage.setItem).not.toHaveBeenCalled();
+      useSettingsStore.getState().updateSettings({ concurrentDownloads: 8 });
+      expect(localStorage.setItem).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('브라우저 저장소 실패에도 메모리 변경과 Electron 파일 저장을 계속한다', async () => {

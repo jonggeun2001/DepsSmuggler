@@ -6,16 +6,19 @@
 
 ## 현재 자동화된 회귀 범위
 
-| 수동 케이스 | 현재 Playwright 파일 | 검증 포인트 |
-| --- | --- | --- |
-| `UI-DL-001` | `tests/e2e/download-smoke.spec.ts` | 장바구니에서 일반 다운로드 완료 화면까지, preflight 출력 형식 표시, 로컬 저장 옵션 전달 |
-| `UI-DL-004` | `tests/e2e/download-cancel-retry.spec.ts` | 느린 다운로드 취소 유지, overwrite 대기 중 늦은 취소 completion 보존, delayed start failure 후 이전 outcome 복구, 실패 후 개별 재시도, 전달 실패가 남은 취소 화면에서의 새 세션 재시도, runtime download/cancel 시도 횟수 |
-| `UI-SET-001`, `UI-SET-002(성공 경로만)` | `tests/e2e/settings-regression.spec.ts` | SMTP 값 입력, 연결 테스트 성공 경로, 저장 후 새로고침 복원 |
-| `UI-CFG-001` | `tests/e2e/settings-cache-breakdown.spec.ts` | 캐시 총합, 타입별 breakdown, 캐시 비우기 후 0 값 갱신 |
-| `UI-HIS-001` | `tests/e2e/history-email-restore.spec.ts` | 이메일 히스토리 재다운로드, 저장된 수신자 복원, 파일 분할 안내 표시, 전역 설정 보존 |
-| `UI-OS-001` | `tests/e2e/os-package-download.spec.ts` | OS 패키지 검색, 전용 다운로드 화면, 출력 옵션 결과 반영 |
+| 수동 케이스                             | 현재 Playwright 파일                         | 검증 포인트                                                                                                                                                                                                               |
+| --------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UI-DL-001`                             | `tests/e2e/download-smoke.spec.ts`           | 장바구니에서 일반 다운로드 완료 화면까지, preflight 출력 형식 표시, 로컬 저장 옵션 전달                                                                                                                                   |
+| `UI-DL-004`                             | `tests/e2e/download-cancel-retry.spec.ts`    | 느린 다운로드 취소 유지, overwrite 대기 중 늦은 취소 completion 보존, delayed start failure 후 이전 outcome 복구, 실패 후 개별 재시도, 전달 실패가 남은 취소 화면에서의 새 세션 재시도, runtime download/cancel 시도 횟수 |
+| `UI-SET-001`, `UI-SET-002(성공 경로만)` | `tests/e2e/settings-regression.spec.ts`      | SMTP 값 입력, 연결 테스트 성공 경로, 저장 후 새로고침 복원                                                                                                                                                                |
+| `UI-CFG-001`                            | `tests/e2e/settings-cache-breakdown.spec.ts` | 캐시 총합, 타입별 breakdown, 캐시 비우기 후 0 값 갱신                                                                                                                                                                     |
+| `UI-HIS-001`                            | `tests/e2e/history-email-restore.spec.ts`    | 이메일 히스토리 재다운로드, 저장된 수신자 복원, 파일 분할 안내 표시, 전역 설정 보존                                                                                                                                       |
+| `UI-OS-001`                             | `tests/e2e/os-package-download.spec.ts`      | OS 패키지 검색, 전용 다운로드 화면, 출력 옵션 결과 반영                                                                                                                                                                   |
+| 장바구니 텍스트·파일 입력 및 빈 상태    | `tests/e2e/cart-input-regression.spec.ts`    | 빈 입력 거부, requirements 중복·주석 제외와 저장 복원, 최신 버전 조회 실패, package.json 파싱 오류·scoped/dev 의존성, 파일 업로드, Maven JAR/POM 구분                                                                     |
 
 현재 회귀 세트는 `tests/e2e/fixtures/mock-electron-app.ts`와 `window.electronAPI` stub을 이용해 preload/IPC를 브라우저 쪽에서 모킹합니다.
+
+설정의 필수 입력 검증·SMTP 실패/재시도·캐시 권한 오류·미저장 이동 방지와 OS 다운로드의 입력·취소·히스토리·구독 정리는 Vitest의 `use-settings-form-actions.test.ts`, `use-os-download-flow.test.ts`에서도 검증합니다. 훅 단위 검증과 아래 DOM/버튼 상태 E2E 후보는 별도 범위입니다.
 
 ## 다음 자동화 우선순위
 
@@ -72,9 +75,9 @@
 
 다음 항목은 자동화 가능하더라도 플랫폼 특성 또는 비용 때문에 수동 확인 비중을 더 크게 둡니다.
 
-| 수동 케이스 | 수동 우선 이유 |
-| --- | --- |
-| `UI-CFG-001` | 캐시 크기와 정리 결과는 로컬 파일 상태에 따라 달라질 수 있음 |
+| 수동 케이스    | 수동 우선 이유                                                          |
+| -------------- | ----------------------------------------------------------------------- |
+| `UI-CFG-001`   | 캐시 크기와 정리 결과는 로컬 파일 상태에 따라 달라질 수 있음            |
 | `UI-ROUTE-001` | 새로고침, 창 크기 변경, 라우트 왕복은 조합이 많고 탐색적 확인 가치가 큼 |
 
 ## Playwright 작성 원칙
@@ -84,6 +87,7 @@
 - 다운로드 검증은 UI 제목만 보지 말고 `runtime.downloadCalls` payload까지 확인합니다.
 - 다운로드 취소/재시도 회귀는 `downloadScenario` 기반 fixture 상태 머신과 `sessionId` 태깅을 함께 사용해, 취소 후 늦은 완료 이벤트, overwrite 대기, delayed start failure를 포함한 재시작 세션 경계를 모두 검증합니다.
 - OS 패키지 시나리오는 일반 다운로드와 별도 파일로 유지해 분기 가독성을 지킵니다.
+- 아이콘이 버튼 접근성 이름에 포함되는 경우 실제 role/name을 기준으로 선택자를 작성합니다. 취소/재시도는 임의 sleep 대신 IPC 호출 기록과 패키지 상태로 사전 조건을 확인합니다.
 
 ## 신규 스펙 템플릿
 

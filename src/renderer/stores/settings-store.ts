@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create, type StateCreator } from 'zustand';
 import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 
@@ -327,8 +327,8 @@ const electronStorage: StateStorage = {
   },
 };
 
-export const useSettingsStore = create<SettingsState>()(
-  persist(
+const createSettingsState: StateCreator<SettingsState, [], [['zustand/persist', Partial<SettingsState>]]> =
+  (setInMemory, getState, api) => persist<SettingsState, [], [], Partial<SettingsState>>(
     (set, get) => ({
       ...defaultSettings,
 
@@ -379,7 +379,8 @@ export const useSettingsStore = create<SettingsState>()(
               const normalizedConfig = normalizeFileSettings(fileConfig);
               // 파일에 저장된 설정을 현재 상태와 병합 (새 설정 항목 대응)
               const mergedConfig = { ...defaultSettings, ...normalizedConfig, _initialized: true };
-              set(mergedConfig);
+              // 초기 로드는 persist를 우회해 손상된 원본/레거시 설정을 자동으로 덮어쓰지 않는다.
+              setInMemory(mergedConfig);
               console.debug('[settings-store] 설정 파일에서 로드 완료');
               return;
             }
@@ -387,7 +388,7 @@ export const useSettingsStore = create<SettingsState>()(
             console.error('설정 파일 로드 실패:', error);
           }
         }
-        set({ _initialized: true });
+        setInMemory({ _initialized: true });
       },
     }),
     {
@@ -403,8 +404,9 @@ export const useSettingsStore = create<SettingsState>()(
         return rest;
       },
     }
-  )
-);
+  )(setInMemory, getState, api);
+
+export const useSettingsStore = create<SettingsState>()(createSettingsState);
 
 // 앱 시작 시 자동으로 파일에서 설정 로드
 if (typeof window !== 'undefined') {
@@ -424,7 +426,7 @@ if (typeof window !== 'undefined') {
       console.debug('[settings-store] Electron 환경에서 설정 초기화 완료');
     } else {
       // Electron API가 없으면 기본값 사용 (브라우저 환경)
-      useSettingsStore.setState({ _initialized: true });
+      await useSettingsStore.getState().initializeFromFile();
       console.debug('[settings-store] 브라우저 환경에서 기본값 사용');
     }
   };
