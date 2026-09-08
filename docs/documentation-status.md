@@ -33,7 +33,7 @@
 | [npm 분석](npm-dependency-resolution.md) | Arborist·hoisting·peer·lockfile·미러 설계 | 자체 resolver, 실제 공개 옵션, lockfile/미러 자동 생성과의 차이 |
 | [HTTP → IPC 이행](api-migration-ipc.md) | v0.1.17 삭제 목록·diff·이행 효과 | 현재 renderer data client의 HTTP/storage 폴백과 IPC 서비스 분리 |
 | [OS 초기 설계](os-package-downloader-design.md) | 인터페이스·프리셋·파서·GPG·출력·UI 단계 초안 | 실제 개별 downloader와 os-shared 경로, GPG 미구현, 완료된 UI 연결 |
-| [CLI 환경 옵션 설계](cli-download-environment-options-design.md), [구현 계획](cli-download-environment-options-plan.md) | 요구사항·병합 계약·Task 1–7·검증·인계 기록 | 구현 완료 상태와 현재 파일 위치·후속 보강 |
+| [CLI 환경 옵션 설계](cli-download-environment-options-design.md), [구현 계획](cli-download-environment-options-plan.md) | 요구사항·병합 계약·Task 1–7·검증·인계 기록 | 구현 완료 상태·현재 파일 위치·pip/Conda 기본 환경의 `--no-deps` 루트 검증으로 확장된 조건 |
 | [UI 발견 사항](ui-testing-findings-2026-04-14.md), [UI 수정 요청](ui-testing-fix-prompt-2026-04-14.md) | 2026-04-14 당시 관찰·재현·요청 | 이후 구현과 현재 자동화 검증의 범위 |
 
 분석 문서의 외부 알고리즘 예시와 성능 수치를 DepsSmuggler의 실행 결과로 취급하지 않습니다. 역사적 자료는 문서 첫머리에서 성격과 현재 가이드 링크를 안내하며, 현재 구현 세부사항은 같은 문서에서도 따로 최신화합니다.

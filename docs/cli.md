@@ -100,7 +100,7 @@ depssmuggler download [옵션]
 - 깊이 경계 도달은 위 규칙에 따른 정상적인 bounded traversal이며 직접 루트 실패가 아닙니다. 반대로 호환되는 필수 의존성 버전을 찾지 못한 경우, 의존성 메타데이터 조회가 실패한 경우, 네트워크 오류가 발생한 경우처럼 실제 필수 의존성 해결 오류는 직접 루트 실패로 처리됩니다.
 - pip 하위 의존성은 버전 제약과 대상 환경에 호환되는 아티팩트를 함께 만족하는 최신 릴리스를 선택하며, 같은 패키지에 여러 경로로 요청된 기본/extra 컨텍스트는 합쳐서 평가합니다. Conda 하위 의존성은 버전뿐 아니라 build MatchSpec도 실제 파일 선택까지 유지하고, 같은 버전의 서로 다른 build가 필요하면 각 아티팩트를 모두 보존합니다.
 - Maven classifier 형식은 라이브러리마다 다르므로 OS와 아키텍처만으로 자동 생성하지 않습니다. Maven에 `--target-os` 또는 기본값이 아닌 `--arch`를 지정할 때는 실제 네이티브 아티팩트를 선택할 `--classifier`를 함께 지정해야 합니다.
-- pip, Conda, Maven에서 대상 환경을 명시하고 `--no-deps`를 사용하면 해당 환경에 맞는 루트 아티팩트만 선택하고 전이 의존성은 다운로드하지 않습니다. pip/Conda의 기본값이 아닌 `--arch`도 대상 환경 명시로 처리합니다.
+- pip·Conda의 `--no-deps`는 환경 옵션을 생략해도 깊이 0 resolver로 호환되는 루트 아티팩트를 선택·검증하며, 전이 의존성은 다운로드하지 않습니다. 기본값이 아닌 `--arch`를 비롯해 지정한 환경 옵션도 이 파일 선택에 반영됩니다. Maven은 classifier 등 대상 환경을 명시한 경우에만 깊이 0으로 루트를 해결합니다. 기본 환경의 Maven과 npm·Docker는 `--no-deps`에서 resolver를 생략합니다.
 - pip은 PyPI JSON API와 Simple API 모두에서 호환 wheel을 우선하고, 없으면 `Requires-Python` 조건을 만족하는 source distribution(`.tar.gz`, `.zip`, `.tar.bz2`, `.tar.xz`)을 선택합니다. source distribution은 대상 환경에서 빌드하지 않고 그대로 반입합니다. 호환 wheel과 source distribution이 모두 없으면 다른 아키텍처 wheel로 바꾸지 않으며, 요청한 정확 버전·`latest`·범위 spec과 대상 Python/OS/아키텍처를 포함한 오류를 반환합니다.
 - Simple API의 source distribution은 `--no-deps`에서 artifact hash가 있으면 Core Metadata 없이도 반입할 수 있습니다. wheel과 의존성 확장 모드는 검증된 Core Metadata를 계속 요구합니다.
 
