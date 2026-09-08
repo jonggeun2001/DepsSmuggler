@@ -138,6 +138,7 @@
 - SMTP 테스트 버튼은 `testSmtpConnection` IPC가 있으면 실제 연결 테스트를 실행하고, 브라우저 개발 환경에서는 시뮬레이션, IPC가 빠진 Electron 빌드에서는 경고와 비활성화 상태를 노출합니다.
 - 히스토리 store는 `window.electronAPI.history.*`를 통해 `~/.depssmuggler/history.json`과 직접 동기화되며, renderer localStorage persist를 source of truth로 사용하지 않습니다.
 - 다운로드 화면 오케스트레이션은 `use-download-page-controller.test.tsx`에서 jsdom + mocked `window.electronAPI` 조합으로 시작/일시정지/재개/취소/완료/오류 시나리오를 회귀 고정합니다.
+- 다운로드 표의 의존성 그룹은 목록 변경 시 부모 ID로 한 번 인덱싱하고 재사용합니다. 행마다 전체 목록을 검색하던 비용을 `O(원본 수 × 전체 항목 수)`에서 `O(전체 항목 수)`로 줄이며, 기존 순서와 상태 집계는 유지합니다. `download-page/utils.test.ts`가 결과 동등성과 조회 횟수를 검증합니다.
 
 ## 사용자 흐름
 

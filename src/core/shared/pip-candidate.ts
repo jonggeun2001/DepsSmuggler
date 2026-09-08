@@ -313,10 +313,19 @@ export class CandidateEvaluator {
     // 필터링
     const applicable = candidates.filter((c) => this.isApplicable(c));
 
-    // 정렬
+    // 같은 후보의 태그·해시 정렬 키는 이번 정렬에서 한 번만 계산한다.
+    const keys = new Map<InstallationCandidate, CandidateSortingKey>();
+    const getKey = (candidate: InstallationCandidate): CandidateSortingKey => {
+      let key = keys.get(candidate);
+      if (!key) {
+        key = this.getSortingKey(candidate);
+        keys.set(candidate, key);
+      }
+      return key;
+    };
     return applicable.sort((a, b) => {
-      const keyA = this.getSortingKey(a);
-      const keyB = this.getSortingKey(b);
+      const keyA = getKey(a);
+      const keyB = getKey(b);
       return this.compareSortingKeys(keyA, keyB);
     });
   }

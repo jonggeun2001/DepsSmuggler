@@ -2,7 +2,7 @@ import { BranchesOutlined, ReloadOutlined, RightOutlined } from '@ant-design/ico
 import { Button, Collapse, List, Progress, Space, Table, Tag, Typography } from 'antd';
 import { useMemo } from 'react';
 import { statusColors, statusIcons, statusLabels } from '../presentation';
-import { formatBytes, getPackageDependencies, getPackageGroupStatus } from '../utils';
+import { formatBytes, groupDownloadItems } from '../utils';
 import type { DownloadStoreItem, DownloadStoreStatus } from '../../../stores/download-store';
 
 const { Panel } = Collapse;
@@ -21,6 +21,10 @@ export function DownloadItemsTable({
   onRetry,
   paginate = false,
 }: DownloadItemsTableProps) {
+  const groups = useMemo(
+    () => showDependenciesTree ? groupDownloadItems(downloadItems) : [],
+    [downloadItems, showDependenciesTree]
+  );
   const columns = useMemo(
     () => [
       {
@@ -126,8 +130,6 @@ export function DownloadItemsTable({
     );
   }
 
-  const originalPackages = downloadItems.filter((item) => !item.isDependency);
-
   return (
     <Collapse
       bordered={false}
@@ -135,12 +137,9 @@ export function DownloadItemsTable({
         <RightOutlined rotate={isActive ? 90 : 0} style={{ fontSize: 12 }} />
       )}
       style={{ background: 'transparent' }}
-      defaultActiveKey={originalPackages.map((pkg) => pkg.id)}
+      defaultActiveKey={groups.map(({ parent }) => parent.id)}
     >
-      {originalPackages.map((pkg) => {
-        const deps = getPackageDependencies(downloadItems, pkg.id);
-        const groupStatus = getPackageGroupStatus(downloadItems, pkg);
-
+      {groups.map(({ parent: pkg, dependencies: deps, status: groupStatus }) => {
         return (
           <Panel
             key={pkg.id}

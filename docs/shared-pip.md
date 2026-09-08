@@ -260,6 +260,8 @@ if (result.success) {
 
 ### CandidateEvaluator
 
+후보 정렬 키는 `getApplicableCandidates()` 호출 안에서 후보 객체별로 한 번만 계산합니다. 반복 비교 때 wheel 태그·해시 검사와 키 객체 생성을 줄이며, 정렬 비교기와 결과 순서는 그대로입니다. 캐시는 호출 후 해제되어 다음 호출의 후보 변경도 반영합니다. `src/core/shared/pip-candidate.test.ts`에서 기존 비교 결과와 키 계산 횟수를 검증합니다.
+
 wheel/sdist 후보를 평가하고 최적 파일을 선택하는 클래스
 
 ```typescript

@@ -148,42 +148,21 @@ export class ApkDependencyResolver extends BaseOSDependencyResolver {
     if (byName) {
       candidates.push(...byName);
     }
+    const candidateKeys = new Set(candidates.map((pkg) => this.getPackageKey(pkg)));
 
     // 2. provides로 검색
     const byProvides = this.providesMap.get(dep.name);
     if (byProvides) {
       for (const pkg of byProvides) {
-        if (!candidates.find((c) => this.getPackageKey(c) === this.getPackageKey(pkg))) {
+        const key = this.getPackageKey(pkg);
+        if (!candidateKeys.has(key)) {
           candidates.push(pkg);
+          candidateKeys.add(key);
         }
       }
     }
 
-    // 3. so: 의존성 처리 (예: so:libc.musl-x86_64.so.1)
-    if (dep.name.startsWith('so:')) {
-      const soName = dep.name;
-      const bySo = this.providesMap.get(soName);
-      if (bySo) {
-        for (const pkg of bySo) {
-          if (!candidates.find((c) => this.getPackageKey(c) === this.getPackageKey(pkg))) {
-            candidates.push(pkg);
-          }
-        }
-      }
-    }
-
-    // 4. cmd: 의존성 처리 (예: cmd:sh)
-    if (dep.name.startsWith('cmd:')) {
-      const cmdName = dep.name;
-      const byCmd = this.providesMap.get(cmdName);
-      if (byCmd) {
-        for (const pkg of byCmd) {
-          if (!candidates.find((c) => this.getPackageKey(c) === this.getPackageKey(pkg))) {
-            candidates.push(pkg);
-          }
-        }
-      }
-    }
+    // so:/cmd: 접두사도 위의 동일 provides 키 조회에 포함된다.
 
     return candidates;
   }

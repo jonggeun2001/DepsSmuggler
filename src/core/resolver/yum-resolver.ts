@@ -164,13 +164,16 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
     if (byName) {
       candidates.push(...byName);
     }
+    const candidateKeys = new Set(candidates.map((pkg) => this.getPackageKey(pkg)));
 
     // 2. provides로 검색
     const byProvides = this.providesMap.get(dep.name);
     if (byProvides) {
       for (const pkg of byProvides) {
-        if (!candidates.find((c) => this.getPackageKey(c) === this.getPackageKey(pkg))) {
+        const key = this.getPackageKey(pkg);
+        if (!candidateKeys.has(key)) {
           candidates.push(pkg);
+          candidateKeys.add(key);
         }
       }
     }
@@ -181,8 +184,10 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
       const byLib = this.providesMap.get(libName);
       if (byLib) {
         for (const pkg of byLib) {
-          if (!candidates.find((c) => this.getPackageKey(c) === this.getPackageKey(pkg))) {
+          const key = this.getPackageKey(pkg);
+          if (!candidateKeys.has(key)) {
             candidates.push(pkg);
+            candidateKeys.add(key);
           }
         }
       }
