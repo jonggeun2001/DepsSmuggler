@@ -541,7 +541,8 @@ candidates.push({
 의존성 해결 완료 후 전체 패키지의 총 크기를 계산하여 반환합니다.
 
 ```typescript
-const flatList = this.flattenDependencies(root);
+// src/core/shared에서 가져온 공용 함수
+const flatList = flattenDependencyTree(root);
 const totalSize = flatList.reduce(
   (sum, pkg) => sum + ((pkg.metadata?.size as number) || 0),
   0

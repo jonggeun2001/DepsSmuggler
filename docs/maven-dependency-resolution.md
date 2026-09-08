@@ -875,8 +875,12 @@ private async fetchPackageSizes(packages: PackageInfo[]): Promise<PackageInfo[]>
 **중요**: Parent POM이나 BOM(Bill of Materials)의 `<dependencyManagement>` 섹션은 **버전 관리 전용**입니다. 실제 다운로드 대상 의존성으로 처리하면 안 됩니다.
 
 ```typescript
-// extractDependencies에서의 처리
-private extractDependencies(pom: PomProject, ...): PomDependency[] {
+// src/core/shared/maven-pom-utils.ts의 공용 함수
+export function extractDependencies(
+  pom: PomProject,
+  coordinate: MavenCoordinate,
+  isRoot = false,
+): PomDependency[] {
   // 실제 <dependencies> 섹션만 반환
   const deps = pom.dependencies?.dependency;
   if (deps) {
@@ -887,7 +891,7 @@ private extractDependencies(pom: PomProject, ...): PomDependency[] {
   // dependencyManagement의 630개 이상 항목을 모두 다운로드하면
   // 스택 오버플로우 및 불필요한 다운로드 발생
   if (isRoot && pom.packaging === 'pom') {
-    logger.info(`Parent/BOM POM 감지: ${coordinate} - 실제 의존성 없음`);
+    logger.info(`Parent/BOM POM 감지: ${coordinateToString(coordinate)} - 실제 의존성 없음`);
   }
 
   return [];
