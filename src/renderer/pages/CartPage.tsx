@@ -81,7 +81,7 @@ const estimatedSizePerPackage: Record<PackageType, number> = {
 
 const CartPage: React.FC = () => {
   const navigate = useNavigate();
-  const { items, removeItem, clearCart, addItem } = useCartStore();
+  const { items, removeItem, clearCart, addItem, hasItem } = useCartStore();
   const settings = useSettingsStore();
   const resetDownload = useDownloadStore((state) => state.reset);
 
@@ -380,10 +380,7 @@ const CartPage: React.FC = () => {
 
     let addedCount = 0;
     resolvedPackages.forEach((pkg) => {
-      const exists = items.some(
-        (item) => item.type === type && item.name === pkg.name && item.version === pkg.version
-      );
-      if (!exists) {
+      if (!hasItem(type, pkg.name, pkg.version, pkg.metadata)) {
         addItem({
           type,
           name: pkg.name,

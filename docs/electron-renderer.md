@@ -149,7 +149,7 @@
 4. `DownloadPage`에서 실제 다운로드 실행
 5. 완료 후 `HistoryPage`로 재방문 가능
 
-`CartPage`에서 `pom.xml` 파일을 가져오거나 텍스트로 붙여넣을 때는 `<type>pom</type>` 같은 Maven artifact type을 장바구니 metadata로 유지합니다. 이 metadata는 일반 다운로드 IPC를 거쳐 `MavenDownloader`에 전달되므로 POM 전용 의존성은 `.pom` 아티팩트와 체크섬으로 다운로드되고, 최상위 복사본도 `.pom` 확장자를 사용합니다.
+`CartPage`에서 `pom.xml` 파일을 가져오거나 텍스트로 붙여넣을 때는 `<type>pom</type>` 같은 Maven artifact type을 장바구니 metadata로 유지합니다. Maven 장바구니의 중복 판정도 이 artifact type을 포함하므로 같은 GAV라도 기본 JAR과 POM은 각각 보관하고, 같은 type만 중복으로 처리합니다. 이 metadata는 일반 다운로드 IPC를 거쳐 `MavenDownloader`에 전달되므로 POM 전용 의존성은 `.pom` 아티팩트와 체크섬으로 다운로드되고, 최상위 복사본도 `.pom` 확장자를 사용합니다.
 
 ### OS 패키지 흐름
 
