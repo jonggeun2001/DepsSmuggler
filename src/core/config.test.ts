@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { getConfigManager, ConfigManager, Config } from './config';
 
 const testHome = vi.hoisted(() => ({ path: '' }));
@@ -327,6 +328,28 @@ describe('ConfigManager', () => {
   });
 
   describe('암호화 마이그레이션', () => {
+    it.each([-1, 5])('레거시 비밀번호 로드는 잘못된 설정(%s)을 자동 저장하지 않고 정상 설정만 마이그레이션한다', async (concurrentDownloads) => {
+      const manager = new ConfigManager();
+      const configPath = path.join(manager.getConfigDir(), 'settings.json');
+      const password = 'legacy-test-password';
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from('depssmuggler-secret-key-32bytes!'), iv);
+      const encrypted = `${iv.toString('hex')}:${cipher.update(password, 'utf8', 'hex')}${cipher.final('hex')}`;
+      await fs.outputJson(configPath, { concurrentDownloads, smtpPassword: encrypted });
+      const original = await fs.readFile(configPath, 'utf8');
+
+      const loaded = await manager.loadConfig();
+      expect(loaded).toMatchObject({ concurrentDownloads: 5, smtpPassword: password });
+      if (concurrentDownloads < 0) {
+        expect(await fs.readFile(configPath, 'utf8')).toBe(original);
+        await manager.updateConfig({ concurrentDownloads: 7 });
+        expect(await manager.loadConfig()).toMatchObject({ concurrentDownloads: 7, smtpPassword: password });
+      } else {
+        expect((await fs.readJson(configPath)).smtpPassword).not.toBe(encrypted);
+        expect(await manager.loadConfig()).toMatchObject({ concurrentDownloads: 5, smtpPassword: password });
+      }
+    });
+
     it('잘못된 형식의 암호화 값은 원본 반환', async () => {
       const configManager = new ConfigManager();
       const configPath = path.join(configManager.getConfigDir(), 'settings.json');

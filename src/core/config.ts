@@ -151,8 +151,8 @@ export class ConfigManager {
           config.smtpPassword = this.decrypt(config.smtpPassword);
         }
 
-        // 레거시 키로 복호화된 경우 새 키로 마이그레이션
-        if (this.needsEncryptionMigration && config.smtpPassword) {
+        // 잘못된 필드가 있으면 원본 보존을 위해 명시적 저장까지 마이그레이션을 미룬다.
+        if (this.needsEncryptionMigration && config.smtpPassword && invalidFields.length === 0) {
           console.info('[config] 암호화 키 마이그레이션을 수행합니다...');
           try {
             await this.saveConfig(config);
