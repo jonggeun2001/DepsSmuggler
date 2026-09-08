@@ -42,10 +42,16 @@ import { getRendererDataClient } from '../lib/renderer-data-client';
 import { DependencyResolutionResult, DependencyNode, PackageType as CorePackageType } from '../../types';
 import type { DependencyAPI } from '../../types/electron';
 import { getPackageArtifactKey } from '../../core/shared/dependency-tree-utils';
+import {
+  parseMavenPomDependencies,
+  type ParsedMavenPomDependency,
+} from './cart-page/maven-pom-parser';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
 const { Dragger } = Upload;
+
+type ParsedPackage = ParsedMavenPomDependency;
 
 // 패키지 타입별 색상
 const typeColors: Record<PackageType, string> = {
@@ -75,7 +81,7 @@ const estimatedSizePerPackage: Record<PackageType, number> = {
 
 const CartPage: React.FC = () => {
   const navigate = useNavigate();
-  const { items, removeItem, clearCart, addItem } = useCartStore();
+  const { items, removeItem, clearCart, addItem, hasItem } = useCartStore();
   const settings = useSettingsStore();
   const resetDownload = useDownloadStore((state) => state.reset);
 
@@ -93,7 +99,7 @@ const CartPage: React.FC = () => {
 
   // 장바구니 아이템 해시 계산 (캐싱용)
   const itemsHash = useMemo(() => {
-    return items.map(i => `${i.type}:${i.name}:${i.version}:${i.arch || ''}`).sort().join('|');
+    return items.map(i => `${i.type}:${i.name}:${i.version}:${i.arch || ''}:${i.metadata?.type || ''}`).sort().join('|');
   }, [items]);
 
   // 예상 다운로드 크기 계산
@@ -126,6 +132,7 @@ const CartPage: React.FC = () => {
         name: item.name,
         version: item.version,
         architecture: item.arch,
+        metadata: item.metadata,
       }));
 
       let result: {
@@ -297,14 +304,14 @@ const CartPage: React.FC = () => {
   // 패키지 파일 파싱
   const parsePackageFile = async (filename: string, content: string) => {
     let type: PackageType = 'pip';
-    let packages: { name: string; version: string }[] = [];
+    let packages: ParsedPackage[] = [];
 
     if (filename === 'requirements.txt' || filename.endsWith('.txt')) {
       type = 'pip';
       packages = parseRequirementsTxt(content);
     } else if (filename === 'pom.xml' || filename.endsWith('.xml')) {
       type = 'maven';
-      packages = parsePomXml(content);
+      packages = parseMavenPomDependencies(content);
     } else if (filename === 'package.json' || filename.endsWith('.json')) {
       type = 'npm';
       packages = parsePackageJson(content);
@@ -314,7 +321,7 @@ const CartPage: React.FC = () => {
   };
 
   // requirements.txt 파싱
-  const parseRequirementsTxt = (content: string): { name: string; version: string }[] => {
+  const parseRequirementsTxt = (content: string): ParsedPackage[] => {
     return content
       .split('\n')
       .filter((line) => line.trim() && !line.startsWith('#') && !line.startsWith('-'))
@@ -326,26 +333,11 @@ const CartPage: React.FC = () => {
         }
         return null;
       })
-      .filter(Boolean) as { name: string; version: string }[];
-  };
-
-  // pom.xml 파싱
-  const parsePomXml = (content: string): { name: string; version: string }[] => {
-    const packages: { name: string; version: string }[] = [];
-    const depRegex =
-      /<dependency>\s*<groupId>([^<]+)<\/groupId>\s*<artifactId>([^<]+)<\/artifactId>\s*(?:<version>([^<]+)<\/version>)?/g;
-    let match;
-    while ((match = depRegex.exec(content)) !== null) {
-      packages.push({
-        name: `${match[1]}:${match[2]}`,
-        version: match[3] || 'latest',
-      });
-    }
-    return packages;
+      .filter(Boolean) as ParsedPackage[];
   };
 
   // package.json 파싱
-  const parsePackageJson = (content: string): { name: string; version: string }[] => {
+  const parsePackageJson = (content: string): ParsedPackage[] => {
     try {
       const pkg = JSON.parse(content);
       const deps = { ...pkg.dependencies, ...pkg.devDependencies };
@@ -370,7 +362,7 @@ const CartPage: React.FC = () => {
   };
 
   // 파싱된 패키지 추가
-  const addParsedPackages = async (type: PackageType, packages: { name: string; version: string }[]) => {
+  const addParsedPackages = async (type: PackageType, packages: ParsedPackage[]) => {
     if (packages.length === 0) {
       message.warning('파싱된 패키지가 없습니다');
       return;
@@ -389,14 +381,12 @@ const CartPage: React.FC = () => {
 
     let addedCount = 0;
     resolvedPackages.forEach((pkg) => {
-      const exists = items.some(
-        (item) => item.type === type && item.name === pkg.name && item.version === pkg.version
-      );
-      if (!exists) {
+      if (!hasItem(type, pkg.name, pkg.version, pkg.metadata)) {
         addItem({
           type,
           name: pkg.name,
           version: pkg.version,
+          metadata: pkg.metadata,
         });
         addedCount++;
       }
@@ -417,7 +407,7 @@ const CartPage: React.FC = () => {
     }
 
     let type: PackageType;
-    let packages: { name: string; version: string }[] = [];
+    let packages: ParsedPackage[] = [];
 
     switch (textInputType) {
       case 'requirements':
@@ -426,7 +416,7 @@ const CartPage: React.FC = () => {
         break;
       case 'pom':
         type = 'maven';
-        packages = parsePomXml(textInputValue);
+        packages = parseMavenPomDependencies(textInputValue);
         break;
       case 'package':
         type = 'npm';

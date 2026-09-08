@@ -29,13 +29,40 @@ export interface CartItem {
   classifier?: string;
 }
 
+type CartItemIdentity = Pick<CartItem, 'type' | 'name' | 'version' | 'metadata'>;
+
+const getMavenArtifactType = (metadata?: Record<string, unknown>): string => {
+  const artifactType = metadata?.type;
+  return typeof artifactType === 'string' && artifactType.trim() !== ''
+    ? artifactType
+    : 'jar';
+};
+
+const isSameCartItem = (item: CartItem, candidate: CartItemIdentity): boolean => {
+  if (
+    item.type !== candidate.type ||
+    item.name !== candidate.name ||
+    item.version !== candidate.version
+  ) {
+    return false;
+  }
+
+  return item.type !== 'maven' ||
+    getMavenArtifactType(item.metadata) === getMavenArtifactType(candidate.metadata);
+};
+
 // 장바구니 상태
 interface CartState {
   items: CartItem[];
   addItem: (item: Omit<CartItem, 'id' | 'addedAt'>) => void;
   removeItem: (id: string) => void;
   clearCart: () => void;
-  hasItem: (type: PackageType, name: string, version: string) => boolean;
+  hasItem: (
+    type: PackageType,
+    name: string,
+    version: string,
+    metadata?: Record<string, unknown>
+  ) => boolean;
 }
 
 // 고유 ID 생성
@@ -51,7 +78,7 @@ export const useCartStore = create<CartState>()(
       addItem: (item) => {
         const state = get();
         // 중복 체크
-        if (state.hasItem(item.type, item.name, item.version)) {
+        if (state.hasItem(item.type, item.name, item.version, item.metadata)) {
           return;
         }
 
@@ -77,10 +104,9 @@ export const useCartStore = create<CartState>()(
         set({ items: [] });
       },
 
-      hasItem: (type, name, version) => {
-        return get().items.some(
-          (item) =>
-            item.type === type && item.name === name && item.version === version
+      hasItem: (type, name, version, metadata) => {
+        return get().items.some((item) =>
+          isSameCartItem(item, { type, name, version, metadata })
         );
       },
     }),

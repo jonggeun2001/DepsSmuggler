@@ -243,12 +243,12 @@ export class MavenQueueProcessor {
       return;
     }
 
-    // packaging 타입 업데이트
-    if (pom.packaging) {
+    // dependency에 명시한 type을 우선하고, packaging으로 보완하면 파일명도 갱신한다.
+    if (!coordinate.type && pom.packaging) {
       coordinate.type = pom.packaging;
       node.package.metadata = {
         ...node.package.metadata,
-        type: pom.packaging,
+        ...this.deps.createDependencyNode(coordinate, node.scope || 'compile').package.metadata,
       };
     }
 

@@ -68,6 +68,8 @@ export interface MavenResolverOptions extends ResolverOptions {
   targetArchitecture?: string;
   /** 사용자 지정 classifier (예: natives-linux, linux-x86_64) */
   classifier?: string;
+  /** 명시적으로 요청한 artifact type. 없으면 원격 POM의 packaging 사용 */
+  artifactType?: string;
 }
 
 // MavenResolutionContext는 maven-queue-processor.ts에서 import됨
@@ -184,6 +186,7 @@ export class MavenResolver implements IResolver {
       version,
       // 사용자가 UI에서 선택한 classifier 사용
       classifier: opts.classifier,
+      type: opts.artifactType,
     };
 
     // 네이티브 패키지이고 classifier가 없으면 경고만 표시 (자동 생성하지 않음)
@@ -297,12 +300,12 @@ export class MavenResolver implements IResolver {
   ): Promise<Record<string, string>> {
     const rootPom = await this.fetchPomWithCache(rootCoordinate);
 
-    // packaging 타입 설정
-    if (rootPom.packaging) {
+    // 명시한 artifact type은 유지하고, 미지정인 경우에만 packaging으로 보완한다.
+    if (!rootCoordinate.type && rootPom.packaging) {
       rootCoordinate.type = rootPom.packaging;
       ctx.rootNode.package.metadata = {
         ...ctx.rootNode.package.metadata,
-        type: rootPom.packaging,
+        ...this.createDependencyNode(rootCoordinate, 'compile').package.metadata,
       };
     }
 
@@ -632,6 +635,7 @@ export class MavenResolver implements IResolver {
               groupId: dep.groupId,
               artifactId: dep.artifactId,
               scope: dep.scope,
+              type: dep.type,
             },
           });
         }

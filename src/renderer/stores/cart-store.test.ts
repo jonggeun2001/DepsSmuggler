@@ -68,6 +68,36 @@ describe('cart-store', () => {
     );
   });
 
+  it('Maven은 같은 GAV여도 artifact type이 다르면 별도 항목으로 보관한다', async () => {
+    const { useCartStore } = await loadCartStore();
+
+    useCartStore.getState().addItem({
+      type: 'maven',
+      name: 'org.apache.flink:flink-metrics',
+      version: '1.20.5',
+    });
+    useCartStore.getState().addItem({
+      type: 'maven',
+      name: 'org.apache.flink:flink-metrics',
+      version: '1.20.5',
+      metadata: { type: 'pom' },
+    });
+    useCartStore.getState().addItem({
+      type: 'maven',
+      name: 'org.apache.flink:flink-metrics',
+      version: '1.20.5',
+      metadata: { type: 'pom' },
+    });
+
+    const items = useCartStore.getState().items;
+
+    expect(items).toHaveLength(2);
+    expect(items.map((item) => item.metadata?.type ?? 'jar').sort()).toEqual([
+      'jar',
+      'pom',
+    ]);
+  });
+
   it('removeItem은 지정한 항목만 제거한다', async () => {
     const { useCartStore } = await loadCartStore();
 

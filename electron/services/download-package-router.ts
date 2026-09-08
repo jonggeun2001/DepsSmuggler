@@ -45,6 +45,35 @@ export interface DownloadPackageRouter {
 }
 
 export function createDownloadPackageRouter(): DownloadPackageRouter {
+  // JAR 작업도 부속 POM을 쓰므로 같은 출력 디렉터리/GAV의 다운로드와 복사를 직렬화한다.
+  const mavenDownloads = new Map<string, Promise<void>>();
+
+  async function downloadMavenInOrder(
+    pkg: DownloadPackage,
+    context: DownloadPackageContext
+  ): Promise<DownloadPackageResult> {
+    const key = JSON.stringify([path.resolve(context.packagesDir), pkg.name, pkg.version]);
+    const previous = mavenDownloads.get(key);
+    let release!: () => void;
+    const completion = new Promise<void>((resolve) => { release = resolve; });
+    mavenDownloads.set(key, completion);
+
+    await previous;
+    try {
+      if (context.state.isCancelled()) {
+        return { id: pkg.id, success: false, error: 'cancelled' };
+      }
+      await context.state.waitWhilePaused();
+      if (context.state.isCancelled()) {
+        return { id: pkg.id, success: false, error: 'cancelled' };
+      }
+      return await downloadMavenPackage(pkg, context);
+    } finally {
+      release();
+      if (mavenDownloads.get(key) === completion) mavenDownloads.delete(key);
+    }
+  }
+
   return {
     async downloadPackage(pkg, context) {
       const { packagesDir, options, progressEmitter, state } = context;
@@ -72,7 +101,7 @@ export function createDownloadPackageRouter(): DownloadPackageRouter {
         );
 
         if (pkg.type === 'maven') {
-          return await downloadMavenPackage(pkg, context);
+          return await downloadMavenInOrder(pkg, context);
         }
 
         if (pkg.type === 'docker') {
@@ -267,17 +296,18 @@ async function downloadMavenPackage(
 
   const groupId = parts[0];
   const artifactId = parts[1];
-  const classifier = pkg.classifier;
+  const classifier = pkg.classifier ?? (pkg.metadata?.classifier as string | undefined);
   let mavenTotalBytes = 0;
   const m2RepoDir = path.join(packagesDir, 'm2repo');
   await fse.ensureDir(m2RepoDir);
 
-  const jarPath = await mavenDownloader.downloadPackage(
+  const artifactPath = await mavenDownloader.downloadPackage(
     {
       type: 'maven',
       name: pkg.name,
       version: pkg.version,
       metadata: {
+        ...pkg.metadata,
         groupId,
         artifactId,
         classifier,
@@ -300,12 +330,13 @@ async function downloadMavenPackage(
     }
   );
 
+  const extension = path.extname(artifactPath) || '.jar';
   const flatFileName = classifier
-    ? `${artifactId}-${pkg.version}-${classifier}.jar`
-    : `${artifactId}-${pkg.version}.jar`;
+    ? `${artifactId}-${pkg.version}-${classifier}${extension}`
+    : `${artifactId}-${pkg.version}${extension}`;
   const flatDestinationPath = path.join(packagesDir, flatFileName);
-  if (jarPath && (await fse.pathExists(jarPath))) {
-    await fse.copy(jarPath, flatDestinationPath);
+  if (artifactPath && (await fse.pathExists(artifactPath))) {
+    await fse.copy(artifactPath, flatDestinationPath);
   }
 
   progressEmitter.emitPackageProgress(

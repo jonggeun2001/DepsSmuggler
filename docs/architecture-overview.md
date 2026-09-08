@@ -59,7 +59,8 @@ depssmuggler/
 - 라우트 source of truth는 `src/renderer/router.tsx`이며, `src/renderer/index.tsx`는 `createAppRouter()`만 소비합니다.
 - `MainLayout.tsx`가 좌측 네비게이션과 공통 레이아웃을 담당합니다.
 - `HomePage.tsx`와 `WizardPage.tsx`는 패키지 타입 선택과 검색 진입을 담당합니다.
-- `CartPage.tsx`는 장바구니와 텍스트 입력 기반 패키지 추가를 담당합니다.
+- `CartPage.tsx`는 장바구니와 텍스트 입력 기반 패키지 추가를 담당하며, BOM을 포함한 Maven POM 입력의 artifact type metadata를 미리보기·의존성 해결·다운로드 경계까지 유지하고 같은 GAV라도 type이 다른 artifact를 구분합니다.
+- Electron 다운로드 라우터는 같은 출력 디렉터리·GAV의 Maven 다운로드와 복사를 직렬화해 JAR의 부속 POM과 별도 POM 작업 간 파일 쓰기 충돌을 방지합니다.
 - `DownloadPage.tsx`는 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `pages/download-page/` 아래 hook/component/util로 분리되어 있습니다.
 - `HistoryPage.tsx`와 `SettingsPage.tsx`는 각각 다운로드 이력과 앱 설정을 관리합니다.
 - `renderer/lib/renderer-data-client.ts`가 renderer와 Electron 사이의 검색/버전조회/히스토리 I/O facade 역할을 맡습니다.

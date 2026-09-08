@@ -588,17 +588,9 @@ const result = await resolver.resolveDependencies(
 
 ### Packaging 타입 처리
 
-POM의 `<packaging>` 태그를 읽어 각 의존성의 타입을 설정합니다:
+명시한 artifact type을 우선하고, type이 없을 때만 원격 POM의 `<packaging>` 태그를 사용합니다. 루트 요청은 `MavenResolverOptions.artifactType`으로 전달되며 전이 의존성은 `<dependency><type>`을 사용합니다. packaging으로 type을 보완할 때는 metadata의 파일명도 함께 갱신합니다.
 
-```typescript
-// POM에서 packaging 타입 추출 후 metadata에 저장
-if (pom.packaging) {
-  node.package.metadata = {
-    ...node.package.metadata,
-    type: pom.packaging,  // 'jar', 'pom', 'war', 'maven-plugin' 등
-  };
-}
-```
+`resolveAllDependencies()`는 입력의 `metadata.type`을 resolver에 전달하고, 공통 artifact key도 Maven type을 구분합니다. 따라서 같은 GAV의 명시적 JAR와 POM은 의존성 포함 다운로드에서도 별개로 유지됩니다.
 
 이를 통해 다운로더가 올바른 파일 확장자로 다운로드할 수 있습니다 (예: pom → POM만, war → WAR 파일).
 
@@ -628,6 +620,14 @@ const deps = resolver.parseFromText(`
 </project>
 `);
 ```
+
+### 텍스트 입력의 의존성 type 보존
+
+`MavenResolver.parseFromText()`는 각 `<dependency>`의 `<type>` 값을 다운로드 메타데이터에 보존합니다. `CartPage`의 POM 파일/텍스트 입력도 같은 artifact type을 장바구니 metadata로 유지하며, Maven의 장바구니 중복 판정은 type까지 비교합니다. 따라서 같은 GAV의 기본 JAR과 `<type>pom</type>` 의존성이 함께 있어도 둘 다 유지됩니다. Electron 다운로드 라우터는 이 metadata를 `MavenDownloader`에 전달하므로 `org.apache.flink:flink-metrics:1.20.5`처럼 POM으로 선언된 의존성은 JAR 기본값으로 바뀌지 않고 `.pom` 및 해당 체크섬 파일로 다운로드되며, 평탄화된 복사본도 `.pom` 확장자를 사용합니다.
+
+장바구니 파서는 기존 입력 호환성을 위해 `dependencyManagement`의 BOM을 포함한 모든 `<dependency>` 선언을 수집합니다.
+
+이 동작은 `npx vitest run src/core/resolver/maven-resolver.test.ts src/core/shared/maven-pom-resolution.test.ts src/core/shared/dependency-tree-utils.test.ts src/renderer/stores/cart-store.test.ts src/renderer/pages/cart-page/maven-pom-parser.test.ts electron/services/download-package-router.test.ts`로 검증합니다.
 
 ---
 
