@@ -3,7 +3,7 @@
  * 의존성 순서 설치 스크립트 및 로컬 저장소 설정 스크립트 생성
  */
 
-import type { OSPackageInfo, OSPackageManager, ScriptType } from './types';
+import type { OSPackageInfo, OSPackageManager } from './types';
 import { getPackageFilename } from './package-file-utils';
 import { stripLeadingDotSlash, toUnixPath } from '../../shared/path-utils';
 
@@ -65,14 +65,14 @@ export class OSScriptGenerator {
    * 로컬 저장소 설정 스크립트 생성
    */
   generateLocalRepoScript(
-    packages: OSPackageInfo[],
+    _packages: OSPackageInfo[],
     packageManager: OSPackageManager,
     options: ScriptGeneratorOptions = {}
   ): GeneratedScripts {
     const opts = { ...this.defaultOptions, ...options };
 
     return {
-      bash: this.generateBashRepoScript(packages, packageManager, opts),
+      bash: this.generateBashRepoScript(packageManager, opts),
       powershell: this.generatePowerShellRepoScript(packageManager, opts),
     };
   }
@@ -234,7 +234,6 @@ export class OSScriptGenerator {
    * Bash 로컬 저장소 설정 스크립트 생성
    */
   private generateBashRepoScript(
-    packages: OSPackageInfo[],
     pm: OSPackageManager,
     opts: Required<ScriptGeneratorOptions>
   ): string {
@@ -273,13 +272,13 @@ export class OSScriptGenerator {
     // 패키지 관리자별 설정
     switch (pm) {
       case 'yum':
-        this.appendYumRepoSetup(lines, opts);
+        this.appendYumRepoSetup(lines);
         break;
       case 'apt':
-        this.appendAptRepoSetup(lines, opts);
+        this.appendAptRepoSetup(lines);
         break;
       case 'apk':
-        this.appendApkRepoSetup(lines, opts);
+        this.appendApkRepoSetup(lines);
         break;
     }
 
@@ -289,7 +288,7 @@ export class OSScriptGenerator {
   /**
    * YUM 저장소 설정 추가
    */
-  private appendYumRepoSetup(lines: string[], opts: Required<ScriptGeneratorOptions>): void {
+  private appendYumRepoSetup(lines: string[]): void {
     lines.push('# createrepo 설치 확인');
     lines.push('if ! command -v createrepo &> /dev/null; then');
     lines.push('  echo "createrepo 도구가 필요합니다. 설치를 시도합니다..."');
@@ -331,7 +330,7 @@ export class OSScriptGenerator {
   /**
    * APT 저장소 설정 추가
    */
-  private appendAptRepoSetup(lines: string[], opts: Required<ScriptGeneratorOptions>): void {
+  private appendAptRepoSetup(lines: string[]): void {
     lines.push('# dpkg-dev 설치 확인 (dpkg-scanpackages 포함)');
     lines.push('if ! command -v dpkg-scanpackages &> /dev/null; then');
     lines.push('  echo "dpkg-dev 패키지가 필요합니다. 설치를 시도합니다..."');
@@ -367,7 +366,7 @@ export class OSScriptGenerator {
   /**
    * APK 저장소 설정 추가
    */
-  private appendApkRepoSetup(lines: string[], opts: Required<ScriptGeneratorOptions>): void {
+  private appendApkRepoSetup(lines: string[]): void {
     lines.push('echo "로컬 APK 저장소를 설정합니다..."');
     lines.push('');
 

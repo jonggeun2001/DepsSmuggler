@@ -1,6 +1,7 @@
 import { create, type StateCreator } from 'zustand';
 import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
+import type { OSDistributionSetting } from '../../types/platform/os-target';
 
 // 언어 버전 타입 정의
 export interface LanguageVersions {
@@ -35,13 +36,7 @@ export type DockerArchitecture = 'amd64' | 'arm64' | 'arm/v7' | '386';
 // pip 타겟 플랫폼 타입 정의 (타입은 별도 파일에서 import)
 export type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 
-// OS 배포판 설정 타입 정의
-// id: 배포판 식별자 (예: 'rocky-9', 'almalinux-8', 'ubuntu-22.04', 'debian-12', 'alpine-3.18')
-// architecture: 대상 CPU 아키텍처 (YUM/APK: 'x86_64', 'aarch64' / APT: 'amd64', 'arm64', 'i386')
-export interface OSDistributionSetting {
-  id: string;           // 배포판 ID - API에서 동적으로 로드된 목록과 매칭
-  architecture: string; // 아키텍처 - 배포판별 지원 아키텍처 중 선택
-}
+export type { OSDistributionSetting } from '../../types/platform/os-target';
 
 // 설정 상태
 interface SettingsState {

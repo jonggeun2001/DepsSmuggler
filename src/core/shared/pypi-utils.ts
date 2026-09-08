@@ -1,17 +1,8 @@
 // PyPI 관련 유틸리티 함수 (PEP 425 기반 태그 우선순위 구현)
 import * as https from 'https';
 import { fetchPackageFiles } from './pip-simple-api-client';
+import type { SupportedTag, WheelTags } from './pip-types';
 import type { DownloadUrlResult } from './types';
-
-/**
- * Wheel 태그 파싱 결과
- * 형식: {distribution}-{version}(-{build})?-{python}-{abi}-{platform}.whl
- */
-interface WheelTags {
-  pythonTags: string[];  // 예: ['cp311', 'cp3', 'py3', 'py311']
-  abiTags: string[];     // 예: ['cp311', 'abi3', 'none']
-  platformTags: string[]; // 예: ['manylinux_2_17_x86_64', 'linux_x86_64', 'any']
-}
 
 /**
  * wheel 파일명에서 태그 파싱
@@ -48,8 +39,8 @@ function generateSupportedTags(
   pythonVersion: string,
   targetOS: string,
   architecture: string
-): Array<{ python: string; abi: string; platform: string }> {
-  const tags: Array<{ python: string; abi: string; platform: string }> = [];
+): SupportedTag[] {
+  const tags: SupportedTag[] = [];
 
   // Python 버전 파싱 (예: "3.11" -> major=3, minor=11)
   const [majorStr, minorStr] = pythonVersion.split('.');
@@ -187,7 +178,7 @@ function generatePlatformTags(targetOS: string, architecture: string): string[] 
  */
 function getTagPriority(
   wheelTags: WheelTags,
-  supportedTags: Array<{ python: string; abi: string; platform: string }>
+  supportedTags: SupportedTag[]
 ): number {
   for (let i = 0; i < supportedTags.length; i++) {
     const supported = supportedTags[i];

@@ -3,7 +3,7 @@
  * 인터넷에서 OS 배포판의 최신 버전 정보를 가져오는 모듈
  */
 
-import type { OSDistribution, OSPackageManager, OSArchitecture, Repository } from './types';
+import type { OSDistribution, OSPackageManager, OSArchitecture } from './types';
 
 // 배포판 버전 정보 (간소화된 형태)
 export interface DistributionVersion {

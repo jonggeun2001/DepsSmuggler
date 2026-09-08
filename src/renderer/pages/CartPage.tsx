@@ -13,8 +13,6 @@ import {
   message,
   Modal,
   Input,
-  Select,
-  Divider,
   Statistic,
   Row,
   Col,

@@ -1,6 +1,5 @@
 import * as winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
-import * as path from 'path';
 import { getConfigManager } from '../core/config';
 import { mask, maskString } from './mask';
 

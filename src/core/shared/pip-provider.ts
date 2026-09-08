@@ -9,7 +9,6 @@
 
 import {
   CandidateEvaluator,
-  CandidateEvaluatorConfig,
   InstallationCandidate,
   PyPIReleaseInfo,
   createCandidateFromRelease,
@@ -167,9 +166,9 @@ export class PipProvider {
    */
   narrowRequirementSelection(
     identifiers: string[],
-    resolutions: Map<string, Candidate>,
-    candidates: Map<string, Candidate[]>,
-    information: Map<string, RequirementInformation[]>,
+    _resolutions: Map<string, Candidate>,
+    _candidates: Map<string, Candidate[]>,
+    _information: Map<string, RequirementInformation[]>,
     backtrackCauses: RequirementInformation[]
   ): string[] {
     // Requires-Python 우선 처리
@@ -205,10 +204,10 @@ export class PipProvider {
    */
   getPreference(
     identifier: string,
-    resolutions: Map<string, Candidate>,
-    candidates: Map<string, Candidate[]>,
+    _resolutions: Map<string, Candidate>,
+    _candidates: Map<string, Candidate[]>,
     information: Map<string, RequirementInformation[]>,
-    backtrackCauses: RequirementInformation[]
+    _backtrackCauses: RequirementInformation[]
   ): Preference {
     const infos = information.get(identifier) || [];
     const hasInformation = infos.length > 0;

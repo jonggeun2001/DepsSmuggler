@@ -316,7 +316,7 @@ export class OSRepoPackager {
     metadataFiles.push(packagesGzPath);
 
     // Release 파일 생성
-    const releaseContent = this.generateAptReleaseFile(packages, packagesContent);
+    const releaseContent = this.generateAptReleaseFile(packagesContent);
     const releasePath = path.join(repoPath, 'Release');
     fs.writeFileSync(releasePath, releaseContent);
     metadataFiles.push(releasePath);
@@ -374,7 +374,7 @@ export class OSRepoPackager {
   /**
    * APT Release 파일 생성
    */
-  private generateAptReleaseFile(packages: OSPackageInfo[], packagesContent: string): string {
+  private generateAptReleaseFile(packagesContent: string): string {
     const packagesChecksum = crypto.createHash('sha256').update(packagesContent).digest('hex');
     const packagesSize = Buffer.byteLength(packagesContent);
 

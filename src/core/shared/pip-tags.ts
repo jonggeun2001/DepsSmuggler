@@ -117,7 +117,6 @@ export function generateCPythonTags(config: TargetPythonConfig): PlatformTag[] {
 export function generateCompatibleTags(config: TargetPythonConfig): PlatformTag[] {
   const tags: PlatformTag[] = [];
   const [major, minor] = config.version.split('.').map(Number);
-  const impl = config.implementation || 'cp';
 
   const platforms = config.platforms || ['any'];
 
@@ -219,7 +218,7 @@ export function generateMacOSPlatformTags(arch: ArchType, minVersion?: [number, 
 
   // macOS 버전 (최신 -> 오래된 순)
   const startVersion = minVersion || (normalizedArch === 'arm64' ? [11, 0] : [10, 9]);
-  const [startMajor, startMinor] = startVersion;
+  const [startMajor] = startVersion;
 
   if (startMajor >= 11) {
     // macOS 11+ (Big Sur 이상)

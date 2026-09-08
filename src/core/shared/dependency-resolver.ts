@@ -18,6 +18,7 @@ import type { OSPackageInfo, OSArchitecture } from '../downloaders/os-shared/typ
 import logger from '../../utils/logger';
 import { getPackageArtifactKey } from './dependency-tree-utils';
 import { ResolutionSession } from './internal/resolution-session';
+import type { OSDistributionSetting } from '../../types/platform/os-target';
 
 /**
  * 의존성 해결 진행 상황 콜백
@@ -158,13 +159,7 @@ export interface ResolvedPackageList {
   failedPackages: { name: string; version: string; error: string }[];
 }
 
-/**
- * OS 배포판 설정 (settings에서 전달)
- */
-export interface OSDistributionSetting {
-  id: string;
-  architecture: string;
-}
+export type { OSDistributionSetting } from '../../types/platform/os-target';
 
 /**
  * 의존성 해결 옵션

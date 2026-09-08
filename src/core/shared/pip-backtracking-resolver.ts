@@ -145,7 +145,7 @@ export class BacktrackingResolver {
 
       // 후보 찾기
       const criterion = state.criteria.get(nextIdentifier)!;
-      const candidates = await this.findCandidates(state, criterion);
+      const candidates = await this.findCandidates(criterion);
 
       if (candidates.length === 0) {
         // 후보 없음 - 백트래킹
@@ -306,7 +306,6 @@ export class BacktrackingResolver {
    * 후보 찾기
    */
   private async findCandidates(
-    state: ResolutionState,
     criterion: ResolutionCriterion
   ): Promise<Candidate[]> {
     // 이미 캐시된 후보가 있으면 사용

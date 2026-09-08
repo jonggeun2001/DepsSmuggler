@@ -179,8 +179,9 @@ export function getNpmCacheStats(): NpmCacheStats {
 
 /**
  * 만료된 캐시 정리
+ * @param _ttl 기존 호출 호환용 인수. 만료 시각은 캐시 저장 시 결정된다.
  */
-export function pruneExpiredNpmCache(ttl: number = DEFAULT_TTL): number {
+export function pruneExpiredNpmCache(_ttl: number = DEFAULT_TTL): number {
   return cacheManager.prune();
 }
 
@@ -197,11 +198,12 @@ export function getPackumentFromCache(
 
 /**
  * 캐시 유효성 확인
+ * @param _ttl 기존 호출 호환용 인수. 만료 시각은 캐시 저장 시 결정된다.
  */
 export function isPackumentCached(
   name: string,
   registryUrl: string = DEFAULT_REGISTRY_URL,
-  ttl: number = DEFAULT_TTL
+  _ttl: number = DEFAULT_TTL
 ): boolean {
   const cacheKey = getCacheKey(name, registryUrl);
   return cacheManager.has(cacheKey);

@@ -220,8 +220,9 @@ const scripts = await generator.generateAllScripts({
 
 | 상수 | 값 | 설명 |
 |------|-----|------|
-| `DEFAULT_CHUNK_SIZE` | 25MB | 기본 분할 크기 |
 | `BUFFER_SIZE` | 64KB | 읽기/쓰기 버퍼 크기 |
+
+분할 크기 기본값은 기존대로 `maxSizeMB = 25`입니다. 사용되지 않던 `DEFAULT_CHUNK_SIZE` 필드를 제거했으며, 실제 분할·병합 동작은 `file-splitter.test.ts`로 검증합니다.
 
 ### 타입 정의
 

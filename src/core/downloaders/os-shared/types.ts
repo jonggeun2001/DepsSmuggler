@@ -3,6 +3,8 @@
  * OS 패키지(yum/rpm, apt/deb, apk)를 위한 공통 타입 정의
  */
 
+import type { ArchiveType } from '../../../types/packaging';
+
 // OS 패키지 관리자 타입
 export type OSPackageManager = 'yum' | 'apt' | 'apk';
 
@@ -27,7 +29,7 @@ export type OSErrorAction = 'retry' | 'skip' | 'cancel';
 export type OutputType = 'archive' | 'repository' | 'both';
 
 // 압축 형식
-export type ArchiveFormat = 'zip' | 'tar.gz';
+export type ArchiveFormat = ArchiveType;
 
 // 스크립트 타입
 export type ScriptType = 'dependency-order' | 'local-repo';

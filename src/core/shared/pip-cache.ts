@@ -57,9 +57,6 @@ interface DiskCacheEntry {
   };
 }
 
-/** 기본 TTL: 5분 (의존성 해결 세션 동안 유효) */
-const DEFAULT_TTL = DEFAULT_MEMORY_TTL_MS / 1000; // 초 단위 (하위 호환성)
-
 /** 디스크 캐시 TTL: 1시간 (더 긴 유효기간) */
 const DISK_CACHE_TTL = DEFAULT_DISK_TTL_MS / 1000; // 초 단위
 
@@ -180,7 +177,6 @@ export async function fetchPackageMetadata(
     cacheDir = getDefaultCacheDir(),
     useMemoryCache = true,
     useDiskCache = true,
-    memoryTtl = DEFAULT_TTL,
     diskTtl = DISK_CACHE_TTL,
     forceRefresh = false,
     timeout = 30000,

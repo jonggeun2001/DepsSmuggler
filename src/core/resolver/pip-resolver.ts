@@ -8,7 +8,6 @@ import {
   ResolverOptions,
 } from '../../types';
 import logger from '../../utils/logger';
-import { PyPIInfo, PyPIResponse } from '../shared/pip-types';
 import {
   comparePep440Versions,
   getPackageArtifactKey,
@@ -21,7 +20,6 @@ import {
   clearMemoryCache as clearPipCache,
   PipCacheOptions,
   PyPIRelease,
-  PyPIPackageInfo,
 } from '../shared/pip-cache';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
 import { getPackageType as getSimplePackageType } from '../shared/pip-simple-api';

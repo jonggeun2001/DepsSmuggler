@@ -137,8 +137,6 @@ export class ScriptGenerator {
 
     // Maven 패키지 설치
     if (packagesByType.has('maven')) {
-      const mavenPackages = packagesByType.get('maven') || [];
-
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('# Maven 패키지 설치');
       lines.push('#-------------------------------------------------------------------------------');

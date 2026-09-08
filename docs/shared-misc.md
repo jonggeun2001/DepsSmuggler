@@ -92,11 +92,9 @@ const sorted = sortByRelevance(results, 'requests', 'pip');
 
 ```typescript
 interface RetryOptions {
-  maxRetries?: number;      // 최대 재시도 횟수 (기본: 3)
-  initialDelay?: number;    // 초기 지연 시간 ms (기본: 1000)
-  maxDelay?: number;        // 최대 지연 시간 ms (기본: 30000)
-  backoffMultiplier?: number; // 지연 증가 배수 (기본: 2)
-  retryOn?: (error: Error) => boolean; // 재시도 조건 함수
+  maxRetries: number;      // 최초 시도 이후 최대 재시도 횟수
+  delayMs: number;         // 최초 재시도 지연 시간 ms (이후 2배씩 증가)
+  shouldRetry?: (error: unknown) => boolean; // 재시도 조건 함수
 }
 ```
 
@@ -119,8 +117,8 @@ const result = await retryWithExponentialBackoff(
   },
   {
     maxRetries: 3,
-    initialDelay: 1000,
-    retryOn: isRetryableHttpError,
+    delayMs: 1000,
+    shouldRetry: isRetryableHttpError,
   }
 );
 ```
@@ -249,6 +247,8 @@ const cudaVersions = await fetchCudaVersions();
 ## 버전 프리로드 (`version-preloader.ts`)
 
 앱 시작 시 버전 정보를 미리 로드하여 UI 응답성을 개선합니다.
+
+브라우저의 `window`·`localStorage` 확인을 타입 가드로 연결해 `any` 단언 없이 접근합니다. DOM 타입이 없는 Electron main에서도 타입 검사가 가능하며, 캐시 키·TTL·Node.js 환경의 캐시 비활성 동작은 유지됩니다. `version-preloader.test.ts`에서 캐시 유효기간과 fallback 동작을 검증합니다.
 
 ### 주요 함수
 

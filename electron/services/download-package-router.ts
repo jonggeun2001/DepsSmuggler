@@ -6,6 +6,7 @@ import type {
   Architecture,
   DownloadOptions,
   DownloadPackage,
+  DownloadPackageResult,
 } from '../../src/core/shared';
 import {
   getCondaDownloader,
@@ -17,11 +18,7 @@ import type { DownloadProgressEmitter } from './download-progress';
 
 const log = createScopedLogger('DownloadPackageRouter');
 
-export interface DownloadPackageResult {
-  id: string;
-  success: boolean;
-  error?: string;
-}
+export type { DownloadPackageResult } from '../../src/core/shared/types';
 
 export interface DownloadExecutionState {
   isCancelled(): boolean;

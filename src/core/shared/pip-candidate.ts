@@ -20,7 +20,6 @@ import {
   parseWheelFilename,
   getWheelTagPriority,
   isWheelFile,
-  isSourceDist,
   BuildTag,
 } from './pip-wheel';
 

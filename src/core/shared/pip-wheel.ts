@@ -10,7 +10,6 @@
 import {
   PlatformTag,
   tagToString,
-  parseTag,
 } from './pip-tags';
 
 /**

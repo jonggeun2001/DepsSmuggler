@@ -291,20 +291,18 @@ torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl
 ### 모듈 구조
 
 ```
-conda-resolver.ts (600줄+)
+conda-resolver.ts
 ├── CondaResolver 클래스
 │   ├── resolveDependencies() - 메인 진입점 (BFS 큐 기반)
 │   ├── fetchPackageInfoBFS() - 단일 패키지 정보 조회
-│   ├── resolvePackageFallback() - Anaconda API 폴백
 │   ├── parseDependencyString() - 의존성 문자열 파싱
 │   ├── isSystemPackage() - 시스템 패키지 확인
-│   ├── getLatestVersion() - API 폴백 버전 조회
 │   ├── flattenDependencies() - 플랫 리스트 변환
 │   ├── clearCache() - 캐시 초기화 (프로세서 위임)
 │   └── parseFromText() - environment.yml 파싱
 └── getCondaResolver() - 싱글톤 팩토리
 
-conda-repodata-processor.ts (301줄)
+conda-repodata-processor.ts
 ├── PackageCandidate 인터페이스
 ├── RepoDataProcessorConfig 인터페이스
 └── CondaRepoDataProcessor 클래스
@@ -356,19 +354,18 @@ interface QueueItem {
 | `getRepoData` | repodata.json 가져오기 (zstd 압축 지원, 캐싱) |
 | `findPackageCandidates` | repodata에서 패키지 후보 검색 |
 | `parseDependencyString` | Conda 의존성 문자열 파싱 |
-| `getLatestVersion` | 채널별 최신 버전 조회 |
 | `getLatestVersionFromRepoData` | repodata에서 최신 버전 조회 |
 | `isSystemPackage` | 외부 Python 런타임 및 Conda 가상 패키지 여부 확인 |
 | `getPythonBuildTag` | Python 버전에서 build 태그 추출 (예: '3.12' -> 'py312') |
 | `isBuildCompatibleWithPython` | build 문자열이 Python 버전과 호환되는지 확인 |
-| `resolvePackageFallback` | Anaconda API fallback 해결 |
+
+버전 선택은 대상 플랫폼과 `noarch`의 repodata에 한정합니다. 이미 실행되지 않던 Anaconda API fallback 메서드와 전달 콜백을 제거했으며, `getLatestVersionFromRepoData`의 네 번째 인수는 기존 호출 호환용으로만 유지합니다. 대상 플랫폼·Python 호환성 판단은 `conda-resolver-target.test.ts`로 검증합니다.
 
 ### 속성
 
 | 속성 | 타입 | 설명 |
 |------|------|------|
 | `type` | PackageType | 'conda' |
-| `apiUrl` | string | Anaconda API URL |
 | `condaUrl` | string | Conda 패키지 저장소 URL |
 | `defaultChannel` | string | 기본 채널 (conda-forge) |
 | `visited` | Map | 방문 캐시 |
@@ -526,7 +523,7 @@ maven-resolver.ts (589줄)
 │   └── flattenDependencies() - 플랫 리스트 변환
 └── getMavenResolver() - 싱글톤 팩토리
 
-maven-queue-processor.ts (302줄)
+maven-queue-processor.ts
 ├── MavenResolutionContext 인터페이스
 ├── QueueProcessorDependencies 인터페이스
 └── MavenQueueProcessor 클래스
@@ -536,6 +533,8 @@ maven-queue-processor.ts (302줄)
     ├── enqueueChildDependencies() - 자식 의존성 큐 추가
     └── addChildToParent() - 부모에 자식 노드 추가
 ```
+
+`QueueProcessorDependencies`는 기존 `PomProject`와 `PomDependency` 타입을 사용합니다. POM 조회·부모 POM 처리·의존성 필터 경계에서 필드 검사가 이어지며, 큐 순서와 scope·충돌 처리 동작은 유지됩니다. `maven-resolver.test.ts`와 `maven-pom-resolution.test.ts`가 관련 동작을 검증합니다.
 
 ### 클래스 구조
 

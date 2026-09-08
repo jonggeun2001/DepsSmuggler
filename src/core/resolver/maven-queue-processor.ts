@@ -9,6 +9,8 @@ import { DependencyNode, DependencyScope } from '../../types';
 import logger from '../../utils/logger';
 import {
   MavenCoordinate,
+  PomDependency,
+  PomProject,
   DependencyProcessingContext,
   coordinateToString,
   coordinateToKey,
@@ -46,11 +48,11 @@ export interface MavenResolutionContext {
  */
 export interface QueueProcessorDependencies {
   /** POM 가져오기 (캐시 포함) */
-  fetchPomWithCache: (coordinate: MavenCoordinate) => Promise<any>;
+  fetchPomWithCache: (coordinate: MavenCoordinate) => Promise<PomProject>;
   /** POM 병렬 프리페치 */
   prefetchPomsParallel: (coordinates: MavenCoordinate[]) => void;
   /** 의존성 포함 여부 체크 */
-  shouldIncludeDependency: (dep: any, includeOptional: boolean) => boolean;
+  shouldIncludeDependency: (dep: PomDependency, includeOptional: boolean) => boolean;
   /** 의존성 노드 생성 */
   createDependencyNode: (coordinate: MavenCoordinate, scope: DependencyScope) => DependencyNode;
   /** 충돌 기록 */
@@ -68,7 +70,7 @@ export interface QueueProcessorDependencies {
   };
   /** BOM 프로세서 */
   bomProcessor: {
-    processParentPom: (pom: any, coordinate: MavenCoordinate) => Promise<Record<string, string>>;
+    processParentPom: (pom: PomProject, coordinate: MavenCoordinate) => Promise<Record<string, string>>;
   };
 }
 
@@ -232,7 +234,7 @@ export class MavenQueueProcessor {
     ctx: MavenResolutionContext
   ): Promise<void> {
     // POM 로드
-    let pom: any;
+    let pom: PomProject;
     try {
       pom = await this.deps.fetchPomWithCache(coordinate);
     } catch (error) {

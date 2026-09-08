@@ -12,7 +12,7 @@ import {
 import { toPng, toSvg } from 'html-to-image';
 import { DependencyNode, DependencyResolutionResult, PackageType } from '../../types';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 interface DependencyTreeProps {
   data: DependencyResolutionResult | null;

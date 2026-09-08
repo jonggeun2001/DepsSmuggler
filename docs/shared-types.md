@@ -4,6 +4,15 @@
 - 목적: 모든 모듈에서 공통으로 사용하는 타입 정의
 - 위치: `src/core/shared/types.ts`, `src/types/download/*.ts`, `src/types/platform/*.ts`, `*-types.ts`
 
+중복 정의가 달라지는 것을 방지하기 위해 다음 타입은 한곳에서 관리합니다. 기존 import 경로는 타입 alias 또는 re-export로 유지하며, 런타임 데이터 형식은 바뀌지 않습니다. renderer와 Electron 타입 검사로 양쪽 사용처의 호환성을 확인합니다.
+
+| 타입 | 공통 정의 | 재사용 위치 |
+|------|-----------|------------|
+| `DownloadPackageResult` | `src/core/shared/types.ts` | Electron 다운로드 라우터 |
+| `ArchiveType` (`ArchiveFormat`) | `src/types/packaging.ts` | 일반·OS 패키저 |
+| `OSDistributionSetting` | `src/types/platform/os-target.ts` | 설정 스토어·의존성 해결 |
+| `WheelTags`, `SupportedTag` | `src/core/shared/pip-types.ts` | PyPI 태그 유틸리티 |
+
 ---
 
 ## 공통 타입 (`types.ts`)

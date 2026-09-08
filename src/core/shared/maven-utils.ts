@@ -65,7 +65,7 @@ export function buildMavenClassifier(
  * isNativeArtifact('org.lwjgl', 'lwjgl-opengl') // true
  * isNativeArtifact('org.apache.commons', 'commons-lang3') // false
  */
-export function isNativeArtifact(groupId: string, artifactId: string): boolean {
+export function isNativeArtifact(_groupId: string, artifactId: string): boolean {
   // artifactId에 'native' 포함 여부
   if (artifactId.toLowerCase().includes('native')) {
     return true;

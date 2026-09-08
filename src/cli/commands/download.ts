@@ -349,7 +349,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
     });
 
     // 진행률 업데이트 이벤트
-    downloadManager.on('progress', (item, overall: OverallProgress) => {
+    downloadManager.on('progress', (_item, overall: OverallProgress) => {
       overallBar.update(Math.round(overall.overallProgress), {
         filename: '전체 진행률',
         speed: formatSpeed(overall.currentSpeed),

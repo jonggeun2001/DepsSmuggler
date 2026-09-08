@@ -118,7 +118,7 @@ export class MavenBomProcessor {
       await this.processDependencyManagement(parentPom, parentProperties);
 
       return finalProperties;
-    } catch (error) {
+    } catch {
       logger.debug('Parent POM 로드 실패 (계속 진행)', {
         parent: `${parentGroupId}:${parentArtifactId}:${parentVersion}`,
       });
@@ -202,7 +202,7 @@ export class MavenBomProcessor {
 
       // 상속받은 properties로 dependencyManagement 처리
       await this.processDependencyManagement(bomPom, bomProperties);
-    } catch (error) {
+    } catch {
       logger.debug('BOM import 실패', { bom: `${dep.groupId}:${dep.artifactId}:${version}` });
     }
   }

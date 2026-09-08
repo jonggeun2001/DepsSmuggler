@@ -9,7 +9,6 @@ import type {
   OSPackageInfo,
   OSDistribution,
   OSPackageOutputOptions,
-  OSPackageManager,
 } from '../../../core/downloaders/os-shared/types';
 
 interface OSPackageCartProps {

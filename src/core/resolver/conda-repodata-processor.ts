@@ -569,12 +569,13 @@ export class CondaRepoDataProcessor {
 
   /**
    * RepoData에서 최신 버전 조회
+   * @param _fallbackFn 기존 호출 순서 호환용 인수. 플랫폼 불일치를 막기 위해 실행하지 않는다.
    */
   async getLatestVersionFromRepoData(
     name: string,
     channel: string,
     versionSpec?: string,
-    fallbackFn?: (name: string, channel: string, versionSpec?: string) => Promise<string | null>,
+    _fallbackFn?: (name: string, channel: string, versionSpec?: string) => Promise<string | null>,
     buildSpec?: string,
   ): Promise<string | null> {
     // 타겟 플랫폼 repodata 확인
