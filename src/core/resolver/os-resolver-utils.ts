@@ -20,6 +20,7 @@ export function matchPackagesByQuery(
   query: string,
   matchType: 'exact' | 'partial' | 'wildcard' = 'partial'
 ): OSPackageInfo[] {
+  let wildcardRegex: RegExp | undefined;
   return packages.filter((pkg) => {
     switch (matchType) {
       case 'exact':
@@ -27,10 +28,10 @@ export function matchPackagesByQuery(
       case 'partial':
         return pkg.name.includes(query);
       case 'wildcard': {
-        const regex = new RegExp(
+        wildcardRegex ??= new RegExp(
           '^' + query.replace(/\*/g, '.*').replace(/\?/g, '.') + '$'
         );
-        return regex.test(pkg.name);
+        return wildcardRegex.test(pkg.name);
       }
       default:
         return false;

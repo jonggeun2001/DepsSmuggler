@@ -205,6 +205,26 @@ export function getPackageGroupStatus(items: DownloadStoreItem[], parentItem: Do
   };
 }
 
+/** 원본 순서를 유지하며 의존성 조회를 전체 목록당 한 번의 인덱싱으로 처리한다. */
+export function groupDownloadItems(items: DownloadStoreItem[]) {
+  const parents: DownloadStoreItem[] = [];
+  const dependenciesByParent = new Map<string, DownloadStoreItem[]>();
+  for (const item of items) {
+    if (!item.isDependency) {
+      parents.push(item);
+    } else if (item.parentId !== undefined) {
+      const dependencies = dependenciesByParent.get(item.parentId);
+      if (dependencies) dependencies.push(item);
+      else dependenciesByParent.set(item.parentId, [item]);
+    }
+  }
+
+  return parents.map((parent) => {
+    const dependencies = dependenciesByParent.get(parent.id) ?? [];
+    return { parent, dependencies, status: getPackageGroupStatus(dependencies, parent) };
+  });
+}
+
 export async function persistHistoryAndMaybeClearCart({
   persistHistory,
   clearCart,

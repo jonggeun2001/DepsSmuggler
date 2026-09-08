@@ -5,10 +5,38 @@ import {
   hasMatchingCartSnapshot,
   getPackageGroupStatus,
   getPackageDependencies,
+  groupDownloadItems,
   persistHistoryAndMaybeClearCart,
 } from './utils';
+import type { DownloadStoreItem, DownloadStoreStatus } from '../../stores/download-store';
 
 describe('download-page/utils', () => {
+  it('그룹 인덱스가 입력 순서·상태 집계를 유지하면서 전체 목록의 반복 스캔을 피한다', () => {
+    let dependencyReads = 0;
+    const statuses: DownloadStoreStatus[] = ['pending', 'downloading', 'completed', 'failed', 'skipped', 'paused', 'cancelled'];
+    const items: DownloadStoreItem[] = Array.from({ length: 80 }, (_, index) => ({
+      id: `item-${index}`, name: `item-${index}`, version: '1',
+      status: statuses[index % statuses.length], progress: 0, downloadedBytes: 0,
+      totalBytes: 0, speed: 0,
+      get isDependency() { dependencyReads++; return index >= 20; },
+      parentId: index >= 20 ? `item-${index % 21}` : undefined,
+    }));
+    const expected = items.filter((item) => !item.isDependency).map((parent) => ({
+      parent, dependencies: getPackageDependencies(items, parent.id),
+      status: getPackageGroupStatus(items, parent),
+    }));
+    dependencyReads = 0;
+
+    const actual = groupDownloadItems(items);
+    const reads = dependencyReads;
+
+    expect(actual).toEqual(expected);
+    expect(actual[0].parent).toBe(items[0]);
+    expect(actual[0].dependencies[0]).toBe(items[21]);
+    expect(reads).toBeLessThanOrEqual(items.length * 2);
+    expect(groupDownloadItems([])).toEqual([]);
+  });
+
   it('pending download item 생성 시 기본 진행 상태를 채워야 함', () => {
     const items = createPendingDownloadItems([
       {
