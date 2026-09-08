@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import path from 'node:path';
 
 const {
   copyMock,
@@ -37,8 +38,15 @@ vi.mock('../utils/logger', () => ({
 import { createDownloadPackageRouter } from './download-package-router';
 
 describe('createDownloadPackageRouter Maven 처리', () => {
+  const packagesDir = path.join('test-output', 'packages');
+  const repositoryDir = path.join(packagesDir, 'm2repo');
+  const pomPath = path.join(
+    repositoryDir, 'org', 'apache', 'flink', 'flink-metrics', '1.20.5',
+    'flink-metrics-1.20.5.pom'
+  );
+
   const createContext = () => ({
-    packagesDir: '/tmp/packages',
+    packagesDir,
     options: {},
     progressEmitter: {
       clearPackageProgress: vi.fn(),
@@ -54,9 +62,7 @@ describe('createDownloadPackageRouter Maven 처리', () => {
   it('POM 전용 패키지 metadata를 다운로더에 전달한다', async () => {
     ensureDirMock.mockResolvedValue(undefined);
     pathExistsMock.mockResolvedValue(false);
-    downloadMavenPackageMock.mockResolvedValue(
-      '/tmp/packages/m2repo/org/apache/flink/flink-metrics/1.20.5/flink-metrics-1.20.5.pom'
-    );
+    downloadMavenPackageMock.mockResolvedValue(pomPath);
 
     const router = createDownloadPackageRouter();
 
@@ -79,7 +85,7 @@ describe('createDownloadPackageRouter Maven 처리', () => {
           type: 'pom',
         }),
       }),
-      '/tmp/packages/m2repo',
+      repositoryDir,
       expect.any(Function),
       expect.any(Object)
     );
@@ -88,9 +94,7 @@ describe('createDownloadPackageRouter Maven 처리', () => {
   it('POM 전용 패키지의 평탄화된 복사본을 .pom 확장자로 저장한다', async () => {
     ensureDirMock.mockResolvedValue(undefined);
     pathExistsMock.mockResolvedValue(true);
-    downloadMavenPackageMock.mockResolvedValue(
-      '/tmp/packages/m2repo/org/apache/flink/flink-metrics/1.20.5/flink-metrics-1.20.5.pom'
-    );
+    downloadMavenPackageMock.mockResolvedValue(pomPath);
 
     const router = createDownloadPackageRouter();
 
@@ -106,8 +110,8 @@ describe('createDownloadPackageRouter Maven 처리', () => {
     );
 
     expect(copyMock).toHaveBeenCalledWith(
-      '/tmp/packages/m2repo/org/apache/flink/flink-metrics/1.20.5/flink-metrics-1.20.5.pom',
-      '/tmp/packages/flink-metrics-1.20.5.pom'
+      pomPath,
+      path.join(packagesDir, 'flink-metrics-1.20.5.pom')
     );
   });
 });
