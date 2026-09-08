@@ -99,7 +99,7 @@ const CartPage: React.FC = () => {
 
   // 장바구니 아이템 해시 계산 (캐싱용)
   const itemsHash = useMemo(() => {
-    return items.map(i => `${i.type}:${i.name}:${i.version}:${i.arch || ''}`).sort().join('|');
+    return items.map(i => `${i.type}:${i.name}:${i.version}:${i.arch || ''}:${i.metadata?.type || ''}`).sort().join('|');
   }, [items]);
 
   // 예상 다운로드 크기 계산
@@ -132,6 +132,7 @@ const CartPage: React.FC = () => {
         name: item.name,
         version: item.version,
         architecture: item.arch,
+        metadata: item.metadata,
       }));
 
       let result: {

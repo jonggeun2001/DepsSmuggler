@@ -22,6 +22,15 @@ function createNode(pkg: PackageInfo, dependencies: DependencyNode[] = []): Depe
 }
 
 describe('getPackageArtifactKey', () => {
+  it('파일명을 조회하기 전에도 Maven POM과 기본 JAR를 구분한다', () => {
+    const jar: PackageInfo = { type: 'maven', name: 'org.example:sample', version: '1.0' };
+    const explicitJar = { ...jar, metadata: { type: 'jar' } };
+    const pom = { ...jar, metadata: { type: 'pom' } };
+
+    expect(getPackageArtifactKey(jar)).toBe(getPackageArtifactKey(explicitJar));
+    expect(getPackageArtifactKey(jar)).not.toBe(getPackageArtifactKey(pom));
+  });
+
   it('같은 파일명이라도 출처·classifier·체크섬이 다르면 별도 아티팩트로 식별한다', () => {
     const basePackage: PackageInfo = {
       type: 'pip',

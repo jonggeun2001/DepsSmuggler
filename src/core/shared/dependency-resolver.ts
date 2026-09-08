@@ -585,10 +585,13 @@ export async function resolveAllDependencies(
           architecture,
         };
       } else if (pkg.type === 'maven') {
-        // maven: 라이브러리별 형식이 다른 네이티브 아티팩트는 classifier로 선택
+        // Maven의 명시적 artifact 선택을 resolver 결과와 파일명에도 유지한다.
         resolverOptions = {
           ...resolverOptions,
           classifier: pkg.classifier,
+          artifactType: typeof pkg.metadata?.type === 'string'
+            ? pkg.metadata.type
+            : undefined,
         };
       }
 

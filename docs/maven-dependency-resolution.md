@@ -495,6 +495,8 @@ Maven은 다양한 패키징 타입을 지원하며, 각 타입에 따라 다운
 3. 기본값: jar
 ```
 
+루트의 명시적 선택은 `metadata.type`에서 `MavenResolverOptions.artifactType`으로 전달됩니다. 루트와 전이 의존성 모두 원격 packaging이 명시한 type을 덮어쓰지 않습니다. packaging을 자동 감지하면 metadata의 파일명도 갱신하며, 다운로드 목록의 artifact key는 Maven type을 포함해 같은 GAV의 JAR와 POM을 구분합니다. `src/core/shared/maven-pom-resolution.test.ts`는 실제 resolver와 공통 병합 경로를 함께 검증합니다.
+
 ```xml
 <!-- 예시: 의존성에서 type 명시 -->
 <dependency>

@@ -73,7 +73,11 @@ export function getPackageArtifactKey(
   const checksum = normalizeArtifactIdentityValue(
     metadata?.checksum,
   );
+  const mavenType = packageInfo.type === 'maven' && typeof metadata?.type === 'string'
+    ? metadata.type
+    : undefined;
   const artifactIdentity = [
+    ['type', mavenType === 'jar' ? undefined : mavenType],
     ['filename', filename],
     ['url', downloadUrl],
     ['repository', repository],

@@ -6,6 +6,19 @@ export interface ParsedMavenPomDependency {
   metadata?: Record<string, unknown>;
 }
 
+function collectDependencyEntries(value: unknown): Record<string, unknown>[] {
+  if (!value || typeof value !== 'object') return [];
+  if (Array.isArray(value)) return value.flatMap(collectDependencyEntries);
+
+  return Object.entries(value).flatMap(([tag, child]) => {
+    if (tag !== 'dependency') return collectDependencyEntries(child);
+    const entries = Array.isArray(child) ? child : [child];
+    return entries.filter((entry): entry is Record<string, unknown> =>
+      entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+    );
+  });
+}
+
 /**
  * 장바구니 입력용 pom.xml 의존성을 파싱한다.
  * Maven artifact type은 다운로더가 확장자를 결정하는 데 사용하므로 보존한다.
@@ -17,15 +30,8 @@ export function parseMavenPomDependencies(content: string): ParsedMavenPomDepend
     parseTagValue: false,
   });
   const parsed = parser.parse(content);
-  const dependencies =
-    parsed.project?.dependencies?.dependency
-    ?? parsed.dependencies?.dependency
-    ?? parsed.dependency;
-  const entries = Array.isArray(dependencies)
-    ? dependencies
-    : dependencies
-      ? [dependencies]
-      : [];
+  // 기존 입력처럼 dependencyManagement/BOM 등 모든 dependency 선언을 가져온다.
+  const entries = collectDependencyEntries(parsed);
 
   return entries.flatMap((dependency: Record<string, unknown>) => {
     const groupId = typeof dependency.groupId === 'string' ? dependency.groupId.trim() : '';
