@@ -73,6 +73,31 @@ describe('OS dependency resolvers', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    ['APT', AptDependencyResolver], ['APK', ApkDependencyResolver], ['YUM', YumDependencyResolver],
+  ] as const)(
+    '%s 후보 병합은 원본 순서·중복을 유지하고 키를 선형 횟수로 계산한다',
+    async (_name, Resolver) => {
+      const resolver = accessResolverForTest(new Resolver(createOptions(repo)));
+      const internals = resolver as unknown as {
+        metadataCache: { packages: Map<string, OSPackageInfo[]> };
+        providesMap: Map<string, OSPackageInfo[]>;
+        getPackageKey(pkg: OSPackageInfo): string;
+      };
+      const byName = createPackage('virtual', '1');
+      const providers = Array.from({ length: 100 }, (_, index) => createPackage(`provider-${index}`, '1'));
+      internals.metadataCache.packages.set('virtual', [byName, byName]);
+      internals.providesMap.set('virtual', [byName, ...providers, ...providers]);
+      const keySpy = vi.spyOn(internals, 'getPackageKey');
+
+      const result = await resolver.findPackagesForDependency({ name: 'virtual' });
+
+      expect(result).toEqual([byName, byName, ...providers]);
+      expect(result[2]).toBe(providers[0]);
+      expect(keySpy.mock.calls.length).toBeLessThanOrEqual(203);
+    }
+  );
+
   it('APT resolver는 컴포넌트 URL, provides, 아키텍처 접미사 검색을 모두 처리한다', async () => {
     const aptRepo = {
       ...repo,

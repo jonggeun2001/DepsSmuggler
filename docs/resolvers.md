@@ -633,6 +633,8 @@ const deps = resolver.parseFromText(`
 
 ## YumResolver
 
+YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 재검색을 없앱니다. 이름 검색 결과의 순서·중복과 providers의 첫 항목 선택은 유지합니다. APK의 `so:`/`cmd:`도 동일 provides 조회 한 번으로 처리합니다. 공통 와일드카드 검색은 패키지마다 만들던 정규식을 검색당 한 번 생성하며, 빈 목록과 잘못된 패턴의 오류 처리는 유지합니다. 검증: `src/core/resolver/os-resolvers.test.ts`, `os-resolver-utils.test.ts`.
+
 ### 개요
 - 목적: YUM/RPM 패키지 의존성 해결
 - 위치: `src/core/resolver/yumResolver.ts`
