@@ -578,7 +578,9 @@ return {
 
 ### 7.4 플랫폼 호환성 체크
 
-의존성에 플랫폼 마커가 있으면 해당 플랫폼 전용 빌드로 판단하여 호환성을 확인합니다. 현재 `CondaRepoDataProcessor.isBuildCompatibleWithPlatform()`은 아래 OS 마커에 앞서 `__archspec` 아키텍처와 `__cuda` 조건도 검사합니다. CUDA 버전이 없으면 CUDA 의존 빌드를 제외하고, 지정한 버전이 있으면 그 버전 제약을 확인합니다. 아래는 OS 마커 부분만 설명한 축약 예시입니다.
+의존성에 플랫폼 마커가 있으면 해당 플랫폼 전용 빌드로 판단하여 호환성을 확인합니다. `CondaRepoDataProcessor.isBuildCompatibleWithPlatform(depends)`는 OS 마커와 `__archspec` 아키텍처를 검사합니다.
+
+CUDA 호환성은 별도 `isBuildCompatibleWithCuda(packageName, packageVersion, build, depends)`가 검사하며, 후보 수집 단계에서 두 메서드를 각각 호출합니다. CUDA 버전이 없으면 CUDA 의존 빌드를 제외하고, 지정한 버전이 있으면 그 버전 제약을 확인합니다. 아래는 플랫폼 검사의 OS 마커 부분만 설명한 축약 예시입니다.
 
 ```typescript
 /**

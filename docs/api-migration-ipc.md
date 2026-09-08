@@ -221,7 +221,12 @@ const unsub = window.electronAPI.download.onProgress((progress) => {
 // 다운로드 시작: 해결된 전체 목록 전달
 await window.electronAPI.download.start({
   packages: deps.allPackages,
-  options: { outputDir: './output', outputFormat: 'zip', includeScripts: true },
+  options: {
+    ...resolveOptions,
+    outputDir: './output',
+    outputFormat: 'zip',
+    includeScripts: true,
+  },
 });
 
 // 컴포넌트 effect의 cleanup에서 unsub() 호출
