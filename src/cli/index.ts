@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { registerOSCommands } from './commands/os';
 import { logger } from '../utils/logger';
+import { maskString } from '../utils/mask';
 
 // 버전 정보
 const VERSION = '1.0.0';
@@ -12,8 +13,9 @@ const VERSION = '1.0.0';
 async function initializeLogger(): Promise<void> {
   try {
     await logger.initialize();
-  } catch {
+  } catch (error) {
     // 로거 초기화 실패 시 콘솔에만 로깅 (기본 동작)
+    logger.warn('CLI 파일 로거 초기화 실패, 콘솔 로깅 사용', { error });
   }
 }
 
@@ -152,7 +154,7 @@ program.exitOverride((err) => {
 registerOSCommands(program);
 
 // 로거 초기화 후 파싱 및 실행
-initializeLogger().then(() => {
+initializeLogger().then(async () => {
   // 명령어가 없으면 도움말 표시
   if (process.argv.length <= 2) {
     console.log(chalk.cyan('\n  DepsSmuggler - 폐쇄망을 위한 패키지 의존성 다운로더\n'));
@@ -175,5 +177,10 @@ initializeLogger().then(() => {
     console.log('\n  자세한 내용: depssmuggler --help\n');
   }
 
-  program.parse(process.argv);
+  await program.parseAsync(process.argv);
+}).catch((error: unknown) => {
+  process.exitCode = 1;
+  logger.error('CLI 명령 실행 실패', { error });
+  const message = error instanceof Error ? error.message : '알 수 없는 오류';
+  console.error(chalk.red(`오류: ${maskString(message)}`));
 });

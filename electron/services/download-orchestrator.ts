@@ -102,6 +102,17 @@ export function createDownloadOrchestrator(
 
   return {
     async startDownload(data) {
+      const isNonEmptyString = (value: unknown): value is string =>
+        typeof value === 'string' && value.trim().length > 0;
+      if (!data || !Array.isArray(data.packages) || data.packages.length === 0 ||
+          !data.packages.every(pkg => pkg && ['id', 'type', 'name', 'version'].every(
+            key => isNonEmptyString(pkg[key as keyof DownloadPackage]))) ||
+          !data.options || !isNonEmptyString(data.options.outputDir) ||
+          (data.options.concurrency !== undefined &&
+            (!Number.isSafeInteger(data.options.concurrency) || data.options.concurrency < 1))) {
+        log.warn('download:start 입력 검증 실패: 패키지 목록, 출력 경로 또는 동시 다운로드 수 확인 필요');
+        throw new TypeError('다운로드 요청이 올바르지 않습니다. 패키지 목록, 출력 경로, 동시 다운로드 수를 확인하세요.');
+      }
       const session = sessionRegistry.createSession(data.sessionId);
       const state = createExecutionState(session);
       const sessionProgressEmitter = bindSessionProgressEmitter(progressEmitter, session.sessionId);

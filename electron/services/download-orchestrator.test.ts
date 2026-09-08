@@ -2,6 +2,10 @@ import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { createEmailSenderMock } from '../../src/core/mailer/__mocks__/email-sender-mock';
 
+vi.mock('../utils/logger', () => ({ createScopedLogger: () => ({
+  info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
+}) }));
+
 const createDeferred = <T>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -13,6 +17,27 @@ const createDeferred = <T>() => {
 };
 
 describe('createDownloadOrchestrator', () => {
+  it.each([null, {}, { packages: null }, { packages: [], options: null },
+    { packages: [null], options: { outputDir: '/tmp/out' } },
+    { packages: [{ id: 'p', type: 'pip', name: 'requests', version: '1' }], options: { outputDir: 42 } },
+    { packages: [{ id: 'p', type: 'pip', name: 'requests', version: '1' }], options: { outputDir: '/tmp/out', concurrency: -1 } },
+  ])('잘못된 요청은 세션/파일/백그라운드 작업을 시작하지 않는다 (%j)', async (data) => {
+    const { createDownloadOrchestrator } = await import('./download-orchestrator');
+    const scheduleTask = vi.fn();
+    const ensureDir = vi.fn();
+    const emitDownloadStatus = vi.fn();
+    const orchestrator = createDownloadOrchestrator({
+      getMainWindow: () => null, scheduleTask, ensureDir,
+      createPackageRouter: () => ({ downloadPackage: vi.fn() }),
+      createProgressEmitter: () => ({ emitDownloadStatus }) as never,
+      archivePackager: createArchivePackagerMock(), generateInstallScripts: vi.fn(),
+    });
+    await expect(orchestrator.startDownload(data as never)).rejects.toThrow();
+    expect(scheduleTask).not.toHaveBeenCalled();
+    expect(ensureDir).not.toHaveBeenCalled();
+    expect(emitDownloadStatus).not.toHaveBeenCalled();
+  });
+
   const createArchivePackagerMock = () => ({
     createArchiveFromDirectory: vi.fn().mockImplementation(
       async (_sourceDir: string, outputPath: string) => outputPath

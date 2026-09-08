@@ -9,6 +9,9 @@ import type {
 import type { DownloadProgressEmitter } from '../download-progress';
 import type { ConcurrencyLimiterFactory } from './concurrency-limiter';
 import type { DeliveryPipeline } from './delivery-pipeline';
+import { createScopedLogger } from '../../utils/logger';
+
+const log = createScopedLogger('DownloadSession');
 
 export interface DownloadSessionRunnerDeps {
   ensureDir: (targetPath: string) => Promise<void>;
@@ -36,8 +39,6 @@ export function createDownloadSessionRunner(
     async run(data, progressEmitter, state) {
       const { packages, options } = data;
       const { outputDir, concurrency = 3 } = options;
-      const packagesDir = path.join(outputDir, 'packages');
-      const limit = deps.createLimiter(concurrency);
       const emitCancelledCompletion = (
         currentOutputPath: string,
         currentArtifactPaths?: string[]
@@ -51,6 +52,8 @@ export function createDownloadSessionRunner(
       };
 
       try {
+        const packagesDir = path.join(outputDir, 'packages');
+        const limit = deps.createLimiter(concurrency);
         await deps.ensureDir(packagesDir);
         const downloadPromises = packages.map((pkg) =>
           limit(() =>
@@ -90,6 +93,7 @@ export function createDownloadSessionRunner(
 
         progressEmitter.emitAllComplete(completionPayload);
       } catch (error) {
+        log.error('다운로드 세션 실행 실패:', error);
         progressEmitter.emitAllComplete({
           success: false,
           outputPath: outputDir,

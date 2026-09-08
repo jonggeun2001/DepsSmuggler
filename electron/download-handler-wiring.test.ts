@@ -104,7 +104,9 @@ describe('download handler wiring', () => {
 
   it('download:start 핸들러가 regular download orchestrator로 위임한다', async () => {
     const mainWindow = {
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     };
@@ -146,7 +148,9 @@ describe('download handler wiring', () => {
 
   it('os:download:start 핸들러가 OS orchestrator 결과를 그대로 반환한다', async () => {
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);

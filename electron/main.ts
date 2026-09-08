@@ -151,10 +151,10 @@ app.whenReady().then(async () => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      void createWindow().catch(error => log.error('창 재생성 실패:', error));
     }
   });
-});
+}).catch(error => log.error('앱 초기화 실패:', error));
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

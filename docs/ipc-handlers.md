@@ -78,6 +78,8 @@ electron/
 
 일반 패키지 검색과 OS 패키지 검색이 모두 이 모듈에 있으며, 핸들러 본체는 채널 등록과 인자 전달만 담당합니다.
 
+검색 사전 로딩 실패는 `SearchOrchestrator` 경고로 기록하고 일반 검색은 계속 사용할 수 있습니다. 사전 로딩이 성공했다고 보고하거나 빈 검색 결과를 미리 확정하지 않습니다. `search-orchestrator.test.ts`가 실패 후 정상 검색을 검증합니다.
+
 주요 위임 대상:
 
 - `electron/services/search-orchestrator.ts`
@@ -145,6 +147,10 @@ electron/
 
 참고: `dependency:resolve`의 `options.includeDependencies`가 `false`이면 메인 프로세스는 원본 패키지 목록만 반환합니다.
 참고: `download:start`는 `deliveryMethod`, `email`, `smtp`, `fileSplit` 옵션을 받아 패키징 뒤 로컬 저장 또는 이메일 전달까지 수행합니다.
+
+`download:start`는 비어 있거나 잘못된 패키지 목록, 필수 문자열, 출력 경로, 동시 다운로드 수를 세션 생성 전에 거부하고 경고를 남깁니다. 초기 limiter 생성 실패도 `DownloadSession`의 실패 완료 이벤트와 오류 로그로 전달됩니다. 정상 요청의 반환값·완료 결과·취소 정책은 유지합니다.
+
+`DownloadProgress`는 일반/OS 다운로드 알림에서 닫힌 창을 건너뛰고, 전송 시점에 발생한 창 종료/IPC 오류를 채널명과 함께 기록합니다. UI 알림 실패를 실제 다운로드 실패로 바꾸지 않으며 정상 전송의 payload와 throttle은 유지합니다. `download-orchestrator.test.ts`, `download-session.test.ts`, `download-progress.test.ts`가 잘못된 요청·초기 실패·창 종료를 검증합니다.
 
 #### OS 패키지 채널
 

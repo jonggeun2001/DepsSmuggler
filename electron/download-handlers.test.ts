@@ -362,7 +362,9 @@ describe('registerDownloadHandlers', () => {
 
   it('tar.gz 선택 시 공통 아카이브 패키저를 사용하고 실제 산출물 경로를 완료 이벤트에 담아야 함', async () => {
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -435,7 +437,9 @@ describe('registerDownloadHandlers', () => {
 
   it('zip 선택 시에도 완료 이벤트가 디렉터리가 아닌 실제 아카이브 파일 경로를 반영해야 함', async () => {
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -493,7 +497,9 @@ describe('registerDownloadHandlers', () => {
     createArchiveFromDirectoryMock.mockRejectedValueOnce(new Error('archive failed'));
 
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -546,7 +552,9 @@ describe('registerDownloadHandlers', () => {
 
   it('지원하지 않는 출력 형식은 조용히 성공시키지 말고 실패로 처리해야 함', async () => {
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -599,7 +607,9 @@ describe('registerDownloadHandlers', () => {
     });
 
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -648,7 +658,9 @@ describe('registerDownloadHandlers', () => {
 
   it('email 전달 선택 시 패키징 뒤 메일을 발송하고 완료 이벤트에 전달 메타데이터를 담아야 함', async () => {
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -731,7 +743,9 @@ describe('registerDownloadHandlers', () => {
       .mockRejectedValueOnce(new Error('network failed'));
 
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -824,7 +838,9 @@ describe('registerDownloadHandlers', () => {
     downloadFileMock.mockRejectedValue(new Error('network failed'));
 
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -904,7 +920,9 @@ describe('registerDownloadHandlers', () => {
     );
 
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -1002,7 +1020,9 @@ describe('registerDownloadHandlers', () => {
     splitFileMock.mockImplementationOnce(async () => splitDeferred.promise);
 
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -1106,7 +1126,9 @@ describe('registerDownloadHandlers', () => {
     });
 
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -1192,7 +1214,9 @@ describe('registerDownloadHandlers', () => {
 
   it('발신자 후보가 없으면 이메일 전달을 시작하지 않고 명시적으로 실패해야 함', async () => {
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -1263,7 +1287,9 @@ describe('registerDownloadHandlers', () => {
     });
 
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -1327,7 +1353,9 @@ describe('registerDownloadHandlers', () => {
 
   it('os:download:start에서 OS 전용 출력 옵션을 적용해 패키징 결과를 반환한다', async () => {
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -1415,7 +1443,9 @@ describe('registerDownloadHandlers', () => {
 
   it('os:download:start에서 해결되지 않은 의존성이 있으면 다운로드를 시작하지 않고 결과에 포함한다', async () => {
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -1461,7 +1491,9 @@ describe('registerDownloadHandlers', () => {
 
   it('os:download:start에서 건너뛴 패키지를 failed 대신 skipped로 집계한다', async () => {
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);
@@ -1503,7 +1535,9 @@ describe('registerDownloadHandlers', () => {
 
   it('os:download:start에서 취소되면 최종 성공 산출물 없이 cancelled 결과를 반환한다', async () => {
     registerDownloadHandlers(() => ({
+      isDestroyed: () => false,
       webContents: {
+        isDestroyed: () => false,
         send: webContentsSend,
       },
     }) as never);

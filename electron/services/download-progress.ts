@@ -1,5 +1,8 @@
 import type { BrowserWindow } from 'electron';
 import type { OSDownloadProgress } from '../../src/core/downloaders/os-shared/types';
+import { createScopedLogger } from '../utils/logger';
+
+const log = createScopedLogger('DownloadProgress');
 
 export interface PackageProgressPayload {
   sessionId?: number;
@@ -42,10 +45,20 @@ export function createDownloadProgressEmitter(
   throttleMs = 1000
 ): DownloadProgressEmitter {
   const lastProgressTime = new Map<string, number>();
+  const send = (channel: string, payload: unknown): void => {
+    try {
+      const window = getMainWindow();
+      if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
+      window.webContents.send(channel, payload);
+    } catch (error) {
+      // 창 닫힘과 send 사이의 경쟁도 처리한다. UI 알림 실패는 다운로드 실패가 아니다.
+      log.warn(`진행 이벤트 전달 실패 (${channel}):`, error);
+    }
+  };
 
   return {
     emitDownloadStatus(payload) {
-      getMainWindow()?.webContents.send('download:status', payload);
+      send('download:status', payload);
     },
 
     emitPackageProgress(packageId, payload, force = false) {
@@ -56,7 +69,7 @@ export function createDownloadProgressEmitter(
       }
 
       lastProgressTime.set(packageId, now);
-      getMainWindow()?.webContents.send('download:progress', {
+      send('download:progress', {
         packageId,
         ...payload,
       });
@@ -71,15 +84,15 @@ export function createDownloadProgressEmitter(
     },
 
     emitAllComplete(payload) {
-      getMainWindow()?.webContents.send('download:all-complete', payload);
+      send('download:all-complete', payload);
     },
 
     emitOSProgress(progress) {
-      getMainWindow()?.webContents.send('os:download:progress', progress);
+      send('os:download:progress', progress);
     },
 
     emitOSResolveDependenciesProgress(payload) {
-      getMainWindow()?.webContents.send('os:resolveDependencies:progress', payload);
+      send('os:resolveDependencies:progress', payload);
     },
   };
 }

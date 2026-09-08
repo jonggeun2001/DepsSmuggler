@@ -32,7 +32,11 @@ export function createSearchOrchestrator(deps: SearchOrchestratorDeps = {}) {
 
   return {
     async prime(): Promise<void> {
-      await packageRouter.prime();
+      try {
+        await packageRouter.prime();
+      } catch (error) {
+        log.warn('검색 사전 로딩 실패, 일반 검색은 계속 사용 가능:', error);
+      }
     },
 
     async searchPackages(

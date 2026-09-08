@@ -1,8 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { getConfigManager, ConfigManager, Config } from './config';
+
+const testHome = vi.hoisted(() => ({ path: '' }));
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return { ...actual, homedir: () => testHome.path };
+});
+
+beforeAll(async () => {
+  testHome.path = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-config-'));
+});
+afterAll(async () => {
+  await fs.remove(testHome.path);
+});
 
 describe('ConfigManager', () => {
   describe('getConfigManager', () => {
@@ -224,6 +238,56 @@ describe('ConfigManager', () => {
   });
 
   describe('에러 처리', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('디렉토리 생성 실패도 기본값으로 복구하고 저장을 시도하지 않는다', async () => {
+      const manager = new ConfigManager();
+      vi.spyOn(manager, 'ensureDirectories').mockRejectedValue(new Error('EACCES'));
+      const save = vi.spyOn(manager, 'saveConfig');
+      await expect(manager.loadConfig()).resolves.toMatchObject({ concurrentDownloads: 5 });
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it('최초 기본값 저장 실패에도 설정 읽기는 사용 가능하다', async () => {
+      const manager = new ConfigManager();
+      await fs.remove(path.join(manager.getConfigDir(), 'settings.json'));
+      vi.spyOn(manager, 'saveConfig').mockRejectedValue(new Error('ENOSPC'));
+      await expect(manager.loadConfig()).resolves.toMatchObject({ concurrentDownloads: 5 });
+    });
+
+    it('손상된 설정을 읽어도 원본 파일을 덮어쓰지 않는다', async () => {
+      const manager = new ConfigManager();
+      const file = path.join(manager.getConfigDir(), 'settings.json');
+      await fs.outputFile(file, '{ broken settings }');
+      await manager.loadConfig();
+      expect(await fs.readFile(file, 'utf8')).toBe('{ broken settings }');
+    });
+
+    it('CLI 설정의 잘못된 타입과 숫자는 안전한 기본값을 사용한다', async () => {
+      const manager = new ConfigManager();
+      await fs.outputJson(path.join(manager.getConfigDir(), 'settings.json'), {
+        concurrentDownloads: -3, enableCache: 'false', cachePath: 42, logLevel: {},
+      });
+      expect(manager.getConfig()).toEqual({
+        concurrentDownloads: 5, cacheEnabled: true, cachePath: manager.getCacheDir(),
+        maxCacheSize: 10 * 1024 * 1024 * 1024, logLevel: 'info',
+      });
+    });
+
+    it('비정상 비동기 설정 필드를 복구하면서 정상 필드는 유지한다', async () => {
+      const manager = new ConfigManager();
+      await fs.outputJson(path.join(manager.getConfigDir(), 'settings.json'), {
+        concurrentDownloads: 0, cachingEnabled: null, fileSplitSizeMB: -1,
+        smtpPassword: {}, smtpHost: 'smtp.example.com',
+      });
+      const loaded = await manager.loadConfig();
+      expect(loaded).toMatchObject({
+        concurrentDownloads: 5, cachingEnabled: true, fileSplitSizeMB: 25,
+        smtpHost: 'smtp.example.com',
+      });
+      expect(loaded.smtpPassword).toBeUndefined();
+    });
+
     it('손상된 설정 파일은 기본값으로 대체', async () => {
       const configManager = new ConfigManager();
       const configPath = path.join(configManager.getConfigDir(), 'settings.json');
@@ -264,6 +328,28 @@ describe('ConfigManager', () => {
   });
 
   describe('암호화 마이그레이션', () => {
+    it.each([-1, 5])('레거시 비밀번호 로드는 잘못된 설정(%s)을 자동 저장하지 않고 정상 설정만 마이그레이션한다', async (concurrentDownloads) => {
+      const manager = new ConfigManager();
+      const configPath = path.join(manager.getConfigDir(), 'settings.json');
+      const password = 'legacy-test-password';
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from('depssmuggler-secret-key-32bytes!'), iv);
+      const encrypted = `${iv.toString('hex')}:${cipher.update(password, 'utf8', 'hex')}${cipher.final('hex')}`;
+      await fs.outputJson(configPath, { concurrentDownloads, smtpPassword: encrypted });
+      const original = await fs.readFile(configPath, 'utf8');
+
+      const loaded = await manager.loadConfig();
+      expect(loaded).toMatchObject({ concurrentDownloads: 5, smtpPassword: password });
+      if (concurrentDownloads < 0) {
+        expect(await fs.readFile(configPath, 'utf8')).toBe(original);
+        await manager.updateConfig({ concurrentDownloads: 7 });
+        expect(await manager.loadConfig()).toMatchObject({ concurrentDownloads: 7, smtpPassword: password });
+      } else {
+        expect((await fs.readJson(configPath)).smtpPassword).not.toBe(encrypted);
+        expect(await manager.loadConfig()).toMatchObject({ concurrentDownloads: 5, smtpPassword: password });
+      }
+    });
+
     it('잘못된 형식의 암호화 값은 원본 반환', async () => {
       const configManager = new ConfigManager();
       const configPath = path.join(configManager.getConfigDir(), 'settings.json');
