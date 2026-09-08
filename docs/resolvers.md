@@ -42,9 +42,9 @@ resolver 문서를 참고합니다.
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `resolveDependencies` | name: string, version?: string, options?: ResolverOptions | Promise<DependencyResolutionResult> | 메인 진입점: 패키지 의존성 트리 해결 (BFS 큐 기반) |
-| `parseFromText` | text: string | ParsedDependency[] | requirements.txt 파싱 |
-| `flattenDependencies` | node: DependencyNode | PackageInfo[] | 트리를 플랫 리스트로 변환 |
+| `resolveDependencies` | name: string, version: string, options?: ResolverOptions | Promise<DependencyResolutionResult> | 메인 진입점: 패키지 의존성 트리 해결 (BFS 큐 기반) |
+| `parseFromText` | content: string | Promise<PackageInfo[]> | requirements.txt를 읽고 버전 조회 |
+| `flattenDependencyTree` (공유 함수) | node: DependencyNode | PackageInfo[] | 결과 flatList 생성에 사용 |
 
 ### 내부 메서드
 
@@ -70,13 +70,13 @@ interface QueueItem {
 }
 
 // 알고리즘 흐름
-1. 루트 패키지를 큐에 추가
-2. 큐에서 패키지를 꺼내어 정보 조회
-3. 동일한 이름과 버전이면 부모-자식 관계를 추가하고, 새 extra가 있을 때만 그 extra로 다시 확장
-4. 노드 생성 및 저장
-5. 하위 의존성을 큐에 추가
-6. 큐가 빌 때까지 반복
-7. 부모-자식 관계 맵을 이용해 트리 구축
+// 1. 루트 패키지를 큐에 추가
+// 2. 큐에서 패키지를 꺼내어 정보 조회
+// 3. 동일한 이름과 버전이면 부모-자식 관계를 추가하고, 새 extra가 있을 때만 그 extra로 다시 확장
+// 4. 노드 생성 및 저장
+// 5. 하위 의존성을 큐에 추가
+// 6. 큐가 빌 때까지 반복
+// 7. 부모-자식 관계 맵을 이용해 트리 구축
 ```
 
 ### 속성
@@ -87,26 +87,26 @@ interface QueueItem {
 | `baseUrl` | string | PyPI API URL |
 | `visited` | Map<string, DependencyNode> | 방문한 패키지 캐시 |
 | `conflicts` | DependencyConflict[] | 감지된 충돌 목록 |
-| `pythonVersion` | string | 타겟 Python 버전 (예: '3.11') |
-| `targetPlatform` | TargetPlatform | 타겟 플랫폼 정보 |
+| `pythonVersion` | string 또는 null | 타겟 Python 버전 (예: '3.11') |
+| `targetPlatform` | TargetPlatform 또는 null | 타겟 플랫폼 정보 |
 | `cacheOptions` | PipCacheOptions | 공유 캐시 옵션 (메타데이터 캐시는 공유 모듈 사용) |
 
 ### 메서드 (캐시 관련)
 
 | 메서드 | 설명 |
 |--------|------|
-| `setCacheOptions` | 캐시 옵션 설정 |
+| `setCacheOptions` / `getCacheOptions` | 캐시 옵션 설정/복사본 조회 |
 | `clearCache` | 캐시 초기화 (공유 캐시 초기화) |
 
 ### Python 대상 옵션
 
 ```typescript
 interface ResolverOptions {
-  targetPlatform: {
-    system: string;       // 'Linux', 'Darwin', 'Windows'
-    machine: string;      // 'x86_64', 'arm64'
+  targetPlatform?: {
+    system?: 'Linux' | 'Darwin' | 'Windows';
+    machine?: 'x86_64' | 'aarch64' | 'arm64';
   };
-  pythonVersion: string;  // '3.11', '3.12'
+  pythonVersion?: string; // '3.11', '3.12'
 }
 ```
 
@@ -153,30 +153,27 @@ const resolver = getPipResolver();
 // 특정 플랫폼용 의존성 해결
 const result = await resolver.resolveDependencies('flask', '2.0.0', {
   pythonVersion: '3.11',
-  targetOS: 'linux',
-  architecture: 'x86_64',
+  targetPlatform: { system: 'Linux', machine: 'x86_64' },
 });
 
-console.log(result.tree);       // 의존성 트리
+console.log(result.root);       // 의존성 트리
 console.log(result.conflicts);  // 충돌 목록
-console.log(result.packages);   // 플랫 패키지 목록
+console.log(result.flatList);   // 플랫 패키지 목록
 ```
 
 ### requirements.txt 파싱
 ```typescript
-const deps = resolver.parseFromText(`
+const deps = await resolver.parseFromText(`
 flask>=2.0.0
 requests==2.31.0
 numpy>=1.20,<2.0
 pywin32>=300; sys_platform == 'win32'
 `);
-// [
-//   { name: 'flask', versionConstraint: '>=2.0.0' },
-//   { name: 'requests', versionConstraint: '==2.31.0' },
-//   { name: 'numpy', versionConstraint: '>=1.20,<2.0' },
-//   { name: 'pywin32', versionConstraint: '>=300', marker: "sys_platform == 'win32'" },
-// ]
+// 결과: Array<{ type: 'pip', name: string, version: string }>
+// 정확 고정은 그대로, 범위/미지정은 원격 조회로 선택한 실제 버전.
 ```
+
+`parseFromText()`는 비동기이며 `-r`, `-e`, `--`로 시작하는 행을 무시합니다. 내부 문자열 파서는 extras/markers를 인식하지만 이 메서드의 반환값에는 이를 보존하지 않습니다. 의존성 해결 단계의 marker 평가와 텍스트 입력 변환은 별도 동작입니다.
 
 ### 의존성 해결 메커니즘
 
@@ -215,7 +212,7 @@ Requires-Dist: requests[security] (>=2.0) ; sys_platform == 'linux'
 
 #### DepsSmuggler 구현
 
-PyPI JSON API를 사용하여 메타데이터 조회:
+기본 PyPI 경로는 JSON API의 `requires_dist`를 사용합니다. 커스텀 Simple API 경로는 검증된 Core Metadata를 조회하며, 소스를 빌드해서 메타데이터를 생성하는 pip 실행기는 아닙니다:
 
 ```typescript
 // pip-cache.ts
@@ -228,10 +225,10 @@ const requiresDist = response.data.info.requires_dist;  // 의존성 목록
 
 #### PEP 440 로컬 버전 식별자
 
-PyTorch 등 GPU 패키지는 **로컬 버전(+cu118)**으로 구분되며, 의존성 매칭에서 **무시**됩니다:
+GPU 패키지는 로컬 버전 식별자(`+cu118` 등)나 별도 인덱스로 배포될 수 있습니다. 아래처럼 public version으로 지정한 조건은 여러 로컬 빌드와 호환될 수 있습니다:
 
 ```python
-# PEP 440 규칙: 로컬 버전은 의존성 매칭에서 무시됨
+# public version 조건에 대한 로컬 빌드 매칭 예시
 torch>=2.0.0  # 다음 모두와 매칭:
               # - torch 2.0.0
               # - torch 2.0.0+cpu
@@ -266,16 +263,18 @@ torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl
 |------|-------|-----|
 | **GPU 구분** | 같은 패키지, `__cuda` 마커로 필터링 | 별도 패키지/인덱스 |
 | **선택 방식** | solver가 자동 선택 | 사용자가 index-url 지정 |
-| **의존성 전파** | 있음 (`__cuda` 마커) | 없음 (로컬 버전 무시) |
+| **의존성 처리** | 가상 패키지 제약과 build/dependency 검사 | 선택한 wheel의 `Requires-Dist` 처리 |
 
-#### CUDA 필터링이 불필요한 이유
+#### pip의 CUDA 선택 경계
 
-1. GPU/CPU가 **이미 분리된 상태**로 배포됨
-2. 메타데이터에 GPU/CPU 조건 분기가 없음
-3. `torch+cu118`을 명시적으로 의존하는 라이브러리 없음 (PEP 440 규칙)
-4. **사용자가 직접 선택**해야 함 (index-url 또는 패키지명)
+현재 `PipResolver`는 Conda의 `cudaVersion` 필터를 적용하지 않습니다. 사용자가 선택한 `indexUrl`·패키지 버전으로 후보를 조회하고, 해당 배포물의 메타데이터를 기준으로 전이 의존성을 해결합니다.
 
-따라서 DepsSmuggler에서 pip 패키지의 CUDA 필터링은 **불필요**합니다.
+1. GPU/CPU용 별도 인덱스가 제공되면 사용자가 대상 인덱스를 지정합니다.
+2. 같은 public version의 다른 wheel도 메타데이터와 해시가 다를 수 있습니다.
+3. 로컬 버전 식별자를 포함한 정확한 요구사항이 가능한 경우까지 모두 무시한다고 설명하지 않습니다.
+4. 추가 GPU 의존성은 패키지 메타데이터가 선언한 내용에 따릅니다.
+
+위 PyTorch 이름과 버전은 배포 형식을 보여주는 예시이며 현재 다운로드 가능 목록을 고정한 표가 아닙니다.
 
 ---
 
@@ -285,7 +284,7 @@ torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl
 - 목적: Conda/Anaconda 패키지 의존성 해결
 - 위치: `src/core/resolver/conda-resolver.ts`
 - RepoData 처리: `src/core/resolver/conda-repodata-processor.ts` (분리된 모듈)
-- 캐시: `src/core/shared/conda-cache.ts` 모듈 사용 (디스크 캐싱 전용 - 350MB+ repodata)
+- 캐시: `src/core/shared/conda-cache.ts` 모듈 사용 (repodata 디스크 캐시와 processor의 요청 중 메모리 캐시)
 - **알고리즘**: BFS 큐 기반 (call stack overflow 방지)
 
 ### 모듈 구조
@@ -297,7 +296,7 @@ conda-resolver.ts
 │   ├── fetchPackageInfoBFS() - 단일 패키지 정보 조회
 │   ├── parseDependencyString() - 의존성 문자열 파싱
 │   ├── isSystemPackage() - 시스템 패키지 확인
-│   ├── flattenDependencies() - 플랫 리스트 변환
+│   ├── flattenDependencyTree() 호출 - 공유 유틸리티로 플랫 리스트 변환
 │   ├── clearCache() - 캐시 초기화 (프로세서 위임)
 │   └── parseFromText() - environment.yml 파싱
 └── getCondaResolver() - 싱글톤 팩토리
@@ -319,10 +318,10 @@ conda-repodata-processor.ts
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `resolveDependencies` | name: string, version?: string, options?: ResolverOptions | Promise<DependencyResolutionResult> | Conda 패키지 의존성 해결 (BFS) |
-| `fetchPackageInfoBFS` | name: string, version: string, channel: string | Promise<PackageInfoResult> | BFS용 패키지 정보 조회 |
-| `parseFromText` | text: string | ParsedDependency[] | environment.yml 파싱 |
-| `flattenDependencies` | node: DependencyNode | PackageInfo[] | 플랫 리스트 변환 |
+| `resolveDependencies` | name, version, options?: ResolverOptions & { channel?: string } | Promise<DependencyResolutionResult> | Conda 패키지 의존성 해결 (BFS) |
+| `fetchPackageInfoBFS` (private) | name, version, channel, buildSpec? | Promise<{ packageInfo, depends, isPythonMatch }> | BFS용 패키지 정보 조회 |
+| `parseFromText` | content: string | Promise<PackageInfo[]> | environment.yml 파싱과 버전 선택 |
+| `flattenDependencyTree` (공유 함수) | node: DependencyNode | PackageInfo[] | 플랫 리스트 변환 |
 | `clearCache` | - | void | repodata 캐시 초기화 |
 
 ### BFS 큐 알고리즘
@@ -335,19 +334,22 @@ interface QueueItem {
   version: string;
   depth: number;
   parentCacheKey?: string;  // 부모 패키지 캐시키 (트리 구축용)
+  buildSpec?: string;
 }
 
 // 알고리즘 흐름
-1. 루트 패키지를 큐에 추가
-2. 큐에서 패키지를 꺼내어 정보 조회
-3. 이미 해결된 패키지면 부모-자식 관계만 추가하고 스킵
-4. 노드 생성 및 resolvedNodes에 저장
-5. 하위 의존성을 큐에 추가
-6. 큐가 빌 때까지 반복
-7. parentChildMap을 이용해 트리 구축
+// 1. 루트 패키지를 큐에 추가
+// 2. 큐에서 패키지를 꺼내어 정보 조회
+// 3. 이미 해결된 패키지면 부모-자식 관계만 추가하고 스킵
+// 4. 노드 생성 및 resolvedNodes에 저장
+// 5. 하위 의존성을 큐에 추가
+// 6. 큐가 빌 때까지 반복
+// 7. parentChildMap을 이용해 트리 구축
 ```
 
-### 내부 메서드
+### 내부 메서드와 processor 위임
+
+`getRepoData`, `findPackageCandidates`, `getLatestVersionFromRepoData`, `getPythonBuildTag`, `isBuildCompatibleWithPython`은 `CondaRepoDataProcessor`의 메서드입니다.
 
 | 메서드 | 설명 |
 |--------|------|
@@ -370,10 +372,10 @@ interface QueueItem {
 | `defaultChannel` | string | 기본 채널 (conda-forge) |
 | `visited` | Map | 방문 캐시 |
 | `conflicts` | DependencyConflict[] | 충돌 목록 |
-| `repodataCache` | Map<string, RepoData> | repodata 메모리 캐시 |
-| `packageIndex` | Map<string, Map<string, Array>> | 패키지 이름별 인덱스 캐시 (O(1) 조회용) |
-| `targetSubdir` | string | 타겟 subdir (예: 'linux-64') |
-| `pythonVersion` | string | 타겟 Python 버전 |
+| `repoDataProcessor.repodataCache` | Map<string, RepoData> | processor의 repodata 메모리 캐시 |
+| `repoDataProcessor.packageIndex` | Map<string, Map<string, Array>> | 패키지 이름별 인덱스 캐시 (O(1) 조회용) |
+| `repoDataProcessor.targetSubdir` | string | 타겟 subdir (예: 'linux-64') |
+| `pythonVersion` | string 또는 null | 타겟 Python 버전 |
 
 ### 특징
 
@@ -382,7 +384,7 @@ interface QueueItem {
 - **Python 버전 필터링**: py312, py311 등 build 태그로 Python 버전에 맞는 패키지 선택
 - **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
 - **런타임 구분**: 외부 Python 런타임과 `__` 가상 패키지만 제외하고 OpenSSL, zlib, libgcc 같은 실제 Conda 패키지는 포함
-- **Anaconda API fallback**: RC 버전 등 특수 라벨 패키지 지원
+- **조회 범위**: resolver는 대상 subdir와 noarch의 repodata만 조회하며 Anaconda API fallback은 하지 않음
 
 ### 성능 최적화
 
@@ -392,11 +394,12 @@ repodata 로드 시 패키지 이름별 인덱스를 생성하여 O(n) 전체 �
 
 ```typescript
 // 인덱스 구조: Map<cacheKey, Map<packageName, Array<{filename, pkg}>>>
-private packageIndex: Map<string, Map<string, Array<{ filename: string; pkg: RepoDataPackage }>>> = new Map();
+const packageIndex: Map<string, Map<string, Array<{ filename: string; pkg: RepoDataPackage }>>> = new Map();
 
-// repodata 로드 시 인덱스 생성
-private buildPackageIndex(cacheKey: string, repodata: RepoData): Map<...> {
-  const index = new Map();
+// repodata 로드 시 인덱스 생성 (핵심 흐름)
+function buildPackageIndex(repodata: RepoData) {
+  const index = new Map<string, Array<{ filename: string; pkg: RepoDataPackage }>>();
+  const allPackages = { ...repodata.packages, ...repodata['packages.conda'] };
   for (const [filename, pkg] of Object.entries(allPackages)) {
     const normalizedName = pkg.name.toLowerCase();
     if (!index.has(normalizedName)) {
@@ -435,7 +438,7 @@ if (!downloadUrl) {
 
 #### 로깅 개선
 
-의존성 해결 시간과 진행 상황을 상세히 로그로 출력합니다:
+의존성 해결 시간과 진행 상황을 로그로 출력합니다. 아래 수치와 문구는 로그 형식의 예시입니다:
 
 ```
 [INFO] repodata 로드 시작: conda-forge/linux-64 (처음 로드 시 시간이 걸릴 수 있습니다)
@@ -466,18 +469,17 @@ const resolver = getCondaResolver();
 const result = await resolver.resolveDependencies('numpy', '1.26.0', {
   channel: 'conda-forge',
   pythonVersion: '3.12',
-  targetOS: 'linux',
-  architecture: 'x86_64',
+  targetPlatform: { system: 'Linux', machine: 'x86_64' },
 });
 
-console.log(result.tree);       // 의존성 트리
+console.log(result.root);       // 의존성 트리
 console.log(result.conflicts);  // 충돌 목록
-console.log(result.packages);   // 플랫 패키지 목록
+console.log(result.flatList);   // 플랫 패키지 목록
 ```
 
 ### environment.yml 파싱
 ```typescript
-const deps = resolver.parseFromText(`
+const deps = await resolver.parseFromText(`
 name: myenv
 channels:
   - conda-forge
@@ -487,11 +489,12 @@ dependencies:
   - pip:
     - requests
 `);
-// [
-//   { name: 'numpy', versionConstraint: '>=1.20', type: 'conda' },
-//   { name: 'pandas', versionConstraint: '=1.3.0', type: 'conda' },
-//   { name: 'requests', type: 'pip' },  // pip 의존성으로 마킹
-// ]
+// 결과의 예시 형태 (범위 조건의 version은 조회 결과에 따라 달라짐):
+// { type: 'conda', name: 'numpy', version: '<선택한 버전>',
+//   metadata: { repository: 'conda-forge/numpy' } }
+// { type: 'conda', name: 'pandas', version: '1.3.0',
+//   metadata: { repository: 'conda-forge/pandas' } }
+// { type: 'pip', name: 'requests', version: 'latest' }
 ```
 
 ---
@@ -509,12 +512,12 @@ dependencies:
 ### 모듈 구조
 
 ```
-maven-resolver.ts (589줄)
+maven-resolver.ts
 ├── MavenResolver 클래스
 │   ├── resolveDependencies() - 메인 진입점
 │   ├── resolveBF() - BFS 기반 의존성 해결 (큐 프로세서 사용)
 │   ├── fetchPomWithCache() - POM 가져오기 (캐싱)
-│   ├── prefetchPomsParallel() - POM 병렬 프리페치
+│   ├── prefetchPomsParallelInternal() - POM 병렬 프리페치
 │   ├── fetchPackageSizes() - 패키지 크기 조회
 │   ├── shouldIncludeDependency() - 의존성 포함 여부
 │   ├── createDependencyNode() - 노드 생성
@@ -540,20 +543,21 @@ maven-queue-processor.ts
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `resolveDependencies` | name: string, version?: string, options?: ResolverOptions | Promise<DependencyResolutionResult> | GAV 좌표 기반 의존성 해결 |
-| `resolvePackage` | artifact: string, depth: number, parentPath: string[] | Promise<DependencyNode \| null> | POM 기반 의존성 재귀 해결 |
-| `parseFromText` | text: string | ParsedDependency[] | pom.xml 파싱 |
-| `flattenDependencies` | node: DependencyNode | PackageInfo[] | 트리를 플랫 리스트로 변환 |
+| `resolveDependencies` | name, version, options?: MavenResolverOptions | Promise<DependencyResolutionResult> | GAV 좌표 기반 의존성 해결 |
+| `getLatestVersion` | groupId, artifactId | Promise<string> | 최신 버전 조회 |
+| `setCacheOptions` / `getCacheOptions` / `clearCache` | 캐시 옵션 | void / MavenCacheOptions | 캐시 설정 및 메모리 캐시 초기화 |
+| `parseFromText` | content: string | Promise<PackageInfo[]> | pom.xml 파싱 |
+| `flattenDependencies` (private) | node: DependencyNode | PackageInfo[] | 트리를 플랫 리스트로 변환 |
 
 ### 내부 메서드
 
 | 메서드 | 설명 |
 |--------|------|
-| `fetchPom` | Maven Central에서 POM 파일 가져오기 |
-| `processDependencyManagement` | BOM (Bill of Materials) 처리 |
-| `extractDependencies` | POM에서 의존성 목록 추출 (BOM/Parent POM 지원) |
+| `fetchPomWithCache` | 설정된 Maven 저장소에서 POM 파일 가져오기 |
+| `MavenBomProcessor.processDependencyManagement` | BOM (Bill of Materials) 처리 |
+| `MavenQueueProcessor` | 루트/전이 POM 의존성 큐와 BOM 관리 버전 처리 |
 | `resolveProperty` | ${property} 치환 (비문자열 값 자동 변환) |
-| `normalizeDependencies` | 의존성 배열 정규화 |
+| `maven-pom-utils.ts` | 속성 치환과 의존성 배열 정규화 공유 함수 |
 | `getLatestVersion` | 최신 버전 조회 |
 
 ### 속성
@@ -563,10 +567,12 @@ maven-queue-processor.ts
 | `type` | PackageType | 'maven' |
 | `repoUrl` | string | Maven Central URL |
 | `parser` | XMLParser | XML 파서 인스턴스 |
-| `visited` | Map<string, DependencyNode> | 방문 캐시 |
+| `MavenResolutionContext.nodeMap` | Map<string, DependencyNode> | 호출별 노드/방문 캐시 |
 | `conflicts` | DependencyConflict[] | 충돌 목록 |
-| `dependencyManagement` | Map<string, string> | BOM 버전 관리 |
+| `bomProcessor` | MavenBomProcessor | BOM·부모 POM과 버전 관리 |
 | `cacheOptions` | MavenCacheOptions | 공유 캐시 옵션 (POM 캐시는 공유 모듈 사용) |
+
+직접 호출 기본값은 최대 깊이 20, POM 프리페치 동시 수 5, cache TTL 600,000ms(10분), optional 제외입니다. `algorithm` 타입은 bf/df를 받지만 현재 진입점은 항상 `resolveBF()`를 사용합니다. `targetOS`/`targetArchitecture`는 deprecated이며 네이티브 classifier를 자동 생성하지 않습니다.
 
 ### BOM/Parent POM 지원
 
@@ -607,7 +613,7 @@ this.parser = new XMLParser({
 
 ### pom.xml 파싱
 ```typescript
-const deps = resolver.parseFromText(`
+const deps = await resolver.parseFromText(`
 <project>
   <dependencies>
     <dependency>
@@ -636,46 +642,45 @@ YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 �
 
 ### 개요
 - 목적: YUM/RPM 패키지 의존성 해결
-- 위치: `src/core/resolver/yumResolver.ts`
+- 위치: `src/core/resolver/yum-resolver.ts`
 - 메타데이터 파서는 `src/core/shared/yum-metadata-parser.ts` shim을 통해 참조합니다.
 
 ### 클래스 구조
 
+실제 클래스명은 `YumDependencyResolver`이며 `YumResolver`는 호환성 alias입니다. `BaseOSDependencyResolver`를 상속하고 생성자에서 `DependencyResolverOptions`를 받습니다.
+
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `resolveDependencies` | name: string, version?: string, options?: ResolverOptions | Promise<DependencyResolutionResult> | RPM 패키지 의존성 해결 |
-| `resolvePackage` | name: string, version: string, depth: number, parentPath: string[] | Promise<DependencyNode \| null> | 단일 패키지 해결 |
-| `parseFromText` | text: string | ParsedDependency[] | 패키지 목록 파싱 |
-| `flattenDependencies` | node: DependencyNode | PackageInfo[] | 플랫 리스트 변환 |
-| `clearCache` | - | void | 메타데이터 캐시 초기화 |
+| `searchPackages` | query, matchType? | Promise<OSPackageSearchResult[]> | 이름별 검색 |
+| `resolveDependencies` (상속) | packages: OSPackageInfo[] | Promise<OS 전용 DependencyResolutionResult> | RPM 의존성 해결 |
 
 ### 내부 메서드
 
 | 메서드 | 설명 |
 |--------|------|
-| `loadMetadata` | YUM 저장소 메타데이터 로드 (repomd.xml, primary.xml) |
-| `findPackage` | 이름으로 패키지 검색 |
-| `findProvider` | Capability 제공자 검색 (예: libssl.so) |
-| `isSystemDependency` | 시스템 의존성 여부 확인 |
-| `formatVersion` | EVR (Epoch:Version-Release) 포맷 |
-| `normalizeEntries` | requires/provides 엔트리 정규화 |
+| `loadMetadata` | 활성 저장소의 repomd.xml/primary 위치를 읽고 메타데이터 캐시 재사용 |
+| `findPackagesForDependency` | 이름/provides/공유 라이브러리 패턴으로 후보 병합 |
+| `addToPackageCache` / `addToProvidesCache` | 이름 및 capability 인덱스 구성 |
+| `fetchDependenciesFromAPI` | 현재 null 반환; 메타데이터 경로 사용 |
+| `fetchDependenciesFromMetadata` | 필수/권장 의존성을 읽음 |
 
 ### 속성
 
 | 속성 | 타입 | 설명 |
 |------|------|------|
-| `type` | PackageType | 'yum' |
-| `parser` | XMLParser | XML 파서 |
-| `visited` | Map | 방문 캐시 |
-| `conflicts` | DependencyConflict[] | 충돌 목록 |
-| `packagesByName` | Map<string, PrimaryPackage[]> | 패키지 인덱스 |
-| `providerCache` | Map<string, PrimaryPackage \| null> | Capability 캐시 |
-| `metadataLoaded` | boolean | 메타데이터 로드 상태 |
-| `currentRepoUrl` | string | 현재 저장소 URL |
+| `parsers` | Map<string, YumMetadataParser> | 저장소별 파서 |
+| `allPackages` | OSPackageInfo[] | 호환 아키텍처의 패키지 목록 |
+| `providesMap` | Map<string, OSPackageInfo[]> | capability 제공자 인덱스 |
+| `metadataCache` (상속) | PackageMetadataCache | 이름별 패키지 목록 |
+| `resolvedPackages` (상속) | Set<string> | 현재 해결 호출의 처리 상태 |
+
+OS resolver는 `parseFromText()`나 공개 `clearCache()`를 제공하지 않습니다. 생성자의 캐시 관리자 또는 새 resolver 인스턴스로 메타데이터 생명주기를 관리합니다. 설치 순서·누락·충돌 결과는 [OS 패키지 문서](./os-package-downloader.md)의 계약을 따릅니다.
 
 ---
 
 ## AptResolver
+
+실제 클래스는 `AptDependencyResolver`이며 `AptResolver` alias와 `getAptResolver(options)` 팩토리를 제공합니다. 검색 외에 상속한 `resolveDependencies(packages)`를 사용합니다.
 
 ### 개요
 - 목적: APT/DEB 패키지 의존성 해결 (Ubuntu, Debian)
@@ -685,9 +690,9 @@ YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 �
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `loadMetadata` | repos, architecture | Promise<void> | APT 저장소 메타데이터 로드 (Packages.gz, Release) |
-| `searchPackages` | query | OSPackageInfo[] | 패키지 검색 |
-| `findPackagesForDependency` | dependency, arch | Promise<OSPackageInfo[]> | 의존성에 해당하는 패키지 찾기 |
+| `loadMetadata` (protected) | - | Promise<void> | APT 저장소 메타데이터 로드 (Packages.gz, Release) |
+| `searchPackages` | query, matchType? | Promise<OSPackageSearchResult[]> | 패키지 검색 |
+| `findPackagesForDependency` (protected) | dependency | Promise<OSPackageInfo[]> | 의존성에 해당하는 패키지 찾기 |
 
 ### 내부 메서드
 
@@ -704,7 +709,7 @@ YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 �
 | 속성 | 타입 | 설명 |
 |------|------|------|
 | `parsers` | Map<string, AptMetadataParser> | 저장소별 메타데이터 파서 |
-| `allPackages` | Map<string, OSPackageInfo[]> | 패키지 캐시 |
+| `allPackages` | OSPackageInfo[] | 패키지 캐시 |
 | `providesMap` | Map<string, OSPackageInfo[]> | Provides 매핑 (가상 패키지) |
 
 ### 특징
@@ -712,12 +717,14 @@ YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 �
 - **Debian Control 파일 형식**: `Package:`, `Version:`, `Depends:` 등 파싱
 - **Provides 지원**: 가상 패키지 (예: `mail-transport-agent`)
 - **Component 자동 추출**: URL에서 main, universe, multiverse 등 추출
-- **Release 파일 파싱**: 저장소 메타데이터 검증
+- **Release 파서 제공**: 파서는 Release 필드를 읽을 수 있으나 resolver의 loadMetadata는 Packages 인덱스를 사용하며 서명 검증을 수행하지 않음
 - **메타데이터 파서 경계**: resolver는 `src/core/shared/apt-metadata-parser.ts` shim을 통해 parser를 사용합니다.
 
 ---
 
 ## ApkResolver
+
+실제 클래스는 `ApkDependencyResolver`이며 `ApkResolver` alias와 `getApkResolver(options)` 팩토리를 제공합니다. 검색 외에 상속한 `resolveDependencies(packages)`를 사용합니다.
 
 ### 개요
 - 목적: APK 패키지 의존성 해결 (Alpine Linux)
@@ -727,9 +734,9 @@ YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 �
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `loadMetadata` | repos, architecture | Promise<void> | APK 저장소 메타데이터 로드 (APKINDEX.tar.gz) |
-| `searchPackages` | query | OSPackageInfo[] | 패키지 검색 |
-| `findPackagesForDependency` | dependency, arch | Promise<OSPackageInfo[]> | 의존성에 해당하는 패키지 찾기 |
+| `loadMetadata` (protected) | - | Promise<void> | APK 저장소 메타데이터 로드 (APKINDEX.tar.gz) |
+| `searchPackages` | query, matchType? | Promise<OSPackageSearchResult[]> | 패키지 검색 |
+| `findPackagesForDependency` (protected) | dependency | Promise<OSPackageInfo[]> | 의존성에 해당하는 패키지 찾기 |
 
 ### 내부 메서드
 
@@ -745,7 +752,7 @@ YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 �
 | 속성 | 타입 | 설명 |
 |------|------|------|
 | `parsers` | Map<string, ApkMetadataParser> | 저장소별 메타데이터 파서 |
-| `allPackages` | Map<string, OSPackageInfo[]> | 패키지 캐시 |
+| `allPackages` | OSPackageInfo[] | 패키지 캐시 |
 | `providesMap` | Map<string, OSPackageInfo[]> | Provides 매핑 |
 
 ### APKINDEX 형식
@@ -781,10 +788,10 @@ p:nginx=1.24.0-r6
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `resolveDependencies` | name: string, version?: string, options?: NpmResolverOptions | Promise<NpmResolutionResult> | 메인 진입점: 패키지 의존성 트리 해결 |
-| `parseFromPackageJson` | packageJsonContent: string | ParsedDependency[] | package.json 파싱 |
+| `resolveDependencies` | name: string, version: string, options?: NpmResolverOptions | Promise<NpmResolutionResult> | 메인 진입점: 패키지 의존성 트리 해결 |
+| `parseFromPackageJson` | content: string | Promise<Array<{ name: string; version: string }>> | package.json 파싱 |
 | `getVersions` | packageName: string | Promise<string[]> | 패키지 버전 목록 조회 |
-| `getPackageInfo` | name: string, version: string | Promise<NpmPackageVersion> | 특정 버전 패키지 정보 조회 |
+| `getPackageInfo` | name: string, version: string | Promise<NpmPackageVersion \| null> | 특정 버전 패키지 정보 조회 |
 
 ### 내부 메서드
 
@@ -792,23 +799,22 @@ p:nginx=1.24.0-r6
 |--------|------|
 | `buildDeps` | 의존성 목록에서 큐 아이템 생성 |
 | `processDepItem` | 단일 의존성 아이템 처리 |
-| `findPlacement` | node_modules 배치 위치 결정 (호이스팅) |
-| `addNodeToTree` | 트리에 노드 추가 |
+| `NpmTreeManager.findPlacement` | node_modules 배치 위치 결정 (호이스팅) |
+| `NpmTreeManager.addNodeToTree` | 트리에 노드 추가 |
 | `enqueueDependencies` | 하위 의존성 큐에 추가 |
-| `fetchPackument` | registry에서 packument 조회 |
-| `resolveVersion` | semver 범위를 실제 버전으로 해결 |
-| `flattenTree` | 트리를 플랫 리스트로 변환 |
-| `isVersionCompatibleWithExisting` | 기존 버전과 호환성 검사 |
+| `NpmVersionResolver.fetchPackument` | registry에서 packument 조회 |
+| `NpmVersionResolver.resolveVersion` | semver 범위를 실제 버전으로 해결 |
+| `NpmTreeManager.flattenTree` | 트리를 플랫 리스트로 변환 |
+| `NpmTreeManager`의 배치 판단 | 기존 노드와 요청 범위를 비교하여 호이스팅/중첩 결정 |
 
 ### 속성
 
 | 속성 | 타입 | 설명 |
 |------|------|------|
 | `type` | PackageType | 'npm' |
-| `registryUrl` | string | npm Registry URL |
-| `resolvedCache` | Map<string, string> | 해결된 버전 캐시 (packument 캐시는 공유 모듈 사용) |
-| `tree` | NpmNode | 의존성 트리 루트 |
-| `conflicts` | NpmConflict[] | 감지된 충돌 목록 |
+| `versionResolver` | NpmVersionResolver | 저장소 조회/해결된 버전 캐시 |
+| `treeManager` | NpmTreeManager | root·배치 상태·충돌 목록 |
+| `targetOS` / `targetArchitecture` | string 또는 null | 플랫폼 필터 조건 |
 | `depsQueue` | DepsQueueItem[] | 처리 대기 큐 |
 | `depsSeen` | Set<string> | 처리된 의존성 추적 |
 
@@ -816,20 +822,33 @@ p:nginx=1.24.0-r6
 
 ```typescript
 interface NpmResolverOptions {
-  maxDepth?: number;             // 최대 탐색 깊이 (기본: 10)
-  includeDevDependencies?: boolean;  // devDependencies 포함
-  includePeerDependencies?: boolean; // peerDependencies 포함
-  includeOptionalDependencies?: boolean; // optionalDependencies 포함
+  maxDepth?: number;             // 기본 50
+  includeDev?: boolean;          // 기본 false
+  includeOptional?: boolean;     // 기본 false
+  installPeers?: boolean;        // 기본 true
+  preferDedupe?: boolean;         // 기본 false
+  legacyPeerDeps?: boolean;      // 기본 false
+  strictPeerDeps?: boolean;
+  installStrategy?: 'hoisted' | 'nested' | 'shallow'; // 기본 hoisted
+  nodeVersion?: string;
+  lockfile?: NpmLockfile;
+  targetOS?: 'windows' | 'macos' | 'linux';
+  targetArchitecture?: 'x86_64' | 'amd64' | 'arm64' | 'aarch64';
 }
 ```
+
+`strictPeerDeps`, `nodeVersion`, `lockfile`는 타입에 선언되어 있지만 현재 resolver에서 읽지 않습니다. `legacyPeerDeps`는 build 옵션에 전달되지만 전용 처리 분기가 없고, `shallow`도 별도 깊이 제한 구현이 없습니다. 타입이 옵션을 허용한다는 사실과 실제 처리 범위를 구분해야 합니다.
 
 ### NpmResolutionResult
 
 ```typescript
 interface NpmResolutionResult {
-  packages: NpmFlatPackage[];  // 플랫 패키지 목록
-  conflicts: NpmConflict[];    // 충돌 목록
-  tree: NpmNode;               // 의존성 트리 (node_modules 구조)
+  root: NpmResolvedNode;
+  flatList: NpmFlatPackage[];
+  conflicts: NpmConflict[];
+  totalSize: number;
+  totalPackages: number;
+  maxDepth: number; // 배치 경로로 계산한 실제 깊이
 }
 ```
 
@@ -861,18 +880,18 @@ const resolver = getNpmResolver();
 // 패키지 의존성 해결
 const result = await resolver.resolveDependencies('express', '4.18.2', {
   maxDepth: 5,
-  includeDevDependencies: false,
+  includeDev: false,
 });
 
-console.log(result.packages.length); // 플랫 패키지 수
+console.log(result.flatList.length); // 플랫 패키지 수
 console.log(result.conflicts);        // 충돌 목록
-console.log(result.tree);             // node_modules 트리 구조
+console.log(result.root);             // node_modules 트리 구조
 ```
 
 ### package.json 파싱
 
 ```typescript
-const deps = resolver.parseFromPackageJson(`{
+const deps = await resolver.parseFromPackageJson(`{
   "name": "my-app",
   "dependencies": {
     "express": "^4.18.0",
@@ -882,17 +901,15 @@ const deps = resolver.parseFromPackageJson(`{
     "typescript": "^5.0.0"
   }
 }`);
-// [
-//   { name: 'express', versionConstraint: '^4.18.0', type: 'dependency' },
-//   { name: 'lodash', versionConstraint: '~4.17.0', type: 'dependency' },
-//   { name: 'typescript', versionConstraint: '^5.0.0', type: 'devDependency' }
-// ]
+// 결과: [{ name: 'express', version: '<해결된 버전>' }, ...]
+// dependencies/devDependencies/peerDependencies/optionalDependencies를 병합해
+// 실제 버전을 조회한다. 원래 범위나 dependency type은 반환하지 않는다.
 ```
 
 ### 특징
 
-- **호이스팅 알고리즘**: npm의 node_modules 구조 재현
-- **semver 지원**: ^, ~, >=, < 등 모든 범위 문법 지원
+- **호이스팅 알고리즘**: Arborist 아이디어에 기반한 node_modules 배치 구현
+- **semver 지원**: semver 라이브러리로 ^, ~, >=, < 등 버전 범위 처리
 - **충돌 감지**: 동일 패키지의 다른 버전 요청 추적
 - **Packument 캐싱**: 중복 요청 방지
 - **peerDependencies**: 선택적으로 처리 가능
@@ -901,13 +918,15 @@ const deps = resolver.parseFromPackageJson(`{
 
 ## 공통 인터페이스
 
-모든 Resolver는 `IResolver` 인터페이스를 구현:
+pip·Conda·Maven은 `src/types/interfaces.ts`의 `IResolver`를 구현합니다. npm은 전용 결과 타입, OS는 `OSPackageInfo[]` 입력과 별도 해결 결과를 사용합니다.
 
 ```typescript
 interface IResolver {
-  type: PackageType;
-  resolveDependencies(name: string, version?: string, options?: ResolverOptions): Promise<DependencyResolutionResult>;
-  parseFromText(text: string): { name: string; version?: string }[];
+  readonly type: PackageType;
+  resolveDependencies(
+    packageName: string, version: string, options?: ResolverOptions
+  ): Promise<DependencyResolutionResult>;
+  parseFromText?(content: string): Promise<PackageInfo[]>;
 }
 ```
 
@@ -915,21 +934,29 @@ interface IResolver {
 
 ```typescript
 interface ResolverOptions {
-  maxDepth?: number;        // 최대 탐색 깊이 (기본: 10)
-  channel?: string;         // Conda 채널
-  pythonVersion?: string;   // Python 버전 (예: '3.11')
-  targetOS?: string;        // 타겟 OS (예: 'linux')
-  architecture?: string;    // 타겟 아키텍처 (예: 'x86_64')
+  includeDevDependencies?: boolean;
+  includeOptionalDependencies?: boolean;
+  maxDepth?: number;
+  skipDependencyExpansion?: boolean;
+  architecture?: Architecture;
+  targetPlatform?: {
+    system?: 'Linux' | 'Windows' | 'Darwin';
+    machine?: 'x86_64' | 'aarch64' | 'arm64';
+  };
+  pythonVersion?: string;
 }
 ```
+
+구현별 확장 옵션은 별도입니다. pip은 `indexUrl`/`extras`, Conda는 `channel`을 받으며 내부에서 `cudaVersion`도 읽습니다. Maven은 `MavenResolverOptions`, npm은 위 `NpmResolverOptions`를 사용합니다. 직접 호출 기준 최대 깊이는 pip/Conda 10, Maven 20, npm 50이며 상위 호출자가 값을 덮어쓸 수 있습니다.
 
 ### DependencyResolutionResult
 
 ```typescript
 interface DependencyResolutionResult {
-  tree: DependencyNode;
-  packages: PackageInfo[];
+  root: DependencyNode;
+  flatList: PackageInfo[];
   conflicts: DependencyConflict[];
+  totalSize?: number;
 }
 ```
 
@@ -937,9 +964,7 @@ interface DependencyResolutionResult {
 
 ```typescript
 interface DependencyNode {
-  name: string;
-  version: string;
-  type: PackageType;
+  package: PackageInfo;
   dependencies: DependencyNode[];
   optional?: boolean;
   scope?: DependencyScope;
@@ -950,10 +975,10 @@ interface DependencyNode {
 
 ```typescript
 interface DependencyConflict {
+  type: 'version' | 'circular' | 'missing';
   packageName: string;
-  type: ConflictType;
   versions: string[];
-  requestedBy: string[];
+  resolvedVersion?: string;
 }
 ```
 
@@ -963,7 +988,7 @@ interface DependencyConflict {
 
 ### BFS 기반
 
-모든 리졸버가 BFS(너비 우선 탐색) 큐 기반으로 변경되어 깊은 의존성 트리에서도 call stack overflow가 발생하지 않습니다.
+현재 의존성 확장은 BFS(너비 우선 탐색) 큐를 사용합니다. 순회 상태는 구현마다 다르므로 아래 항목은 공통 개념이며 모든 클래스가 동일한 필드나 보장 범위를 갖는다는 의미는 아닙니다.
 
 1. **BFS 탐색**: 큐 기반 너비 우선 탐색으로 의존성 트리 구축
 2. **방문 캐싱**: 동일 패키지 중복 처리 방지 (resolvedNodes Map)
@@ -979,9 +1004,11 @@ interface DependencyConflict {
 ├── B >= 1.0
 │   └── D >= 2.0
 ├── C >= 1.5
-│   └── D >= 1.8  ← 충돌: D의 다른 버전 요청
+│   └── D >= 1.8  ← D >= 2.0으로 함께 만족할 수도 있음
 └── E (optional)
 ```
+
+버전 조건이 서로 다르다는 이유만으로 항상 충돌은 아닙니다. 각 resolver가 선택한 버전·배치·후보를 기준으로 conflict를 기록하며, 서로 다른 버전을 함께 다운로드하는 것과 하나의 환경에 동시에 설치 가능한 것은 구분됩니다.
 
 ---
 

@@ -1,5 +1,14 @@
 # pip install 의존성 해결 및 파일 선택 알고리즘 분석
 
+> **알고리즘 분석 + 구현 대조 · 2026-09-08**: 1–6절은 pip/resolvelib의 동작을 설명하는 참고 분석입니다. pip의 모든 알고리즘이 DepsSmuggler에 연결되었다는 의미는 아닙니다. 현재 공개 API는 [Resolvers](resolvers.md), 개별 도구는 [공유 pip 유틸리티](shared-pip.md)를 참고하세요.
+
+## 현재 구현 요약
+
+- 실제 앱 경로는 `src/core/resolver/pip-resolver.ts`의 `PipResolver.resolveDependencies()`가 수행하는 BFS입니다. `src/core/shared/pip-backtracking-resolver.ts`의 `BacktrackingResolver`는 별도 유틸리티이며 일반 GUI/CLI resolver 경로에 연결되어 있지 않습니다.
+- PEP 508 marker와 extras, 버전 제약, PyPI JSON·Simple API, wheel의 Python/ABI/OS/아키텍처 호환성을 평가합니다. 대상 환경이 지정되면 호환 wheel을 우선하고 호환 sdist로만 폴백하며, 후보가 없으면 실패합니다.
+- `metadata.downloadUrl`, `filename`, `checksum`, `size`는 실제 선택 파일을 기준으로 전달합니다. 다운로드 단계는 이 URL을 재사용합니다. 자세한 계약은 [CLI 대상 환경 설계](cli-download-environment-options-design.md)에 정리되어 있습니다.
+- 7.1–7.2절의 충돌 처리·태그·백트래킹 자료는 구현 목표와 개념을 보존한 것입니다. `PlatformTag`, `CandidateSortingKey`, `ResolverState` 초안은 현재 타입 선언이 아니며, 모든 충돌 버전을 자동 설치 가능한 단일 환경으로 조정한다는 보장은 없습니다.
+
 ## 1. 전체 아키텍처 개요
 
 pip install은 크게 **두 가지 핵심 시스템**으로 구성됩니다:
@@ -254,43 +263,37 @@ interface ResolverState {
 
 ### 7.3 패키지 크기 추출
 
-PipResolver는 PyPI JSON API에서 패키지 크기를 추출합니다.
+`PipResolver.fetchPackageInfoUncached()`는 PyPI JSON의 `urls`에서 **선택된 파일의 크기**를 추출합니다. 같은 버전의 wheel과 sdist는 크기가 다를 수 있습니다.
 
-```typescript
-// PyPI JSON API 응답 구조
-// https://pypi.org/pypi/{package}/{version}/json
+```json
 {
-  "info": { "name": "requests", "version": "2.31.0", ... },
+  "info": { "name": "requests", "version": "2.31.0" },
   "urls": [
-    {
-      "packagetype": "bdist_wheel",
-      "filename": "requests-2.31.0-py3-none-any.whl",
-      "size": 62574,
-      ...
-    },
-    {
-      "packagetype": "sdist",
-      "filename": "requests-2.31.0.tar.gz",
-      "size": 110346,
-      ...
-    }
+    { "packagetype": "bdist_wheel", "filename": "requests-2.31.0-py3-none-any.whl", "size": 62574 },
+    { "packagetype": "sdist", "filename": "requests-2.31.0.tar.gz", "size": 110346 }
   ]
-}
-
-// 크기 추출 로직
-let packageSize = 0;
-if (urls && urls.length > 0) {
-  // wheel 파일 우선, 없으면 sdist
-  const wheel = urls.find((u) => u.packagetype === 'bdist_wheel');
-  const sdist = urls.find((u) => u.packagetype === 'sdist');
-  packageSize = (wheel || sdist || urls[0]).size || 0;
 }
 ```
 
-**우선순위**:
-1. `bdist_wheel` (wheel 파일) - 설치가 빠르고 일반적으로 크기가 작음
-2. `sdist` (소스 배포) - wheel이 없는 경우 폴백
-3. 첫 번째 URL - 둘 다 없는 경우
+위 크기는 응답 형식을 보여주는 예시입니다. 핵심 처리 흐름은 다음과 같습니다.
+
+```typescript
+// PipResolver 내부의 개념 발췌: info와 urls는 PyPI JSON 응답
+const candidates = urls.map((release) => ({
+  ...release,
+  requires_python: release.requires_python ?? info.requires_python,
+}));
+const selectedFile = this.selectBestWheel(candidates);
+const packageSize = selectedFile?.size || 0;
+```
+
+**선택 순서와 실패 조건**:
+
+1. 대상 환경이 있으면 `Requires-Python`, Python/ABI 태그, OS·아키텍처를 만족하는 wheel을 고릅니다. `abi3`는 최소 CPython 버전도 검사합니다.
+2. 호환 wheel이 없으면 호환 sdist만 허용합니다. 둘 다 없으면 대상 아티팩트 오류를 발생시킵니다.
+3. 내부 `selectBestWheel()`의 대상 플랫폼 미설정 분기에만 첫 wheel → sdist → 첫 URL의 기존 폴백이 남아 있습니다. 이를 대상 환경이 지정된 다운로드의 선택 규칙으로 사용하면 안 됩니다.
+
+크기뿐 아니라 같은 선택 파일의 URL·파일명·체크섬을 함께 보존합니다. 따라서 예전의 단순 `urls.find(wheel)` 크기 계산으로 되돌리면 실제 다운로드 파일과 예상 크기가 달라질 수 있습니다.
 
 ### 7.4 요청 단위 조회 재사용
 

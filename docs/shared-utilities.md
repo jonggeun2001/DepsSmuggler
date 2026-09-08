@@ -23,6 +23,7 @@ src/core/shared/
 ├── dependency-tree-utils.ts      # 의존성 트리 유틸리티
 ├── file-utils.ts                 # 파일 다운로드/압축 유틸리티
 ├── script-utils.ts               # 설치 스크립트 생성
+├── filename-utils.ts             # 파일명/캐시 키 정리
 ├── path-utils.ts                 # 크로스 플랫폼 경로 처리
 │
 │   # HTTP 클라이언트 추상화
@@ -36,7 +37,10 @@ src/core/shared/
 │
 │   # 공유 캐시 모듈
 ├── cache-utils.ts                # 캐시 공통 유틸리티
-├── cache-manager.ts              # 범용 캐시 매니저
+├── cache-manager.ts              # cache/cache-store.ts 호환용 재내보내기
+├── cache/
+│   ├── cache-store.ts            # 범용 메모리/디스크 캐시와 요청 합치기
+│   └── artifact-cache.ts         # 다운로드 파일 캐시
 ├── pip-cache.ts                  # PyPI 메타데이터 캐시 (메모리 + 디스크)
 ├── npm-cache.ts                  # npm packument 캐시 (메모리)
 ├── maven-cache.ts                # Maven POM 캐시 (메모리 + 디스크)
@@ -45,16 +49,21 @@ src/core/shared/
 │   # pip 고급 의존성 해결 모듈
 ├── pip-backtracking-resolver.ts  # pip 백트래킹 Resolver
 ├── pip-candidate.ts              # 후보 평가기
-├── pip-provider.ts               # resolvelib Provider 구현
+├── pip-provider.ts               # resolvelib 스타일 Provider
 ├── pip-tags.ts                   # PEP 425 태그 생성/매칭
 ├── pip-wheel.ts                  # Wheel 파일 파싱/선택
+├── pip-version.ts                # PEP 440 버전 파싱/비교
+├── pep508-marker.ts              # PEP 508 환경 마커 평가
+├── pip-simple-api.ts             # Simple API 릴리스/버전 목록
+├── pip-simple-api-client.ts      # 커스텀 인덱스 파일 목록/Core Metadata
 │
 │   # conda 고급 모듈
 ├── conda-matchspec.ts            # MatchSpec 파싱/매칭
 ├── conda-validator.ts            # Conda 채널 검증
 │
 │   # maven 고급 모듈
-├── maven-skipper.ts              # 의존성 스킵/캐시 관리
+├── maven-skipper.ts              # maven-dedupe-index.ts 호환용 재내보내기
+├── maven-dedupe-index.ts         # BF 좌표/중복/충돌 관리
 ├── maven-pom-utils.ts            # POM 파싱 유틸리티
 ├── maven-bom-processor.ts        # BOM 처리기
 ├── maven-utils.ts                # Maven classifier 빌드 유틸리티
@@ -67,11 +76,15 @@ src/core/shared/
 │   # 재시도 유틸리티
 ├── retry-utils.ts                # 지수 백오프 재시도
 │
-│   # 검색 유틸리티
-└── search-utils.ts               # 검색 결과 정렬/관련성 점수 계산
-
-src/core/shared/
-└── pip-simple-api-client.ts      # PyPI Simple API 파싱
+│   # 검색/OS 메타데이터/요청 조회 재사용
+├── search-utils.ts               # 검색 결과 정렬/관련성 점수 계산
+├── npm-version-resolver.ts       # npm 스펙에서 버전 선택
+├── apt-metadata-parser.ts        # DEB 메타데이터 파싱
+├── yum-metadata-parser.ts        # RPM 메타데이터 파싱
+├── apk-metadata-parser.ts        # APK 메타데이터 파싱
+└── internal/
+    ├── resolution-session.ts          # 요청별 원격 조회 결과 재사용
+    └── resolution-session-registry.ts # resolver와 세션 연결
 
 src/utils/
 ├── logger.ts                     # 로깅 유틸리티
@@ -101,7 +114,7 @@ src/utils/
 
 ## 모듈 진입점 (`index.ts`)
 
-모든 공유 유틸리티를 단일 진입점에서 내보냄
+선택한 공유 API를 단일 진입점에서 내보냅니다. 아래는 기본 함수와 체크섬 API의 발췌이며, 전체 export는 `src/core/shared/index.ts`를 기준으로 합니다. 패키지별 캐시, 플랫폼 매핑, 버전 조회/프리로드, 재시도와 경로 유틸리티 등은 해당 모듈을 직접 import합니다.
 
 ```typescript
 // 타입
@@ -112,6 +125,8 @@ export * from './pip-types';
 // 버전 비교 유틸리티
 export {
   compareVersions,
+  comparePep440Versions,
+  isPrereleaseVersion,
   isVersionCompatible,
   sortVersionsDescending,
   sortVersionsAscending,
@@ -154,6 +169,8 @@ export type { ChecksumAlgorithm } from './integrity/checksum';
 
 ---
 
+진입점은 위 발췌 외에도 Conda MatchSpec, pip 태그·wheel·후보·Provider·독립 백트래킹 모듈, Maven 타입·중복 인덱스, npm 타입·버전 리졸버, OS 메타데이터 파서, HTTP 구현체, 검색과 의존성 트리 API를 내보냅니다. `CacheManager` 이름은 이 진입점에서 Maven의 `MavenDedupeIndex` alias를 가리키므로 범용 캐시나 파일 캐시를 사용할 때는 정확한 모듈을 지정해야 합니다.
+
 ## 무결성 검사 유틸리티 (`integrity/checksum.ts`)
 
 파일 기반 체크섬 계산과 검증을 공통 모듈로 통합했습니다.
@@ -165,7 +182,9 @@ export type { ChecksumAlgorithm } from './integrity/checksum';
 | `calculateFileChecksum(filePath, algorithm?)` | 파일의 체크섬을 계산합니다. 기본 알고리즘은 `sha256`입니다. |
 | `verifyFileChecksum(filePath, expectedChecksum, algorithm?)` | 파일 체크섬이 기대값과 일치하는지 검증합니다. |
 | `normalizeChecksum(checksum)` | 대소문자/`sha256:` 같은 알고리즘 프리픽스를 정규화합니다. |
-| `isChecksumAlgorithm(value)` | 지원하는 알고리즘(`md5`, `sha1`, `sha256`, `sha512`) 여부를 확인합니다. |
+| `isChecksumAlgorithm(value)` | 소문자 알고리즘 문자열(`md5`, `sha1`, `sha256`, `sha512`) 여부를 확인합니다. |
+
+`calculateFileChecksum()`은 `Promise<string>`, `verifyFileChecksum()`은 `Promise<boolean>`을 반환합니다. 파일 읽기 오류는 reject되며 검증 함수가 모든 오류를 false로 바꾸지는 않습니다. 기대 체크섬의 접두사는 비교할 때 제거하지만 알고리즘을 자동 선택하지 않으므로 SHA-512 등은 algorithm 인자를 함께 지정해야 합니다.
 
 ### 주요 사용처
 
@@ -173,7 +192,7 @@ export type { ChecksumAlgorithm } from './integrity/checksum';
 - `src/core/downloaders/conda.ts`
 - `src/core/downloaders/maven.ts`
 - `src/core/downloaders/docker-utils.ts`
-- `src/core/cache-manager.ts`
+- `src/core/shared/cache/artifact-cache.ts` (`src/core/cache-manager.ts`는 호환용 재내보내기)
 - `src/core/downloaders/os-shared/gpg-verifier.ts`
 
 ---

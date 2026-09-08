@@ -1,5 +1,9 @@
 # CLI Download Environment Options Implementation Plan
 
+> **완료된 작업 계획 · 2026-09-08 대조**: 아래 Task 1–7, 코드 초안, 당시 검증 명령과 인계 절차는 구현 이력으로 보존합니다. 다시 실행할 작업 목록이 아닙니다. 현재 옵션·동작은 [CLI 문서](cli.md#download), 계약과 구현 위치는 [환경 옵션 설계](cli-download-environment-options-design.md)를 참고하세요.
+>
+> 구현 결과는 `src/cli/commands/download-environment.ts`, `download.ts`, `download-runner.ts`, `src/core/shared/dependency-resolver.ts` 및 pip/Conda/Maven resolver·downloader에 반영되어 있습니다. 후속 수정으로 pip 호환 wheel/sdist 선택, Conda noarch의 Python 제약, Maven 명시적 type 보존도 보강되었습니다. 아래 초안의 메서드·타입을 현재 API로 복사하지 말고 해당 소스와 테스트를 기준으로 삼습니다.
+
 **Goal:** `depssmuggler download`에서 대상 OS, 아키텍처, Python/CUDA 버전, Conda 채널과 Maven classifier를 검증하고 의존성 해결부터 실제 아티팩트 다운로드까지 일관되게 적용한다.
 
 **Architecture:** CLI 환경 옵션의 런타임 검증과 비기본값 판별을 작은 전용 모듈로 분리한다. `downloadCommand`는 검증된 값을 공용 dependency resolver에 전달하고, resolver는 기존 요청 패키지에 실제 선택된 root 메타데이터를 병합한다. 각 downloader는 resolver가 선택한 URL 또는 classifier를 우선 사용하고 기존 조회 로직은 폴백으로 유지한다.

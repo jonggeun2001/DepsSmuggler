@@ -24,23 +24,27 @@
 ```typescript
 interface DownloadPackage {
   id: string;
-  type: string;           // 'pip' | 'conda' | 'maven' | 'npm' | 'yum' | 'apt' | 'apk' | 'docker'
-  name: string;           // 패키지명
-  version: string;        // 버전
-  architecture?: string;  // 아키텍처 (예: 'x86_64', 'arm64')
+  type: string;
+  name: string;
+  version: string;
+  architecture?: string;
+  /** 패키지 크기 (바이트) */
+  size?: number;
   /** OS 패키지의 다운로드 URL (yum/apt/apk 등) */
   downloadUrl?: string;
   /** OS 패키지의 저장소 정보 */
   repository?: { baseUrl: string; name?: string };
   /** OS 패키지의 파일 경로 (저장소 내 위치) */
   location?: string;
-  /** pip 커스텀 인덱스 URL (예: PyTorch CUDA) */
+  /** 실제 다운로드될 파일명 (예: numpy-1.24.0-py311h64a7726_0.conda, requests-2.28.0-py3-none-any.whl) */
+  filename?: string;
+  /** pip 커스텀 인덱스 URL (예: https://download.pytorch.org/whl/cu121) */
   indexUrl?: string;
   /** pip extras 의존성 (예: ['cuda'], ['security', 'socks']) */
   extras?: string[];
-  /** Maven classifier (예: 'natives-linux', 'linux-x86_64') */
+  /** Maven classifier (예: natives-linux, linux-x86_64) */
   classifier?: string;
-  /** Docker 이미지 메타데이터 (레지스트리 정보 등) */
+  /** 추가 메타데이터 (Docker registry 등) */
   metadata?: Record<string, unknown>;
 }
 ```
@@ -61,7 +65,7 @@ interface DownloadOptions {
   architecture?: Architecture;             // 아키텍처
   includeDependencies?: boolean;           // false면 의존성 해결 단계를 생략하고 원본만 사용
   pythonVersion?: string;                  // Python 버전 (pip/conda용)
-  concurrency?: number;                    // 동시 다운로드 수 (기본: 3)
+  concurrency?: number;                    // 동시 다운로드 수 (기본값은 호출부에서 결정)
   deliveryMethod?: 'local' | 'email';
   email?: { to: string; from?: string; subject?: string };
   fileSplit?: { enabled: boolean; maxSizeMB: number };
@@ -132,6 +136,7 @@ interface PyPIRelease {
   packagetype: 'sdist' | 'bdist_wheel' | 'bdist_egg';
   python_version: string;
   requires_python?: string;
+  yanked?: boolean;
 }
 ```
 
@@ -161,14 +166,12 @@ PyPI API 응답
 ```typescript
 interface PyPIResponse {
   info: PyPIInfo;
-  releases?: Record<string, PyPIRelease[]>;  // 특정 버전 조회 시 없을 수 있음
-  urls?: PyPIRelease[];  // 특정 버전 조회 시 포함
+  releases: Record<string, PyPIRelease[]>;
+  urls: PyPIRelease[];
 }
 ```
 
-> **참고**: PyPI API는 버전 지정 여부에 따라 응답 구조가 다릅니다:
-> - 버전 없이 조회 (`/pypi/{package}/json`): `releases` 포함
-> - 버전 지정 조회 (`/pypi/{package}/{version}/json`): `urls` 포함, `releases` 없음
+> **참고**: 위 내용은 이 저장소의 TypeScript 선언입니다. `releases`와 `urls`를 모두 필수로 선언하지만, 실제 원격 응답은 조회 엔드포인트에 따라 다를 수 있으므로 `pip-cache.ts`의 별도 응답 타입은 두 필드를 선택으로 선언하고, `pypi-utils.ts`의 버전별 조회는 `urls`를 사용합니다. API 응답 형식과 로컬 타입의 필수 여부를 구분해야 합니다.
 
 ### WheelTags
 
@@ -176,8 +179,8 @@ Wheel 파일 태그 정보 (PEP 425)
 
 ```typescript
 interface WheelTags {
-  pythonTags: string[];   // 예: ['cp311', 'cp3', 'py3', 'py311']
-  abiTags: string[];      // 예: ['cp311', 'abi3', 'none']
+  pythonTags: string[];  // 예: ['cp311', 'cp3', 'py3', 'py311']
+  abiTags: string[];     // 예: ['cp311', 'abi3', 'none']
   platformTags: string[]; // 예: ['manylinux_2_17_x86_64', 'linux_x86_64', 'any']
 }
 ```
@@ -281,10 +284,22 @@ npm 패키지 전체 메타데이터 (registry에서 조회)
 
 ```typescript
 interface NpmPackument {
+  _id: string;
+  _rev?: string;
   name: string;
-  'dist-tags': Record<string, string>;  // 예: { latest: '1.0.0' }
+  'dist-tags': Record<string, string>;
   versions: Record<string, NpmPackageVersion>;
-  time?: Record<string, string>;        // 버전별 발행 시간
+  time?: Record<string, string>;
+  maintainers?: NpmPerson[];
+  description?: string;
+  homepage?: string;
+  keywords?: string[];
+  repository?: NpmRepository;
+  author?: NpmPerson;
+  bugs?: { url?: string; email?: string };
+  license?: string;
+  readme?: string;
+  readmeFilename?: string;
 }
 ```
 
@@ -296,12 +311,35 @@ interface NpmPackument {
 interface NpmPackageVersion {
   name: string;
   version: string;
+  description?: string;
+  main?: string;
+  types?: string;
+  typings?: string;
+  scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
-  optionalDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, PeerDependencyMeta>;
+  optionalDependencies?: Record<string, string>;
+  bundleDependencies?: string[];
+  bundledDependencies?: string[];
+  engines?: Record<string, string>;
+  os?: string[];
+  cpu?: string[];
   dist: NpmDist;
+  repository?: NpmRepository;
+  author?: NpmPerson;
+  maintainers?: NpmPerson[];
+  keywords?: string[];
+  license?: string;
+  homepage?: string;
+  bugs?: { url?: string; email?: string };
+  deprecated?: string;
+  _id?: string;
+  _npmVersion?: string;
+  _nodeVersion?: string;
+  _npmUser?: NpmPerson;
+  _hasShrinkwrap?: boolean;
 }
 ```
 
@@ -311,11 +349,12 @@ interface NpmPackageVersion {
 
 ```typescript
 interface NpmDist {
-  tarball: string;      // 다운로드 URL
-  shasum: string;       // SHA1 해시
-  integrity?: string;   // SHA512 SRI 해시
+  tarball: string;
+  shasum: string;
+  integrity?: string;
   fileCount?: number;
   unpackedSize?: number;
+  signatures?: NpmSignature[];
 }
 ```
 
@@ -325,9 +364,12 @@ interface NpmDist {
 
 ```typescript
 interface NpmResolutionResult {
-  packages: NpmFlatPackage[];  // 플랫 패키지 목록
-  conflicts: NpmConflict[];    // 충돌 목록
-  tree: NpmNode;               // 의존성 트리
+  root: NpmResolvedNode;
+  flatList: NpmFlatPackage[];
+  conflicts: NpmConflict[];
+  totalSize: number;
+  totalPackages: number;
+  maxDepth: number;
 }
 ```
 
@@ -339,9 +381,17 @@ interface NpmResolutionResult {
 interface NpmNode {
   name: string;
   version: string;
-  path: string;                      // node_modules 경로
-  dependencies?: Record<string, NpmNode>;
   depth: number;
+  path: string;        // node_modules 경로
+  parent: string | null;
+  children: Map<string, NpmNode>;
+  edgesOut: Map<string, NpmEdge>;
+  edgesIn: Set<NpmEdge>;
+  packageInfo: NpmPackageVersion;
+  isRoot: boolean;
+  optional: boolean;
+  dev: boolean;
+  peer: boolean;
 }
 ```
 
@@ -359,7 +409,7 @@ interface MavenCoordinate {
   artifactId: string;
   version: string;
   classifier?: string;
-  packaging?: string;
+  type?: string;
 }
 ```
 
@@ -370,14 +420,29 @@ POM 프로젝트 정보
 ```typescript
 interface PomProject {
   groupId?: string;
-  artifactId: string;
+  artifactId?: string;
   version?: string;
   packaging?: string;
   parent?: PomParent;
   properties?: Record<string, string>;
-  dependencyManagement?: { dependencies: PomDependency[] };
-  dependencies?: PomDependency[];
-  build?: { plugins?: PomPlugin[] };
+  dependencies?: {
+    dependency: PomDependency | PomDependency[];
+  };
+  dependencyManagement?: {
+    dependencies?: {
+      dependency: PomDependency | PomDependency[];
+    };
+  };
+  build?: {
+    plugins?: {
+      plugin: PomPlugin | PomPlugin[];
+    };
+    pluginManagement?: {
+      plugins?: {
+        plugin: PomPlugin | PomPlugin[];
+      };
+    };
+  };
 }
 ```
 
@@ -390,11 +455,13 @@ interface PomDependency {
   groupId: string;
   artifactId: string;
   version?: string;
-  scope?: 'compile' | 'provided' | 'runtime' | 'test' | 'system';
-  optional?: boolean;
-  exclusions?: PomExclusion[];
-  classifier?: string;
+  scope?: string;
+  optional?: string | boolean;
   type?: string;
+  classifier?: string;
+  exclusions?: {
+    exclusion: PomExclusion | PomExclusion[];
+  };
 }
 ```
 
@@ -405,31 +472,36 @@ interface PomDependency {
 ```typescript
 interface ResolvedDependencyNode {
   coordinate: MavenCoordinate;
-  scope: string;
+  scope: DependencyScope;
   depth: number;
+  nodeCoordinate: NodeCoordinate;
+  path: string[];
   children: ResolvedDependencyNode[];
-  downloadUrl?: string;
-  parentPath: string[];
+  /** 충돌로 인해 생략됨 */
+  omitted?: boolean;
+  omitReason?: 'conflict' | 'duplicate';
+  /** 충돌 시 승자 버전 */
+  winnerVersion?: string;
 }
 ```
 
 ### Scope 전이 행렬
 
 ```typescript
-const SCOPE_TRANSITION_MATRIX: Record<ScopeTransitionKey, ScopeTransitionResult> = {
-  'compile:compile': 'compile',
-  'compile:runtime': 'runtime',
-  'compile:provided': null,      // 전이 안됨
-  'compile:test': null,
-  'runtime:compile': 'runtime',
-  'runtime:runtime': 'runtime',
-  'provided:compile': 'provided',
-  'test:compile': 'test',
-  // ...
+const SCOPE_TRANSITION_MATRIX: Record<
+  ScopeTransitionKey,
+  Record<ScopeTransitionKey, ScopeTransitionResult>
+> = {
+  compile: { compile: 'compile', provided: null, runtime: 'runtime', test: null },
+  provided: { compile: 'provided', provided: null, runtime: 'provided', test: null },
+  runtime: { compile: 'runtime', provided: null, runtime: 'runtime', test: null },
+  test: { compile: 'test', provided: null, runtime: 'test', test: null },
 };
 ```
 
 ---
+
+`ScopeTransitionKey`는 `compile | provided | runtime | test`입니다. `transitScope(parentScope, childOriginalScope)`는 이 중첩 행렬을 조회하며 `system` 자식이나 지원하지 않는 조합에는 `null`을 반환합니다.
 
 ## 관련 문서
 

@@ -25,7 +25,9 @@ src/core/shared/
 
 | 함수명 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `compareVersions` | a: string, b: string | number | 버전 비교 (a > b면 양수) |
+| `compareVersions` | a: string, b: string | number | 숫자 부분 위주의 일반 비교 (a > b면 양수) |
+| `comparePep440Versions` | a: string, b: string | number | epoch·pre/post/dev·local을 포함한 후보 순서 비교 |
+| `isPrereleaseVersion` | version: string | boolean | prerelease/development release 판별 |
 | `isVersionCompatible` | version: string, spec: string | boolean | 버전 스펙 호환성 체크 |
 | `sortVersionsDescending` | versions: string[] | string[] | 버전 내림차순 정렬 |
 | `sortVersionsAscending` | versions: string[] | string[] | 버전 오름차순 정렬 |
@@ -35,10 +37,15 @@ src/core/shared/
 
 - `>=`, `<=`, `>`, `<` - 비교 연산자
 - `==` - 정확히 일치 (와일드카드 `*` 지원)
-- `!=` - 불일치
+- `!=` - 불일치 (와일드카드 지원)
+- `===` - ASCII 대소문자를 무시한 문자열 동등 비교
 - `~=` - 호환 릴리스 (예: `~=2.1`은 `>=2.1, ==2.*`)
 - `,` - AND 연산
 - `|` - OR 연산
+
+`isVersionCompatible()`는 쉼표로 나눈 각 조건 안에서 `|` OR를 평가합니다. `==`는 정규화된 release/epoch/suffix를 비교하며, 스펙에 local label이 없으면 후보의 local label을 무시합니다. 연산자 없는 일반 버전 문자열은 정확 버전 조건으로 처리하지 않으므로 `==1.2.3`처럼 전달해야 합니다.
+
+`compareVersions()`와 이를 사용하는 정렬/최신 버전 함수는 문자 suffix를 제거하는 단순 비교입니다. pip 후보의 PEP 440 순서에는 `comparePep440Versions()`를 사용합니다. Conda/Maven/npm의 전용 버전 해결 규칙과 동일한 함수로 취급하지 않습니다.
 
 ### 사용 예시
 
@@ -78,7 +85,7 @@ findLatestCompatibleVersion(versions, '>=2.0,<3.0'); // '2.5.0'
 | `apk` | ApkResolver | APK 의존성 (통합 처리) |
 | `docker` | - | 원본만 포함 (의존성 없음) |
 
-> **참고**: OS 패키지(yum, apt, apk)는 `osPackageInfo` 메타데이터가 있으면 의존성 해결이 수행됩니다.
+> **참고**: OS 패키지(yum, apt, apk)는 `metadata.osPackageInfo`와 해당 배포판 설정이 필요합니다. 메타데이터가 없으면 원본만 포함하고, 메타데이터가 있는데 설정이 없거나 배포판 ID가 유효하지 않으면 해당 루트의 실패로 기록합니다.
 
 ### ResolvedPackageList
 
@@ -98,31 +105,51 @@ interface ResolvedPackageList {
 
 ```typescript
 interface DependencyResolverOptions {
-  maxDepth?: number;        // 최대 탐색 깊이 (기본: 5)
-  // pip에만 전달되는 루트 전용 처리 힌트
+  /** 의존성 포함 여부 (기본값: true) */
+  includeDependencies?: boolean;
+  /** 최대 의존성 탐색 깊이 (기본값: 5) */
+  maxDepth?: number;
+  /** 루트 아티팩트만 검증하고 자식 의존성 탐색은 생략 */
   resolveRootArtifactsOnly?: boolean;
-  includeOptional?: boolean; // 선택적 의존성 포함 (기본: false)
-  condaChannel?: string;    // conda 채널 (기본: 'conda-forge')
-  yumRepoUrl?: string;      // yum 저장소 URL
-  architecture?: string;    // 아키텍처 (기본: 'x86_64')
-  pythonVersion?: string;   // Python 버전 (예: '3.12')
-  targetOS?: string;        // 타겟 OS (예: 'linux')
-  onProgress?: DependencyProgressCallback;  // 진행 상황 콜백
-
-  // OS 패키지 배포판 설정
-  yumDistribution?: OSDistributionSetting;  // YUM 배포판 (RHEL/CentOS/Rocky/AlmaLinux)
-  aptDistribution?: OSDistributionSetting;  // APT 배포판 (Debian/Ubuntu)
-  apkDistribution?: OSDistributionSetting;  // APK 배포판 (Alpine)
-  includeRecommends?: boolean;              // 권장 의존성 포함 (APT용)
+  /** 선택적 의존성 포함 여부 (기본값: false) */
+  includeOptional?: boolean;
+  /** conda 채널 (기본값: 'conda-forge') */
+  condaChannel?: string;
+  /** yum 저장소 URL */
+  yumRepoUrl?: string;
+  /** 아키텍처 (기본값: 'x86_64') */
+  architecture?: string;
+  /** 타겟 OS (pip/conda 휠 필터링용, 폐쇄망 OS) */
+  targetOS?: 'any' | 'windows' | 'macos' | 'linux';
+  /** Python 버전 (pip 호환성 필터링용, 예: '3.12', '3.12.2') */
+  pythonVersion?: string;
+  /** CUDA 버전 (conda 패키지의 __cuda 의존성 필터링용, 예: '11.8', '12.4') */
+  cudaVersion?: string | null;
+  /** 진행 상황 콜백 */
+  onProgress?: DependencyProgressCallback;
+  /** YUM 배포판 설정 (RHEL/CentOS/Rocky/AlmaLinux) */
+  yumDistribution?: OSDistributionSetting;
+  /** APT 배포판 설정 (Debian/Ubuntu) */
+  aptDistribution?: OSDistributionSetting;
+  /** APK 배포판 설정 (Alpine) */
+  apkDistribution?: OSDistributionSetting;
+  /** 권장 의존성 포함 여부 (APT용) */
+  includeRecommends?: boolean;
 }
 
 interface OSDistributionSetting {
-  id: string;           // 배포판 ID (예: 'rocky-9', 'ubuntu-22.04')
-  architecture: string; // 아키텍처 (예: 'x86_64', 'amd64')
+  /** 배포판 ID (예: rocky-9, ubuntu-22.04, alpine-3.18) */
+  id: string;
+  /** 배포판에서 지원하는 아키텍처 (예: x86_64, amd64, aarch64, arm64) */
+  architecture: string;
 }
 ```
 
-`resolveAllDependencies`의 `maxDepth` 기본값은 `5`이며 CLI 기본 의존성 포함 다운로드가 사용하는 값입니다. 각 리졸버는 이 깊이까지 해결된 패키지를 결과에 포함합니다. pip는 경계 노드에 적용 가능한 의존성이 남아 있으면 하위 확장을 생략하고 깊이 정보를 담은 경고를 애플리케이션 로그에 기록하지만, 직접 루트를 실패로 처리하지 않습니다. `resolveRootArtifactsOnly`는 shared resolver에서 pip의 `skipDependencyExpansion`으로만 전달되는 루트 전용 처리 힌트입니다. CLI의 `--no-deps`는 이 힌트와 `maxDepth: 0`을 함께 전달하므로 pip와 Conda 모두 루트 아티팩트만 조회하며, 깊이 제한 경고 없이 조용히 종료합니다. pip `PipResolver.resolveDependencies`를 직접 호출할 때의 `maxDepth` 기본값은 `10`입니다.
+`resolveAllDependencies`의 `maxDepth` 기본값은 `5`이며 CLI 기본 의존성 포함 다운로드가 사용하는 값입니다. 라이브러리 리졸버에 이 값을 전달하며, OS 리졸버 생성 경로에는 이 옵션을 전달하지 않습니다. 깊이 경계의 실제 처리는 타입별 리졸버 구현에 따릅니다. pip는 경계 노드에 적용 가능한 의존성이 남아 있으면 하위 확장을 생략하고 깊이 정보를 담은 경고를 애플리케이션 로그에 기록하지만, 직접 루트를 실패로 처리하지 않습니다. `resolveRootArtifactsOnly`는 shared resolver에서 pip의 `skipDependencyExpansion`으로만 전달되는 루트 전용 처리 힌트입니다. CLI의 `--no-deps`는 이 힌트와 `maxDepth: 0`을 함께 전달하므로 pip와 Conda 모두 루트 아티팩트만 조회하며, 깊이 제한 경고 없이 조용히 종료합니다. pip `PipResolver.resolveDependencies`를 직접 호출할 때의 `maxDepth` 기본값은 `10`입니다.
+
+`includeDependencies: false`는 원본 배열을 그대로 반환하고 원격 루트 아티팩트 조회도 수행하지 않습니다. CLI의 `--no-deps`가 사용하는 `includeDependencies: true, maxDepth: 0` 경로와 구분해야 합니다.
+
+`includeOptional`은 일반 라이브러리 경로에 `includeOptionalDependencies`로 전달됩니다. npm 전용 리졸버는 `includeOptional` 필드를 읽으므로 이 공통 옵션으로 npm optionalDependencies가 활성화되지는 않습니다. npm의 OS/아키텍처 필터 옵션도 이 공통 호출부에서는 전달하지 않습니다. `yumRepoUrl`은 타입에는 남아 있으나 OS 분기에서는 배포판의 `defaultRepos`를 사용합니다.
 
 ### 요청 단위 원격 조회 재사용
 
@@ -157,7 +184,7 @@ snapshot을 사용하므로, 요청 중 변경이 legacy singleton 설정으로 
 
 ### DependencyProgressCallback
 
-의존성 해결 진행 상황을 실시간으로 전달하는 콜백
+직접 루트 처리의 시작·완료·오류를 전달하는 콜백입니다. `current`/`total`은 전체 전이 노드가 아닌 입력 루트 기준입니다. 현재 `dependencyCount`는 라이브러리에서는 `flatList.length`(루트 포함), OS에서는 결과 개수에서 1을 뺀 값으로 전달됩니다.
 
 ```typescript
 interface DependencyProgressCallback {
@@ -234,46 +261,36 @@ resolveAllDependencies()
         ├── OS 리졸버 생성 (YumResolver, AptResolver, ApkResolver)
         │
         ├── 의존성 해결 수행
-        │   └── BFS 기반 의존성 트리 구축
+        │   └── 타입별 OS 리졸버가 패키지/충돌/미해결 목록 반환
         │
         ├── 결과를 DownloadPackage로 변환
         │   └── downloadUrl, filename, location 설정
         │
-        └── dependencyTrees에 추가 (UI 표시용)
+        └── 루트 아래 나머지 패키지를 한 단계로 붙여 dependencyTrees에 추가 (UI 표시용)
 ```
 
 ### 사용 예시
 
 ```typescript
-import { resolveAllDependencies, DownloadPackage } from '../shared';
+import { resolveAllDependencies } from '../shared';
+import type { DownloadPackage } from '../shared';
+import type { OSPackageInfo } from '../downloaders/os-shared/types';
 
-const packages: DownloadPackage[] = [
-  {
+// 같은 배포판의 OS 검색/조회에서 얻은 완전한 메타데이터를 전달합니다.
+async function resolveHttpd(osPackageInfo: OSPackageInfo) {
+  const packages: DownloadPackage[] = [{
     id: '1',
     type: 'yum',
-    name: 'httpd',
-    version: '2.4.6',
-    metadata: {
-      osPackageInfo: {
-        name: 'httpd',
-        version: '2.4.6-97.el7',
-        architecture: 'x86_64',
-        repository: { baseUrl: 'http://...', name: 'base' },
-        location: 'Packages/httpd-2.4.6-97.el7.x86_64.rpm',
-        // ... 기타 OSPackageInfo 필드
-      }
-    }
-  },
-];
-
-const result = await resolveAllDependencies(packages, {
-  maxDepth: 5,
-  includeOptional: false,
-  yumDistribution: { id: 'rocky-9', architecture: 'x86_64' },
-});
-
-// 결과: httpd + 모든 의존성 패키지
-console.log(`총 ${result.allPackages.length}개 패키지`);
+    name: osPackageInfo.name,
+    version: osPackageInfo.version,
+    architecture: osPackageInfo.architecture,
+    metadata: { osPackageInfo },
+  }];
+  return resolveAllDependencies(packages, {
+    includeOptional: false,
+    yumDistribution: { id: 'rocky-9', architecture: 'x86_64' },
+  });
+}
 ```
 
 ### 결과 구조
@@ -281,7 +298,7 @@ console.log(`총 ${result.allPackages.length}개 패키지`);
 OS 패키지 의존성 해결 결과는 다음과 같이 반환됩니다:
 
 ```typescript
-// allPackages 내 OS 패키지
+// allPackages 내 OS 패키지의 구조 예시 (값·중첩 메타데이터 일부 생략)
 {
   id: 'generated-id',
   type: 'yum',
@@ -303,7 +320,7 @@ OS 패키지 의존성 해결 결과는 다음과 같이 반환됩니다:
 
 의존성 트리 조작을 위한 유틸리티 함수 모음입니다.
 
-**알고리즘**: 모든 함수가 반복문(스택/BFS) 기반으로 구현되어 깊은 트리에서도 call stack overflow가 발생하지 않습니다.
+**알고리즘**: 순회 함수는 반복문(스택/BFS) 기반으로 구현하여 깊이에 따른 재귀 호출 스택 증가를 피합니다.
 
 ### 함수 목록
 
@@ -312,12 +329,13 @@ OS 패키지 의존성 해결 결과는 다음과 같이 반환됩니다:
 | `flattenDependencyTree(node)` | 트리를 플랫 리스트로 변환 | 스택 기반 DFS |
 | `flattenMultipleDependencyTrees(nodes)` | 여러 트리를 중복 제거하며 병합 | 스택 기반 DFS |
 | `getDependencyTreeDepth(node)` | 트리의 최대 깊이 계산 | 큐 기반 BFS |
-| `getDependencyTreeSize(node)` | 트리의 총 노드 개수 | 스택 기반 DFS |
+| `getDependencyTreeSize(node)` | 서로 다른 노드 객체 개수 | 스택 기반 DFS |
+| `getPackageArtifactKey(packageInfo)` | 패키지와 아티팩트 메타데이터의 식별 키 | 문자열 조합 |
 
 ### 구현 특징
 
 - **순환 참조 방지**: `visited` Set으로 객체 참조 추적
-- **중복 제거**: `name@version` 키로 중복 패키지 필터링
+- **중복 제거**: 평탄화 함수는 `type:소문자이름@version`에 filename, 다운로드 URL, repository/index URL, classifier, checksum, Maven type 정보를 결합한 아티팩트 키로 중복을 제거합니다. 같은 이름·버전의 서로 다른 wheel/classifier를 유지합니다.
 - **메모리 효율**: 스택/큐 구조로 재귀 호출 스택 대체
 
 ```typescript
@@ -337,6 +355,8 @@ while (stack.length > 0) {
 }
 ```
 
+`getDependencyTreeDepth()`는 루트만 있으면 1을 반환합니다. 객체가 여러 경로에서 공유된 그래프에서는 BFS의 첫 방문 깊이를 사용하며 모든 가능한 경로의 최장 길이를 탐색하지 않습니다. `getDependencyTreeSize()`의 객체 수는 아티팩트 중복 제거 후 패키지 수와 다를 수 있습니다.
+
 ### 사용 예시
 
 ```typescript
@@ -345,7 +365,9 @@ import {
   getDependencyTreeDepth
 } from './shared/dependency-tree-utils';
 
-const tree = await resolver.resolveDependencies('flask', '2.0.0');
+// resolver는 PipResolver처럼 DependencyResolutionResult를 반환하는 인스턴스
+const resolution = await resolver.resolveDependencies('flask', '2.0.0');
+const tree = resolution.root;
 
 // 플랫 리스트로 변환
 const packages = flattenDependencyTree(tree);

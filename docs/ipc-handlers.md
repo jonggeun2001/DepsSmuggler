@@ -33,6 +33,9 @@ electron/
 | `select-directory` | 설정용 디렉터리 선택 |
 | `save-file` | 파일 저장 다이얼로그 |
 | `open-folder` | Finder/Explorer 열기 |
+| `test-smtp-connection` | SMTP 설정으로 연결만 테스트하고 연결을 닫음. 실제 이메일 발송은 하지 않음 |
+
+`toggle-devtools`는 main에 등록되어 있지만 현재 preload 메서드로 노출되지 않습니다. 반대로 preload의 `log`는 `renderer:log`를 `send`하지만, 현재 소스에 해당 채널의 main 수신 핸들러는 없습니다.
 
 ## 설정 / 캐시 / 히스토리
 
@@ -134,7 +137,6 @@ electron/
 | `download:cancel` | 취소 |
 | `download:check-path` | 출력 폴더 상태 확인 |
 | `download:clear-path` | 출력 폴더 비우기 |
-| `test-smtp-connection` | SMTP 설정으로 연결 테스트 |
 
 일반 패키지 이벤트:
 
@@ -142,11 +144,15 @@ electron/
 |--------|------|
 | `download:status` | 전체 단계 상태 |
 | `download:progress` | 개별 패키지 진행률 |
-| `download:deps-resolved` | 다운로드 전 의존성 해결 결과 |
+| `download:deps-resolved` | preload의 의존성 해결 결과 구독 API는 남아 있지만 현재 main service에는 이 이벤트 발행 경로가 없음. UI는 `dependency:resolve` 응답을 사용 |
 | `download:all-complete` | 전체 다운로드 완료. `outputPath`는 대표 산출물 경로를, `artifactPaths`는 실제 산출물 목록을 담음. 이메일 전달 시 `deliveryMethod`, `deliveryResult`가 함께 전달됨 |
 
 참고: `dependency:resolve`의 `options.includeDependencies`가 `false`이면 메인 프로세스는 원본 패키지 목록만 반환합니다.
 참고: `download:start`는 `deliveryMethod`, `email`, `smtp`, `fileSplit` 옵션을 받아 패키징 뒤 로컬 저장 또는 이메일 전달까지 수행합니다.
+
+일반 `download:start`의 런타임 응답은 시작 접수를 뜻하는 `{ success: true, started: true }`이고 실제 최종 결과는 `download:all-complete`로 전달됩니다. 일반 의존성 계산은 renderer가 먼저 `dependency:resolve`로 수행하며, `download:start`의 세션 실행기는 전달받은 패키지 목록을 다운로드합니다. OS 전용 `os:download:start`는 이와 달리 의존성 계산부터 최종 결과 반환까지 기다리는 요청입니다.
+
+일반 다운로드 요청과 진행률·상태·완료 이벤트에는 선택적인 `sessionId`가 포함됩니다. 렌더러는 이를 사용해 취소 또는 재시작 이후 도착한 이전 세션 이벤트를 구분합니다. 이벤트 구독 API는 각각 listener 제거 함수를 반환합니다.
 
 `download:start`는 비어 있거나 잘못된 패키지 목록, 필수 문자열, 출력 경로, 동시 다운로드 수를 세션 생성 전에 거부하고 경고를 남깁니다. 초기 limiter 생성 실패도 `DownloadSession`의 실패 완료 이벤트와 오류 로그로 전달됩니다. 정상 요청의 반환값·완료 결과·취소 정책은 유지합니다.
 
@@ -183,7 +189,7 @@ OS 이벤트:
 | `versions:refresh-expired` | 만료 캐시만 갱신 |
 | `versions:cache-status` | 버전 캐시 상태 조회 |
 
-현재 Java/Node 버전은 IPC가 아니라 렌더러의 정적 옵션을 주로 사용합니다.
+Java/Node 런타임 버전 목록 IPC와 해당 런타임 선택 단계는 현재 없습니다. Python/CUDA는 설정 화면에서 위 채널을 사용하고, 패키지 자체의 버전 목록은 `search:versions`로 조회합니다.
 
 ### `updater.ts`
 
@@ -201,6 +207,8 @@ OS 이벤트:
 |--------|------|
 | `updater:status` | 상태 변경 브로드캐스트 |
 
+패키징된 앱은 전체 updater를 초기화하며, 개발 모드에는 같은 채널의 no-op 핸들러를 등록합니다. `updater:set-auto-download` 채널은 구현되어 있지만 설정 화면의 `autoDownloadUpdate` 저장에서 호출하지 않습니다. 시작 시 업데이트 확인도 저장된 `autoUpdate` 값을 참조하지 않습니다.
+
 ## Preload 표면
 
 `window.electronAPI`는 다음 그룹으로 정리되어 있습니다.
@@ -209,9 +217,9 @@ OS 이벤트:
 - `config`, `cache`, `history`
 - `os`, `docker.cache`, `maven`
 - `updater`, `versions`
-- `getAppVersion`, `getAppPath`, `selectFolder`, `saveFile`, `openFolder`, `log`
+- `getAppVersion`, `getAppPath`, `selectFolder`, `selectDirectory`, `saveFile`, `openFolder`, `testSmtpConnection`, `log`
 
-실제 타입과 반환값은 `electron/preload.ts`가 기준입니다.
+실제 노출 메서드와 이벤트 wiring은 `electron/preload.ts`, 렌더러 선언은 `src/types/electron.d.ts`, 런타임 반환값은 각 handler/service가 기준입니다. 일부 preload 반환값은 `unknown` 또는 `void`로 축약되어 있으므로 서비스가 반환하는 결과와 구분해서 확인합니다. `os.getDistributions()`는 인수가 없으면 `os:getAllDistributions`를 호출하고, 인수가 있으면 패키지 관리자별 `os:getDistributions`를 호출합니다.
 
 ## 관련 문서
 

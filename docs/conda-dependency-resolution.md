@@ -1,5 +1,15 @@
 # Conda 의존성 해결 알고리즘 분석
 
+> **알고리즘 분석 + 구현 대조 · 2026-09-08**: 1–4절은 Conda/SAT solver의 배경 분석, 5절은 BFS·MatchSpec·버전 비교를 설명하는 의사 코드입니다. DepsSmuggler는 SAT solver를 실행하지 않습니다. 실제 타입과 API는 [Resolvers](resolvers.md)와 [공유 Conda 유틸리티](shared-conda.md)를 참고하세요.
+
+## 현재 구현 요약
+
+- `CondaResolver.resolveDependencies()`는 BFS로 탐색하고, `CondaRepoDataProcessor`가 repodata 로딩·후보 인덱스·빌드 선택을 담당합니다. MatchSpec과 버전 비교는 `src/core/shared/conda-matchspec.ts`를 사용합니다.
+- `PackageCandidate`는 `conda-repodata-processor.ts`에 정의되며 `build`, `buildNumber`, `isPythonMatch`, `size`, `filename`, `subdir`, `depends`를 포함합니다. 아래 축약 예시는 전체 인터페이스 선언을 대체하지 않습니다.
+- 대상 플랫폼에 후보가 없거나 Python이 맞지 않을 때 noarch를 조회합니다. noarch도 Python/Python ABI 제약을 검증하며 무조건 호환으로 처리하지 않습니다. 호환 파일을 찾지 못하면 실패합니다.
+- Python·Python ABI와 `__` 가상 패키지는 외부 환경 조건으로 취급합니다. OpenSSL·zlib·libgcc 같은 실제 런타임 패키지는 수집 대상입니다.
+- 6절의 `defaults`/`main` URL 분기는 채널 URL 설계 참고 예시입니다. 현재 resolver는 `https://conda.anaconda.org/{channel}/{subdir}/{filename}`을 구성하며 `defaults`를 `repo.anaconda.com/pkgs/main`으로 자동 변환하지 않습니다.
+
 ## 1. 전체 아키텍처
 
 ```
@@ -503,21 +513,26 @@ interface PackageCandidate {
   name: string;
   version: string;
   filename: string;
+  build: string;
   buildNumber: number;
   depends: string[];
   subdir: string;
   size: number;  // repodata.json의 size 필드
+  isPythonMatch: boolean;
 }
 
-// repodata에서 패키지 정보 추출 시 size 포함
+// 후보 구성의 개념 발췌: filename은 repodata 패키지 맵의 키,
+// isPythonMatch는 build와 depends를 평가한 결과
 candidates.push({
   name: pkg.name,
   version: pkg.version,
-  filename: pkg.filename,
+  filename,
+  build: pkg.build,
   buildNumber: pkg.build_number,
   depends: pkg.depends || [],
   subdir: pkg.subdir || repodata.info?.subdir || 'noarch',
-  size: pkg.size || 0,  // 크기 정보 추가
+  size: pkg.size || 0,
+  isPythonMatch,
 });
 ```
 
@@ -546,37 +561,24 @@ return {
 
 ### 7.3 Python 버전 호환성
 
-빌드 문자열에서 Python 버전을 추출하여 타겟 Python 버전과 호환되는지 확인합니다.
+현재 `CondaRepoDataProcessor.isBuildCompatibleWithPython(build, depends)`는 빌드 문자열과 의존성 조건을 함께 검사합니다.
 
-```typescript
-/**
- * 빌드가 타겟 Python 버전과 호환되는지 확인
- * @param build 빌드 문자열 (예: "py311h123abc_0")
- * @returns Python 버전이 없거나 매칭되면 true
- */
-isBuildCompatibleWithPython(build: string): boolean {
-  const pythonTag = this.getPythonBuildTag(); // 예: 'py313'
-  if (!pythonTag) return true;
+1. 대상 Python이 없으면 Python 필터를 적용하지 않습니다.
+2. `py311`, `cp312` 같은 태그가 있으면 대상 Python과 일치해야 합니다.
+3. 태그가 없는 `pyhd...` noarch 빌드도 `depends`의 `python`/`python_abi` 버전과 ABI build 제약을 검사합니다. 예를 들어 Python 3.12 대상은 `python >=3.13` noarch 패키지를 선택할 수 없습니다.
+4. `major.minor` 대상 버전은 버전 범위 평가 시 `.0`을 붙여 비교합니다.
 
-  // py\d+ (conda 스타일) 또는 cp\d+ (CPython 스타일) 패턴 검사
-  const pyMatch = build.match(/(py|cp)\d+/);
-  if (!pyMatch) return true; // Python 버전 없으면 네이티브 라이브러리로 간주
-
-  // Python 버전이 있으면 정확히 매칭 (py313 또는 cp313)
-  const pythonNumber = pythonTag.slice(2); // 'py313' -> '313'
-  return build.includes(`py${pythonNumber}`) || build.includes(`cp${pythonNumber}`);
-}
-```
-
-**지원 패턴**:
 | 패턴 | 설명 | 예시 |
 |------|------|------|
-| `py\d+` | Conda 스타일 | `py311`, `py312`, `py313` |
-| `cp\d+` | CPython 스타일 | `cp311`, `cp312`, `cp313` |
+| `py` + 숫자 | Conda Python 태그 | `py311`, `py312`, `py313` |
+| `cp` + 숫자 | CPython ABI 태그 | `cp311`, `cp312`, `cp313` |
+| Python 태그 없음 | `depends` 조건을 별도로 검사 | `pyhd8ed1ab_0`, 네이티브 라이브러리 빌드 |
+
+빌드 태그만 보는 과거 예시와 달리 Python 범위를 가진 noarch 패키지도 정확히 필터링합니다.
 
 ### 7.4 플랫폼 호환성 체크
 
-의존성에 플랫폼 마커가 있으면 해당 플랫폼 전용 빌드로 판단하여 호환성을 확인합니다.
+의존성에 플랫폼 마커가 있으면 해당 플랫폼 전용 빌드로 판단하여 호환성을 확인합니다. 현재 `CondaRepoDataProcessor.isBuildCompatibleWithPlatform()`은 아래 OS 마커에 앞서 `__archspec` 아키텍처와 `__cuda` 조건도 검사합니다. CUDA 버전이 없으면 CUDA 의존 빌드를 제외하고, 지정한 버전이 있으면 그 버전 제약을 확인합니다. 아래는 OS 마커 부분만 설명한 축약 예시입니다.
 
 ```typescript
 /**
@@ -593,7 +595,10 @@ isBuildCompatibleWithPlatform(depends: string[]): boolean {
   const hasWin = depends.some(d => d === '__win' || d.startsWith('__win '));
   const hasUnix = depends.some(d => d === '__unix' || d.startsWith('__unix '));
   const hasLinux = depends.some(d => d === '__linux' || d.startsWith('__linux '));
-  const hasOSX = depends.some(d => d === '__osx' || d.startsWith('__osx '));
+  const hasOSX = depends.some(d =>
+    d === '__osx' || d.startsWith('__osx ') ||
+    d === '__macos' || d.startsWith('__macos ')
+  );
   const hasGlibc = depends.some(d => d === '__glibc' || d.startsWith('__glibc '));
 
   // 플랫폼 마커가 없으면 모든 플랫폼과 호환
@@ -622,36 +627,23 @@ isBuildCompatibleWithPlatform(depends: string[]): boolean {
 
 ### 7.5 noarch 폴백 처리
 
-타겟 플랫폼에서 패키지를 찾지 못하거나 Python 버전이 맞지 않으면 `noarch`를 확인합니다.
+`CondaResolver.fetchPackageInfoBFS()`의 폴백 조건은 **선택 파일이 없거나 Python이 맞지 않는 경우**입니다. 의존성이 비어 있는 정상 패키지는 파일이 있다는 이유만으로 noarch에 덮어쓰지 않습니다.
 
 ```typescript
-// 타겟 플랫폼 repodata 확인
-const candidates = this.findPackageCandidates(repodata, name, versionSpec, targetCacheKey);
-let isPythonMatch = false;
-
-if (candidates.length > 0) {
-  isPythonMatch = candidates[0].isPythonMatch ?? true;
-  // ... 패키지 정보 추출
+// 실제 조건 발췌: targetSubdir 후보를 평가한 이후
+if (targetSubdir !== 'noarch' && (!resolvedFilename || !isPythonMatch)) {
+  // noarch repodata를 읽고 동일한 버전·build·Python 제약으로 후보 평가
 }
-
-// noarch도 확인: 후보가 없거나 Python 버전이 맞지 않는 경우
-if (depends.length === 0 || !isPythonMatch) {
-  const noarchRepodata = await this.getRepoData(channel, 'noarch');
-  if (noarchRepodata) {
-    const noarchCandidates = this.findPackageCandidates(noarchRepodata, name, versionSpec, noarchCacheKey);
-    if (noarchCandidates.length > 0) {
-      // noarch 패키지는 모든 Python 버전과 호환되므로 우선 사용
-      isPythonMatch = true;
-      // ... 패키지 정보 추출
-    }
-  }
+if (!resolvedSubdir || !resolvedFilename || !isPythonMatch) {
+  throw new Error('대상 환경과 호환되는 Conda 아티팩트를 찾을 수 없습니다');
 }
 ```
 
 **폴백 우선순위**:
-1. 타겟 플랫폼 (예: `linux-64`) - Python 버전 일치
-2. `noarch` - Python 버전 무관
-3. Python 버전 불일치 시 스킵 (strict mode)
+
+1. 대상 플랫폼에서 버전·build·Python 조건을 만족하는 파일을 선택합니다.
+2. 후보가 없거나 Python이 맞지 않으면 noarch에서 같은 조건을 만족하는 파일을 선택합니다.
+3. noarch 후보에도 `isPythonMatch`를 그대로 적용하고, 호환 파일이 없으면 실패합니다. 루트 오류와 전이 의존성 오류의 처리는 [Resolvers](resolvers.md)의 결과·오류 계약을 따릅니다.
 
 ### 7.6 외부 런타임 및 가상 패키지 스킵
 
@@ -672,43 +664,21 @@ private isSystemPackage(name: string): boolean {
 
 ### 7.7 downloadUrl 전달 흐름
 
-의존성 해결 시 생성된 `downloadUrl`이 UI까지 전달되는 흐름:
-
-```
-CondaResolver.resolve()
-    │
-    ├── repodata에서 패키지 정보 조회
-    │   └── downloadUrl 생성: `${condaUrl}/${channel}/${subdir}/${filename}`
-    │
-    ├── DependencyResult.package.metadata.downloadUrl에 저장
-    │
-resolveAllDependencies()
-    │
-    ├── downloadUrl 전달
-    │   if (depPkg.metadata?.downloadUrl) {
-    │     downloadPkg.downloadUrl = depPkg.metadata.downloadUrl;
-    │   }
-    │
-    └── metadata 전달 (subdir, filename 등)
-        if (depPkg.metadata) {
-          downloadPkg.metadata = depPkg.metadata;
-        }
-    │
-DownloadPage.tsx
-    │
-    ├── DownloadItem에 downloadUrl, metadata 저장
-    │
-    └── IPC로 전달: pkg.downloadUrl, pkg.metadata
-    │
-download-handlers.ts
-    │
-    └── condaDownloadUrl = pkg.downloadUrl || pkg.metadata?.downloadUrl
+```text
+CondaResolver.resolveDependencies()
+  → CondaRepoDataProcessor가 파일·subdir·size 선택
+  → PackageInfo.metadata에 downloadUrl / filename / subdir / repository / size 저장
+  → resolveAllDependencies()가 요청 패키지와 resolver 메타데이터 병합
+  → GUI 다운로드 항목 또는 CLI DownloadManager 큐
+  → Electron download-package-router 또는 공통 CondaDownloader
+  → 선택된 URL로 다운로드
 ```
 
-**장점**:
-- 의존성 해결 시 이미 결정된 URL을 재사용
-- 다운로드 시 추가 API 호출 불필요
-- 플랫폼/Python 버전 일치 보장
+**장점과 적용 조건**:
+
+- 의존성 해결에서 선택한 URL이 있으면 실제 다운로드에서 재사용해 아티팩트가 바뀌지 않습니다.
+- URL이 없는 기존 입력에는 downloader의 메타데이터 조회 폴백이 남아 있습니다.
+- 선택된 `filename`, `subdir`와 Python 호환성이 함께 전달됩니다. 공개 메서드 이름은 `resolveDependencies()`이며 과거 예시의 `resolve()`는 현재 API가 아닙니다.
 
 ## 8. 요청 단위 조회 재사용
 

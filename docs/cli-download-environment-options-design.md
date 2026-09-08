@@ -1,10 +1,23 @@
 # CLI 다운로드 대상 환경 옵션 설계
 
+> **구현된 설계 · 2026-09-08 대조**: 이 문서의 대상 환경 옵션은 현재 구현되어 있습니다. 사용자 명령은 [CLI 문서](cli.md#download), 작업 순서의 기록은 [구현 계획](cli-download-environment-options-plan.md)을 참고하세요.
+
+## 현재 구현 위치
+
+| 책임 | 소스 |
+|------|------|
+| Commander 옵션 | `src/cli/index.ts` |
+| 환경 값 검증·루트만 해결할 조건 | `src/cli/commands/download-environment.ts` |
+| 명령과 실행 단계 | `src/cli/commands/download.ts`, `download-runner.ts` |
+| 요청 메타데이터 병합·resolver 호출 | `src/core/shared/dependency-resolver.ts` |
+| 실제 파일 선택·다운로드 | `src/core/resolver/{pip,conda,maven}-resolver.ts`, `src/core/downloaders/{pip,conda,maven}.ts` |
+| 검증 | `download-environment.test.ts`, `download.test.ts`, `dependency-resolver.test.ts`, `pip-resolver-download.test.ts` |
+
 ## 배경
 
-`depssmuggler download`는 현재 패키지 타입, 패키지 버전, 아키텍처, 출력 형식과 의존성 포함 여부를 받을 수 있다. 그러나 핵심 의존성 해결기는 대상 OS, Python 버전, CUDA 버전, Conda 채널을 지원하고 Maven resolver는 classifier를 지원하는데도 일반 CLI가 이 값을 노출하거나 전달하지 않는다.
+설계 당시 `depssmuggler download`는 패키지 타입, 패키지 버전, 아키텍처, 출력 형식과 의존성 포함 여부만 받을 수 있었다. 핵심 의존성 해결기는 대상 OS, Python 버전, CUDA 버전, Conda 채널을 지원하고 Maven resolver는 classifier를 지원했지만 일반 CLI가 이 값을 노출하거나 전달하지 않았다. 아래 계약을 구현해 이 차이를 해소했다.
 
-그 결과 GUI에서 선택할 수 있는 대상 환경과 CLI 자동화에서 지정할 수 있는 대상 환경 사이에 차이가 있다. 특히 pip wheel, Conda 빌드와 Maven 네이티브 아티팩트는 대상 환경 정보가 없으면 사용자가 의도한 파일과 다른 결과를 고를 수 있다.
+당시 GUI와 CLI의 선택 범위 차이는 pip wheel, Conda 빌드와 Maven 네이티브 아티팩트에 영향을 주었다. 대상 환경 정보가 없으면 사용자가 의도한 파일과 다른 결과를 고를 수 있기 때문이다.
 
 ## 목표
 

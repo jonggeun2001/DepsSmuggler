@@ -33,7 +33,7 @@ src/utils/
 |--------|----------|--------|------|
 | `levenshteinDistance` | a: string, b: string | number | 두 문자열 간의 편집 거리 계산 |
 | `normalizeForSearch` | str: string | string | 검색용 문자열 정규화 (소문자, 특수문자 제거) |
-| `calculateRelevanceScore` | name: string, query: string | number | 패키지명과 쿼리의 관련성 점수 계산 (0~100) |
+| `calculateRelevanceScore` | name: string, query: string | number | 패키지명과 쿼리의 관련성 점수 계산 (낮을수록 우선, 상한 없음) |
 | `sortByRelevance` | results: T[], query: string, type?: PackageType | T[] | 검색 결과를 관련성 순으로 정렬 |
 
 ### PackageType
@@ -44,10 +44,12 @@ type PackageType = 'pip' | 'conda' | 'maven' | 'npm' | 'docker' | 'yum' | 'defau
 
 ### 관련성 점수 계산 기준
 
-1. **정확 일치** (100점): 쿼리와 패키지명이 정확히 일치
-2. **접두사 일치** (90점): 패키지명이 쿼리로 시작
-3. **포함 일치** (70점): 패키지명에 쿼리가 포함됨
-4. **편집 거리 기반** (0~60점): Levenshtein 거리에 따른 유사도
+1. **정확 일치**: 정규화한 이름이 같으면 0
+2. **접두사 일치**: `1 + (패키지명 길이 - 쿼리 길이) * 0.1`
+3. **포함 일치**: `10 + 첫 등장 인덱스`
+4. **편집 거리 기반**: `50 + Levenshtein 거리 * 10`
+
+점수는 낮을수록 먼저 정렬됩니다. `sortByRelevance()`는 전체 이름의 정확 일치를 먼저 처리하고 나머지를 핵심명 점수로 비교합니다. 빈 검색어에는 원본 배열을 반환하며 그 외에는 복사본을 정렬합니다.
 
 ### 패키지 타입별 핵심명 추출
 
@@ -64,8 +66,8 @@ type PackageType = 'pip' | 'conda' | 'maven' | 'npm' | 'docker' | 'yum' | 'defau
 import { sortByRelevance, calculateRelevanceScore } from './search-utils';
 
 // 관련성 점수 계산
-const score = calculateRelevanceScore('requests', 'req');  // 높은 점수 (접두사 일치)
-const score2 = calculateRelevanceScore('flask', 'req');    // 낮은 점수
+const score = calculateRelevanceScore('requests', 'req');  // 1.5 (접두사 일치)
+const score2 = calculateRelevanceScore('flask', 'req');    // 더 큰 점수 (관련성 낮음)
 
 // 검색 결과 정렬
 const results = [
@@ -105,9 +107,12 @@ interface RetryOptions {
 | `retryWithExponentialBackoff<T>(fn, options)` | 지수 백오프로 함수 재시도 |
 | `isRetryableHttpError(error)` | HTTP 오류 재시도 가능 여부 확인 |
 
+`maxRetries`와 `delayMs`는 필수입니다. 지연은 `delayMs * 2^attempt`이며 jitter나 상한은 없습니다. `isRetryableHttpError()`는 `code`가 `ETIMEDOUT`/`ECONNABORTED`이거나 `response.status`가 504/503/408일 때만 true를 반환합니다. 모든 5xx 또는 429를 자동 재시도하지 않습니다.
+
 ### 사용 예시
 
 ```typescript
+import axios from 'axios';
 import { retryWithExponentialBackoff, isRetryableHttpError } from './retry-utils';
 
 const result = await retryWithExponentialBackoff(
@@ -133,46 +138,52 @@ Linux 배포판 및 macOS 버전에 대한 매핑 정보를 제공합니다.
 
 ```typescript
 interface LinuxDistroInfo {
-  id: string;           // 'rocky-9', 'ubuntu-22.04'
-  name: string;         // 표시 이름
-  family: string;       // 'rhel', 'debian', 'alpine'
-  glibcVersion: string; // glibc 버전
-  eolDate?: string;     // EOL 날짜
+  id: string;              // 'centos7', 'rhel8', 'ubuntu22', etc.
+  name: string;            // 'CentOS 7', 'RHEL 8', 'Ubuntu 22.04 LTS'
+  family: 'rhel' | 'debian' | 'ubuntu' | 'other';
+  glibcVersion: string;    // '2.17', '2.28', '2.34', '2.35', '2.39', etc.
+  releaseDate?: string;    // '2014-06-10'
+  eolDate?: string;        // '2024-06-30'
+  status: 'current' | 'lts' | 'eol' | 'extended-support';
+  notes?: string;          // 추가 설명
 }
 
-// 배포판별 glibc 버전 매핑
 const LINUX_DISTRO_GLIBC_MAP: Record<string, LinuxDistroInfo>;
-
-// glibc 버전 역방향 매핑
-const GLIBC_VERSION_MAP: Record<string, string[]>;
+// 배포판 ID → glibc 버전
+const GLIBC_VERSION_MAP: Record<string, string>;
 ```
 
 ### macOS 버전 정보
 
 ```typescript
 interface MacOSVersionInfo {
-  version: string;      // '15.0', '14.0'
-  name: string;         // 'Sequoia', 'Sonoma'
-  x86_64: boolean;      // x86_64 지원
-  arm64: boolean;       // arm64 지원
+  version: string;         // "10.9", "11.0", "12.0", "13.0", "14.0", "15.0"
+  name: string;            // "Mavericks", "Big Sur", "Monterey", "Ventura", "Sonoma", "Sequoia"
+  minArch: 'intel' | 'apple_silicon' | 'both';  // 최소 아키텍처 요구사항
+  releaseYear: number;     // 2013, 2020, 2021, 2022, 2023, 2024
+  releaseDate?: string;    // "2013-10-22", "2020-11-12", etc.
+  eolDate?: string;        // End of Life 날짜 (알려진 경우)
+  isLTS?: boolean;         // macOS는 LTS 개념이 없지만 향후 확장 가능
 }
 
-const MACOS_VERSIONS: MacOSVersionInfo[];
+const MACOS_VERSIONS: Record<string, MacOSVersionInfo>;
 ```
 
 ### 주요 함수
 
 | 함수 | 설명 |
 |------|------|
-| `getDistrosByFamily(family)` | 패밀리별 배포판 목록 조회 |
-| `getDistrosByGlibcVersion(version)` | glibc 버전 호환 배포판 조회 |
+| `getDistrosByFamily()` | family → 배포판 배열인 전체 그룹 객체 반환 |
+| `getDistrosByGlibcVersion(version)` | glibc 버전 문자열이 정확히 같은 배포판 반환 |
 | `isDistroEOL(distroId)` | EOL 여부 확인 |
-| `isDistroEOLSoon(distroId, daysThreshold)` | 곧 EOL 예정 여부 확인 |
+| `isDistroEOLSoon(distroId, months?)` | 기본 6개월 이내 EOL 예정 여부 확인 |
 | `getMacOSVersionInfo(version)` | macOS 버전 정보 조회 |
-| `getMacOSVersionsSorted()` | 정렬된 macOS 버전 목록 |
+| `getMacOSVersionsSorted()` | releaseYear 오름차순 목록 |
 | `isMacOSVersionCompatibleWithArch(version, arch)` | 아키텍처 호환성 확인 |
 
 ---
+
+이 매핑은 저장소에 포함된 정적 목록입니다. ID는 `rocky9`, `ubuntu22`처럼 OS 패키지 배포판 ID(`rocky-9`, `ubuntu-22.04`)와 다릅니다. `isDistroEOL()`은 정적 `status`가 아닌 `eolDate`와 실행 시각을 비교하며, 현재 upstream 지원 상태를 원격 검증하지 않습니다. `getMacOSVersionInfo()`는 없는 버전에 `undefined`를 반환합니다.
 
 ## 버전 조회 (`version-fetcher.ts`)
 
@@ -183,9 +194,11 @@ Python, Node.js, Java, CUDA 등의 버전 정보를 원격에서 조회하고 �
 | 함수 | 반환값 | 설명 |
 |------|--------|------|
 | `fetchPythonVersions()` | Promise<string[]> | Python 버전 목록 (python.org API) |
-| `fetchNodeVersions()` | Promise<string[]> | Node.js 버전 목록 (nodejs.org API) |
-| `fetchJavaVersions()` | Promise<string[]> | Java 버전 목록 (Adoptium API) |
+| `fetchNodeVersions()` | Promise<NodeRelease[]> | Node.js 버전 목록 (nodejs.org API) |
+| `fetchJavaVersions()` | Promise<JavaRelease[]> | Java 버전 목록 (Adoptium API) |
 | `fetchCudaVersions()` | Promise<string[]> | CUDA 버전 목록 (NVIDIA conda 채널) |
+
+`JavaRelease`는 `{ version: string; lts: boolean }`, `NodeRelease`는 `{ version: string; lts: string | false }`입니다. Node 결과의 version은 `"20"` 같은 major 문자열이며 현재 릴리스와 LTS major를 반환합니다. Java는 LTS와 최근 non-LTS 3개를 반환합니다. 두 함수는 코드에 deprecated로 표시되어 있으며 현재 버전 프리로드 대상은 Python/CUDA입니다.
 
 ### Python 버전 조회
 
@@ -227,8 +240,11 @@ const NODE_CACHE_TTL = 86400000;   // 24시간
 const JAVA_CACHE_TTL = 86400000;   // 24시간
 const CUDA_CACHE_TTL = 604800000;  // 7일 (CUDA 릴리스 빈도 낮음)
 
-// 캐시 저장 위치: ~/.depssmuggler/cache/
+// Python: 메모리 + 브라우저 localStorage (python_versions_cache)
+// Java/Node/CUDA: 메모리 + ~/.depssmuggler/cache/{java,node,cuda}-versions.json
 ```
+
+원격 조회 실패 시 만료된 캐시를 먼저 사용하고, 없으면 코드에 포함된 버전 목록으로 대체합니다. 다음 버전 목록은 응답 형태 예시이며 현재 최신 버전 목록을 의미하지 않습니다.
 
 ### 사용 예시
 
@@ -255,28 +271,37 @@ const cudaVersions = await fetchCudaVersions();
 | 함수 | 설명 |
 |------|------|
 | `preloadAllVersions()` | 모든 버전 정보 프리로드 |
-| `loadPythonVersions()` | Python 버전 로드 (캐시 우선) |
-| `loadCudaVersions()` | CUDA 버전 로드 (캐시 우선) |
+| `loadPythonVersions()` (내부) | Python 버전 로드 (캐시 우선) |
+| `loadCudaVersions()` (내부) | CUDA 버전 로드 (캐시 우선) |
 | `refreshExpiredCaches()` | 만료된 캐시 갱신 |
-| `isCacheValid(key)` | 캐시 유효성 확인 |
-| `getCacheAge(key)` | 캐시 경과 시간 조회 |
+| `isCacheValid(source)` | source는 `python` 또는 `cuda`; 저장 시각의 TTL 확인 |
+| `getCacheAge(source)` | 경과 시간(ms); 저장 시각이 없거나 Node 환경이면 undefined |
 
 ### PreloadResult
 
 ```typescript
 interface PreloadResult {
-  python: VersionLoadingStatus;
-  cuda: VersionLoadingStatus;
+  success: boolean;
+  status: VersionLoadingStatus;
+  errors: VersionLoadingError[];
+  duration: number; // ms
 }
 
 interface VersionLoadingStatus {
-  versions: string[];
-  fromCache: boolean;
-  error?: VersionLoadingError;
+  python: 'idle' | 'loading' | 'success' | 'error';
+  cuda: 'idle' | 'loading' | 'success' | 'error';
+}
+
+interface VersionLoadingError {
+  source: 'python' | 'cuda';
+  error: string;
+  timestamp: number;
 }
 ```
 
 ---
+
+`preloadAllVersions()`는 버전 배열이나 fromCache 필드를 반환하지 않습니다. 브라우저 캐시는 `depssmuggler:python-versions`, `depssmuggler:cuda-versions`와 각 `-timestamp` 키이며 TTL은 24시간/7일입니다. 내부 로더가 fallback 목록으로 완료해도 상태는 success이므로 네트워크 조회 성공 여부와 같지 않습니다.
 
 ## 민감 정보 마스킹 (`src/utils/mask.ts`)
 
@@ -289,26 +314,22 @@ interface VersionLoadingStatus {
 ### 상수
 
 ```typescript
-const MASK = '****';  // 마스킹 문자열
+const MASK = '***MASKED***';  // 마스킹 문자열
 ```
 
 ### 민감 정보 패턴
 
 ```typescript
-// 민감한 필드명 패턴
-const SENSITIVE_FIELD_PATTERNS = [
-  'password', 'passwd', 'pwd', 'secret', 'token',
-  'apikey', 'api_key', 'api-key', 'auth', 'credential',
-  'private', 'key', 'bearer', 'authorization', 'access_token',
-  'refresh_token', 'client_secret', 'smtp', 'mail'
-];
+// 실제 기본 패턴 목록은 getSensitivePatterns()로 조회합니다.
+const examples = ['password', 'pass', 'token', 'apikey', 'authorization',
+  'credit_card', 'privatekey', 'session', 'cookie'];
 
-// 민감한 URL 파라미터 정규식
-const URL_SENSITIVE_PARAM_REGEX = /([\?&])(password|token|key|secret|auth|api_key)=/gi;
-
-// Bearer 토큰 정규식
-const BEARER_TOKEN_REGEX = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi;
+// 객체 키는 기본 패턴 전체와 대소문자를 무시한 정확 일치로 비교
+// 문자열은 URL 쿼리와 key=value, JWT 형태의 Bearer 토큰을 처리
+const BEARER_TOKEN_REGEX = /Bearer\s+[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]*/gi;
 ```
+
+`auth`, 일반 `key`, `smtp`, `mail`을 모두 민감 필드로 취급하지 않습니다. `auth` 같은 중첩 객체는 내부의 `pass`/`password` 등을 재귀적으로 처리합니다. `addSensitivePattern()`은 객체 키 검사 정규식만 갱신하며 문자열 URL/key=value 정규식까지 갱신하지 않습니다.
 
 ### 주요 함수
 
@@ -320,7 +341,7 @@ const BEARER_TOKEN_REGEX = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi;
 | `maskSensitiveData` | ...args: unknown[] | unknown[] | 여러 인자의 민감 정보 마스킹 |
 | `isSensitiveKey` | key: string | boolean | 민감한 키인지 확인 |
 | `addSensitivePattern` | pattern: string | void | 커스텀 민감 패턴 추가 |
-| `getSensitivePatterns` | - | string[] | 등록된 민감 패턴 목록 |
+| `getSensitivePatterns` | - | readonly string[] | 등록된 민감 패턴 목록 |
 
 ### 사용 예시
 
@@ -339,43 +360,38 @@ const masked = maskObject(config);
 // {
 //   host: 'smtp.example.com',
 //   username: 'user@example.com',
-//   password: '****',
-//   apiKey: '****',
+//   password: '***MASKED***',
+//   apiKey: '***MASKED***',
 // }
 
 // 문자열 마스킹
 const logMessage = 'Request to https://api.example.com?token=abc123&user=john';
 const maskedLog = maskString(logMessage);
-// 'Request to https://api.example.com?token=****&user=john'
+// 'Request to https://api.example.com?token=***MASKED***&user=john'
 
 // Bearer 토큰 마스킹
-const authHeader = 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...';
+const authHeader = 'Authorization: Bearer header.payload.signature';
 const maskedHeader = maskString(authHeader);
-// 'Authorization: Bearer ****'
+// 'Authorization: Bearer ***MASKED***'
 
 // 커스텀 패턴 추가
 addSensitivePattern('myCustomSecret');
 const customData = { myCustomSecret: 'sensitive value' };
 const maskedCustom = maskObject(customData);
-// { myCustomSecret: '****' }
+// { myCustomSecret: '***MASKED***' }
 ```
 
 ### 로거와의 통합
 
-`src/utils/logger.ts`에서 자동으로 마스킹을 적용:
+`src/utils/logger.ts`는 Winston으로 기록하기 전에 메시지에 `maskString()`, 메타데이터에 `mask()`를 적용합니다. 공개 호출 예시는 다음과 같습니다:
 
 ```typescript
-import { maskSensitiveData } from './mask';
+import logger from '../../utils/logger';
 
-class Logger {
-  info(message: string, ...args: unknown[]): void {
-    console.log(`[INFO] ${message}`, ...maskSensitiveData(...args));
-  }
-
-  error(message: string, ...args: unknown[]): void {
-    console.error(`[ERROR] ${message}`, ...maskSensitiveData(...args));
-  }
-}
+logger.info('다운로드 시작', { packageName: 'requests' });
+logger.error('인증 오류', { password: 'example-secret' });
+// 메타데이터의 password 값은 ***MASKED***로 기록
+logger.logError(new Error('요청 실패'), '패키지 조회');
 ```
 
 ---

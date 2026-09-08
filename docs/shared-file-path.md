@@ -34,9 +34,11 @@ async function downloadFile(
 ```
 
 - HTTP/HTTPS 모두 지원
-- 리다이렉트 자동 처리
+- 301/302의 `Location`으로 재귀 다운로드 (상대 URL 해석이나 최대 횟수 제한은 구현하지 않음)
 - AbortSignal을 통한 다운로드 취소
 - shouldPause 콜백을 통한 일시정지/재개
+
+현재 헬퍼는 대상 디렉토리를 생성하지 않으며 호출 중 발생한 abort 이벤트를 처리합니다. 이미 취소된 signal 검사, HTTP 오류 상태 거부, 재시도·체크섬 검증은 이 함수에 포함되지 않습니다. 진행률의 total은 Content-Length가 없으면 0입니다.
 
 ### FileDownloadOptions
 
@@ -88,7 +90,7 @@ import { downloadFile } from './file-utils';
 const controller = new AbortController();
 let paused = false;
 
-await downloadFile(
+const downloadPromise = downloadFile(
   'https://example.com/file.zip',
   '/path/to/file.zip',
   (downloaded, total) => {
@@ -100,14 +102,12 @@ await downloadFile(
   }
 );
 
-// 일시정지
-paused = true;
+// 다운로드가 진행 중일 때 UI 이벤트 등에서 호출
+const pause = () => { paused = true; };
+const resume = () => { paused = false; };
+const cancel = () => controller.abort();
 
-// 재개
-paused = false;
-
-// 취소
-controller.abort();
+await downloadPromise; // 취소하면 reject되므로 호출부에서 처리
 ```
 
 ### createZipArchive
@@ -138,7 +138,7 @@ async function createTarGzArchive(
 
 ### generateInstallScripts
 
-설치 스크립트 생성 (Bash + PowerShell)
+설치 스크립트 생성 (Bash + PowerShell). 출력 디렉토리는 호출 전에 준비해야 합니다.
 
 ```typescript
 function generateInstallScripts(
@@ -152,7 +152,11 @@ function generateInstallScripts(
 - `docker-load.sh` (Bash): Docker 이미지 로드용 (Docker 패키지 포함 시 자동 생성)
 - `docker-load.ps1` (PowerShell): Docker 이미지 로드용 (Docker 패키지 포함 시 자동 생성)
 
+현재 일반 설치 스크립트는 pip와 Conda 항목 모두에 `pip install --no-index`를 생성하고 Maven은 아티팩트 위치를 안내합니다. npm/OS 패키지 전용 설치 명령은 이 헬퍼가 생성하지 않습니다. Conda 네이티브 아카이브 설치까지 지원하는 것으로 해석하면 안 됩니다. Python 검색 경로에는 `packages`와 모든 하위 디렉토리를 포함합니다.
+
 ### 생성되는 스크립트 예시
+
+생성일과 일부 출력문을 생략한 예시입니다.
 
 **install.sh:**
 ```bash
@@ -161,8 +165,13 @@ function generateInstallScripts(
 set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+PIP_FIND_LINK_ARGS=()
+while IFS= read -r -d '' directory; do
+    PIP_FIND_LINK_ARGS+=(--find-links="$directory")
+done < <(find "$SCRIPT_DIR/packages" -type d -print0)
+
 # pip 패키지 설치
-pip install --no-index --find-links="$SCRIPT_DIR/packages" requests==2.28.0
+pip install --no-index "${PIP_FIND_LINK_ARGS[@]}" requests==2.28.0
 ```
 
 **docker-load.sh:** (Docker 이미지 포함 시 자동 생성)
@@ -204,7 +213,9 @@ try { docker --version | Out-Null } catch {
 
 # 이미지 로드
 Write-Host "Loading nginx:latest..."
-docker load -i "$ScriptDir\packages\nginx-latest.tar"
+$PackagesDir = Join-Path -Path $ScriptDir -ChildPath 'packages'
+$ImagePath = Join-Path -Path $PackagesDir -ChildPath 'nginx-latest.tar'
+docker load -i $ImagePath
 Write-Host "  [OK] nginx:latest 로드 완료" -ForegroundColor Green
 ```
 
@@ -219,15 +230,19 @@ Windows 호환 파일명 처리 유틸리티
 | 함수명 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `sanitizeFilename` | name, maxLength? | string | 파일명을 Windows/Unix 모두에서 안전하게 변환 |
-| `sanitizeCacheKey` | key | string | 캐시 키를 파일명으로 안전하게 변환 |
+| `sanitizeCacheKey` | key, maxLength? | string | 캐시 키를 파일명으로 안전하게 변환 |
 | `sanitizeDockerTag` | tag | string | Docker 태그 정규화 |
 | `getExtension` | filename | string | 확장자 추출 |
 | `removeExtension` | filename | string | 확장자 제거 |
-| `isPathLengthValid` | path, os? | boolean | 경로 길이 유효성 검사 |
-| `getPathLengthWarning` | path, os? | string \| null | 경로 길이 경고 메시지 |
+| `isPathLengthValid` | path, maxLength? | boolean | 경로 길이 유효성 검사 |
+| `getPathLengthWarning` | path | string \| null | 경로 길이 경고 메시지 |
 | `toLongPath` | path | string | Windows Long Path 형식 (\\\\?\\) 변환 |
 
+`sanitizeFilename()` 기본 최대 길이는 200, `sanitizeCacheKey()`는 100입니다. 연속된 밑줄은 하나로 합치고 앞뒤 밑줄을 제거합니다. `isPathLengthValid()`는 기본 260자와 문자열 길이만 비교하며 OS를 조회하지 않습니다. `getPathLengthWarning()`은 200자 초과 시 안내, 260자 초과 시 제한 안내를 반환합니다. `toLongPath()`는 현재 실행 OS가 Windows이고 260자를 넘는 드라이브 경로에만 접두사를 붙입니다.
+
 ### Windows 제약사항
+
+아래는 금지 문자·예약어를 설명하는 개념 코드입니다. 실제 구현은 문자 `Set`과 제어 문자 코드 검사를 사용합니다.
 
 ```typescript
 // 금지된 문자
@@ -236,7 +251,8 @@ const WINDOWS_FORBIDDEN_CHARS = /[<>:"/\\|?*\x00-\x1F]/g;
 // 예약된 파일명
 const WINDOWS_RESERVED_NAMES = [
   'CON', 'PRN', 'AUX', 'NUL',
-  'COM1'...'COM9', 'LPT1'...'LPT9'
+  ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`)
 ];
 ```
 
@@ -245,9 +261,9 @@ const WINDOWS_RESERVED_NAMES = [
 ```typescript
 import { sanitizeFilename, sanitizeCacheKey } from './filename-utils';
 
-sanitizeFilename('file<>:name');      // 'file___name'
+sanitizeFilename('file<>:name');      // 'file_name'
 sanitizeFilename('CON');              // '_CON'
-sanitizeFilename('@types/node');      // '_types_node'
+sanitizeFilename('@types/node');      // '@types_node'
 
 sanitizeCacheKey('org.springframework:spring-core:5.3.0');
 // 'org.springframework_spring-core_5.3.0'
@@ -278,8 +294,12 @@ sanitizeCacheKey('org.springframework:spring-core:5.3.0');
 | `stripLeadingDotSlash` | path | string | 선행 './' 제거 |
 | `psJoinPath` | base, child | string | PowerShell Join-Path 구문 |
 | `psQuotePath` | path | string | PowerShell 경로 이스케이프 |
-| `getFileMode` | options | number | 파일 권한 모드 |
-| `getWriteOptions` | options | object | 파일 쓰기 옵션 |
+| `getFileMode` | executable: boolean | number \| undefined | Unix는 0755/0644, Windows는 undefined |
+| `getWriteOptions` | executable: boolean | { encoding; mode? } | utf-8 및 선택적 권한 |
+| `sanitizePath` | input, allowedChars? | string | 경로 요소의 구분자·연속 점·특수문자 정리 |
+| `isPathWithinBase` | basePath, targetPath | boolean | 정규화한 문자열 경로가 기준 경로 안인지 확인 |
+
+`normalizePath`, `getRelativePath`, `joinPath`, `isAbsolutePath`, `resolvePath`는 실행 OS의 Node `path` 규칙을 사용합니다. 슬래시 변환은 다른 OS의 경로 의미까지 해석하지 않으며 `toBashPath()`/`toPowerShellPath()`도 따옴표를 붙이지 않습니다. PowerShell 리터럴 인용은 `psQuotePath()`를 사용합니다. `isPathWithinBase()`는 심볼릭 링크를 해석하지 않는 문자열 검사입니다.
 
 ### 플랫폼 상수
 

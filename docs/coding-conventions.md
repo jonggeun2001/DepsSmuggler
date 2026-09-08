@@ -2,6 +2,8 @@
 
 이 문서는 DepsSmuggler 프로젝트의 코딩 컨벤션과 스타일 가이드를 정의합니다.
 
+도구가 실제로 검사하는 규칙은 `.editorconfig`, `.prettierrc`, `.eslintrc.cjs`, `tsconfig*.json`을 기준으로 설명합니다. 아래 코드 예시는 작성 지침이며 모든 기존 파일이 같은 형태라는 뜻은 아닙니다. 파일 구조와 실행 경로는 [아키텍처 개요](./architecture-overview.md), 검증 범위는 [테스트](./testing.md)를 함께 참고합니다.
+
 ## 목차
 
 - [도구 설정](#도구-설정)
@@ -13,6 +15,8 @@
 - [테스트](#테스트)
 - [주석 및 문서화](#주석-및-문서화)
 - [Git 컨벤션](#git-컨벤션)
+- [에러 처리](#에러-처리)
+- [성능 고려사항](#성능-고려사항)
 
 ---
 
@@ -22,14 +26,14 @@
 
 프로젝트 루트의 `.editorconfig` 파일로 기본 에디터 설정을 관리합니다.
 
-- **인덴트**: 2 스페이스
+- **인덴트**: 2 스페이스 (`Makefile`은 탭)
 - **줄 끝**: LF (Unix)
 - **파일 끝 개행**: 있음
 - **후행 공백**: 제거 (마크다운 제외)
 
 ### Prettier
 
-코드 포맷팅은 Prettier를 사용합니다. `.prettierrc` 설정:
+코드 포맷팅은 Prettier를 사용합니다. `.prettierrc`의 주요 설정:
 
 ```json
 {
@@ -41,13 +45,17 @@
 }
 ```
 
+추가로 객체 괄호 공백, 화살표 함수 인수 괄호, LF 줄 끝을 사용하며 JSX에는 큰따옴표를 사용합니다. JSON 파일에는 `printWidth: 200` override가 있습니다.
+
 ### ESLint
 
 정적 분석은 ESLint를 사용합니다. `.eslintrc.cjs` 참조.
 
-- TypeScript strict 규칙 적용
+- `@typescript-eslint/recommended` 규칙 적용 (`strict` 타입 검사는 TypeScript 설정에서 수행)
 - React Hooks 규칙 적용
-- Import 정렬 자동화
+- `import/order` 정렬 위반은 경고이며 `lint:fix`에서 자동 수정 가능
+- 미사용 변수·명시적 `any`·non-null assertion은 경고, Hooks 호출 규칙 위반은 오류
+- 특정 downloader/resolver 간 직접 의존은 `import/no-restricted-paths` 오류로 차단하고 `core/ports` 또는 shared 경계를 사용
 
 ### 명령어
 
@@ -57,6 +65,8 @@ npm run lint:fix      # ESLint 자동 수정
 npm run format        # Prettier 포맷팅
 npm run format:check  # Prettier 검사만
 ```
+
+현재 `format`/`format:check` 스크립트는 `src/**/*.{ts,tsx,js,jsx,json}`와 `electron/**/*.{ts,js}`만 대상으로 하므로 문서·루트 설정·`tests/e2e` 전체를 검사하는 명령은 아닙니다. `lint`는 저장소의 `.ts/.tsx/.js/.jsx`를 검사하며 CI에도 독립 잡으로 연결되어 있습니다.
 
 ---
 
@@ -111,21 +121,21 @@ expect(testable.isRunning).toBe(true);
 
 ### Strict Mode
 
-`tsconfig.json`에서 strict 모드 활성화:
+`tsconfig.json`에 명시된 주요 검사 옵션:
 
 ```json
 {
   "compilerOptions": {
     "strict": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true
+    "noUnusedParameters": true
   }
 }
 ```
 
 `tsconfig.json`과 `tsconfig.electron.json` 모두 미사용 선언을 검사합니다. 사용되지 않는 내부 함수·인수는 호출부와 함께 제거하고, 공개 API나 콜백의 인수 순서를 유지해야 하는 경우에만 `_` 접두어를 사용합니다. 타입 검사와 기존 동작 테스트로 정리 전후를 확인합니다.
+
+`noImplicitAny`와 `strictNullChecks`는 별도 키로 선언하지 않고 `strict: true`로 활성화됩니다. 기본 설정은 renderer와 Electron/core/CLI 소스를 포함하며 테스트 파일은 제외합니다. `tsconfig.electron.json`은 renderer를 제외하고 CommonJS 산출물을 만들며, 개발 CLI의 `tsconfig.cli.json`은 기본 설정에 ts-node의 CommonJS module override를 추가합니다.
 
 ### Null 체크
 
@@ -231,46 +241,45 @@ electron/
 
 ### 파일 네이밍
 
-**글로벌 표준 준수**: Node.js 프로젝트 표준에 맞게 kebab-case를 사용합니다.
+새 일반 모듈에는 프로젝트 관례인 kebab-case를 사용하고, React 컴포넌트에는 PascalCase를 사용합니다.
 
 | 유형 | 규칙 | 예시 |
 |------|------|------|
 | React 컴포넌트 | **PascalCase** | `WizardPage.tsx`, `DownloadButton.tsx` |
-| 일반 모듈 | **kebab-case** | `download-manager.ts`, `cache-manager.ts` |
+| 일반 모듈 | **kebab-case** | `download-runner.ts`, `cache-manager.ts` |
 | Zustand 스토어 | **kebab-case** | `cart-store.ts`, `settings-store.ts` |
 | 유틸리티 | **kebab-case** | `file-utils.ts`, `path-utils.ts` |
 | 다운로더 | **kebab-case** | `pip.ts`, `maven.ts`, `docker-auth-client.ts` |
 | 리졸버 | **kebab-case** | `pip-resolver.ts`, `npm-resolver.ts` |
-| 테스트 | 원본명 + `.test` | `pip.test.ts`, `download-manager.test.ts` |
+| 테스트 | 원본명 + `.test` | `pip.test.ts`, `download-runner.test.ts` |
 | 타입 정의 | **kebab-case** | `npm-types.ts`, `maven-types.ts` |
 
 **예외**: 단일 단어 파일은 그대로 사용 (`pip.ts`, `maven.ts`, `factory.ts`)
+
+기존 위자드 훅 `useWizardSearchFlow.ts`처럼 camelCase 파일도 있습니다. 컨벤션 문서 갱신만으로 기존 경로를 변경하지 않습니다. Electron의 세부 handler와 service, renderer의 page별 hook/component 디렉터리는 위 구조의 하위 계층이며 실제 목록은 아키텍처 문서에서 관리합니다.
 
 ---
 
 ## Import 정렬
 
-ESLint `import/order` 규칙에 따라 자동 정렬됩니다.
+ESLint `import/order`는 `builtin → external → internal → parent/sibling → index → type` 순서를 경고 수준으로 검사합니다. 각 그룹은 대소문자를 무시한 이름순이고 그룹 사이 빈 줄을 넣지 않습니다. 일반 `lint`는 검사만 하며 자동 수정은 `lint:fix`로 실행합니다.
 
 ```typescript
 // 1. Node.js 내장 모듈
 import * as fs from 'fs';
 import * as path from 'path';
-
 // 2. 외부 라이브러리
 import axios from 'axios';
 import { create } from 'zustand';
-
-// 3. 프로젝트 내부 모듈
+// 3. 상대 경로 모듈 (상위/같은 디렉터리는 한 그룹)
 import { PackageInfo } from '../../types';
 import { downloadFile } from '../shared/download-utils';
-
-// 4. 상대 경로 모듈 (같은 디렉토리)
 import { PipResolver } from './pip-resolver';
-
-// 5. 타입 전용 import
+// 4. 타입 전용 import
 import type { DownloadOptions } from '../../types';
 ```
+
+상대 경로 import는 프로젝트 코드여도 `internal` 그룹이 아니라 `parent/sibling`으로 분류됩니다. 위 예시에는 별도 `internal`/`index` import가 없습니다.
 
 ---
 
@@ -330,6 +339,8 @@ src/core/downloaders/
 
 ### 테스트 패턴
 
+아래는 suite와 준비/검증 블록을 보여주는 구성 예시입니다. 실제 단위 테스트에서는 downloader의 네트워크 경계를 mock하고, 검색 결과나 빈 입력의 기대값은 각 구현 계약에 맞춥니다.
+
 ```typescript
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
@@ -372,6 +383,8 @@ const mockPackage = createMockPackageInfo({ name: 'requests', version: '2.28.0' 
 ```
 
 ### 통합 테스트
+
+아래 환경 변수 패턴은 실제 외부 저장소를 호출하는 downloader 통합 테스트에 사용합니다. 내부 모듈 조합을 mock으로 검증하는 테스트는 기본 단위 테스트 실행에 포함할 수 있습니다.
 
 ```typescript
 // 환경 변수로 통합 테스트 제어
@@ -455,7 +468,7 @@ chore: 의존성 업데이트
 ### PR 규칙
 
 - 하나의 PR은 하나의 기능/수정에 집중
-- 테스트 포함 필수
+- 변경에 맞는 검증 결과 포함. 동작 변경은 관련 회귀 테스트를 추가/갱신하고, 문서만 바꿀 때는 소스 대조와 문서 검사를 기록
 - 관련 문서 업데이트
 
 ---
@@ -464,15 +477,17 @@ chore: 의존성 업데이트
 
 ### 커스텀 에러
 
+예외 클래스를 작성할 때의 예시입니다. 실제 공용 `DownloadError`는 `src/types/download/error.ts`의 데이터 인터페이스이므로 같은 이름의 예외 클래스로 대체하지 않습니다.
+
 ```typescript
-export class DownloadError extends Error {
+export class PackageDownloadException extends Error {
   constructor(
     message: string,
     public readonly packageName: string,
     public readonly cause?: Error
   ) {
     super(message);
-    this.name = 'DownloadError';
+    this.name = 'PackageDownloadException';
   }
 }
 ```
@@ -483,7 +498,7 @@ export class DownloadError extends Error {
 try {
   await downloadPackage(info, destPath);
 } catch (error) {
-  if (error instanceof DownloadError) {
+  if (error instanceof PackageDownloadException) {
     logger.error('다운로드 실패', { package: error.packageName });
   } else {
     logger.error('알 수 없는 오류', { error });
