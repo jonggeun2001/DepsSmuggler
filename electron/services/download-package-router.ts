@@ -267,17 +267,18 @@ async function downloadMavenPackage(
 
   const groupId = parts[0];
   const artifactId = parts[1];
-  const classifier = pkg.classifier;
+  const classifier = pkg.classifier ?? (pkg.metadata?.classifier as string | undefined);
   let mavenTotalBytes = 0;
   const m2RepoDir = path.join(packagesDir, 'm2repo');
   await fse.ensureDir(m2RepoDir);
 
-  const jarPath = await mavenDownloader.downloadPackage(
+  const artifactPath = await mavenDownloader.downloadPackage(
     {
       type: 'maven',
       name: pkg.name,
       version: pkg.version,
       metadata: {
+        ...pkg.metadata,
         groupId,
         artifactId,
         classifier,
@@ -300,12 +301,13 @@ async function downloadMavenPackage(
     }
   );
 
+  const extension = path.extname(artifactPath) || '.jar';
   const flatFileName = classifier
-    ? `${artifactId}-${pkg.version}-${classifier}.jar`
-    : `${artifactId}-${pkg.version}.jar`;
+    ? `${artifactId}-${pkg.version}-${classifier}${extension}`
+    : `${artifactId}-${pkg.version}${extension}`;
   const flatDestinationPath = path.join(packagesDir, flatFileName);
-  if (jarPath && (await fse.pathExists(jarPath))) {
-    await fse.copy(jarPath, flatDestinationPath);
+  if (artifactPath && (await fse.pathExists(artifactPath))) {
+    await fse.copy(artifactPath, flatDestinationPath);
   }
 
   progressEmitter.emitPackageProgress(
