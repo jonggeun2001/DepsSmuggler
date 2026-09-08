@@ -1,10 +1,23 @@
 # CLI 다운로드 대상 환경 옵션 설계
 
+> **구현된 설계 · 2026-09-08 대조**: 이 문서의 대상 환경 옵션은 현재 구현되어 있습니다. 사용자 명령은 [CLI 문서](cli.md#download), 작업 순서의 기록은 [구현 계획](cli-download-environment-options-plan.md)을 참고하세요.
+
+## 현재 구현 위치
+
+| 책임 | 소스 |
+|------|------|
+| Commander 옵션 | `src/cli/index.ts` |
+| 환경 값 검증·비기본 환경 판별 | `src/cli/commands/download-environment.ts` |
+| 루트만 해결할 조건·명령과 실행 단계 | `src/cli/commands/download.ts`, `download-runner.ts` |
+| 요청 메타데이터 병합·resolver 호출 | `src/core/shared/dependency-resolver.ts` |
+| 실제 파일 선택·다운로드 | `src/core/resolver/{pip,conda,maven}-resolver.ts`, `src/core/downloaders/{pip,conda,maven}.ts` |
+| 검증 | `download-environment.test.ts`, `download.test.ts`, `dependency-resolver.test.ts`, `pip-resolver-download.test.ts` |
+
 ## 배경
 
-`depssmuggler download`는 현재 패키지 타입, 패키지 버전, 아키텍처, 출력 형식과 의존성 포함 여부를 받을 수 있다. 그러나 핵심 의존성 해결기는 대상 OS, Python 버전, CUDA 버전, Conda 채널을 지원하고 Maven resolver는 classifier를 지원하는데도 일반 CLI가 이 값을 노출하거나 전달하지 않는다.
+설계 당시 `depssmuggler download`는 패키지 타입, 패키지 버전, 아키텍처, 출력 형식과 의존성 포함 여부만 받을 수 있었다. 핵심 의존성 해결기는 대상 OS, Python 버전, CUDA 버전, Conda 채널을 지원하고 Maven resolver는 classifier를 지원했지만 일반 CLI가 이 값을 노출하거나 전달하지 않았다. 아래 계약을 구현해 이 차이를 해소했다.
 
-그 결과 GUI에서 선택할 수 있는 대상 환경과 CLI 자동화에서 지정할 수 있는 대상 환경 사이에 차이가 있다. 특히 pip wheel, Conda 빌드와 Maven 네이티브 아티팩트는 대상 환경 정보가 없으면 사용자가 의도한 파일과 다른 결과를 고를 수 있다.
+당시 GUI와 CLI의 선택 범위 차이는 pip wheel, Conda 빌드와 Maven 네이티브 아티팩트에 영향을 주었다. 대상 환경 정보가 없으면 사용자가 의도한 파일과 다른 결과를 고를 수 있기 때문이다.
 
 ## 목표
 
@@ -71,17 +84,17 @@ DownloadManager queue
 패키지별 downloader가 선택된 metadata로 실제 파일 다운로드
 ```
 
-의존성을 포함하지 않는 경우에는 다음 조건을 모두 만족할 때만 깊이 0으로 루트 패키지를 해결한다.
+`--no-deps`의 루트 아티팩트 해결 여부는 `preparePackagesForDownload()`가 다음과 같이 결정한다.
 
-1. 타입이 `pip`, `conda`, `maven` 중 하나다.
-2. 새 환경 옵션 중 하나가 실질적인 비기본값이다.
-   - `pythonVersion`이 지정됨
-   - `cudaVersion`이 지정됨
-   - `classifier`가 지정됨
-   - `targetOS`가 `any`가 아님
-   - `condaChannel`이 `conda-forge`가 아님
+| 타입 | 깊이 0 루트 해결 조건 |
+|------|----------------------|
+| pip, Conda | 환경 옵션이 모두 기본값이어도 항상 수행 |
+| Maven | `hasExplicitTargetEnvironment(options)`가 참일 때 수행. 유효한 명령에서는 classifier를 명시한 경우가 해당하며, 비기본 OS·아키텍처에도 classifier가 필요함 |
+| npm, Docker 및 일반 `download`의 OS 타입 | resolver를 호출하지 않고 입력 패키지를 반환 |
 
-이 경우에도 해결된 의존성은 큐에 넣지 않고 루트 아티팩트의 메타데이터만 사용한다. pip/Conda에서 기본값이 아닌 아키텍처만 지정한 경우도 깊이 0 해결을 수행한다. 모든 환경 옵션이 기본값인 기존 `--no-deps` 명령, npm과 Docker는 resolver를 추가 호출하지 않고 기존 경로를 유지한다.
+`hasExplicitTargetEnvironment()`는 비기본 `arch`, `targetOS`, `condaChannel` 또는 지정된 `pythonVersion`, `cudaVersion`, `classifier`를 검사한다. 타입에 맞지 않는 환경 옵션은 이 단계 전에 검증 오류로 거부된다. 이 판별 함수와 별개로 pip·Conda는 항상 루트 아티팩트를 해결하므로, 기본 환경의 `--no-deps`도 호환 파일 선택과 해결 실패 검사를 거친다.
+
+루트만 해결할 때는 `includeDependencies: true`, `maxDepth: 0`, `resolveRootArtifactsOnly: true`를 전달한다. 전이 의존성은 큐에 넣지 않고 선택된 루트 아티팩트의 메타데이터만 사용한다. 초기 설계의 “비기본 환경을 지정한 경우에만 해결” 조건은 후속 구현에서 pip·Conda의 기본 환경까지 확장되었다.
 
 `resolveAllDependencies`는 이미 요청 패키지를 결과 맵에 먼저 넣으므로, 동일 키의 resolver 결과를 단순히 건너뛰지 않고 resolver가 제공한 메타데이터와 파일 정보를 기존 항목에 병합한다. 이 변경으로 Conda 루트 패키지와 Maven classifier 같은 선택 결과가 CLI 다운로드 단계까지 보존된다.
 
@@ -104,15 +117,15 @@ DownloadManager queue
 ## 오류 처리
 
 - 옵션 검증 오류는 네트워크 요청과 출력 디렉터리 생성 전에 발생한다.
-- 깊이 0 루트 아티팩트 해결에 실패하면 기존 의존성 해결 실패와 같은 CLI 실패 경로를 사용한다.
-- 대상 환경을 지정하지 않은 기존 경로에서 resolver가 다운로드 URL을 제공하지 못하면 downloader의 메타데이터 조회 폴백을 유지한다. 대상 환경을 지정했는데 호환 wheel과 sdist가 모두 없으면 다른 아키텍처를 선택하지 않고 resolver 단계에서 실패한다.
+- 깊이 0 루트 아티팩트 해결에 실패하면 기본 모드는 실패한 직접 패키지를 경고와 함께 제외하고 성공한 루트만 다운로드한다. 남은 다운로드 항목이 없거나 `--strict`를 사용하면 명령을 실패 처리한다.
+- pip·Conda는 환경 옵션을 생략해도 resolver의 호환 파일 선택을 거친다. 호환 아티팩트가 없으면 다른 플랫폼 파일로 바꾸거나 downloader 폴백에 맡기지 않고 해당 루트를 해결 실패로 처리한다. downloader 자체의 URL 미지정 시 메타데이터 조회 폴백은 위 사용 계약대로 유지된다.
 - 기존 네트워크 오류의 재시도·실패 출력 동작은 변경하지 않는다.
 
 ## 테스트 전략
 
 1. CLI command 테스트에서 각 환경 옵션이 `resolveAllDependencies`로 전달되는지 확인한다.
 2. 잘못된 OS, 아키텍처, Python/CUDA 버전과 패키지 타입별 잘못된 조합이 다운로드 시작 전에 거부되는지 확인한다.
-3. `--no-deps`에서 환경 민감 타입은 깊이 0 루트 해결만 수행하고 의존성을 큐에 추가하지 않는지 확인한다.
+3. pip·Conda의 `--no-deps`는 기본 환경과 명시한 환경 모두에서 깊이 0 루트 해결만 수행하고 의존성을 큐에 추가하지 않는지 확인한다. Maven의 환경 지정 여부와 나머지 타입의 resolver 생략 조건도 구분한다.
 4. 공용 dependency resolver 테스트에서 기존 루트 패키지에 resolver의 URL, 파일명, classifier 메타데이터가 병합되는지 확인한다.
 5. pip resolver에서 downloader까지 이어지는 테스트로 PyPI JSON과 Simple API에서 선택한 URL·체크섬을 재조회 없이 사용하는지 확인하고, ARM64 별칭·`abi3` 최소 버전·`Requires-Python` 제약을 검증한다.
 6. 파일 입력과 `--no-deps`에도 비기본 아키텍처가 적용되고, pip/Conda의 미지원 아키텍처와 classifier 없는 Maven 대상 OS/아키텍처가 부수 효과 전에 거부되는지 확인한다.

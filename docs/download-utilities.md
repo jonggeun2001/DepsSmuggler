@@ -16,14 +16,14 @@
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `addSample` | bytes: number | void | 다운로드 샘플 추가 (스로틀링 적용) |
-| `addSampleForced` | bytes: number | void | 다운로드 샘플 강제 추가 (스로틀링 무시) |
+| `addSample` | speed: number | boolean | bytes/sec 샘플 추가, 간격 제한으로 생략하면 false |
+| `addSampleForced` | speed: number | void | bytes/sec 샘플 강제 추가 (스로틀링 무시) |
 | `getCurrentSpeed` | - | number | 현재 속도 (bytes/sec) |
 | `getAverageSpeed` | - | number | 평균 속도 (bytes/sec) |
-| `getEstimatedTimeRemaining` | remainingBytes: number | number | 예상 남은 시간 (ms) |
-| `getStats` | - | SpeedStats | 속도 통계 객체 |
+| `getEstimatedTimeRemaining` | remainingBytes: number | number | 예상 남은 시간 (초) |
+| `getStats` | remainingBytes?: number | SpeedStats | 속도 통계 객체 |
 | `sampleCount` | - | number | 현재 샘플 개수 |
-| `getSamples` | - | number[] | 샘플 배열 복사본 |
+| `getSamples` | - | readonly number[] | 내부 샘플 배열의 읽기 전용 참조 |
 | `reset` | - | void | 통계 초기화 |
 
 ### 옵션
@@ -41,6 +41,7 @@ interface SpeedCalculatorOptions {
 interface SpeedStats {
   currentSpeed: number;      // 현재 속도 (bytes/sec)
   averageSpeed: number;      // 평균 속도 (bytes/sec)
+  estimatedTimeRemaining: number; // 예상 남은 시간 (초)
   sampleCount: number;       // 샘플 개수
 }
 ```
@@ -64,19 +65,21 @@ import { createSpeedCalculator } from './core/speed-calculator';
 const calculator = createSpeedCalculator();
 
 // 다운로드 진행 중 호출
-function onProgress(bytesDownloaded: number, totalBytes: number) {
-  calculator.addSample(bytesDownloaded);
+function onProgress(speedBytesPerSecond: number, bytesDownloaded: number, totalBytes: number) {
+  calculator.addSample(speedBytesPerSecond);
 
-  const stats = calculator.getStats();
+  const stats = calculator.getStats(totalBytes - bytesDownloaded);
   const remaining = calculator.getEstimatedTimeRemaining(totalBytes - bytesDownloaded);
 
-  console.log(`속도: ${formatBytes(stats.currentSpeed)}/s`);
-  console.log(`남은 시간: ${formatTime(remaining)}`);
+  console.log(`속도: ${stats.currentSpeed} bytes/sec`);
+  console.log(`남은 시간: ${remaining}초`);
 }
 
 // 다운로드 완료 후 리셋
 calculator.reset();
 ```
+
+누적 다운로드 바이트를 전달하는 API가 아닙니다. 호출자가 계산한 구간 속도를 샘플로 전달하며, 평균은 보관 중인 최근 샘플의 산술평균입니다. 속도나 남은 바이트가 0 이하이면 남은 시간은 0입니다.
 
 ---
 
@@ -89,14 +92,7 @@ calculator.reset();
 ### ErrorCategory
 
 ```typescript
-enum ErrorCategory {
-  NETWORK = 'network',           // 네트워크 오류 (연결 실패, 타임아웃)
-  SERVER = 'server',             // 서버 오류 (5xx)
-  CLIENT = 'client',             // 클라이언트 오류 (4xx)
-  VALIDATION = 'validation',     // 검증 오류 (체크섬 불일치)
-  FILESYSTEM = 'filesystem',     // 파일시스템 오류
-  UNKNOWN = 'unknown'            // 알 수 없는 오류
-}
+type ErrorCategory = 'network' | 'timeout' | 'notFound' | 'serverError' | 'unknown';
 ```
 
 ### RetryPolicy
@@ -106,7 +102,7 @@ interface RetryPolicy {
   maxRetries: number;       // 최대 재시도 횟수 (기본: 3)
   baseDelayMs: number;      // 기본 대기 시간 ms (기본: 1000)
   maxDelayMs: number;       // 최대 대기 시간 ms (기본: 30000)
-  backoffMultiplier: number; // 지수 백오프 승수 (기본: 2)
+  backoffMultiplier: number; // 지수 백오프 승수 (기본: 1.5)
 }
 
 // 기본 정책
@@ -114,7 +110,7 @@ const DEFAULT_RETRY_POLICY: RetryPolicy = {
   maxRetries: 3,
   baseDelayMs: 1000,
   maxDelayMs: 30000,
-  backoffMultiplier: 2
+  backoffMultiplier: 1.5
 };
 ```
 
@@ -123,21 +119,20 @@ const DEFAULT_RETRY_POLICY: RetryPolicy = {
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `categorizeError` | error: Error | ErrorCategory | 에러 분류 |
-| `isRetryable` | category: ErrorCategory | boolean | 재시도 가능 여부 |
-| `shouldRetry` | category: ErrorCategory, attempt: number | boolean | 재시도 필요 여부 |
+| `isRetryable` | error: Error | boolean | 재시도 가능 여부 |
+| `shouldRetry` | currentRetryCount: number, error?: Error | boolean | 재시도 필요 여부 |
 | `getRetryDelay` | attempt: number | number | 재시도 대기 시간 (ms) |
-| `handleError` | error: Error, attempt: number | ErrorHandleResult | 에러 처리 결과 |
-| `getPolicy` | - | RetryPolicy | 현재 정책 조회 |
+| `handleError` | error: Error, currentRetryCount: number | ErrorHandleResult | 에러 처리 결과 |
+| `getPolicy` | - | Readonly<RetryPolicy> | 현재 정책 조회 |
 
 ### ErrorHandleResult
 
 ```typescript
 interface ErrorHandleResult {
-  category: ErrorCategory;   // 에러 분류
-  isRetryable: boolean;      // 재시도 가능 여부
-  shouldRetry: boolean;      // 재시도 권장 여부
-  retryDelay: number;        // 권장 대기 시간 (ms)
-  message: string;           // 사용자 친화적 메시지
+  action: 'retry' | 'fail' | 'skip'; // 현재 구현의 반환은 retry 또는 fail
+  message: string;
+  retryAfterMs?: number;           // retry일 때만 존재 (ms)
+  retryCount: number;              // 다음 재시도 횟수 또는 최종 횟수
 }
 ```
 
@@ -145,12 +140,13 @@ interface ErrorHandleResult {
 
 | 카테고리 | 재시도 | 설명 |
 |----------|--------|------|
-| NETWORK | O | 일시적 네트워크 오류 |
-| SERVER | O | 서버 과부하/일시 장애 |
-| CLIENT | X | 잘못된 요청 (4xx) |
-| VALIDATION | X | 체크섬 불일치 |
-| FILESYSTEM | X | 디스크 오류 |
-| UNKNOWN | X | 알 수 없는 오류 |
+| network | O | 메시지의 connection/network/ECONNREFUSED/ENOTFOUND |
+| timeout | O | timeout/ETIMEDOUT |
+| notFound | X | 404/not found/찾을 수 없 |
+| serverError | O | 500/502/503 |
+| unknown | O | 위 문자열에 해당하지 않는 오류 |
+
+분류는 `Error.message`의 문자열 검사입니다. 일반적인 모든 4xx, 파일시스템 오류, 체크섬 실패를 별도 범주로 판별하지 않습니다. `shouldRetry()`는 현재 재시도 횟수가 한도 미만이고 `notFound`가 아닐 때 true입니다.
 
 ### 팩토리 함수
 
@@ -167,55 +163,44 @@ const handler = createErrorHandler({
 ### 사용 예시
 
 ```typescript
-import { createErrorHandler, ErrorCategory } from './core/download-error-handler';
+import { createErrorHandler } from './core/download-error-handler';
 
 const handler = createErrorHandler();
 
-async function downloadWithRetry(url: string, destPath: string) {
-  let attempt = 0;
-
-  while (attempt < handler.getPolicy().maxRetries) {
+// operation에는 실제 다운로드 함수를 전달한다.
+async function downloadWithRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let retryCount = 0;
+  for (;;) {
     try {
-      await downloadFile(url, destPath);
-      return; // 성공
+      return await operation();
     } catch (error) {
-      attempt++;
-      const result = handler.handleError(error as Error, attempt);
-
-      console.log(`오류: ${result.message}`);
-      console.log(`카테고리: ${result.category}`);
-
-      if (!result.shouldRetry) {
-        throw error;
-      }
-
-      console.log(`${result.retryDelay}ms 후 재시도... (${attempt}/${handler.getPolicy().maxRetries})`);
-      await sleep(result.retryDelay);
+      const result = handler.handleError(error as Error, retryCount);
+      console.log(result.message);
+      if (result.action !== 'retry') throw error;
+      retryCount = result.retryCount;
+      await new Promise(resolve => setTimeout(resolve, result.retryAfterMs ?? 0));
     }
   }
-
-  throw new Error('최대 재시도 횟수 초과');
 }
 ```
 
 ### 지수 백오프
 
 ```typescript
-// 재시도 대기 시간 계산 (지수 백오프 + 지터)
-getRetryDelay(attempt: number): number {
-  const delay = this.policy.baseDelayMs * Math.pow(this.policy.backoffMultiplier, attempt - 1);
-  const jitter = Math.random() * 0.3 * delay; // 30% 지터
-  return Math.min(delay + jitter, this.policy.maxDelayMs);
+// 클래스 메서드의 계산을 독립 함수로 표현: 0부터 시작, 지터 없음
+function getRetryDelay(attemptNumber: number, policy: RetryPolicy): number {
+  const delay = policy.baseDelayMs * Math.pow(policy.backoffMultiplier, attemptNumber);
+  return Math.min(delay, policy.maxDelayMs);
 }
 
-// 예시 (기본 정책):
-// 1회차: 1000ms + jitter
-// 2회차: 2000ms + jitter
-// 3회차: 4000ms + jitter (최대 30000ms)
+// 기본 정책: 최초 시도 외 최대 3회 재시도
+// retryCount 0: 1000ms
+// retryCount 1: 1500ms
+// retryCount 2: 2250ms
 ```
 
 ---
 
 ## 관련 문서
-- [DownloadManager](./download-manager.md)
+- [다운로드 아키텍처](./architecture-overview.md)
 - [공유 유틸리티](./shared-utilities.md)

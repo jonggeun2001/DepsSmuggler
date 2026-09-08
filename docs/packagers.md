@@ -19,7 +19,7 @@
 | `createArchive` | files, outputPath, packages, options | Promise<string> | 파일 목록을 `packages/` 아래로 묶어 압축 |
 | `createArchiveFromDirectory` | sourceDir, outputPath, packages, options | Promise<string> | 준비된 디렉터리 구조를 유지한 채 압축 |
 | `getArchiveInfo` | archivePath: string | Promise<{ format, size, fileCount }> | 압축 파일 정보 조회 |
-| `verifyArchive` | archivePath: string | Promise<boolean> | 압축 파일 무결성 검증 |
+| `verifyArchive` | archivePath: string | Promise<boolean> | 파일 존재 및 크기 > 0 확인 |
 
 ### 내부 메서드
 
@@ -33,16 +33,13 @@
 ### 타입 정의
 
 ```typescript
-const ArchiveFormat = {
-  ZIP: 'zip',
-  TAR_GZ: 'tar.gz'
-} as const;
+type ArchiveFormat = 'zip' | 'tar.gz'; // ArchiveType을 재사용
 
 interface ArchiveOptions {
   format: ArchiveFormat;       // 압축 형식
-  compressionLevel?: number;   // 압축 레벨 (0-9)
-  includeReadme?: boolean;     // README 포함 여부
-  includeManifest?: boolean;   // manifest.json 포함 여부
+  compressionLevel?: number;   // 압축 레벨 (0-9, 기본 6)
+  includeReadme?: boolean;     // README 포함 여부 (기본 true)
+  includeManifest?: boolean;   // manifest.json 포함 여부 (기본 true)
   onProgress?: (progress: ArchiveProgress) => void;
 }
 
@@ -85,6 +82,8 @@ const result = await packager.createArchiveFromDirectory(
 
 GUI 다운로드 경로에서는 `electron/download-handlers.ts`가 `createArchiveFromDirectory(...)`를 사용합니다. 그래서 `outputDir` 아래에 만들어 둔 `packages/`, `install.sh`, `install.ps1` 같은 파일이 그대로 아카이브에 포함되고, 최종 완료 이벤트는 실제 `.zip` 또는 `.tar.gz` 파일 경로를 반환합니다.
 
+`getArchiveInfo()`는 확장자로 형식을 판별하고 파일 크기를 조회합니다. `fileCount`는 항상 0이며, `verifyArchive()`는 압축 해제나 내부 CRC 검사를 수행하지 않습니다. `onProgress`는 입력 파일 크기를 조사하는 준비 단계의 진행률이며 압축 스트림의 진행률이 아닙니다.
+
 현재 구현은 다운로드 산출물을 별도 staging 디렉터리로 한 번 더 복사하지 않고, 원본 디렉터리/파일 엔트리를 아카이브 스트림에 직접 추가한 뒤 `manifest.json`, `README.txt`만 추가 entry로 주입합니다.
 
 ### 기술적 주의사항
@@ -117,29 +116,27 @@ const archive = archiver('zip', { zlib: { level: 9 } });
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `generateBashScript` | options: ScriptOptions | Promise<GeneratedScript> | Bash 스크립트 생성 |
-| `generatePowerShellScript` | options: ScriptOptions | Promise<GeneratedScript> | PowerShell 스크립트 생성 |
-| `generateAllScripts` | options: ScriptOptions | Promise<GeneratedScript[]> | 모든 형식 스크립트 생성 |
+| `generateBashScript` | packages, outputPath, options? | Promise<string> | Bash 스크립트 생성 |
+| `generatePowerShellScript` | packages, outputPath, options? | Promise<string> | PowerShell 스크립트 생성 |
+| `generateAllScripts` | packages, outputDir, options? | Promise<GeneratedScript[]> | 모든 형식 스크립트 생성 |
 
 ### 내부 메서드
 
 | 메서드 | 설명 |
 |--------|------|
-| `groupPackagesByType` | 패키지를 타입별로 그룹화하여 설치 순서 결정 |
+| `groupPackagesByType` | 패키지를 타입별로 그룹화 (의존성 위상 정렬은 하지 않음) |
 
 ### 타입 정의
 
 ```typescript
 interface ScriptOptions {
-  packages: PackageInfo[];     // 설치할 패키지 목록
-  outputDir: string;           // 스크립트 출력 디렉토리
-  mirrorPath?: string;         // 미러 경로 (옵션)
-  includeVerification?: boolean; // 체크섬 검증 포함
+  includeHeader?: boolean;        // 기본 true
+  includeErrorHandling?: boolean; // 기본 true
+  packageDir?: string;            // 기본 './packages'
 }
 
 interface GeneratedScript {
   type: 'bash' | 'powershell';
-  filename: string;
   content: string;
   path: string;
 }
@@ -147,48 +144,46 @@ interface GeneratedScript {
 
 ### 생성되는 스크립트
 
-**Bash (install.sh)**
+**Bash (install.sh)의 Python 설치 부분 (핵심 흐름)**
 ```bash
 #!/bin/bash
 set -e
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MIRROR_DIR="${SCRIPT_DIR}/mirror"
-
-echo "Installing Python packages..."
-pip install --no-index --find-links "${MIRROR_DIR}/pip/simple" requests flask
-
-echo "Installing Maven artifacts..."
-# Maven 설치 명령어...
-
-echo "Installation completed!"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+PACKAGE_DIR="./packages"
+PIP_FIND_LINK_ARGS=()
+while IFS= read -r -d '' directory; do
+  PIP_FIND_LINK_ARGS+=(--find-links="$directory")
+done < <(find "$PACKAGE_DIR" -type d -print0)
+pip install --no-index "${PIP_FIND_LINK_ARGS[@]}" requests==2.31.0
 ```
 
-**PowerShell (install.ps1)**
+**PowerShell (install.ps1)의 Python 설치 부분 (핵심 흐름)**
 ```powershell
-#Requires -Version 5.1
 $ErrorActionPreference = "Stop"
-
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$MirrorDir = Join-Path $ScriptDir "mirror"
-
-Write-Host "Installing Python packages..."
-pip install --no-index --find-links "$MirrorDir\pip\simple" requests flask
-
-Write-Host "Installation completed!"
+$PackageDir = Join-Path $ScriptDir "packages"
+$FindLinkArgs = @("--find-links=$PackageDir")
+Get-ChildItem -Path $PackageDir -Directory -Recurse | ForEach-Object {
+    $FindLinkArgs += "--find-links=$($_.FullName)"
+}
+pip install --no-index @FindLinkArgs requests==2.31.0
 ```
+
+실제 파일은 헤더, 패키지 디렉터리와 실행 도구 확인, 로그 함수와 타입별 설치 함수를 포함합니다. Python은 하위 디렉터리마다 `--find-links`를 추가하며, Maven은 JAR 파일을 재귀 탐색합니다. Bash는 pip/conda·Maven·YUM·Docker 블록을, PowerShell은 pip/conda·Maven·Docker 블록을 생성하며 YUM 설치 블록은 없습니다.
+
+일반 `ScriptGenerator`에는 npm·APT·APK 전용 설치 블록이 없고, Conda 항목도 pip 설치 블록으로 묶입니다. `.conda` 파일을 설치하는 Conda 전용 스크립트로 간주하면 안 됩니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
 
 ### 사용 예시
 ```typescript
 import { getScriptGenerator } from './core/packager/script-generator';
 
 const generator = getScriptGenerator();
-const scripts = await generator.generateAllScripts({
-  packages: downloadedPackages,
-  outputDir: '/tmp/output',
-  mirrorPath: './mirror',
-  includeVerification: true
-});
+const scripts = await generator.generateAllScripts(
+  downloadedPackages,
+  '/tmp/output',
+  { packageDir: './packages', includeErrorHandling: true }
+);
 ```
 
 ---
@@ -203,10 +198,10 @@ const scripts = await generator.generateAllScripts({
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `splitFile` | options: SplitOptions | Promise<SplitResult> | 파일 분할 |
-| `joinFiles` | metadataPath: string, outputPath: string, onProgress? | Promise<string> | 분할된 파일 병합 |
-| `needsSplit` | filePath: string, maxSize: number | Promise<boolean> | 분할 필요 여부 확인 |
-| `estimatePartCount` | filePath: string, chunkSize: number | Promise<number> | 예상 파트 수 계산 |
+| `splitFile` | filePath: string, options?: SplitOptions | Promise<SplitResult> | 파일 분할 |
+| `joinFiles` | parts: string[] 또는 metadataPath: string, outputPath, onProgress? | Promise<string> | 분할된 파일 병합 |
+| `needsSplit` | filePath: string, maxSizeMB?: number | Promise<boolean> | 분할 필요 여부 확인 |
+| `estimatePartCount` | filePath: string, maxSizeMB?: number | Promise<number> | 예상 파트 수 계산 |
 
 ### 내부 메서드
 
@@ -222,7 +217,7 @@ const scripts = await generator.generateAllScripts({
 |------|-----|------|
 | `BUFFER_SIZE` | 64KB | 읽기/쓰기 버퍼 크기 |
 
-분할 크기 기본값은 기존대로 `maxSizeMB = 25`입니다. 사용되지 않던 `DEFAULT_CHUNK_SIZE` 필드를 제거했으며, 실제 분할·병합 동작은 `file-splitter.test.ts`로 검증합니다.
+분할 크기 기본값은 `maxSizeMB = 25`이고 1MB를 1024 × 1024바이트로 계산합니다. `generateMergeScripts` 기본값은 true입니다. 실제 분할·병합 동작은 `file-splitter.test.ts`에서 검증합니다.
 
 ### 타입 정의
 
@@ -264,10 +259,10 @@ interface SplitMetadata {
 ### 생성되는 파일 구조
 
 ```
-split/
-├── packages.zip.part.001
-├── packages.zip.part.002
-├── packages.zip.part.003
+원본 파일이 있는 디렉터리/
+├── packages.zip.part001
+├── packages.zip.part002
+├── packages.zip.part003
 ├── packages.zip.meta.json
 ├── merge.sh
 └── merge.ps1
@@ -285,12 +280,13 @@ const result = await splitter.splitFile('/tmp/large-file.zip', {
   onProgress: (p) => console.log(`Part ${p.currentPart}/${p.totalParts}`)
 });
 
-// 병합
-const joinedPath = await splitter.joinFiles(
-  result.metadataPath!,
-  '/tmp/restored-file.zip'
-);
+// 실제로 분할됐을 때만 메타데이터 파일이 생성된다.
+const joinedPath = result.metadataPath
+  ? await splitter.joinFiles(result.metadataPath, '/tmp/restored-file.zip')
+  : result.parts[0];
 ```
+
+파일 크기가 기준 이하면 원본 경로 하나만 반환하고 메타데이터 파일·병합 스크립트를 만들지 않습니다. `joinFiles()`는 `.meta.json` 경로나 파트 배열을 받으며, 메타데이터의 SHA256과 병합 결과가 다르면 경고를 기록하지만 반환 자체를 실패시키지는 않습니다.
 
 현재 일반 다운로드 이메일 전달 플로우는 첨부 크기 초과 시 `splitFile()`을 호출해 생성된 파트, 메타데이터 JSON, 병합 스크립트를 그대로 메일 첨부 대상으로 사용합니다.
 
@@ -299,4 +295,4 @@ const joinedPath = await splitter.joinFiles(
 ## 관련 문서
 - [아키텍처 개요](./architecture-overview.md)
 - [Downloaders 문서](./downloaders.md)
-- [DownloadManager 문서](./download-manager.md)
+- [다운로드 아키텍처](./architecture-overview.md)

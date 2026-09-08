@@ -4,8 +4,8 @@
 - 목적: 각 패키지 관리자별 패키지 검색 및 다운로드 구현
 - 위치: `src/core/downloaders/`
 - 공통 체크섬 검증은 `src/core/shared/integrity/checksum.ts`를 통해 공유한다. `pip`, `conda`, `maven`, Docker blob 다운로드, 캐시 검증, OS GPG verifier가 이 유틸리티를 재사용한다.
-- Phase 6부터 `src/core/downloaders/lang-shared/base-language-downloader.ts`가 언어 패키지 공통 다운로드 레이어를 제공한다. 현재 `pip`, `conda`, `npm`, `maven`이 스트림 저장, 진행률 계산, 파일명 정규화, 검증 실패 시 정리 로직을 공유한다.
-- Phase 4부터 downloader가 resolver 구현에 직접 기대지 않도록 `src/core/ports/package-metadata-port.ts`, `src/core/ports/package-fetch-port.ts` 경계를 기준으로 점진적으로 정리한다.
+- `src/core/downloaders/lang-shared/base-language-downloader.ts`가 언어 패키지 공통 다운로드 레이어를 제공한다. 현재 `pip`, `conda`, `npm`, `maven`이 스트림 저장, 진행률 계산, 파일명 정규화, 검증 실패 시 정리 로직을 공유한다.
+- downloader와 resolver의 조회 경계는 `src/core/ports/package-metadata-port.ts`, `src/core/ports/package-fetch-port.ts`에 정의한다.
 
 ---
 
@@ -15,18 +15,19 @@
 - 목적: PyPI 패키지 검색 및 다운로드
 - 위치: `src/core/downloaders/pip.ts`
 - 커스텀 인덱스용 Simple API 조회는 `src/core/shared/pip-simple-api-client.ts`를 재사용한다.
-- 파일 저장과 진행률 이벤트 생성은 `BaseLanguageDownloader`가 담당하고, `PipDownloader`는 release 선택과 SHA256 검증 기준을 제공한다.
+- 파일 저장과 진행률 이벤트 생성은 `BaseLanguageDownloader`가 담당하고, `PipDownloader`는 release 선택과 제공된 해시 중 검증할 알고리즘을 제공한다.
 
 ### 클래스 구조
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `searchPackages` | query: string | Promise<PackageInfo[]> | PyPI에서 패키지 검색 |
-| `getVersions` | packageName: string | Promise<string[]> | 패키지의 사용 가능한 버전 목록 조회 |
-| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 상세 메타데이터 조회 |
-| `downloadPackage` | name: string, version: string, destDir: string, options? | Promise<DownloadResult> | 패키지 파일 다운로드 |
-| `getReleasesForArch` | releases: PyPIRelease[], arch?: string | PyPIRelease[] | 특정 아키텍처용 릴리즈 필터링 |
-| `verifyChecksum` | filePath: string, expectedHash: string | Promise<boolean> | shared checksum 유틸리티를 통한 SHA256 체크섬 검증 |
+| `searchPackages` | query: string, indexUrl?: string | Promise<PackageInfo[]> | PyPI에서 패키지 검색 |
+| `getVersions` | packageName: string, indexUrl?: string | Promise<string[]> | 패키지의 사용 가능한 버전 목록 조회 |
+| `getPackageMetadata` | name, version, indexUrl? | Promise<PackageInfo> | 메타데이터와 선택된 다운로드 URL 조회 |
+| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | 패키지 파일 경로 반환 |
+| `getReleasesForArch` | name, version, arch?, pythonVersion?, targetOS? | Promise<PyPIRelease[]> | 특정 아키텍처용 릴리즈 필터링 |
+| `verifyChecksum` | filePath, expectedHash, algorithm? | Promise<boolean> | 기본 SHA256; 지정한 알고리즘으로 검증 |
+| `setPipTargetPlatform` | platform: PipTargetPlatform 또는 null | void | 후속 메타데이터 조회의 대상 환경 설정 |
 
 ### 내부 메서드
 
@@ -45,11 +46,14 @@
 ### 다운로드 옵션
 
 ```typescript
-interface PipDownloadOptions {
-  pythonVersion?: string;   // 타겟 Python 버전 (예: '3.11')
-  targetOS?: string;        // 타겟 OS (예: 'linux', 'macos', 'windows')
-  architecture?: string;    // 타겟 아키텍처 (예: 'x86_64', 'arm64')
-  preferWheel?: boolean;    // wheel 파일 우선 선택 (기본: true)
+// Downloader 메서드의 별도 options 인수가 아니라 인스턴스에 설정한다.
+interface PipTargetPlatform {
+  os: 'linux' | 'macos' | 'windows';
+  arch: 'x86_64' | 'aarch64' | 'arm64' | 'i386' | 'amd64' | 'arm/v7' | '386';
+  pythonVersion?: string;
+  linuxDistro?: string;
+  glibcVersion?: string;
+  macosVersion?: string;
 }
 ```
 
@@ -61,13 +65,19 @@ const downloader = getPipDownloader();
 const results = await downloader.searchPackages('requests');
 const versions = await downloader.getVersions('requests');
 
-// 특정 Python/OS/아키텍처용 패키지 다운로드
-const result = await downloader.downloadPackage('numpy', '1.26.0', '/tmp/downloads', {
-  pythonVersion: '3.11',
-  targetOS: 'linux',
-  architecture: 'x86_64',
-});
+// 특정 Python/OS/아키텍처용 파일 선택 후 다운로드
+// 설정을 공유하지 않으려면 new PipDownloader()를 사용한다.
+downloader.setPipTargetPlatform({ os: 'linux', arch: 'x86_64', pythonVersion: '3.11' });
+try {
+  const info = await downloader.getPackageMetadata('numpy', '1.26.0');
+  const filePath = await downloader.downloadPackage(info, '/tmp/downloads');
+  console.log(filePath); // /tmp/downloads/pip/<artifact fingerprint>/<wheel 파일명>
+} finally {
+  downloader.setPipTargetPlatform(null);
+}
 ```
+
+일반 다운로드 작업의 `PipDownloadOptions`는 `src/types/download/options.ts`의 `DownloadOptions` 확장 타입입니다. `preferWheel` 옵션은 없으며, 다운로더는 자체 호환성 선택 규칙을 사용합니다. resolver가 선택한 `metadata.downloadUrl`이 있으면 이를 재사용하고, pip 파일은 `pip/<artifact fingerprint>/` 아래에 저장하여 같은 이름의 다른 산출물을 구분합니다.
 
 ---
 
@@ -84,10 +94,10 @@ const result = await downloader.downloadPackage('numpy', '1.26.0', '/tmp/downloa
 |--------|----------|--------|------|
 | `searchPackages` | query: string, channel?: string | Promise<PackageInfo[]> | Anaconda에서 패키지 검색 |
 | `getVersions` | packageName: string, channel?: string | Promise<string[]> | 패키지 버전 목록 조회 |
-| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
-| `downloadPackage` | name: string, version: string, destDir: string, options? | Promise<DownloadResult> | 패키지 다운로드 |
-| `getPackageFiles` | name: string, version: string, channel?: string | Promise<CondaPackageFile[]> | 패키지 파일 목록 조회 |
-| `verifyChecksum` | filePath: string, expectedHash: string | Promise<boolean> | shared checksum 유틸리티를 통한 SHA256/MD5 체크섬 검증 |
+| `getPackageMetadata` | name, version, channel?, arch? | Promise<PackageInfo> | 패키지 메타데이터 조회 |
+| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | 선택된 파일 다운로드 |
+| `getPackageFiles` | name: string, channel?: string | Promise<CondaPackageFile[]> | 패키지 파일 목록 조회 |
+| `verifyChecksum` | filePath, expectedHash, algorithm?: md5 또는 sha256 | Promise<boolean> | 기본 MD5, 명시적으로 SHA256 선택 가능 |
 | `clearCache` | - | void | repodata 캐시 초기화 |
 
 ### 내부 메서드
@@ -96,9 +106,9 @@ const result = await downloader.downloadPackage('numpy', '1.26.0', '/tmp/downloa
 |--------|------|
 | `getRepoData` | repodata.json 가져오기 (zstd 압축 지원, 캐싱) |
 | `findPackageInRepoData` | repodata에서 패키지 검색 |
-| `selectBestFile` | Python 버전, OS, 아키텍처에 맞는 최적 파일 선택 |
+| `selectBestFile` | Anaconda API fallback에서 버전/아키텍처에 맞는 파일 선택 |
 | `getPackageMetadataFallback` | Anaconda API fallback 조회 |
-| `mapArch` | 아키텍처 매핑 (x86_64 → linux-64 등) |
+| `mapArch` | subdir를 공통 Architecture로 변환 (linux-64 → x86_64 등) |
 
 ### 속성
 
@@ -113,22 +123,20 @@ const result = await downloader.downloadPackage('numpy', '1.26.0', '/tmp/downloa
 ### 다운로드 옵션
 
 ```typescript
-interface CondaDownloadOptions {
-  channel?: string;        // 채널 (기본: 'conda-forge')
-  pythonVersion?: string;  // 타겟 Python 버전 (예: '3.12')
-  targetOS?: string;       // 타겟 OS (예: 'linux', 'macos', 'windows')
-  architecture?: string;   // 타겟 아키텍처 (예: 'x86_64', 'arm64')
-}
+// CondaDownloader.downloadPackage(info, destPath, onProgress?)
+// info.metadata.repository: 'conda-forge/numpy'
+// info.metadata.downloadUrl: resolver가 대상 환경에 맞게 선택한 URL
+// info.arch: 공통 Architecture 값
 ```
+
+`CondaDownloadOptions`라는 downloader 전용 타입은 없습니다. Python/OS/CUDA 조건은 `CondaResolver.resolveDependencies()`에서 처리하고, 결과의 `PackageInfo`를 다운로더에 전달합니다. `getPackageMetadata(name, version, channel, arch)`는 Python 버전/OS 인수를 받지 않으므로 대상 환경이 중요하면 resolver를 사용합니다.
 
 ### 채널 설정
 ```typescript
-const CondaChannel = {
-  CONDA_FORGE: 'conda-forge',
-  MAIN: 'main',
-  R: 'r',
-  BIOCONDA: 'bioconda'
-} as const;
+// CondaChannel은 모듈 내부 문자열 타입이며 enum/상수로 export되지 않는다.
+type CondaChannel = 'conda-forge' | 'main' | 'anaconda' | 'defaults' | string;
+await downloader.searchPackages('numpy', 'conda-forge');
+await downloader.searchPackages('numpy', 'all'); // 검색에서만 채널 필터 생략
 ```
 
 ### Subdir 매핑
@@ -146,9 +154,9 @@ const CondaChannel = {
 
 - **repodata.json.zst 지원**: zstd 압축 파일 우선 사용 (대역폭 절약)
 - **캐싱**: repodata 캐싱으로 중복 요청 방지
-- **Python 버전 필터링**: py312, py311 등 build 태그로 Python 버전에 맞는 패키지 선택
+- **Python 버전 필터링**: CondaResolver에서 build 태그/의존성 조건에 맞는 파일을 선택하여 전달
 - **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
-- **Anaconda API fallback**: RC 버전 등 특수 라벨 패키지 지원
+- **Anaconda API fallback**: repodata에서 찾지 못한 경우 API 파일 목록에서 후보 선택 (엄격한 대상 환경 해결은 resolver 사용)
 
 ### 타임아웃 및 재시도 설정
 
@@ -158,19 +166,23 @@ Anaconda API가 느린 경우를 대비하여 타임아웃과 재시도 로직�
 |------|-----|------|
 | 기본 타임아웃 | 10분 (600,000ms) | HTTP 클라이언트 기본 타임아웃 |
 | 검색 타임아웃 | 10분 (600,000ms) | `searchPackages` 메서드 전용 |
-| 최대 재시도 | 3회 | 타임아웃/네트워크 에러 시 |
-| 재시도 대기 | 1초, 2초, 3초 | 점진적 백오프 |
+| 최대 재시도 | 2회 (최초 포함 3번 시도) | ECONNABORTED/ETIMEDOUT만 재시도 |
+| 재시도 대기 | 1초, 2초 | 선형 대기 |
 
 ```typescript
-// 재시도 로직 (searchPackages 내부)
+// 재시도 로직 (searchPackages 내부 흐름)
+const maxRetries = 2;
 for (let attempt = 0; attempt <= maxRetries; attempt++) {
   try {
-    const response = await this.client.get(..., { timeout: 600000 });
+    const response = await this.client.get(`${this.apiUrl}/search`, {
+      params: { name: query }, timeout: 600000,
+    });
     // ...
   } catch (error) {
     if (axios.isAxiosError(error) &&
         (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT')) {
-      // 타임아웃이면 재시도
+      // 마지막 시도에서는 throw; 남은 시도가 있을 때만 대기
+      if (attempt >= maxRetries) throw error;
       await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
       continue;
     }
@@ -181,21 +193,22 @@ for (let attempt = 0; attempt <= maxRetries; attempt++) {
 
 ### 사용 예시
 ```typescript
-import { getCondaDownloader, CondaChannel } from './core/downloaders/conda';
+import { getCondaDownloader } from './core/downloaders/conda';
+import { getCondaResolver } from './core/resolver/conda-resolver';
 
 const downloader = getCondaDownloader();
-const results = await downloader.searchPackages('numpy', CondaChannel.CONDA_FORGE);
-
-// Python 3.12, Linux x86_64용 패키지 다운로드
-const result = await downloader.downloadPackage('numpy', '1.26.0', '/tmp/downloads', {
+const results = await downloader.searchPackages('numpy', 'conda-forge');
+const resolution = await getCondaResolver().resolveDependencies('numpy', '1.26.0', {
   channel: 'conda-forge',
   pythonVersion: '3.12',
-  targetOS: 'linux',
-  architecture: 'x86_64',
+  targetPlatform: { system: 'Linux', machine: 'x86_64' },
 });
+const info = resolution.root.package;
+const filePath = await downloader.downloadPackage(info, '/tmp/downloads');
 
-// 다운로드 후 체크섬 검증
-const valid = await downloader.verifyChecksum(result.filePath, result.sha256);
+// 다운로드 경로는 문자열이다. 체크섬은 PackageInfo metadata에서 확인한다.
+const expectedMd5 = info.metadata?.checksum?.md5;
+if (expectedMd5) await downloader.verifyChecksum(filePath, expectedMd5, 'md5');
 ```
 
 ---
@@ -212,15 +225,14 @@ const valid = await downloader.verifyChecksum(result.filePath, result.sha256);
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `searchPackages` | query: string | Promise<PackageInfo[]> | Maven Central에서 아티팩트 검색 |
-| `getVersions` | artifactId: string, groupId?: string | Promise<string[]> | 아티팩트 버전 목록 조회 |
-| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 아티팩트 메타데이터 조회 |
-| `downloadPackage` | name: string, version: string, destDir: string | Promise<DownloadResult> | 아티팩트 완전 다운로드 (jar, pom, 체크섬 포함) |
-| `downloadArtifact` | artifact: MavenArtifact, destDir: string, options? | Promise<DownloadResult> | 특정 타입 아티팩트 다운로드 |
-| `downloadChecksumFile` | groupId, artifactId, version, destDir, extension | Promise<void> | 체크섬 파일 (.sha1) 다운로드 |
-| `downloadPom` | artifact: MavenArtifact, destDir: string | Promise<DownloadResult> | POM 파일 다운로드 |
-| `downloadSources` | artifact: MavenArtifact, destDir: string | Promise<DownloadResult> | 소스 JAR 다운로드 |
-| `downloadJavadoc` | artifact: MavenArtifact, destDir: string | Promise<DownloadResult> | Javadoc JAR 다운로드 |
-| `verifyChecksum` | filePath: string, checksumUrl: string | Promise<boolean> | shared checksum 유틸리티를 통한 SHA1 체크섬 검증 |
+| `getVersions` | packageName: string (groupId:artifactId) | Promise<string[]> | 아티팩트 버전 목록 조회 |
+| `getPackageMetadata` | name: string, version: string | Promise<PackageInfo> | 아티팩트 메타데이터 조회 |
+| `downloadPackage` | info: PackageInfo, destPath, onProgress?, _options? | Promise<string> | 아티팩트 다운로드 (jar, pom, 체크섬 포함) |
+| `downloadArtifact` | groupId, artifactId, version, destPath, artifactType?, onProgress?, classifier? | Promise<string> | 특정 타입 아티팩트 다운로드 |
+| `downloadPom` | groupId, artifactId, version, destPath | Promise<string> | POM 파일 다운로드 |
+| `downloadSources` | groupId, artifactId, version, destPath | Promise<string> | 소스 JAR 다운로드 |
+| `downloadJavadoc` | groupId, artifactId, version, destPath | Promise<string> | Javadoc JAR 다운로드 |
+| `verifyChecksum` | filePath: string, expected: string | Promise<boolean> | shared checksum 유틸리티를 통한 SHA1 체크섬 검증 |
 
 ### 내부 메서드
 
@@ -230,7 +242,8 @@ const valid = await downloader.verifyChecksum(result.filePath, result.sha256);
 | `buildFileName` | 다운로드 파일명 생성 |
 | `buildM2Path` | .m2 저장소 형식의 경로 생성 |
 | `compareVersions` | Maven 버전 비교 |
-| `parseCoordinates` | GAV 좌표 파싱 (groupId:artifactId:version) |
+| `parseCoordinates` (public) | GAV 좌표 파싱 (groupId:artifactId:version) |
+| `downloadChecksumFile` (private) | 저장소의 `.sha1` companion 파일을 다운로드 |
 
 ### 아티팩트 타입
 
@@ -278,14 +291,14 @@ if (isPomOnly) {
 
 ### 완전 다운로드 (downloadPackage)
 
-`downloadPackage` 메서드는 오프라인 Maven 저장소 구성에 필요한 모든 파일을 다운로드합니다:
+`downloadPackage` 메서드는 기본 JAR 아티팩트에 대해 다음 파일을 내려받습니다. 아티팩트 type이 다르면 확장자가 바뀌고 POM-only는 JAR를 생략합니다:
 
 1. **JAR 파일** (`.jar`) - 컴파일된 바이트코드
 2. **JAR 체크섬** (`.jar.sha1`) - JAR 무결성 검증용
 3. **POM 파일** (`.pom`) - 프로젝트 메타데이터 및 의존성 정보
 4. **POM 체크섬** (`.pom.sha1`) - POM 무결성 검증용
 
-이를 통해 다운로드된 패키지를 폐쇄망의 로컬 Maven 저장소로 직접 사용할 수 있습니다.
+POM과 checksum companion 조회 실패는 경고 후 계속할 수 있으므로 네 파일이 항상 존재하는 것은 아닙니다. `_options`의 OS/아키텍처는 현재 사용하지 않으며 네이티브 classifier는 metadata에서 명시해야 합니다.
 
 ### .m2 저장소 구조 지원
 
@@ -307,13 +320,13 @@ destPath/
 
 ### 검색 결과 필드
 
-`searchPackages`는 `central.sonatype.com` API를 사용하며, 인기도 순으로 정렬됩니다:
+`searchPackages`는 `groupId:artifactId` 좌표 입력이면 Sonatype의 `/api/internal/browse/component/versions`를 조회합니다. 좌표 조회 실패 시와 일반 키워드 입력 시에는 같은 호스트의 `/api/internal/browse/components`에 POST하여 인기도 순으로 검색합니다. `searchViaSearchApi`라는 내부 이름과 달리 이 키워드 경로는 search.maven.org가 아닙니다:
 
 ```typescript
 interface PackageInfo {
   name: string;           // groupId:artifactId
   version: string;        // 최신 버전
-  description?: string;
+  type: 'maven';
   metadata: {
     groupId: string;
     artifactId: string;
@@ -322,7 +335,7 @@ interface PackageInfo {
 }
 ```
 
-**참고**: API 결과는 최대 20개로 제한됩니다.
+**참고**: 키워드 검색은 최대 20개를 요청합니다. 좌표 검색은 해당 아티팩트의 버전 배열을 반환하며 인기 지표를 포함하지 않습니다.
 
 ### 에러 처리
 
@@ -342,13 +355,11 @@ const downloader = getMavenDownloader();
 const results = await downloader.searchPackages('spring-core');
 // results[0].metadata.popularityCount로 인기도 확인 가능
 
-// 완전 다운로드 (jar, jar.sha1, pom, pom.sha1 모두 다운로드)
+// 아티팩트와 POM 및 조회 가능한 SHA1 companion 파일 다운로드
 const result = await downloader.downloadPackage(
-  'org.springframework:spring-core',
-  '5.3.0',
+  { type: 'maven', name: 'org.springframework:spring-core', version: '5.3.0' },
   '/tmp/downloads'
 );
-
 // 다운로드된 파일 (.m2 구조):
 // /tmp/downloads/org/springframework/spring-core/5.3.0/spring-core-5.3.0.jar
 // /tmp/downloads/org/springframework/spring-core/5.3.0/spring-core-5.3.0.jar.sha1
@@ -356,11 +367,9 @@ const result = await downloader.downloadPackage(
 // /tmp/downloads/org/springframework/spring-core/5.3.0/spring-core-5.3.0.pom.sha1
 
 // 특정 아티팩트만 다운로드
-const artifactResult = await downloader.downloadArtifact({
-  groupId: 'org.springframework',
-  artifactId: 'spring-core',
-  version: '5.3.0'
-}, '/tmp/downloads');
+const artifactResult = await downloader.downloadArtifact(
+  'org.springframework', 'spring-core', '5.3.0', '/tmp/downloads', 'jar'
+);
 ```
 
 ---
@@ -369,19 +378,21 @@ const artifactResult = await downloader.downloadArtifact({
 
 ### 개요
 - 목적: Linux OS 패키지(rpm, deb, apk) 검색, 의존성 해결, 다운로드 및 패키징
-- 위치: `src/core/downloaders/os/`
+- 위치: `src/core/downloaders/{yum,apt,apk}.ts`, `src/core/downloaders/os-shared/`
 - 지원 패키지 관리자: YUM/RPM, APT/DEB, APK
 - **상세 문서**: [OS 패키지 다운로더 문서](./os-package-downloader.md)
 
-### 통합 클래스: OSPackageDownloader
+### 실행 클래스와 조합 경로
 
-| 메서드 | 파라미터 | 반환값 | 설명 |
-|--------|----------|--------|------|
-| `search` | OSPackageSearchOptions | Promise<OSPackageSearchResult> | 패키지 검색 |
-| `resolveDependencies` | packages, distribution, architecture, options? | Promise<DependencyResolutionResult> | 의존성 해결 |
-| `download` | OSPackageDownloadOptions | Promise<OSPackageDownloadResult> | 패키지 다운로드 |
-| `getCacheStats` | - | CacheStats | 캐시 통계 |
-| `clearCache` | - | Promise<void> | 캐시 초기화 |
+`YumDownloader`, `AptDownloader`, `ApkDownloader`는 `BaseOSDownloader`를 상속합니다. 검색과 의존성 해결은 `*DependencyResolver`, CLI 작업 조합은 `os-shared/cli-backend.ts`가 맡습니다. `OSPackageDownloader`는 `os-shared/types.ts`의 계약 인터페이스이며 생성 가능한 통합 클래스가 아닙니다.
+
+| 소유 모듈 | 메서드 | 반환값 | 설명 |
+|-----------|--------|--------|------|
+| `*DependencyResolver` | `searchPackages(query, matchType?)` | `Promise<OSPackageSearchResult[]>` | 이름별 그룹 검색 |
+| `BaseOSDependencyResolver` | `resolveDependencies(packages)` | OS 전용 `DependencyResolutionResult` | 의존성 해결 |
+| `BaseOSDownloader` | `downloadPackage(pkg)` | `Promise<OSPackageDownloadResult>` | 단일 패키지 다운로드 |
+| `BaseOSDownloader` | `downloadPackages(packages)` | `Promise<DownloadPackagesResult>` | 동시 다운로드 |
+| `OsPackageCache` | `getStats()` / `invalidate()` | `CacheStats` / `Promise<void>` | 캐시 조회/삭제 |
 
 ### 패키지 관리자별 구현
 
@@ -391,7 +402,7 @@ const artifactResult = await downloader.downloadArtifact({
 | `AptDownloader` | apt | .deb | Packages.gz, Release |
 | `ApkDownloader` | apk | .apk | APKINDEX.tar.gz |
 
-### 지원 배포판
+### 지원 배포판 (정적 저장소 프리셋)
 
 | 패키지 관리자 | 배포판 |
 |--------------|--------|
@@ -401,34 +412,35 @@ const artifactResult = await downloader.downloadArtifact({
 
 ### 주요 기능
 
-- **의존성 자동 해결**: 하이브리드 방식 (API + 메타데이터 파싱)
+- **의존성 자동 해결**: 현재 YUM/APT/APK는 저장소 메타데이터 파싱 사용
 - **메타데이터 캐싱**: LRU 캐시 + TTL 지원
-- **GPG 서명 검증**: 공식 저장소 패키지 검증
+- **검증**: GPGVerifier 주입 시 체크섬 검증 (실제 GPG 서명 검증은 미구현)
 - **스크립트 생성**: bash/PowerShell 설치 스크립트
 - **출력 패키징**: zip/tar.gz 아카이브, 로컬 저장소 구조
 
 ### 사용 예시
 
 ```typescript
-import { OSPackageDownloader, getDistributionById } from './core/downloaders/os';
+import { searchOSPackages, downloadOSPackages } from './core/downloaders/os-shared/cli-backend';
+import { getDistributionById } from './core/downloaders/os-shared/repositories';
 
-const downloader = new OSPackageDownloader({ concurrency: 5 });
 const distribution = getDistributionById('rocky-9')!;
-
-// 패키지 검색
-const result = await downloader.search({
-  query: 'nginx',
+const common = {
   distribution,
-  architecture: 'x86_64',
-  matchType: 'contains',
-});
-
-// 의존성 포함 다운로드
-const downloadResult = await downloader.download({
-  packages: result.packages,
-  outputDir: '/tmp/packages',
+  architecture: 'x86_64' as const,
+  cacheDirectory: '/tmp/depssmuggler-os-cache',
+  cacheEnabled: true,
+};
+const result = await searchOSPackages({ ...common, query: 'nginx', matchType: 'partial' });
+const downloadResult = await downloadOSPackages({
+  ...common,
+  packageNames: ['nginx'],
+  outputPath: '/tmp/packages.zip',
+  outputType: 'archive',
+  archiveFormat: 'zip',
+  includeScripts: true,
   resolveDependencies: true,
-  cacheMode: 'session',
+  concurrency: 3,
 });
 ```
 
@@ -446,17 +458,16 @@ const downloadResult = await downloader.download({
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `searchPackages` | query: string | Promise<OSPackageInfo[]> | YUM 저장소에서 패키지 검색 |
-| `getVersions` | packageName: string | Promise<string[]> | 패키지 버전 목록 조회 |
-| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
-| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | RPM 패키지 다운로드 |
+| `constructor` | options: BaseDownloaderOptions | 인스턴스 | 배포판·저장소·출력 경로 설정 |
+| `downloadPackages` | packages: OSPackageInfo[] | Promise<DownloadPackagesResult> | 다중 다운로드 (상속) |
+| `downloadPackage` | pkg: OSPackageInfo | Promise<OSPackageDownloadResult> | RPM 단일 다운로드 (상속) |
 
 ### 메타데이터 파서 (YumMetadataParser)
 
 | 메서드 | 설명 |
 |--------|------|
-| `parseRepomd(url)` | repomd.xml 파싱 |
-| `parsePrimary(url)` | primary.xml.gz 파싱 |
+| `parseRepomd()` | repomd.xml 파싱 |
+| `parsePrimary(location)` | primary.xml.gz 파싱 |
 | `searchPackages(query)` | 패키지 검색 |
 | `getPackageVersions(name)` | 버전 목록 조회 |
 
@@ -464,10 +475,10 @@ const downloadResult = await downloader.download({
 
 | 타입 | 설명 |
 |------|------|
-| `RepoMd` | 저장소 메타데이터 |
-| `RepoMdData` | 저장소 데이터 정보 |
-| `PrimaryPackage` | primary.xml 패키지 정보 |
-| `RpmEntry` | RPM 의존성 엔트리 |
+| `RepomdInfo` | revision과 primary/filelists/other 위치 |
+| `RepomdDataInfo` | location, checksum, timestamp 등 |
+| `OSPackageInfo` | primary.xml에서 파싱한 패키지 정보 |
+| `PackageDependency` | 정규화한 RPM 의존성 엔트리 |
 
 ---
 
@@ -483,10 +494,9 @@ const downloadResult = await downloader.download({
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `searchPackages` | query: string | Promise<OSPackageInfo[]> | APT 저장소에서 패키지 검색 |
-| `getVersions` | packageName: string | Promise<string[]> | 패키지 버전 목록 조회 |
-| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
-| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | DEB 패키지 다운로드 |
+| `constructor` | options: BaseDownloaderOptions | 인스턴스 | 배포판·저장소·출력 경로 설정 |
+| `downloadPackages` | packages: OSPackageInfo[] | Promise<DownloadPackagesResult> | 다중 다운로드 (상속) |
+| `downloadPackage` | pkg: OSPackageInfo | Promise<OSPackageDownloadResult> | DEB 단일 다운로드 (상속) |
 
 ### 메타데이터 파서 (AptMetadataParser)
 
@@ -496,8 +506,8 @@ const downloadResult = await downloader.download({
 | `parsePackages()` | Packages.gz 파싱 |
 | `searchPackages(query)` | 패키지 검색 |
 | `getPackageVersions(name)` | 버전 목록 조회 |
-| `parseDebControlFields(content)` | Debian Control 형식 파싱 |
-| `parseDebDepends(depends)` | Depends 필드 파싱 |
+| `parseDebControlFields(content)` (private) | Debian Control 형식 파싱 |
+| `parseDebDepends(depends)` (private) | Depends 필드 파싱 |
 
 ### 지원 배포판
 
@@ -510,11 +520,16 @@ const downloadResult = await downloader.download({
 ### 사용 예시
 
 ```typescript
-import { getAptDownloader } from './core/downloaders/apt';
+import { AptDependencyResolver } from './core/resolver/apt-resolver';
+import { getDistributionById } from './core/downloaders/os-shared/repositories';
 
-const downloader = getAptDownloader();
-const results = await downloader.searchPackages('nginx');
-const versions = await downloader.getVersions('nginx');
+const distribution = getDistributionById('ubuntu-22.04')!;
+const resolver = new AptDependencyResolver({
+  distribution, architecture: 'amd64', repositories: distribution.defaultRepos,
+  includeOptional: false, includeRecommends: false,
+});
+const results = await resolver.searchPackages('nginx', 'exact');
+const versions = results[0]?.versions ?? [];
 ```
 
 ---
@@ -531,10 +546,9 @@ const versions = await downloader.getVersions('nginx');
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `searchPackages` | query: string | Promise<OSPackageInfo[]> | APK 저장소에서 패키지 검색 |
-| `getVersions` | packageName: string | Promise<string[]> | 패키지 버전 목록 조회 |
-| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
-| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | APK 패키지 다운로드 |
+| `constructor` | options: BaseDownloaderOptions | 인스턴스 | 배포판·저장소·출력 경로 설정 |
+| `downloadPackages` | packages: OSPackageInfo[] | Promise<DownloadPackagesResult> | 다중 다운로드 (상속) |
+| `downloadPackage` | pkg: OSPackageInfo | Promise<OSPackageDownloadResult> | APK 단일 다운로드 (상속) |
 
 ### 메타데이터 파서 (ApkMetadataParser)
 
@@ -543,8 +557,8 @@ const versions = await downloader.getVersions('nginx');
 | `parseIndex()` | APKINDEX.tar.gz 파싱 |
 | `searchPackages(query)` | 패키지 검색 |
 | `getPackageVersions(name)` | 버전 목록 조회 |
-| `parseApkEntry(entry)` | APK 엔트리 파싱 |
-| `parseApkDepends(depends)` | 의존성 필드 파싱 |
+| `parseApkEntry(entry)` (private) | APK 엔트리 파싱 |
+| `parseApkDepends(depends)` (private) | 의존성 필드 파싱 |
 
 ### APKINDEX 필드
 
@@ -564,16 +578,22 @@ const versions = await downloader.getVersions('nginx');
 - Alpine Linux 3.18
 - Alpine Linux 3.19
 - Alpine Linux 3.20
-- Alpine Linux 3.21
+
+동적 배포판 조회는 추가 버전을 보여줄 수 있지만 실제 저장소 프리셋은 별도입니다. `getAptDownloader()`/`getApkDownloader()`를 처음 호출할 때는 `BaseDownloaderOptions`가 필요합니다.
 
 ### 사용 예시
 
 ```typescript
-import { getApkDownloader } from './core/downloaders/apk';
+import { ApkDependencyResolver } from './core/resolver/apk-resolver';
+import { getDistributionById } from './core/downloaders/os-shared/repositories';
 
-const downloader = getApkDownloader();
-const results = await downloader.searchPackages('nginx');
-const versions = await downloader.getVersions('nginx');
+const distribution = getDistributionById('alpine-3.20')!;
+const resolver = new ApkDependencyResolver({
+  distribution, architecture: 'x86_64', repositories: distribution.defaultRepos,
+  includeOptional: false, includeRecommends: false,
+});
+const results = await resolver.searchPackages('nginx', 'exact');
+const versions = results[0]?.versions ?? [];
 ```
 
 ---
@@ -590,37 +610,29 @@ const versions = await downloader.getVersions('nginx');
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `searchPackages` | query: string | Promise<PackageInfo[]> | npm Registry에서 패키지 검색 |
+| `searchPackages` | query: string, size?: number | Promise<PackageInfo[]> | npm Registry에서 패키지 검색 |
 | `getVersions` | packageName: string | Promise<string[]> | 패키지 버전 목록 조회 |
-| `getPackageMetadata` | name: string, version?: string | Promise<PackageMetadata> | 패키지 메타데이터 조회 |
-| `downloadPackage` | name: string, version: string, destDir: string | Promise<DownloadResult> | tarball 다운로드 |
-| `downloadTarball` | url: string, destDir: string, filename: string | Promise<string> | tarball 직접 다운로드 |
+| `getPackageMetadata` | name: string, version: string | Promise<PackageInfo> | 패키지 메타데이터 조회 |
+| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | tarball 다운로드 |
+| `downloadTarball` | tarballUrl, destPath, integrity?, onProgress? | Promise<string> | tarball 직접 다운로드 |
 | `getDistTags` | packageName: string | Promise<Record<string, string>> | dist-tags 조회 (latest 등) |
 | `getPackageVersion` | name: string, version: string | Promise<NpmPackageVersion \| null> | 특정 버전 정보 조회 |
 | `verifyIntegrity` | filePath: string, integrity: string | Promise<boolean> | SRI 무결성 검증 |
 | `verifyShasum` | filePath: string, shasum: string | Promise<boolean> | SHA1 체크섬 검증 |
 | `clearCache` | - | void | packument 캐시 초기화 |
 
-### 내부 메서드
+### 내부 모듈과 속성
 
-| 메서드 | 설명 |
-|--------|------|
-| `fetchPackument` | registry에서 전체 패키지 메타데이터(packument) 조회 |
-| `resolveVersion` | 버전 범위를 실제 버전으로 해결 |
-| `satisfies` | semver 범위 매칭 (^, ~, >=, <, = 등) |
-| `satisfiesCaret` | ^ 범위 매칭 |
-| `satisfiesTilde` | ~ 범위 매칭 |
-| `compareVersions` | semver 버전 비교 |
-
-### 속성
+버전 선택은 `src/core/shared/npm-version-resolver.ts`의 `NpmVersionResolver`에 위임합니다. packument는 `npm-cache.ts`가 보관하며 downloader 자체의 `packumentCache`나 `satisfiesCaret`/`satisfiesTilde` 메서드는 없습니다.
 
 | 속성 | 타입 | 설명 |
 |------|------|------|
-| `type` | PackageType | 'npm' |
-| `registryUrl` | string | npm Registry URL (기본: https://registry.npmjs.org) |
-| `searchUrl` | string | npm 검색 API URL |
-| `packumentCache` | Map<string, NpmPackument> | packument 캐시 |
+| `type` | 'npm' | 패키지 타입 |
+| `searchUrl` | string | 검색 API URL (생성자에서 설정 가능) |
 | `client` | AxiosInstance | HTTP 클라이언트 |
+| `versionResolver` | NpmVersionResolver | registry URL, packument 조회, 버전 해석 |
+
+`new NpmDownloader(registryUrl?, searchUrl?)`로 저장소/검색 URL을 설정할 수 있습니다. `searchPackages(query, size = 20)`은 기본 20개를 요청합니다.
 
 ### 버전 범위 지원
 
@@ -649,14 +661,13 @@ const results = await downloader.searchPackages('express');
 // 버전 목록 조회
 const versions = await downloader.getVersions('lodash');
 
-// 패키지 다운로드
-const result = await downloader.downloadPackage('lodash', '4.17.21', '/tmp/downloads');
+// 패키지 다운로드: 반환값은 경로 문자열
+const info = await downloader.getPackageMetadata('lodash', '4.17.21');
+const filePath = await downloader.downloadPackage(info, '/tmp/downloads');
+console.log(filePath); // '/tmp/downloads/lodash-4.17.21.tgz'
 
-console.log(result.filePath);  // '/tmp/downloads/lodash-4.17.21.tgz'
-console.log(result.integrity); // 'sha512-...'
-
-// 무결성 검증
-const valid = await downloader.verifyIntegrity(result.filePath, result.integrity);
+const integrity = info.metadata?.checksum?.sha512;
+if (integrity) await downloader.verifyIntegrity(filePath, integrity);
 ```
 
 ### 특징
@@ -681,13 +692,15 @@ const valid = await downloader.verifyIntegrity(result.filePath, result.integrity
 |--------|----------|--------|------|
 | `searchPackages` | query: string, registry?: string | Promise<PackageInfo[]> | 레지스트리에서 이미지 검색 |
 | `getVersions` | imageName: string, registry?: string | Promise<string[]> | 이미지 태그 목록 조회 |
-| `getPackageMetadata` | name: string, tag?: string | Promise<PackageMetadata> | 이미지 메타데이터 조회 |
+| `getPackageMetadata` | name: string, version: string | Promise<PackageInfo> | 현재 Docker Hub 경로의 메타데이터 조회 |
 | `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | 이미지 다운로드 (레지스트리 자동 추출) |
 | `downloadImage` | name, tag, arch, destDir, onProgress?, registry? | Promise<string> | 이미지 다운로드 (tar 파일 생성) |
 
-### 내부 메서드
+### 내부 협력 모듈의 함수
 
-| 메서드 | 설명 |
+이 함수들은 `DockerDownloader`의 직접 메서드가 아니라 `docker-utils.ts`, `DockerAuthClient`, `DockerCatalogCache`에 있습니다.
+
+| 함수/메서드 | 설명 |
 |--------|------|
 | `extractRegistry` | 전체 이미지명에서 레지스트리와 이미지 이름 분리 |
 | `parseImageName` | 레지스트리 제외 후 namespace/repo 분리 |
@@ -705,6 +718,8 @@ const valid = await downloader.verifyIntegrity(result.filePath, result.integrity
 | `ecr` | Amazon ECR Public | public.ecr.aws |
 | `quay.io` | Red Hat Quay.io | quay.io |
 | `custom` | 사용자 정의 레지스트리 | 사용자 입력 |
+
+공개 pull용 토큰/익명 접근을 구현하며 사용자 자격 증명 기반 private registry 인증은 없습니다. `getPackageMetadata()`는 Docker Hub에 고정되어 있으므로 추가 레지스트리의 메타데이터 조회까지 동일하게 지원한다고 가정하면 안 됩니다. 멀티 아키텍처 매니페스트 선택은 Linux 이미지를 대상으로 합니다.
 
 ### 레지스트리 타입 정의
 
@@ -749,11 +764,12 @@ const REGISTRY_CONFIGS: Record<string, RegistryConfig> = {
 
 ### 아키텍처 매핑
 ```typescript
-const ARCH_MAP: Record<string, string> = {
-  'x86_64': 'amd64',
-  'amd64': 'amd64',
-  'arm64': 'arm64',
-  'aarch64': 'arm64'
+const ARCH_MAP: Record<Architecture, DockerPlatform> = {
+  x86_64: { architecture: 'amd64' }, amd64: { architecture: 'amd64' },
+  arm64: { architecture: 'arm64' }, aarch64: { architecture: 'arm64' },
+  i386: { architecture: '386' }, i686: { architecture: '386' },
+  '386': { architecture: '386' }, 'arm/v7': { architecture: 'arm', variant: 'v7' },
+  noarch: { architecture: 'amd64' }, all: { architecture: 'amd64' },
 };
 ```
 
@@ -761,7 +777,7 @@ const ARCH_MAP: Record<string, string> = {
 
 - **토큰 캐시**: 레지스트리별 인증 토큰 캐싱 (만료 시 자동 갱신)
 - **레지스트리 설정 캐시**: 커스텀 레지스트리 설정 캐싱
-- **카탈로그 캐시**: 비 Docker Hub 레지스트리의 저장소 목록 캐싱 (기본 TTL: 1시간)
+- **카탈로그 캐시**: 커스텀 레지스트리의 저장소 목록 캐싱 (기본 TTL: 1시간)
 
 ### 검색 동작
 
@@ -788,7 +804,7 @@ ghcr.io, ECR 등 공개 검색 API가 없는 레지스트리의 경우:
 
 ```typescript
 // 검색 결과 예시
-'docker.io/library/nginx'     // Docker Hub 공식 이미지
+'docker.io/nginx'             // Hub API의 repo_name에 registry를 붙임; namespace 생략 가능
 'docker.io/bitnami/redis'     // Docker Hub 사용자 이미지
 'quay.io/coreos/etcd'         // Quay.io 이미지
 'ghcr.io/owner/image'         // GitHub Container Registry
@@ -802,7 +818,7 @@ ghcr.io, ECR 등 공개 검색 API가 없는 레지스트리의 경우:
 
 ```typescript
 // 내부 extractRegistry 로직
-private extractRegistry(fullName: string): { registry: string | null; imageName: string } {
+function extractRegistry(fullName: string): { registry: string | null; imageName: string } {
   const knownRegistries = ['docker.io', 'quay.io', 'ghcr.io', 'gcr.io', 'public.ecr.aws'];
   const parts = fullName.split('/');
 
@@ -840,7 +856,7 @@ await downloader.downloadPackage({
 |------|------|
 | `RegistryType` | 레지스트리 타입 열거 |
 | `RegistryConfig` | 레지스트리 설정 인터페이스 |
-| `CatalogCache` | 카탈로그 캐시 인터페이스 |
+| `CatalogCacheStatus` | 레지스트리별 카탈로그 상태 (docker-catalog-cache.ts) |
 | `TokenResponse` | Docker Registry 인증 토큰 |
 | `DockerManifest` | 이미지 매니페스트 |
 | `DockerSearchResult` | 검색 결과 항목 |
@@ -858,8 +874,8 @@ const downloader = getDockerDownloader();
 // Docker Hub 검색 (기본)
 const hubResults = await downloader.searchPackages('nginx');
 
-// GitHub Container Registry 검색
-const ghcrResults = await downloader.searchPackages('hello-world', 'ghcr.io');
+// GitHub Container Registry는 정확한 이름 후보만 제안한다.
+const ghcrResults = await downloader.searchPackages('owner/image', 'ghcr.io');
 
 // Quay.io에서 태그 조회
 const quayTags = await downloader.getVersions('prometheus/prometheus', 'quay.io');
@@ -874,6 +890,8 @@ const tarPath = await downloader.downloadImage(
   'docker.io'
 );
 ```
+
+직접 `downloadImage()`를 호출할 때는 registry 인수를 전달해야 하며, 이름의 레지스트리를 자동 선택하는 것은 `downloadPackage()` 경로입니다. tar 출력 파일명은 `<repo>-<tag>.tar`이고 내부 `manifest.json`에는 원래 registry/namespace 태그를 기록합니다.
 
 ### 기술적 주의사항
 
@@ -899,7 +917,9 @@ fs.ensureDir(dir);  // ✅ fs-extra 메서드는 그대로 사용
 Error 객체는 JSON 직렬화 시 빈 객체(`{}`)로 변환되므로, 명시적으로 메시지와 스택을 추출:
 
 ```typescript
-catch (error) {
+try {
+  // 이미지 다운로드 실행
+} catch (error) {
   const errorMessage = error instanceof Error ? error.message : String(error);
   const errorStack = error instanceof Error ? error.stack : undefined;
   logger.error('Docker 이미지 다운로드 실패', {
@@ -914,16 +934,20 @@ catch (error) {
 
 ## 공통 인터페이스
 
-모든 Downloader는 `IDownloader` 인터페이스를 구현:
+pip·Conda·Maven·npm·Docker는 다음 `IDownloader`를 구현합니다 (`src/types/interfaces.ts`). OS 다운로더는 별도의 `BaseOSDownloader` 계약을 사용합니다.
 
 ```typescript
 interface IDownloader {
-  type: PackageType;
+  readonly type: PackageType;
   searchPackages(query: string): Promise<PackageInfo[]>;
   getVersions(packageName: string): Promise<string[]>;
-  getPackageMetadata(name: string, version?: string): Promise<PackageMetadata>;
-  downloadPackage(name: string, version: string, destDir: string, options?: any): Promise<DownloadResult>;
-  verifyChecksum?(filePath: string, expectedHash: string): Promise<boolean>;
+  getPackageMetadata(name: string, version: string): Promise<PackageInfo>;
+  downloadPackage(
+    info: PackageInfo,
+    destPath: string,
+    onProgress?: (progress: DownloadProgressEvent) => void
+  ): Promise<string>;
+  verifyChecksum?(filePath: string, expected: string): Promise<boolean>;
 }
 ```
 

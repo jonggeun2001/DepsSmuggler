@@ -58,14 +58,15 @@
 | `getDownloader(type)` | 동기적으로 다운로더 가져오기 |
 | `getDownloaderAsync(type)` | 비동기적으로 다운로더 가져오기 (초기화 보장) |
 | `registerDownloader(type, creator)` | 다운로더 생성자 등록 |
-| `initializeDownloaders()` | 모든 기본 다운로더 등록 |
-| `resetDownloaderRegistry()` | 레지스트리 초기화 |
+| `initializeDownloaders()` | `Promise<void>`를 반환하며, 아직 등록하지 않은 기본 creator만 등록 |
+| `resetDownloaderRegistry()` | creator·인스턴스·오버라이드와 초기화 플래그를 모두 초기화 |
 
 ### 기본 downloader registry
 
 `src/core/downloaders/registry.ts`는 기본 downloader 타입과 creator를 한 곳에서 정의합니다.
 
 - `getRegisteredDownloaderTypes()`는 등록 대상 타입 목록을 반환합니다.
+- `isRegisteredDownloaderType(type)`은 기본 등록 대상인지 판별하고, `getRegisteredDownloaderCreator(type)`은 생성 함수를 반환합니다.
 - `createRegisteredDownloader(type)`는 registry에 정의된 creator로 downloader를 생성합니다.
 - `registerDefaultDownloaderCreators(register)`는 factory가 기본 creator를 내부 레지스트리에 복사할 때 사용합니다.
 
@@ -87,7 +88,7 @@
 import { getDownloader, initializeDownloaders } from './downloaders/factory';
 
 // 초기화 (앱 시작 시 1회)
-initializeDownloaders();
+await initializeDownloaders();
 
 // 다운로더 사용
 const pipDownloader = getDownloader('pip');
@@ -107,7 +108,7 @@ describe('DownloadManager', () => {
     // 모킹된 다운로더 설정
     const mockPipDownloader = {
       searchPackages: vi.fn().mockResolvedValue([]),
-      downloadPackage: vi.fn().mockResolvedValue({ success: true }),
+      downloadPackage: vi.fn().mockResolvedValue('/tmp/requests.whl'),
       // ...
     };
     setTestDownloader('pip', mockPipDownloader as unknown as IDownloader);
@@ -121,7 +122,10 @@ describe('DownloadManager', () => {
   it('should download packages', async () => {
     const downloader = getDownloader('pip');
     // downloader는 mockPipDownloader를 반환함
-    await downloader.downloadPackage(...);
+    await downloader.downloadPackage(
+      { type: 'pip', name: 'requests', version: '2.31.0' },
+      '/tmp/packages'
+    );
     expect(downloader.downloadPackage).toHaveBeenCalled();
   });
 });
@@ -151,6 +155,10 @@ const downloader = await getDownloaderAsync('npm');
 | `docker` | DockerDownloader | Docker 이미지 |
 
 `yum`, `apt`, `apk`는 별도의 OS 패키지 downloader 경로에서 옵션과 함께 생성되므로 이 기본 registry에는 포함되지 않습니다.
+
+기본 creator는 각 모듈의 `getPipDownloader()` 같은 기존 싱글톤 getter를 사용합니다. 따라서 factory의 인스턴스 캐시를 지워도 각 모듈의 싱글톤까지 새로 생성되는 것은 아닙니다. 격리된 테스트 인스턴스가 필요하면 `setTestDownloader()` 또는 직접 생성한 인스턴스를 반환하는 creator를 사용합니다. `registerCreator()`는 기존 인스턴스 캐시를 지우지 않으므로 이미 조회한 타입의 creator를 바꿀 때는 `clearInstance(type)`도 필요합니다.
+
+`getDownloader()`는 자동 초기화하지 않습니다. `getDownloaderAsync()`는 초기화 전이고 기본 등록 대상이며 creator가 없을 때만 초기화를 수행합니다. 등록되지 않은 OS 타입 등을 조회하면 `다운로더가 등록되지 않았습니다` 오류가 발생합니다.
 
 ---
 

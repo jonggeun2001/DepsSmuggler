@@ -1,5 +1,18 @@
 # UI 테스트 후속 수정 프롬프트 (2026-04-14)
 
+> 보존된 과거 실행 프롬프트입니다. F-01~F-04가 미해결이던 시점의 요구사항과 병렬 작업 분해를 유지하며, 아래 명령은 지금 수행해야 할 미완료 작업 목록이 아닙니다. 2026-09-08에 기준 소스 `cbeaf65`와 대조했습니다.
+
+## 현재 처리 상태
+
+| 작업 단위 | 현재 소스의 반영 상태 | 확인 위치 |
+| --- | --- | --- |
+| A. Download preflight UI | 출력 형식·수신자·분할 여부·크기 기준 표시 구현 | `src/renderer/pages/download-page/components/DownloadStandardView.tsx` |
+| B. Cache 상세 통계 | PIP/NPM/Maven/Conda 상세와 삭제 후 갱신 구현 | `src/renderer/pages/settings/CacheSettingsSection.tsx`, `cache-stats-utils.ts`, `tests/e2e/settings-cache-breakdown.spec.ts` |
+| C. Cancel / Retry | 결정적 fixture와 취소·재시도·늦은 완료 세션 회귀 구현 | `tests/e2e/fixtures/mock-electron-app.ts`, `tests/e2e/download-cancel-retry.spec.ts` |
+| D. 문서/검증 | 당시 검증 결과는 결과 문서에 보존, 현재 실행 범위는 테스트 가이드에서 관리 | [당시 결과](./ui-testing-findings-2026-04-14.md), [테스트](./testing.md) |
+
+이 표는 소스와 테스트 자산의 존재·연결을 확인한 기록이며, 이번 문서 대조의 UI 실행 결과를 나타내지 않습니다.
+
 ## 목적
 
 `docs/ui-testing-findings-2026-04-14.md`에서 확인된 수정 필요 사항을 다음 구현 세션에서 바로 사용할 수 있도록 실행 프롬프트와 병렬 작업 분해 형태로 정리합니다.

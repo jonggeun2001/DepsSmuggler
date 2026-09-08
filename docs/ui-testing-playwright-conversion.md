@@ -9,6 +9,7 @@
 | 수동 케이스                             | 현재 Playwright 파일                         | 검증 포인트                                                                                                                                                                                                               |
 | --------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `UI-DL-001`                             | `tests/e2e/download-smoke.spec.ts`           | 장바구니에서 일반 다운로드 완료 화면까지, preflight 출력 형식 표시, 로컬 저장 옵션 전달                                                                                                                                   |
+| `UI-DL-003`                             | `tests/e2e/cart-input-regression.spec.ts`   | 빈 장바구니와 직접 진입한 다운로드 화면의 안내·검색 복귀 액션 |
 | `UI-DL-004`                             | `tests/e2e/download-cancel-retry.spec.ts`    | 느린 다운로드 취소 유지, overwrite 대기 중 늦은 취소 completion 보존, delayed start failure 후 이전 outcome 복구, 실패 후 개별 재시도, 전달 실패가 남은 취소 화면에서의 새 세션 재시도, runtime download/cancel 시도 횟수 |
 | `UI-SET-001`, `UI-SET-002(성공 경로만)` | `tests/e2e/settings-regression.spec.ts`      | SMTP 값 입력, 연결 테스트 성공 경로, 저장 후 새로고침 복원                                                                                                                                                                |
 | `UI-CFG-001`                            | `tests/e2e/settings-cache-breakdown.spec.ts` | 캐시 총합, 타입별 breakdown, 캐시 비우기 후 0 값 갱신                                                                                                                                                                     |
@@ -17,6 +18,8 @@
 | 장바구니 텍스트·파일 입력 및 빈 상태    | `tests/e2e/cart-input-regression.spec.ts`    | 빈 입력 거부, requirements 중복·주석 제외와 저장 복원, 최신 버전 조회 실패, package.json 파싱 오류·scoped/dev 의존성, 파일 업로드, Maven JAR/POM 구분                                                                     |
 
 현재 회귀 세트는 `tests/e2e/fixtures/mock-electron-app.ts`와 `window.electronAPI` stub을 이용해 preload/IPC를 브라우저 쪽에서 모킹합니다.
+
+OS 전용 spec은 공통 fixture 대신 `page.addInitScript`의 inline stub을 사용합니다. 이 회귀 세트는 Vite 렌더러 UI를 검증하며 실제 Electron main, SMTP 서버, 생성한 압축 파일/저장소의 설치 가능성을 검증하는 테스트는 아닙니다. 실제 실행 설정과 CI 연결은 [테스트](./testing.md)를 참고합니다.
 
 설정의 필수 입력 검증·SMTP 실패/재시도·캐시 권한 오류·미저장 이동 방지와 OS 다운로드의 입력·취소·히스토리·구독 정리는 Vitest의 `use-settings-form-actions.test.ts`, `use-os-download-flow.test.ts`에서도 검증합니다. 훅 단위 검증과 아래 DOM/버튼 상태 E2E 후보는 별도 범위입니다.
 
@@ -120,4 +123,4 @@ test('시나리오 이름', async ({ page }) => {
 1. `UI-WIZ-001`을 자동화해 홈 진입과 위저드 초기화 회귀를 먼저 고정합니다.
 2. `UI-WIZ-002`로 검색과 장바구니 연결을 커버합니다.
 3. `UI-DL-002`로 전달 옵션 분기를 보강합니다.
-4. 이후 필요 시 `UI-DL-003`과 `UI-SET-002`의 방어 분기처럼 아직 수동 확인 비중이 남은 항목을 우선 자동화합니다.
+4. 이후 `UI-SET-002`의 DOM 방어 분기를 보강합니다. `UI-DL-003`의 기본 빈 상태/복귀는 이미 자동화되어 있으므로 새 진입 조건이 생기면 기존 `cart-input-regression.spec.ts`를 확장합니다.

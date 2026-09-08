@@ -3,7 +3,7 @@
 ## 개요
 
 - **목적**: Linux OS 패키지(rpm, deb, apk) 검색, 의존성 해결, 다운로드 및 패키징
-- **위치**: `src/core/downloaders/os/`
+- **위치**: `src/core/downloaders/{yum,apt,apk}.ts`, `src/core/downloaders/os-shared/`
 - **지원 패키지 관리자**: YUM/RPM, APT/DEB, APK
 
 ---
@@ -22,10 +22,12 @@ src/core/downloaders/
     ├── types.ts             # 공통 타입 정의
     ├── base-downloader.ts   # BaseOSDownloader 추상 클래스
     ├── base-resolver.ts     # BaseOSDependencyResolver 추상 클래스
+    ├── cli-backend.ts       # CLI 검색·다운로드·캐시 조합
+    ├── package-file-utils.ts # 파일명 및 다운로드 파일 키
     ├── dependency-tree.ts   # OSDependencyTree 의존성 트리
     ├── repositories.ts      # OS 배포판 및 저장소 프리셋
     ├── distribution-fetcher.ts  # 동적 배포판 버전 정보 조회
-    ├── cache-manager.ts     # OSCacheManager (LRU + TTL)
+    ├── cache-manager.ts     # OsPackageCache (LRU + TTL)
     ├── gpg-verifier.ts      # GPGVerifier
     ├── script-generator.ts  # OSScriptGenerator
     ├── archive-packager.ts  # OSArchivePackager (zip/tar.gz)
@@ -39,8 +41,8 @@ src/core/downloaders/
 
 src/core/resolver/
 ├── yum-resolver.ts          # YumDependencyResolver
-├── apt-resolver.ts          # AptDependencyResolver (NEW)
-└── apk-resolver.ts          # ApkDependencyResolver (NEW)
+├── apt-resolver.ts          # AptDependencyResolver
+└── apk-resolver.ts          # ApkDependencyResolver
 ```
 
 ### 클래스 다이어그램
@@ -86,7 +88,7 @@ type OSArchitecture =
   | 'x86_64' | 'amd64'      // 64비트 x86
   | 'aarch64' | 'arm64'     // 64비트 ARM
   | 'i686' | 'i386' | 'x86' // 32비트 x86
-  | 'armv7l' | 'armhf'      // 32비트 ARM
+  | 'armv7l' | 'armhf' | 'armv7' // 32비트 ARM
   | 'noarch' | 'all';       // 아키텍처 무관
 ```
 
@@ -102,7 +104,6 @@ interface OSDistribution {
   architectures: OSArchitecture[];
   defaultRepos: Repository[];    // 기본 저장소
   extendedRepos: Repository[];   // 확장 저장소 (EPEL, Universe 등)
-  isRecommended?: boolean;       // 추천 여부
 }
 ```
 
@@ -160,22 +161,29 @@ interface PackageDependency {
 
 ---
 
-## OSPackageDownloader (통합 클래스)
+## OS 패키지 작업 조합과 공통 다운로더
 
 ### 위치
-`src/core/downloaders/os/downloader.ts`
+
+실행 클래스는 `BaseOSDownloader`를 상속한 `YumDownloader`, `AptDownloader`, `ApkDownloader`입니다. 검색과 의존성 해결은 별도의 `*DependencyResolver`가 담당합니다. CLI는 `os-shared/cli-backend.ts`, Electron은 `electron/services/os-download-orchestrator.ts`에서 이를 조합합니다.
+
+`os-shared/types.ts`에는 `OSPackageDownloader`, `OSPackageSearchOptions`, `OSPackageDownloadOptions` 같은 계약 타입이 남아 있습니다. `OSPackageDownloader`라는 통합 실행 클래스나 `os/downloader.ts` 파일은 없습니다. 해당 인터페이스를 `new OSPackageDownloader()`로 생성하지 않습니다.
 
 ### 메서드
 
-| 메서드 | 파라미터 | 반환값 | 설명 |
-|--------|----------|--------|------|
-| `search` | options: OSPackageSearchOptions | Promise<OSPackageSearchResponse> | 패키지 검색 |
-| `resolveDependencies` | packages, distribution, architecture, options? | Promise<DependencyResolutionResult> | 의존성 해결 |
-| `download` | options: OSPackageDownloadOptions | Promise<OSPackageDownloadResult> | 패키지 다운로드 |
-| `getCacheStats` | - | CacheStats | 캐시 통계 조회 |
-| `clearCache` | - | Promise<void> | 캐시 초기화 |
+| 소유 모듈 | 메서드 | 반환값 | 설명 |
+|-----------|--------|--------|------|
+| `*DependencyResolver` | `searchPackages(query, matchType?)` | `Promise<OSPackageSearchResult[]>` | 이름별 검색 결과 |
+| `BaseOSDependencyResolver` | `resolveDependencies(packages)` | `Promise<DependencyResolutionResult>` | 의존성 해결 |
+| `BaseOSDownloader` | `downloadPackage(pkg)` | `Promise<OSPackageDownloadResult>` | 단일 파일 다운로드 |
+| `BaseOSDownloader` | `downloadPackages(packages)` | `Promise<DownloadPackagesResult>` | 동시 다운로드 |
+| `cli-backend.ts` | `searchOSPackages(options)` | `Promise<OSPackageSearchResult[]>` | 캐시와 resolver를 조합한 검색 |
+| `cli-backend.ts` | `downloadOSPackages(options)` | `Promise<DownloadOSPackagesResult>` | 검색·해결·다운로드·패키징 |
+| `cli-backend.ts` | `getOSPackageCacheStats(directory)` / `clearOSPackageCache(directory)` | Promise | 디스크 메타데이터 캐시 관리 |
 
 ### 검색 옵션
+
+공통 계약 타입의 검색 조건은 다음과 같습니다. 실제 resolver에는 distribution/architecture/repositories를 생성자 옵션으로 전달하고, `searchPackages()`에는 query와 matchType만 전달합니다.
 
 ```typescript
 interface OSPackageSearchOptions {
@@ -183,7 +191,7 @@ interface OSPackageSearchOptions {
   distribution: OSDistribution;
   architecture: OSArchitecture;
   repositories?: Repository[];
-  matchType?: MatchType;         // 'exact' | 'contains' | 'startsWith' | 'wildcard'
+  matchType?: 'exact' | 'partial' | 'wildcard';
   includeVersions?: boolean;
   limit?: number;
 }
@@ -192,88 +200,91 @@ interface OSPackageSearchOptions {
 ### 검색 결과 타입
 
 ```typescript
-/**
- * 패키지 검색 결과 (이름별 그룹화)
- */
 interface OSPackageSearchResult {
-  name: string;                  // 패키지 이름
-  versions: OSPackageInfo[];     // 해당 이름의 모든 버전 (최신순 정렬)
-  latest: OSPackageInfo;         // 최신 버전 패키지 정보
-}
-
-/**
- * 검색 API 응답
- */
-interface OSPackageSearchResponse {
-  packages: OSPackageSearchResult[];  // 이름별 그룹화된 검색 결과
-  totalCount: number;                  // 전체 고유 패키지 이름 수
-  hasMore: boolean;                    // 추가 결과 존재 여부
+  name: string;
+  versions: OSPackageInfo[]; // 이름별 버전 목록
+  latest: OSPackageInfo;
 }
 ```
+
+resolver와 CLI backend는 이 객체의 배열을 반환합니다. Electron `os:search`는 최신 버전만 추려 `{ packages: OSPackageInfo[], totalCount: number }`로 변환합니다. `hasMore` 필드는 반환하지 않습니다.
 
 ### 다운로드 옵션
 
+실행 다운로더의 생성자 옵션과 반환값은 다음과 같습니다.
+
 ```typescript
-interface OSPackageDownloadOptions {
-  packages: OSPackageInfo[];
+interface BaseDownloaderOptions {
   outputDir: string;
-  resolveDependencies?: boolean;
-  includeOptionalDeps?: boolean;
-  verifyGPG?: boolean;
-  concurrency?: number;
-  cacheMode: CacheMode;          // 'session' | 'persistent' | 'disabled'
+  distribution: OSDistribution;
+  architecture: OSArchitecture;
+  repositories: Repository[];
+  concurrency: number;
+  gpgVerifier?: GPGVerifier;
+  abortSignal?: AbortSignal;
   onProgress?: (progress: OSDownloadProgress) => void;
   onError?: (error: OSDownloadError) => Promise<OSErrorAction>;
 }
+
+interface OSPackageDownloadResult {
+  success: boolean;
+  filePath?: string;
+  error?: Error;
+  skipped?: boolean;
+  cancelled?: boolean;
+  verification?: VerificationResult;
+}
+
+interface DownloadPackagesResult {
+  success: OSPackageInfo[];
+  failed: Array<{ package: OSPackageInfo; error: Error }>;
+  downloadedFiles: Map<string, string>;
+}
 ```
+
+`downloadedFiles`의 키는 `getDownloadedFileKey(pkg)`로 생성하며 이름·버전·RPM release·아키텍처를 구분합니다. 패키저에도 반환된 Map을 그대로 전달합니다.
+
+계약 타입 `OSPackageDownloadOptions`는 `packages`, `outputDir`, `resolveDependencies`, `includeOptionalDeps`, `concurrency`, `verifyGPG`, `cacheMode`가 필수이고 `onProgress`/`onError`가 선택입니다. `cacheMode`의 값은 `session | persistent | none`입니다. 실행 클래스의 `downloadPackage()`가 이 전체 옵션 객체를 받는 것은 아닙니다.
 
 ### 사용 예시
 
 ```typescript
-import { OSPackageDownloader, getDistributionById } from './core/downloaders/os';
+import { YumDownloader } from './core/downloaders/yum';
+import { YumDependencyResolver } from './core/resolver/yum-resolver';
+import { getDistributionById } from './core/downloaders/os-shared/repositories';
+import { OsPackageCache } from './core/downloaders/os-shared/cache-manager';
 
-const downloader = new OSPackageDownloader({ concurrency: 5 });
-
-// 배포판 선택
 const distribution = getDistributionById('rocky-9')!;
-
-// 패키지 검색 (결과는 이름별로 그룹화됨)
-const searchResult = await downloader.search({
-  query: 'httpd',
+const repositories = [...distribution.defaultRepos, ...distribution.extendedRepos]
+  .filter(repo => repo.enabled);
+const resolver = new YumDependencyResolver({
   distribution,
   architecture: 'x86_64',
-  matchType: 'contains',
-  limit: 50,
+  repositories,
+  cacheManager: new OsPackageCache({ type: 'session' }),
+  includeOptional: false,
+  includeRecommends: false,
 });
 
-// searchResult.packages 구조 예시:
-// [
-//   { name: 'httpd', versions: [...], latest: {...} },
-//   { name: 'httpd-devel', versions: [...], latest: {...} },
-//   { name: 'httpd-tools', versions: [...], latest: {...} },
-// ]
+const searchResults = await resolver.searchPackages('httpd', 'exact');
+if (!searchResults.length) throw new Error('httpd 패키지를 찾지 못했습니다.');
+const depResult = await resolver.resolveDependencies([searchResults[0].latest]);
 
-// 최신 버전 패키지만 선택
-const packagesToDownload = searchResult.packages.map(p => p.latest);
-
-// 의존성 해결
-const depResult = await downloader.resolveDependencies(
-  packagesToDownload.slice(0, 1),
+const downloader = new YumDownloader({
   distribution,
-  'x86_64',
-  { includeOptional: false }
-);
-
-// 다운로드
-const downloadResult = await downloader.download({
-  packages: depResult.packages,
+  architecture: 'x86_64',
+  repositories,
   outputDir: '/tmp/packages',
-  resolveDependencies: true,
   concurrency: 3,
-  cacheMode: 'session',
-  onProgress: (progress) => console.log(`${progress.currentPackage}: ${progress.percent}%`),
+  onProgress: progress => console.log(
+    `${progress.currentPackage}: ${progress.bytesDownloaded}/${progress.totalBytes}`
+  ),
 });
+const downloadResult = await downloader.downloadPackages(depResult.packages);
+console.log(downloadResult.downloadedFiles);
 ```
+
+이 저수준 예제에서는 패키지 파일만 저장합니다. CLI backend는 여기에 충돌 후보 병합, 아카이브/저장소 생성, staging 정리를 추가합니다. 충돌 후보를 모두 함께 내려받더라도 동시에 설치할 수 있다는 의미는 아니며, CLI는 충돌이 있으면 자동 설치 스크립트를 생략하고 경고를 반환합니다.
 
 ---
 
@@ -283,7 +294,7 @@ const downloadResult = await downloader.download({
 
 - **위치**: `src/core/downloaders/yum.ts`
 - **Resolver 위치**: `src/core/resolver/yum-resolver.ts`
-- **지원 배포판**: CentOS 7, Rocky Linux 8/9, AlmaLinux 8/9, Fedora
+- **지원 배포판**: CentOS 7, Rocky Linux 8/9, AlmaLinux 8/9 (정적 프리셋)
 - **파일 형식**: `.rpm`
 - **메타데이터**: `repodata/repomd.xml`, `primary.xml.gz`
 
@@ -302,8 +313,8 @@ interface RepomdInfo {
 
 ```
 ${baseUrl}/repodata/repomd.xml
-${baseUrl}/repodata/primary.xml.gz
-${baseUrl}/Packages/${filename}.rpm
+${baseUrl}/${repomd.primary.location}  # 실제 파일명은 repomd.xml에서 읽음
+${baseUrl}/${pkg.location}            # 저장소 메타데이터의 location 사용
 ```
 
 ---
@@ -314,7 +325,7 @@ ${baseUrl}/Packages/${filename}.rpm
 - **Resolver 위치**: `src/core/resolver/apt-resolver.ts`
 - **지원 배포판**: Ubuntu 20.04/22.04/24.04, Debian 11/12
 - **파일 형식**: `.deb`
-- **메타데이터**: `Packages.gz`, `Release`, `InRelease`
+- **메타데이터**: `Packages.gz` 등 패키지 인덱스와 `Release` 파서 (InRelease 서명 검증은 구현되지 않음)
 
 #### 메타데이터 파싱 (AptMetadataParser)
 
@@ -374,7 +385,7 @@ D:pcre2 zlib
 ### BaseOSDependencyResolver
 
 - **위치**: `src/core/downloaders/os-shared/base-resolver.ts`
-- **방식**: 하이브리드 (API 우선 → 메타데이터 파싱 폴백)
+- **방식**: API 우선/메타데이터 폴백 확장 지점을 제공하며, 현재 YUM·APT·APK의 API 구현은 모두 null을 반환하여 메타데이터 사용
 - **알고리즘**: BFS 큐 기반
 
 #### 알고리즘
@@ -386,7 +397,7 @@ D:pcre2 zlib
 3. **provides/virtual 패키지** 해결
 4. **버전 제약 조건** 확인
 5. **위상 정렬 (Topological Sort)**로 설치 순서 결정
-6. **충돌 감지** 및 모든 후보 버전 포함
+6. **충돌 감지**: 여러 호환 버전을 conflict에 기록하고 최신 후보를 그래프에 선택; CLI backend는 conflict 후보도 다운로드 목록에 병합
 7. **MAX_ITERATIONS (10000)** 제한으로 무한 루프 방지
 
 #### DependencyResolutionResult
@@ -394,9 +405,9 @@ D:pcre2 zlib
 ```typescript
 interface DependencyResolutionResult {
   packages: OSPackageInfo[];      // 해결된 패키지 목록 (설치 순서)
-  tree: OSDependencyTree;         // 의존성 트리
-  missing: MissingDependency[];   // 해결 실패 의존성
-  conflicts: VersionConflict[];   // 버전 충돌
+  unresolved: PackageDependency[]; // 해결 실패 의존성
+  conflicts: Array<{ package: string; versions: OSPackageInfo[] }>;
+  warnings: string[];
 }
 ```
 
@@ -414,7 +425,7 @@ class OSDependencyTree {
   getInstallOrder(): OSPackageInfo[];           // 위상 정렬된 설치 순서
   getAllPackages(): OSPackageInfo[];            // 모든 패키지
   getMissingDependencies(): MissingDependency[];
-  getVersionConflicts(): VersionConflict[];
+  getConflicts(): VersionConflict[];
   toVisualizationData(): VisualizationData;     // 시각화용 데이터
 }
 ```
@@ -430,10 +441,9 @@ class OSDependencyTree {
 
 ```typescript
 interface OSCacheConfig {
-  mode: CacheMode;               // 'session' | 'persistent' | 'disabled'
-  ttl: number;                   // TTL (밀리초)
-  maxSize: number;               // 최대 크기 (바이트)
-  maxItems: number;              // 최대 항목 수
+  type: CacheMode;               // 'session' | 'persistent' | 'none'
+  ttl: number;                   // TTL (초, 기본 3600)
+  maxSize: number;               // 최대 크기 (바이트, 기본 500MB)
   directory?: string;            // persistent 모드 저장 경로
 }
 
@@ -442,28 +452,34 @@ class OsPackageCache {
   set<T>(key: string, data: T): Promise<void>;
   invalidate(pattern?: string): Promise<void>;
   getStats(): CacheStats;
-  clear(): Promise<void>;
+  // 전체 삭제는 invalidate() 호출
 }
 ```
 
 ### GPGVerifier
 
 - **위치**: `src/core/downloaders/os-shared/gpg-verifier.ts`
-- **기능**: 패키지 서명 검증 (공식 저장소만)
+- **기능**: 설정에 따라 공식 저장소 패키지의 체크섬 검증; 실제 GPG 서명 검증은 미구현
 
 ```typescript
 interface VerificationResult {
   verified: boolean;
   skipped: boolean;
-  reason?: string;
+  reason?: 'non-official-repo' | 'gpg-disabled' | 'key-not-found'
+    | 'signature-invalid' | 'checksum-mismatch';
   error?: Error;
+  keyId?: string;
 }
 
 class GPGVerifier {
-  importKey(keyUrl: string): Promise<void>;
+  importKey(keyUrl: string, repositoryId: string): Promise<GPGKey | null>;
+  preloadRepositoryKeys(repos: Repository[]): Promise<void>;
+  verifyChecksum(pkg: OSPackageInfo, filePath: string): Promise<VerificationResult>;
   verifyPackage(pkg: OSPackageInfo, filePath: string): Promise<VerificationResult>;
 }
 ```
+
+기본 설정은 `enabled: true`, `officialOnly: true`, `continueOnKeyError: true`입니다. `verifyPackage()`는 저장소의 `gpgCheck`와 공식 저장소 여부를 확인한 뒤 체크섬을 검사합니다. RPM/DEB/APK 서명 검증 메서드는 현재 성공을 반환하는 확장 지점이므로 결과의 `verified`를 실제 GPG 검증 완료로 해석하지 않습니다. `BaseOSDownloader`는 verifier가 주입된 경우에만 호출하며 CLI backend는 기본적으로 이를 주입하지 않습니다.
 
 ### OSScriptGenerator
 
@@ -478,16 +494,25 @@ interface GeneratedScripts {
 
 type ScriptType = 'dependency-order' | 'local-repo';
 
+interface ScriptGeneratorOptions {
+  repoName?: string;              // 기본 'depssmuggler-local'
+  packageDir?: string;            // 기본 './packages'
+  stopOnError?: boolean;          // 기본 true
+  showProgress?: boolean;         // 기본 true
+  includeKoreanComments?: boolean; // 기본 true
+}
+
 class OSScriptGenerator {
   generateDependencyOrderScript(
     packages: OSPackageInfo[],
-    packageManager: OSPackageManager
+    packageManager: OSPackageManager,
+    options?: ScriptGeneratorOptions
   ): GeneratedScripts;
 
   generateLocalRepoScript(
     packages: OSPackageInfo[],
     packageManager: OSPackageManager,
-    repoName: string
+    options?: ScriptGeneratorOptions
   ): GeneratedScripts;
 }
 ```
@@ -507,7 +532,10 @@ interface ArchiveOptions {
   outputPath: string;
   includeScripts: boolean;
   scriptTypes: ScriptType[];
+  packageManager: OSPackageManager;
   repoName?: string;
+  includeMetadata?: boolean;    // 기본 true
+  includeReadme?: boolean;      // 기본 true
 }
 
 class OSArchivePackager {
@@ -527,10 +555,10 @@ output.zip/
 │   ├── httpd-2.4.6-97.el7.rpm
 │   ├── apr-1.4.8-7.el7.rpm
 │   └── ...
-├── scripts/                    # 설치 스크립트
-│   ├── install.sh              # 의존성 순서 설치
-│   ├── setup-repo.sh           # 로컬 저장소 설정
-│   └── install.ps1             # Windows WSL 안내
+├── install.sh                  # 의존성 순서 설치
+├── install.ps1                 # Windows에서 WSL을 통한 실행
+├── setup-repo.sh               # 로컬 저장소 설정
+├── setup-repo.ps1
 ├── metadata.json               # 패키지 메타데이터
 └── README.txt                  # 사용 안내
 ```
@@ -544,13 +572,15 @@ output.zip/
 interface RepoOptions {
   outputPath: string;
   packageManager: OSPackageManager;
-  createMetadata: boolean;       // 저장소 메타데이터 생성 여부
+  repoName: string;
+  includeSetupScript?: boolean; // 기본 true
 }
 
 interface RepoResult {
   repoPath: string;
-  metadataGenerated: boolean;
-  packages: PackageMetadata[];
+  packageCount: number;
+  totalSize: number;
+  metadataFiles: string[];
 }
 
 class OSRepoPackager {
@@ -564,11 +594,13 @@ class OSRepoPackager {
 
 #### 패키지 관리자별 메타데이터
 
-| PM | 메타데이터 파일 | 생성 도구 |
+| PM | 메타데이터 파일 | 현재 생성 방식 |
 |----|-----------------|-----------|
-| YUM | `repodata/repomd.xml`, `primary.xml.gz` | createrepo |
-| APT | `Packages.gz`, `Release` | dpkg-scanpackages |
-| APK | `APKINDEX.tar.gz` | apk index |
+| YUM | `repodata/repomd.xml`, `primary.xml.gz`, `filelists.xml.gz`, `other.xml.gz` | TypeScript XML 생성 + gzip |
+| APT | `Packages`, `Packages.gz`, `Release` | TypeScript Control 텍스트 생성 + gzip |
+| APK | `APKINDEX.tar.gz` | 인덱스 텍스트를 gzip으로 저장하는 간소화 구현 |
+
+현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. APK 출력은 파일 이름과 달리 tar 컨테이너 없이 gzip한 인덱스이므로 정식 Alpine 저장소와의 완전한 호환성을 보장하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다.
 
 ---
 
@@ -578,7 +610,7 @@ class OSRepoPackager {
 `src/core/downloaders/os-shared/distribution-fetcher.ts`
 
 ### 개요
-인터넷에서 OS 배포판의 최신 버전 정보를 동적으로 가져오는 모듈. 정적 프리셋(`repositories.ts`)과 달리 실시간 데이터를 제공합니다.
+인터넷에서 OS 배포판 버전 정보를 조회하고 24시간 캐시하는 모듈입니다. 정적 프리셋(`repositories.ts`)과 별도의 목록을 반환합니다. 이 목록에는 정적 프리셋에 없는 버전이 포함될 수 있으며, `convertToOSDistributions()`는 저장소 설정을 생성하지 않습니다. GUI 검색·다운로드는 정적 `getDistributionById()`로 다시 확인하므로 동적 목록에 보이는 모든 버전이 다운로드 가능한 것은 아닙니다.
 
 ### 주요 타입
 
@@ -622,7 +654,7 @@ interface DistributionFamily {
 | 함수 | 반환값 | 설명 |
 |------|--------|------|
 | `fetchAllDistributions()` | `Promise<DistributionFamily[]>` | 모든 배포판 정보 (병렬 조회) |
-| `convertToOSDistributions(families)` | `OSDistribution[]` | OSDistribution 형식 변환 |
+| `convertToOSDistributions(families)` | `Omit<OSDistribution, 'defaultRepos' \| 'extendedRepos'>[]` | 저장소를 제외한 배포판 정보 변환 |
 | `getSimplifiedDistributions()` | `Promise<SimplifiedDistro[]>` | 설정 페이지용 간소화 목록 |
 | `getDistributionsByPackageManager(pm)` | `Promise<DistributionFamily[]>` | 패키지 관리자별 필터 |
 | `invalidateDistributionCache()` | `void` | 캐시 무효화 |
@@ -654,12 +686,12 @@ const simplified = await getSimplifiedDistributions();
 ```
 
 ### 폴백 동작
-네트워크 오류 시 각 배포판별로 하드코딩된 최신 버전 정보를 반환합니다:
+네트워크 오류 시 각 배포판별로 소스에 하드코딩된 대체 버전 정보를 반환합니다. 다음은 코드의 fallback 목록이며 현재 배포판 지원 기간을 보장하는 표가 아닙니다:
 - Alpine: 3.21, 3.20, 3.19, 3.18
 - Ubuntu: 24.04, 22.04, 20.04 (LTS만)
 - Debian: 13, 12, 11
 - Rocky/AlmaLinux: 9, 8
-- CentOS: Stream 9
+- CentOS: Stream 9, 7 (정적 목록)
 
 ---
 
@@ -690,26 +722,30 @@ const simplified = await getSimplifiedDistributions();
 
 ```typescript
 // 배포판 조회
-getDistributionById(id: string): OSDistribution | undefined;
-getDistributionsByPackageManager(pm: OSPackageManager): OSDistribution[];
+declare function getDistributionById(id: string): OSDistribution | undefined;
+declare function getDistributionsByPackageManager(pm: OSPackageManager): OSDistribution[];
 
 // 추천 배포판
-getRecommendedDistributions(): OSDistribution[];
+declare function getRecommendedDistributions(useCase: string): OSDistribution[];
 
 // 용도별 추천
-USE_CASE_RECOMMENDATIONS: Record<string, string[]>;
-// - enterprise: ['rocky-9', 'alma-9', 'ubuntu-22.04']
+declare const USE_CASE_RECOMMENDATIONS: UseCaseRecommendation[];
+// 각 항목: id, name, description, distributions
+// - enterprise: ['rocky-9', 'almalinux-9', 'ubuntu-22.04', 'debian-12']
 // - legacy: ['centos-7', 'ubuntu-20.04', 'debian-11']
-// - container: ['alpine-3.20', 'alpine-3.19']
-// - development: ['ubuntu-24.04', 'debian-12', 'rocky-9']
+// - container: ['alpine-3.20', 'alpine-3.19', 'debian-12']
+// - development: ['ubuntu-24.04', 'debian-12', 'rocky-9', 'alpine-3.20']
 
 // 아키텍처 유틸리티
-normalizeArchitecture(arch: string): OSArchitecture;
-isArchitectureCompatible(pkg: OSArchitecture, target: OSArchitecture): boolean;
+declare function normalizeArchitecture(arch: string): OSArchitecture;
+declare function isArchitectureCompatible(pkg: OSArchitecture, target: OSArchitecture): boolean;
 
 // 저장소 URL 처리
-resolveRepoUrl(baseUrl: string, arch: OSArchitecture): string;
-createCustomRepository(options: Partial<Repository>): Repository;
+declare function resolveRepoUrl(baseUrl: string, arch: OSArchitecture, distribution: OSDistribution): string;
+declare function createCustomRepository(
+  id: string, name: string, baseUrl: string,
+  options?: Partial<Omit<Repository, 'id' | 'name' | 'baseUrl'>>
+): Repository;
 ```
 
 ---
@@ -724,14 +760,19 @@ createCustomRepository(options: Partial<Repository>): Repository;
 
 | 채널 | 파라미터 | 반환값 | 설명 |
 |------|----------|--------|------|
-| `search:os` | options | OSPackageSearchResponse | OS 패키지 검색 |
-| `download:start` | packages, options | DownloadResult | 다운로드 시작 (OS 패키지 포함) |
+| `os:search` | options | `{ packages, totalCount }` | 최신 버전의 OS 패키지 검색 |
+| `os:resolveDependencies` | options | 해결 결과 | OS 의존성 해결 |
+| `os:download:start` | options | 다운로드 결과 | OS 전용 다운로드 시작 |
+| `os:download:cancel` | - | 취소 결과 | OS 작업 취소 |
+| `os:cache:stats` / `os:cache:clear` | - | 캐시 결과 | OS 캐시 관리 |
+| `download:start` | data | 일반 다운로드 결과 | 일반 장바구니 다운로드 진입점 |
 
 ### 진행 상황 이벤트
 
 | 이벤트 | 데이터 | 설명 |
 |--------|--------|------|
-| `download:progress` | DownloadProgress | 다운로드 진행 |
+| `os:download:progress` | `OSDownloadProgress` | OS 전용 다운로드 진행 |
+| `download:progress` | 일반 다운로드 진행 이벤트 | 일반 장바구니 다운로드 진행 |
 
 ---
 
@@ -743,8 +784,9 @@ createCustomRepository(options: Partial<Repository>): Repository;
 interface OSDownloadError {
   package?: OSPackageInfo;
   message: string;
-  code?: string;
-  retryCount?: number;
+  type: 'network' | 'checksum' | 'gpg' | 'dependency' | 'unknown';
+  cause?: Error;
+  retryable: boolean;
 }
 ```
 
@@ -756,12 +798,10 @@ type OSErrorAction = 'retry' | 'skip' | 'cancel';
 
 ### 에러 핸들링 흐름
 
-1. 다운로드 오류 발생
-2. `onError` 콜백 호출 (UI에서 다이얼로그 표시)
-3. 사용자 선택에 따라:
-   - `retry`: 재시도 (최대 3회)
-   - `skip`: 해당 패키지 건너뛰기
-   - `cancel`: 전체 다운로드 취소
+1. `BaseOSDownloader`는 최대 3번 시도하며 시도 사이에 1초, 2초 대기합니다.
+2. 모두 실패한 뒤 `onError`가 있으면 호출합니다.
+3. `retry`는 3번의 시도 묶음을 다시 시작하고, `skip`은 `skipped: true` 결과를 반환하며, `cancel`은 오류를 던집니다. 별도의 `AbortSignal` 취소는 `cancelled: true` 결과로 처리합니다.
+4. 현재 이 콜백에 전달하는 오류 유형은 `network`로 고정되므로 실제 검증 오류도 메시지와 cause를 함께 확인해야 합니다.
 
 ---
 
@@ -808,7 +848,7 @@ depssmuggler os download <packages...> --distro <distro-id> [options]
 depssmuggler os download httpd nginx --distro rocky-9
 
 # 아카이브만 생성
-depssmuggler os download httpd --distro ubuntu-22.04 --format archive --archive-format zip
+depssmuggler os download apache2 --distro ubuntu-22.04 --format archive --archive-format zip
 
 # 로컬 저장소 생성 + 스크립트
 depssmuggler os download httpd --distro rocky-9 --format repository --scripts

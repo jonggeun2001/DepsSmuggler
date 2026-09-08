@@ -1,5 +1,15 @@
 # npm 의존성 해결 알고리즘 분석
 
+> **알고리즘 분석 + 구현 대조 · 2026-09-08**: 1–11절과 13절은 npm/Arborist의 개념·설치 옵션·소스 구조를 설명하는 참고 자료입니다. npm 명령·`.npmrc`·lockfile 계약이 그대로 DepsSmuggler CLI에 노출되지는 않습니다. 현재 API는 [Resolvers](resolvers.md), [공유 npm 유틸리티](shared-npm.md), [CLI](cli.md)를 참고하세요.
+
+## 현재 구현 요약
+
+- `src/core/resolver/npm-resolver.ts`의 `NpmResolver`는 BFS로 의존성을 수집합니다. 버전/packument 조회는 `src/core/shared/npm-version-resolver.ts`, peer 충돌과 hoisting은 `src/core/resolver/npm-tree-manager.ts`가 담당합니다. npm의 Arborist 패키지를 직접 실행하는 구현은 아닙니다.
+- 공개 resolver 기본값은 `includeDev: false`, `includeOptional: false`, `installPeers: true`, `legacyPeerDeps: false`, `preferDedupe: false`, `installStrategy: 'hoisted'`입니다. UI/CLI가 노출하는 옵션과 구분합니다.
+- downloader는 packument의 `dist.tarball` URL을 사용하고 integrity 정보를 처리합니다. 아래 단순 URL 패턴은 구조 예시이며 scoped 패키지 등을 위해 직접 URL을 조립하는 계약이 아닙니다.
+- `parseFromPackageJson()`은 패키지 목록을 파싱하는 core API입니다. 일반 CLI의 `--file`은 줄 단위 입력이며 `package-lock.json`을 읽고 기존 잠금을 재현하는 기능은 없습니다.
+- 12.2절은 설계 고려사항, 12.4절은 제안된 오프라인 미러 구조입니다. 현재 출력은 다운로드한 tarball과 생성 아카이브·설치 스크립트이며, registry packument 서버와 lockfile을 자동 생성하는 기능을 의미하지 않습니다.
+
 ## 1. 개요
 
 npm의 `npm install` 실행 시 의존성 해결은 **Arborist** (`@npmcli/arborist`) 모듈이 담당합니다. npm v7부터 도입된 Arborist는 의존성 트리 관리의 핵심 엔진으로, 이전 버전들의 문제점을 해결하기 위해 완전히 재설계되었습니다.

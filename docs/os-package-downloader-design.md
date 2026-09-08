@@ -1,5 +1,20 @@
 # OS 패키지 다운로더 설계 문서
 
+> **초기 설계 기록 · 2026-09-08 대조**: 아래 1–14절의 인터페이스 초안, 프리셋 예시, 알고리즘과 단계별 계획은 설계 근거로 보존합니다. 현재 사용법은 [OS 패키지 다운로더](os-package-downloader.md), 명령은 [CLI](cli.md), 화면·채널은 [IPC 핸들러](ipc-handlers.md)를 참고하세요. 초안의 클래스와 저장소 목록이 모두 구현되었다는 의미는 아닙니다.
+
+## 현재 구현과 설계의 대응
+
+| 설계 주제 | 현재 구현·차이 |
+|-----------|----------------|
+| `src/core/downloaders/os/`와 통합 `OSPackageDownloader` | 실제로는 [yum.ts](../src/core/downloaders/yum.ts), [apt.ts](../src/core/downloaders/apt.ts), [apk.ts](../src/core/downloaders/apk.ts)의 개별 다운로더와 `os-shared/base-downloader.ts`를 사용합니다. 초안의 통합 클래스는 없습니다. |
+| 공통 타입·CLI 실행 | `os-shared/types.ts`, `os-shared/cli-backend.ts`; `src/cli/commands/os.ts`에서 호출합니다. |
+| OS 프리셋·저장소 | `os-shared/repositories.ts`, `os-shared/repos/`, `os-shared/distribution-fetcher.ts`. 아래 고정 예시와 동적 조회 결과는 다를 수 있으며 `os list-distros`로 확인합니다. |
+| 메타데이터·의존성 해결 | 파서 클래스는 위 downloader 파일에 정의되며 resolver는 `src/core/shared/{yum,apt,apk}-metadata-parser.ts` 재내보내기로 참조합니다. 해결기는 [yum-resolver.ts](../src/core/resolver/yum-resolver.ts), [apt-resolver.ts](../src/core/resolver/apt-resolver.ts), [apk-resolver.ts](../src/core/resolver/apk-resolver.ts)와 `os-shared/base-resolver.ts`, `dependency-tree.ts`를 사용합니다. |
+| 캐시·출력·스크립트 | `os-shared/cache-manager.ts`, `archive-packager.ts`, `repo-packager.ts`, `script-generator.ts`. CLI는 archive/repository/both 출력과 zip/tar.gz 압축을 구분합니다. |
+| GPG 검증 | `os-shared/gpg-verifier.ts`는 체크섬 검증을 제공하지만 실제 RPM/DEB/APK GPG 서명 검증은 미구현입니다. CLI backend는 이 verifier를 주입하지 않습니다. 아래 GPG 설계는 완료 기능 목록이 아닙니다. |
+| UI 통합 | `pages/download-page/hooks/use-os-download-flow.ts`와 `electron/services/os-download-orchestrator.ts`로 연결됩니다. OS 항목의 관리자·배포판·아키텍처 문맥이 일치할 때 전용 흐름을 사용합니다. |
+| Phase 1–4 | yum/apt/apk 다운로드와 GUI 연결, 단위 테스트 및 브라우저 E2E가 구현되어 있습니다. 아래 “다음 단계”는 당시 순서를 남긴 기록입니다. |
+
 ## 1. 개요
 
 OS 패키지(yum/rpm, apt/deb, apk) 다운로드를 위한 통합 모듈 설계.

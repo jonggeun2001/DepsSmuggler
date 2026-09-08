@@ -45,9 +45,9 @@ async function getCondaDownloadUrl(
 
 ### 특징
 
-- **repodata.json.zst 지원**: zstd 압축 파일 우선 사용 (더 빠른 다운로드)
-- **캐싱**: repodata 캐싱으로 중복 요청 방지
-- **Python 버전 필터링**: py312, py311 등 build 태그로 Python 버전에 맞는 패키지 선택
+- **repodata.json.zst 지원**: zstd 압축 파일 → `current_repodata.json` → `repodata.json` 순으로 시도합니다.
+- **캐싱**: 이 URL 헬퍼는 `conda-utils.ts`의 별도 메모리 `Map`에 채널/subdir별 repodata를 보관합니다. 아래 `conda-cache.ts`의 디스크 캐시와는 별도 경로이며 TTL/공개 초기화 API는 없습니다.
+- **Python 버전 우선순위**: `py312`, `cp312` 같은 build 태그가 맞는 후보를 우선하고, 그다음 `.conda` 형식과 높은 build number를 선호합니다. 호환 빌드가 없으면 경고 후 다른 빌드를 선택할 수 있으므로 엄격한 필터는 아닙니다.
 - **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
 - **Anaconda API fallback**: RC 버전 등 특수 라벨 패키지 지원
 
@@ -61,6 +61,8 @@ async function getCondaDownloadUrl(
 | macos/darwin | arm64 | osx-arm64 |
 | windows | x86_64 | win-64 |
 | windows | arm64 | win-arm64 |
+
+`getCondaSubdir()`의 기본값은 Linux/x86_64입니다. ARM 판별은 `arm64`와 `aarch64`에 적용하고, 다른 아키텍처는 해당 OS의 64비트 subdir로 처리합니다. 알 수 없는 OS에는 `linux-64`를 반환합니다.
 
 ### 사용 예시
 
@@ -80,6 +82,7 @@ const result = await getCondaDownloadUrl(
   '3.12'
 );
 
+// 응답 형태 예시: 실제 파일명·크기는 조회 결과에 따릅니다.
 console.log(result);
 // {
 //   url: 'https://conda.anaconda.org/conda-forge/linux-64/numpy-1.26.0-py312h8753938_0.conda',
@@ -94,12 +97,13 @@ console.log(result);
 
 repodata.json 캐싱 및 조회 시스템 (**디스크 캐시 전용** - 메모리 캐시 미사용)
 
-> **참고**: Conda repodata.json 파일은 350MB+ 크기이므로 메모리 캐시를 사용하지 않고 디스크 캐시만 사용합니다.
-> Phase 6 기준으로 동시 동일 요청 dedupe만 `CacheStore` 기반 메모리 어댑터를 사용하고, payload 자체는 디스크 포맷만 유지합니다.
+> **참고**: repodata는 채널에 따라 큰 메모리를 차지하므로, 이 모듈은 완료 후 재사용할 payload를 메모리 캐시에 보존하지 않습니다. 같은 base URL·캐시 경로·채널·subdir·옵션의 동시 요청은 `CacheStore.dedupeFetch()`로 합친 뒤 결과를 메모리 저장소에서 삭제합니다. 파싱/압축 해제 중에는 payload가 메모리에 존재합니다.
+
+유효기간은 `max(서버 max-age, 86400초)`로 최소 24시간입니다. TTL 안에서는 디스크만 읽고, 만료되면 기존 URL의 ETag/Last-Modified를 조건부 헤더로 보내 304 응답을 재사용합니다. `forceRefresh`는 TTL 조회와 조건부 요청을 생략합니다. `pruneExpiredCache()`의 기본 정리 기준은 저장된 `maxAge`의 10배입니다.
 
 ### 다운로드 진행 상황 로깅
 
-repodata 다운로드 시 진행 상황을 20% 단위로 로그 출력:
+전체 크기를 알 수 있을 때 마지막 로그보다 진행률이 20%p 이상 증가하면 로그를 남깁니다. 아래 코드는 계산부를 생략한 발췌입니다:
 
 ```typescript
 onDownloadProgress: (progressEvent) => {
@@ -151,9 +155,9 @@ interface RepodataCacheMeta {
   url: string;              // 원본 URL
   etag?: string;            // HTTP ETag
   lastModified?: string;    // HTTP Last-Modified
-  maxAge: number;           // Cache-Control max-age (초)
+  maxAge: number;           // 서버 max-age와 86400 중 큰 값 (초)
   cachedAt: number;         // 캐시 저장 시간 (Unix timestamp ms)
-  fileSize: number;         // 파일 크기 (바이트)
+  fileSize: number;         // 압축 응답 바이트 수 또는 JSON 문자열 길이
   packageCount: number;     // 패키지 수
   compressed: boolean;      // zstd 압축 여부
 }
@@ -211,7 +215,7 @@ Conda 패키지 스펙 파싱 및 매칭
 | 함수명 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `parseMatchSpec` | spec: string | MatchSpec | MatchSpec 문자열 파싱 |
-| `matchesSpec` | package: RepoDataPackage, spec: MatchSpec | boolean | 패키지가 스펙에 일치하는지 검사 |
+| `matchesSpec` | package: { name; version; build? }, spec: MatchSpec | boolean | 패키지가 스펙에 일치하는지 검사 |
 | `matchesVersionSpec` | version: string, versionSpec: string | boolean | 버전 스펙 일치 검사 |
 | `matchesBuildSpec` | build: string, buildSpec: string | boolean | 빌드 스펙 일치 검사 |
 | `compareCondaVersions` | a: string, b: string | number | Conda 버전 비교 |
@@ -245,36 +249,38 @@ interface MatchSpec {
 ```typescript
 import { parseMatchSpec, matchesSpec } from './conda-matchspec';
 
-const spec = parseMatchSpec('numpy>=1.20,<2.0 py312*');
+const spec = parseMatchSpec('numpy >=1.20,<2.0 py312*');
 // { name: 'numpy', version: '>=1.20,<2.0', build: 'py312*' }
 
-const pkg = { name: 'numpy', version: '1.26.0', build: 'py312h8753938_0', ... };
+const pkg = { name: 'numpy', version: '1.26.0', build: 'py312h8753938_0' };
 const matches = matchesSpec(pkg, spec); // true
 ```
 
 ---
 
+`parseMatchSpec()`는 공백으로 나눈 `name version build`와 `name=version=build`, 선택적인 `channel[/subdir]::` 접두사를 처리합니다. 붙여 쓴 `numpy>=1.20` 형태를 일반 비교식으로 파싱하지 않습니다. `matchesSpec()`는 이름·버전·빌드만 검사하고 채널/subdir/namespace는 검사하지 않습니다.
+
 ## Conda 채널 검증 (`conda-validator.ts`)
 
-Conda 채널 URL 유효성 검증 유틸리티입니다.
+Conda 채널의 원격 repodata에 HEAD 요청을 보내 접근 가능 여부를 확인하는 비동기 유틸리티입니다. 두 함수 모두 `Promise<boolean>`을 반환합니다.
 
 ### 주요 함수
 
 | 함수 | 설명 |
 |------|------|
-| `validateCondaChannel(channel)` | 채널 유효성 검증 (간략) |
-| `validateCondaChannelStrict(channel)` | 채널 유효성 검증 (엄격) |
+| `validateCondaChannel(channel)` | `noarch/repodata.json`에서 HTTP 200 확인, 타임아웃 5초 |
+| `validateCondaChannelStrict(channel, subdirs?)` | 기본 `noarch`, `linux-64`, `win-64`, `osx-64`를 병렬 확인, 요청별 3초; 하나라도 성공하면 true |
 
 ### 사용 예시
 
 ```typescript
 import { validateCondaChannel, validateCondaChannelStrict } from './conda-validator';
 
-validateCondaChannel('conda-forge');     // { valid: true, normalized: 'conda-forge' }
-validateCondaChannel('invalid/channel'); // { valid: false, error: '...' }
+const accessible = await validateCondaChannel('conda-forge');
 
-// 엄격 모드: 실제 repodata 존재 확인
-const result = await validateCondaChannelStrict('conda-forge');
+// 여러 subdir 중 하나라도 접근 가능한지 확인
+const result = await validateCondaChannelStrict('conda-forge', ['linux-64', 'noarch']);
+// 네트워크/서버 상태에 따라 true 또는 false
 ```
 
 ---

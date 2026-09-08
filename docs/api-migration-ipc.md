@@ -1,5 +1,14 @@
 # HTTP API에서 IPC로의 마이그레이션
 
+> **이행 기록 · 2026-09-08 대조**: 아래 v0.1.17의 삭제 목록과 diff는 당시 변경을 보존한 기록입니다. 현재 파일 배치·API 계약은 [IPC 핸들러](ipc-handlers.md)와 [Electron / Renderer](electron-renderer.md)를 따릅니다.
+
+## 현재 구현과의 연결
+
+- Electron의 의존성 해결·실제 다운로드·OS 작업은 preload를 통해 main의 IPC 핸들러와 서비스로 연결됩니다. `electron/main.ts`는 등록을 조합하고, 다운로드 실행은 `electron/services/download-orchestrator.ts`, 전달·압축·분할은 `electron/services/download/delivery-pipeline.ts`가 담당합니다.
+- 검색·버전·히스토리 접근은 `src/renderer/lib/renderer-data-client.ts`로 모였습니다. Electron IPC를 우선하고, 브라우저 검색·버전 조회에는 HTTP 폴백, 히스토리에는 `localStorage` 폴백이 있습니다. 따라서 아래의 “모든 API가 IPC 전용”이라는 당시 표현을 현재 브라우저 개발 경로 전체에 적용하면 안 됩니다.
+- `download:onProgress`는 아래 이행 표의 옛 표기입니다. 현재 preload 메서드는 `window.electronAPI.download.onProgress`, 실제 이벤트 채널은 `download:progress`입니다. 구독 반환 함수로 해제합니다.
+- 현재 화면 로직은 `pages/wizard-page/`, `pages/download-page/`, `pages/settings/` 등으로 나뉘어 있습니다. 아래 `DownloadPage.tsx` 등의 diff는 현재 파일에 그대로 적용할 패치가 아닙니다.
+
 ## 개요
 - 목적: 개발/프로덕션 환경 통합 및 코드 단순화
 - 완료 버전: v0.1.17
@@ -184,31 +193,48 @@ const downloadResults = await Promise.all(downloadPromises);
 
 ---
 
-## 개발자 가이드
+## 개발자 가이드 (현재 호출 경계)
 
 ### API 호출 패턴
 
-모든 렌더러 코드에서 IPC API를 사용합니다:
+검색·버전·히스토리는 공용 data client를 사용하고, 실제 다운로드는 Electron IPC의 존재를 확인한 뒤 호출합니다:
 
 ```typescript
 // 패키지 검색
-const { results } = await window.electronAPI.search.packages('pip', 'requests');
+import { getRendererDataClient } from '../lib/renderer-data-client';
+
+const results = await getRendererDataClient().searchPackages('pip', 'requests');
 
 // 의존성 해결
-const deps = await window.electronAPI.dependency.resolve({ packages, options });
+// packages는 호출부에서 구성한 요청 목록
+const resolveOptions = { targetOS: 'linux', architecture: 'x86_64', pythonVersion: '3.12' };
+if (!window.electronAPI?.dependency?.resolve || !window.electronAPI?.download?.start) {
+  throw new Error('다운로드 API를 사용할 수 없습니다');
+}
+const deps = await window.electronAPI.dependency.resolve({ packages, options: resolveOptions });
 
-// 다운로드 시작
-await window.electronAPI.download.start({ packages, options });
-
-// 진행률 수신
+// 진행률은 다운로드 시작 전에 구독
 const unsub = window.electronAPI.download.onProgress((progress) => {
   console.log(progress);
 });
+
+// 다운로드 시작: 해결된 전체 목록 전달
+await window.electronAPI.download.start({
+  packages: deps.allPackages,
+  options: {
+    ...resolveOptions,
+    outputDir: './output',
+    outputFormat: 'zip',
+    includeScripts: true,
+  },
+});
+
+// 컴포넌트 effect의 cleanup에서 unsub() 호출
 ```
 
 ### API 사용 가능 여부 확인
 
-IPC API가 없는 환경(예: 순수 브라우저)에서는 명확한 에러를 표시합니다:
+다운로드처럼 IPC가 필수인 기능은 API가 없는 환경(예: 순수 브라우저)에서 명확한 에러를 표시합니다. 검색·버전·히스토리의 폴백과 구분합니다:
 
 ```typescript
 if (!window.electronAPI?.download?.start) {

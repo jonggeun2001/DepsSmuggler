@@ -1,5 +1,15 @@
 # Maven 의존성 해결 알고리즘 분석
 
+> **알고리즘 분석 + 구현 대조 · 2026-09-08**: 1–8절과 11절은 Maven Resolver의 DF/BF·Skipper·설정·소스 구조를 설명하는 참고 분석입니다. 7절의 성능 수치는 이 저장소의 측정 결과가 아닙니다. 아래 JVM 옵션은 Maven용이며 DepsSmuggler CLI 옵션이 아닙니다. 실제 API는 [Resolvers](resolvers.md), [Downloaders](downloaders.md), [공유 Maven 유틸리티](shared-maven.md)를 참고하세요.
+
+## 현재 구현 요약
+
+- `MavenResolver`는 BF 탐색을 `MavenQueueProcessor`와 조합하고, `MavenBomProcessor`, `DependencyResolutionSkipper` 및 Maven 공용 캐시를 사용합니다. Maven JVM 라이브러리를 직접 실행하지 않습니다.
+- 루트의 명시적 `metadata.type`은 `artifactType`으로 전달되며 원격 POM packaging이 이를 덮어쓰지 않습니다. 아티팩트 키는 type을 포함합니다. classifier는 사용자가 선택하며 OS/아키텍처만으로 자동 생성하지 않습니다.
+- `dependencyManagement`와 BOM은 버전 관리에 사용하고, 그 목록 전체를 실제 다운로드 의존성으로 펼치지 않습니다. `MavenQueueProcessor`가 `src/core/shared/maven-pom-utils.ts`의 `extractDependencies()`를 호출합니다.
+- `MavenDownloader.downloadPackage()`는 `metadata.packaging` → `metadata.type` → POM의 `<packaging>` → `jar` 순서로 파일 타입을 정합니다. 메인 아티팩트와 POM, 사용 가능한 `.sha1` 파일을 내려받습니다. source/javadoc은 classifier 또는 type으로 선택하며 자동으로 모두 포함하지 않습니다.
+- 9절의 구현 권장사항과 10.4절의 축약 코드는 설계 설명입니다. 예시의 모든 타입·체크섬 알고리즘이 호출 옵션으로 노출되는 것은 아닙니다. 12–13절은 현재 구현의 크기 조회·POM 처리·요청 재사용을 설명합니다.
+
 ## 1. 개요
 
 Maven의 `mvn install` 실행 시 의존성 해결은 **maven-resolver** (구 Aether) 컴포넌트가 담당합니다. Maven 3.9.0부터는 두 가지 알고리즘을 지원합니다:
@@ -858,14 +868,19 @@ private async fetchPackageSizes(packages: PackageInfo[]): Promise<PackageInfo[]>
 - POM-only 패키지는 `.pom` 파일 크기 조회
 - 조회 실패 시 크기를 0으로 설정 (다운로드에는 영향 없음)
 - `totalSize` 계산하여 결과에 포함
+- 현재 크기 조회는 기본 Maven Central URL과 `pom`/`jar` 확장자만 사용합니다. classifier·WAR 등 다른 확장자·사용자 지정 저장소를 반영한 정밀 크기 보장은 없으며 실제 파일 다운로드 선택과 구분해야 합니다.
 
 ### 12.2 Parent POM / BOM의 dependencyManagement 처리
 
 **중요**: Parent POM이나 BOM(Bill of Materials)의 `<dependencyManagement>` 섹션은 **버전 관리 전용**입니다. 실제 다운로드 대상 의존성으로 처리하면 안 됩니다.
 
 ```typescript
-// extractDependencies에서의 처리
-private extractDependencies(pom: PomProject, ...): PomDependency[] {
+// src/core/shared/maven-pom-utils.ts의 공용 함수
+export function extractDependencies(
+  pom: PomProject,
+  coordinate: MavenCoordinate,
+  isRoot = false,
+): PomDependency[] {
   // 실제 <dependencies> 섹션만 반환
   const deps = pom.dependencies?.dependency;
   if (deps) {
@@ -876,7 +891,7 @@ private extractDependencies(pom: PomProject, ...): PomDependency[] {
   // dependencyManagement의 630개 이상 항목을 모두 다운로드하면
   // 스택 오버플로우 및 불필요한 다운로드 발생
   if (isRoot && pom.packaging === 'pom') {
-    logger.info(`Parent/BOM POM 감지: ${coordinate} - 실제 의존성 없음`);
+    logger.info(`Parent/BOM POM 감지: ${coordinateToString(coordinate)} - 실제 의존성 없음`);
   }
 
   return [];
@@ -909,7 +924,7 @@ if (!packaging) {
 }
 ```
 
-**적용 시점**: `downloadPackage` 호출 시 `metadata.packaging`이 없는 경우
+**적용 시점**: `downloadPackage` 호출 시 `metadata.packaging`과 `metadata.type`이 모두 없는 경우. 아래 예시의 `packaging` 변수는 두 필드의 우선순위를 먼저 적용한 값입니다.
 
 ## 13. 요청 단위 POM·버전 조회 재사용
 

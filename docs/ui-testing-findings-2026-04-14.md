@@ -1,5 +1,20 @@
 # UI 테스트 결과 (2026-04-14)
 
+> 이 문서는 2026-04-14의 관찰과 후속 재검증 기록입니다. 아래 `실제 결과`·`수정 방향`은 당시 상태를 보존한 내용이며 현재 미해결 목록이 아닙니다. 2026-09-08 소스 대조 기준은 `cbeaf65`이고, 이번 문서 대조에서 UI를 다시 실행했다는 뜻은 아닙니다.
+
+## 현재 소스와의 대응
+
+| 당시 항목 | 현재 상태 | 소스/회귀 근거 |
+| --- | --- | --- |
+| F-01 출력 형식 요약 | 구현 반영됨 | `DownloadStandardView.tsx`의 출력 형식 Tag, `tests/e2e/download-smoke.spec.ts` |
+| F-02 분할/첨부 안내 | 구현 반영됨 | `DownloadStandardView.tsx`의 수신자·분할 여부·최대 크기 안내, `tests/e2e/history-email-restore.spec.ts` |
+| F-03 캐시 상세 통계 | 구현 반영됨 | `CacheSettingsSection.tsx`, `cache-stats-utils.ts`, `tests/e2e/settings-cache-breakdown.spec.ts` |
+| F-04 취소/재시도 fixture | 구현 및 후속 세션 회귀 반영됨 | `mock-electron-app.ts`, `download-cancel-retry.spec.ts`의 지연 완료·덮어쓰기 대기·재시작 실패 시나리오 |
+| `Space direction` 경고 | 기존 사용 코드 남아 있음 | `WizardPage.tsx`, `HistoryPage.tsx`, `DownloadStandardView.tsx` 등. 아래 경고 관찰은 당시 실행 기록 |
+| `/favicon.ico` 404 | 당시 관찰 보존 | 이 소스 대조에서 HTTP 요청을 재실행하지 않았으므로 최신 재현 여부는 미확인 |
+
+현재 수동·자동화 범위는 [체크리스트](./ui-testing-checklist.md)와 [Playwright 전환 시나리오](./ui-testing-playwright-conversion.md)를 따릅니다.
+
 ## 범위
 
 - 초기 관찰 기준 커밋: `8a9b8cc`

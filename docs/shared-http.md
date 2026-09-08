@@ -21,12 +21,35 @@ src/core/shared/
 
 ```typescript
 interface HttpClient {
-  get<T>(url: string, options?: RequestOptions): Promise<HttpResponse<T>>;
-  post<T>(url: string, data?: unknown, options?: RequestOptions): Promise<HttpResponse<T>>;
-  put<T>(url: string, data?: unknown, options?: RequestOptions): Promise<HttpResponse<T>>;
-  delete<T>(url: string, options?: RequestOptions): Promise<HttpResponse<T>>;
+  /**
+   * GET 요청
+   */
+  get<T = unknown>(url: string, options?: RequestOptions): Promise<HttpResponse<T>>;
+
+  /**
+   * POST 요청
+   */
+  post<T = unknown>(url: string, data?: unknown, options?: RequestOptions): Promise<HttpResponse<T>>;
+
+  /**
+   * PUT 요청
+   */
+  put<T = unknown>(url: string, data?: unknown, options?: RequestOptions): Promise<HttpResponse<T>>;
+
+  /**
+   * DELETE 요청
+   */
+  delete<T = unknown>(url: string, options?: RequestOptions): Promise<HttpResponse<T>>;
+
+  /**
+   * HEAD 요청 (헤더만 조회)
+   */
   head(url: string, options?: RequestOptions): Promise<HttpResponse<void>>;
-  getStream(url: string, options?: RequestOptions): Promise<NodeJS.ReadableStream>;
+
+  /**
+   * 스트림 다운로드 (큰 파일 다운로드용)
+   */
+  getStream(url: string, options?: RequestOptions): Promise<HttpResponse<NodeJS.ReadableStream>>;
 }
 ```
 
@@ -34,10 +57,14 @@ interface HttpClient {
 
 ```typescript
 interface RequestOptions {
+  params?: Record<string, string | number | boolean>;
   headers?: Record<string, string>;
   timeout?: number;
-  responseType?: 'json' | 'text' | 'arraybuffer' | 'stream';
-  onProgress?: (event: ProgressEvent) => void;
+  responseType?: 'json' | 'arraybuffer' | 'stream' | 'text';
+  onDownloadProgress?: (progressEvent: ProgressEvent) => void;
+  signal?: AbortSignal;
+  maxRedirects?: number;
+  validateStatus?: (status: number) => boolean;
 }
 ```
 
@@ -47,6 +74,7 @@ interface RequestOptions {
 interface HttpResponse<T> {
   data: T;
   status: number;
+  statusText: string;
   headers: Record<string, string>;
 }
 ```
@@ -55,9 +83,9 @@ interface HttpResponse<T> {
 
 ```typescript
 interface ProgressEvent {
-  loaded: number;      // 현재 다운로드된 바이트
-  total: number;       // 전체 바이트 (알 수 없으면 0)
-  percent: number;     // 진행률 (0-100)
+  loaded: number;
+  total?: number;
+  progress?: number;
 }
 ```
 
@@ -65,18 +93,25 @@ interface ProgressEvent {
 
 ```typescript
 class HttpError extends Error {
-  status: number;      // HTTP 상태 코드
-  statusText: string;  // 상태 메시지
-  url: string;         // 요청 URL
-  response?: unknown;  // 응답 본문 (있는 경우)
+  constructor(
+    message: string,
+    status?: number,
+    statusText?: string,
+    response?: HttpResponse<unknown>
+  );
+  isClientError(): boolean;
+  isServerError(): boolean;
+  isNotFound(): boolean;
 }
 ```
+
+`status`, `statusText`, `response`는 읽기 전용 선택 필드입니다. 네트워크 오류에는 HTTP 상태가 없을 수 있습니다. `ProgressEvent.progress`는 Axios에서 전달하는 0~1 비율이며, 전체 크기를 모를 때 `total`과 `progress`는 없을 수 있습니다.
 
 ---
 
 ## AxiosHttpClient (`axios-http-client.ts`)
 
-프로덕션용 Axios 기반 구현체:
+프로덕션용 Axios 기반 구현체입니다. 기본 타임아웃은 30초, 최대 리다이렉트는 5회이며 `baseURL`, `headers`, `timeout`, `maxRedirects`를 생성자에서 설정할 수 있습니다. `getDefaultHttpClient()`는 공유 인스턴스를 반환하고 테스트에서는 `setDefaultHttpClient()`와 `resetDefaultHttpClient()`로 교체·초기화합니다.
 
 ```typescript
 import { AxiosHttpClient } from './axios-http-client';
@@ -101,37 +136,44 @@ import { MockHttpClient } from './mock-http-client';
 const mockClient = new MockHttpClient();
 
 // 응답 설정
-mockClient.onGet('/api/packages').respond({
+mockClient.onGet('/api/packages', {
   data: [{ name: 'lodash', version: '4.17.21' }],
   status: 200
 });
 
 // 에러 시뮬레이션
-mockClient.onGet('/api/error').reject(new HttpError(500, 'Server Error'));
+mockClient.onGetError('/api/error', { message: 'Server Error', status: 500 });
 
-// 테스트에서 사용
-const downloader = new PipDownloader({ httpClient: mockClient });
+// 호출 및 기록 확인
+const response = await mockClient.get('/api/packages');
+console.log(response.data, mockClient.getCallCount());
 ```
 
 ---
 
+Mock은 URL의 문자열·정규식·조건 함수로 첫 핸들러를 선택합니다. 현재 핸들러 매칭은 HTTP 메서드를 구분하지 않으며 `getCallHistory()`에는 메서드와 옵션이 기록됩니다. `onPost()`, `onAny()`, `reset()`, `wasCalled()`도 제공합니다.
+
 ## 사용 예시
 
+아래 클래스는 인터페이스 활용을 보여주는 독립 예시입니다.
+
 ```typescript
+import { createWriteStream } from 'fs';
+import { pipeline } from 'stream/promises';
 import { AxiosHttpClient } from './shared/axios-http-client';
 import type { HttpClient } from './shared/http-client';
 
-class PipDownloader {
+class ExampleDownloader {
   constructor(private httpClient: HttpClient = new AxiosHttpClient()) {}
 
   async downloadPackage(url: string, destPath: string): Promise<void> {
-    const stream = await this.httpClient.getStream(url, {
-      onProgress: (event) => {
-        console.log(`${event.percent}% 완료`);
+    const response = await this.httpClient.getStream(url, {
+      onDownloadProgress: (event) => {
+        if (event.progress !== undefined) console.log(`${event.progress * 100}% 완료`);
       }
     });
 
-    await pipeline(stream, fs.createWriteStream(destPath));
+    await pipeline(response.data, createWriteStream(destPath));
   }
 }
 ```

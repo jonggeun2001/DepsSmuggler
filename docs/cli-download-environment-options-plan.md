@@ -1,5 +1,11 @@
 # CLI Download Environment Options Implementation Plan
 
+> **완료된 작업 계획 · 2026-09-08 대조**: 아래 Task 1–7, 코드 초안, 당시 검증 명령과 인계 절차는 구현 이력으로 보존합니다. 다시 실행할 작업 목록이 아닙니다. 현재 옵션·동작은 [CLI 문서](cli.md#download), 계약과 구현 위치는 [환경 옵션 설계](cli-download-environment-options-design.md)를 참고하세요.
+>
+> 구현 결과는 `src/cli/commands/download-environment.ts`, `download.ts`, `download-runner.ts`, `src/core/shared/dependency-resolver.ts` 및 pip/Conda/Maven resolver·downloader에 반영되어 있습니다. 후속 수정으로 pip 호환 wheel/sdist 선택, Conda noarch의 Python 제약, Maven 명시적 type 보존도 보강되었습니다. 아래 초안의 메서드·타입을 현재 API로 복사하지 말고 해당 소스와 테스트를 기준으로 삼습니다.
+>
+> 특히 Task 2의 Step 2·9에 남아 있는 “새 환경 옵션이 없는 `--no-deps`는 resolver를 호출하지 않는다”는 초기 조건은 pip·Conda에 더 이상 적용되지 않습니다. 현재 두 타입은 기본 환경에서도 `maxDepth: 0`, `resolveRootArtifactsOnly: true`로 루트 파일을 검증합니다. Maven은 명시한 대상 환경이 있을 때만 루트를 해결하며, 나머지 타입의 일반 `download --no-deps`는 resolver를 생략합니다.
+
 **Goal:** `depssmuggler download`에서 대상 OS, 아키텍처, Python/CUDA 버전, Conda 채널과 Maven classifier를 검증하고 의존성 해결부터 실제 아티팩트 다운로드까지 일관되게 적용한다.
 
 **Architecture:** CLI 환경 옵션의 런타임 검증과 비기본값 판별을 작은 전용 모듈로 분리한다. `downloadCommand`는 검증된 값을 공용 dependency resolver에 전달하고, resolver는 기존 요청 패키지에 실제 선택된 root 메타데이터를 병합한다. 각 downloader는 resolver가 선택한 URL 또는 classifier를 우선 사용하고 기존 조회 로직은 폴백으로 유지한다.
@@ -221,6 +227,8 @@ it('대상 환경 옵션을 의존성 resolver에 전달한다', async () => {
 
 - [ ] **Step 2: `--no-deps` 조건부 루트 해결 실패 테스트 작성**
 
+아래는 당시 테스트 초안이다. 두 번째 테스트의 pip 기본 환경 가정은 후속 구현에서 반대로 바뀌었으며, 현재 `download.test.ts`는 기본 환경의 pip와 Conda도 깊이 0 resolver를 호출하는지 검증한다.
+
 ```ts
 it('환경 옵션이 지정된 pip --no-deps는 깊이 0으로 루트만 해결한다', async () => {
   vi.mocked(resolveAllDependencies).mockResolvedValueOnce(resolvedPipRootWithMetadata);
@@ -339,6 +347,8 @@ const resolved = await resolveAllDependencies(packages.map(toDownloadPackage), {
 - [ ] **Step 9: `--no-deps` 루트 결과 선택 구현**
 
 `options.deps === false`이고 `hasExplicitTargetEnvironment(options)`가 참인 pip/conda/Maven만 resolver를 실행한다. resolver 호출 전에 요청 `DownloadPackage`의 `id` 집합을 저장하고, 반환된 `resolved.allPackages`에서 해당 `id`에 속하는 병합 완료 항목만 골라 `PackageInfo`로 변환한다. 따라서 의존성은 큐에 넣지 않으면서 Task 3의 병합 우선순위에 따라 보존된 `indexUrl`, `extras`, 요청 메타데이터와 resolver 선택 메타데이터를 함께 사용한다. 그 외 `--no-deps`는 조기 반환한다.
+
+현재 구현은 위 초기 조건에 `CLI_ROOT_ARTIFACT_RESOLUTION_TYPES`의 pip·Conda를 추가하여 환경 옵션과 무관하게 루트를 해결한다. 성공한 루트 결과는 `successfulPackages`를 우선 사용하고, 해당 필드가 없을 때 요청 ID로 `allPackages`를 걸러낸다. 이 문단의 이전 조건과 코드 초안은 구현 이력으로만 보존한다.
 
 - [ ] **Step 10: download command 테스트 통과 확인**
 
