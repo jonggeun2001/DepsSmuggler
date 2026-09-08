@@ -7,7 +7,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { PackageInfo, PackageMetadata } from '../../types';
 import logger from '../../utils/logger';
-import { DockerSearchResponse, DockerTagsResponse, QuaySearchResponse, DockerManifest } from './docker-types';
+import { DockerSearchResponse, DockerTagsResponse, QuaySearchResponse } from './docker-types';
 import { getRegistryType, extractRegistry, parseImageName } from './docker-utils';
 import { DockerAuthClient } from './docker-auth-client';
 import { DockerCatalogCache } from './docker-catalog-cache';

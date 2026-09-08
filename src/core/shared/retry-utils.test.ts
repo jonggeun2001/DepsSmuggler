@@ -101,6 +101,25 @@ describe('retryWithExponentialBackoff', () => {
 });
 
 describe('isRetryableHttpError', () => {
+  it.each([
+    'timeout',
+    503,
+    false,
+    { response: '503' },
+    { response: { status: '503' } },
+    { response: { status: null } },
+  ])('HTTP 오류 필드가 없는 값은 재시도하지 않는다: %j', (error) => {
+    expect(isRetryableHttpError(error)).toBe(false);
+  });
+
+  it('함수에 붙은 오류 필드도 기존과 동일하게 판별한다', () => {
+    const timeout = Object.assign(() => undefined, { code: 'ETIMEDOUT' });
+    const response = Object.assign(() => undefined, { status: 503 });
+
+    expect(isRetryableHttpError(timeout)).toBe(true);
+    expect(isRetryableHttpError({ response })).toBe(true);
+  });
+
   it('504 Gateway Timeout은 재시도 가능', () => {
     expect(isRetryableHttpError({ response: { status: 504 } })).toBe(true);
   });

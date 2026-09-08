@@ -5,7 +5,7 @@
 export interface RetryOptions {
   maxRetries: number;
   delayMs: number;
-  shouldRetry?: (error: any) => boolean;
+  shouldRetry?: (error: unknown) => boolean;
 }
 
 /**
@@ -19,7 +19,7 @@ export async function retryWithExponentialBackoff<T>(
   options: RetryOptions
 ): Promise<T> {
   const { maxRetries, delayMs, shouldRetry } = options;
-  let lastError: any;
+  let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -51,27 +51,29 @@ export async function retryWithExponentialBackoff<T>(
  * @param error axios 에러 객체
  * @returns 재시도 가능 여부
  */
-export function isRetryableHttpError(error: any): boolean {
-  // null이나 undefined 체크
-  if (!error) {
+export function isRetryableHttpError(error: unknown): boolean {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) {
     return false;
   }
 
   // 504 Gateway Timeout, 503 Service Unavailable, 408 Request Timeout
-  const retryableCodes = [504, 503, 408];
+  const retryableStatusCodes = [504, 503, 408];
 
   // 연결 타임아웃 또는 연결 중단
-  if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+  if ('code' in error && (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED')) {
     return true;
   }
 
-  // HTTP 상태 코드 확인
-  if (
-    error.response?.status &&
-    retryableCodes.includes(error.response.status)
-  ) {
-    return true;
+  if (!('response' in error)) {
+    return false;
   }
 
-  return false;
+  const response = error.response;
+  if (response === null || (typeof response !== 'object' && typeof response !== 'function')) {
+    return false;
+  }
+
+  return 'status' in response &&
+    typeof response.status === 'number' &&
+    retryableStatusCodes.includes(response.status);
 }

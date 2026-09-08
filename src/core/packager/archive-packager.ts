@@ -2,6 +2,7 @@ import archiver from 'archiver';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { PackageInfo } from '../../types';
+import type { ArchiveType } from '../../types/packaging';
 import type { ArchivePackageManifest } from '../../types/manifest/package-manifest';
 import logger from '../../utils/logger';
 import { resolvePath, toUnixPath } from '../shared/path-utils';
@@ -12,7 +13,7 @@ export type {
 } from '../../types/manifest/package-manifest';
 
 // 압축 형식 타입
-export type ArchiveFormat = 'zip' | 'tar.gz';
+export type ArchiveFormat = ArchiveType;
 
 // 압축 옵션
 export interface ArchiveOptions {

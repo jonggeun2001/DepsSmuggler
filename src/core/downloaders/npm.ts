@@ -31,7 +31,6 @@ import { NpmVersionResolver } from '../shared/npm-version-resolver';
 export class NpmDownloader extends BaseLanguageDownloader implements IDownloader {
   readonly type = 'npm' as const;
   private client: AxiosInstance;
-  private readonly registryUrl: string;
   private readonly searchUrl: string;
   private versionResolver: NpmVersionResolver;
 
@@ -40,7 +39,6 @@ export class NpmDownloader extends BaseLanguageDownloader implements IDownloader
     searchUrl = NPM_CONSTANTS.DEFAULT_SEARCH_URL
   ) {
     super();
-    this.registryUrl = registryUrl;
     this.searchUrl = searchUrl;
     this.client = axios.create({
       timeout: NPM_CONSTANTS.API_TIMEOUT_MS,

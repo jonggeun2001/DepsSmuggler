@@ -7,11 +7,9 @@ import {
   Input,
   Select,
   Button,
-  Table,
   Space,
   Typography,
   message,
-  Empty,
   Spin,
   Tag,
   Divider,
@@ -88,44 +86,6 @@ const packageTypeOptions: { value: PackageType; label: string; category: Categor
   { value: 'docker', label: 'Docker', category: 'container', description: 'Docker Hub 이미지' },
 ];
 
-// 언어 버전 옵션
-interface LanguageVersionOption {
-  value: string;
-  label: string;
-  eol?: boolean;
-}
-
-const languageVersionOptions: Record<string, LanguageVersionOption[]> = {
-  pip: [
-    { value: '3.13', label: 'Python 3.13' },
-    { value: '3.12', label: 'Python 3.12' },
-    { value: '3.11', label: 'Python 3.11' },
-    { value: '3.10', label: 'Python 3.10' },
-    { value: '3.9', label: 'Python 3.9' },
-    { value: '3.8', label: 'Python 3.8', eol: true },
-  ],
-  conda: [
-    { value: '3.13', label: 'Python 3.13' },
-    { value: '3.12', label: 'Python 3.12' },
-    { value: '3.11', label: 'Python 3.11' },
-    { value: '3.10', label: 'Python 3.10' },
-    { value: '3.9', label: 'Python 3.9' },
-    { value: '3.8', label: 'Python 3.8', eol: true },
-  ],
-  maven: [
-    { value: '21', label: 'Java 21 (LTS)' },
-    { value: '17', label: 'Java 17 (LTS)' },
-    { value: '11', label: 'Java 11 (LTS)' },
-    { value: '8', label: 'Java 8 (LTS)' },
-  ],
-  npm: [
-    { value: '22', label: 'Node.js 22 (Current)' },
-    { value: '20', label: 'Node.js 20 (LTS)' },
-    { value: '18', label: 'Node.js 18 (LTS)' },
-    { value: '16', label: 'Node.js 16', eol: true },
-  ],
-};
-
 // 패키지 타입에서 언어 키 가져오기
 const getLanguageKey = (type: PackageType): 'python' | 'java' | 'node' | null => {
   switch (type) {
@@ -139,11 +99,6 @@ const getLanguageKey = (type: PackageType): 'python' | 'java' | 'node' | null =>
     default:
       return null;
   }
-};
-
-// 언어 버전 선택 단계 스킵 여부
-const shouldSkipLanguageVersion = (type: PackageType): boolean => {
-  return ['yum', 'apt', 'apk', 'docker'].includes(type);
 };
 
 // Docker 레지스트리 옵션
@@ -204,7 +159,6 @@ const WizardPage: React.FC = () => {
     dockerCustomRegistry,
     dockerArchitecture,
     dockerLayerCompression,
-    dockerRetryStrategy,
     dockerIncludeLoadScript,
     customPipIndexUrls,
     addCustomPipIndexUrl,

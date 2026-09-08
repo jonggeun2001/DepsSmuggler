@@ -30,7 +30,6 @@ interface SearchState {
 export const OSPackageSearch: React.FC<OSPackageSearchProps> = ({
   distribution,
   architecture,
-  repositories,
   onAddToCart,
 }) => {
   const [state, setState] = useState<SearchState>({

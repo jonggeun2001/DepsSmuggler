@@ -144,7 +144,7 @@ export class DockerDownloader implements IDownloader {
   ): Promise<string> {
     try {
       // 1. 준비: 토큰 획득 및 매니페스트 조회
-      const ctx = await this.prepareDownload(repository, tag, arch, destPath, registry);
+      const ctx = await this.prepareDownload(repository, tag, destPath, registry);
       const manifest = await this.fetchManifest(ctx, arch);
 
       // 2. 진행률 추적 설정
@@ -182,7 +182,6 @@ export class DockerDownloader implements IDownloader {
   private async prepareDownload(
     repository: string,
     tag: string,
-    arch: Architecture,
     destPath: string,
     registry: string
   ): Promise<DownloadContext> {

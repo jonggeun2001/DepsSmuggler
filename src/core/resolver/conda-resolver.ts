@@ -1,4 +1,3 @@
-import axios from 'axios';
 import * as yaml from 'js-yaml';
 import {
   IResolver,
@@ -9,10 +8,7 @@ import {
   ResolverOptions,
 } from '../../types';
 import logger from '../../utils/logger';
-import { CondaPackageFile } from '../shared/conda-types';
 import {
-  compareCondaVersions,
-  matchesVersionSpec,
   parseMatchSpec as parseMatchSpecFn,
   getCondaSubdir,
   flattenDependencyTree,
@@ -25,13 +21,6 @@ import {
   attachResolutionSession,
   getAttachedResolutionSession,
 } from '../shared/internal/resolution-session-registry';
-
-// Resolver 전용 CondaPackageInfo (files, versions 추가 필드)
-interface CondaPackageInfo {
-  name: string;
-  files: CondaPackageFile[];
-  versions: string[];
-}
 
 // environment.yml 구조
 interface EnvironmentYml {
@@ -51,7 +40,6 @@ interface ParsedDependency {
 
 export class CondaResolver implements IResolver {
   readonly type = 'conda' as const;
-  private readonly apiUrl = 'https://api.anaconda.org';
   private readonly condaUrl = 'https://conda.anaconda.org';
   private visited: Map<string, DependencyNode> = new Map();
   private conflicts: DependencyConflict[] = [];
@@ -427,8 +415,7 @@ export class CondaResolver implements IResolver {
         name,
         channel,
         versionSpec,
-        (fallbackName, fallbackChannel, fallbackVersionSpec) =>
-          this.getLatestVersion(fallbackName, fallbackChannel, fallbackVersionSpec),
+        undefined,
         buildSpec,
       ),
       Boolean,
@@ -471,32 +458,6 @@ export class CondaResolver implements IResolver {
   }
 
   /**
-   * Anaconda API 폴백 (repodata 조회 실패시)
-   */
-  private async resolvePackageFallback(
-    name: string,
-    version: string,
-    channel: string
-  ): Promise<{ depends: string[]; version: string } | null> {
-    try {
-      const response = await axios.get<CondaPackageInfo>(
-        `${this.apiUrl}/package/${channel}/${name}`
-      );
-      const pkgInfo = response.data;
-
-      // 버전에 맞는 파일 찾기
-      const file = pkgInfo.files.find((f) => f.version === version);
-      const depends = file?.attrs.depends || [];
-
-      return { depends, version };
-    } catch {
-      return null;
-    }
-  }
-
-  // getLatestVersionFromRepoData는 CondaRepoDataProcessor로 분리됨
-
-  /**
    * 의존성 문자열 파싱 (Conda MatchSpec 문법)
    * 지원 형식:
    * - "python >=3.6"
@@ -528,54 +489,6 @@ export class CondaResolver implements IResolver {
       normalizedName === 'python_abi' ||
       normalizedName.startsWith('__')
     );
-  }
-
-  /**
-   * 최신 호환 버전 조회 (Anaconda API 폴백)
-   */
-  private async getLatestVersion(
-    name: string,
-    channel: string,
-    versionSpec?: string
-  ): Promise<string | null> {
-    try {
-      const response = await axios.get<CondaPackageInfo>(
-        `${this.apiUrl}/package/${channel}/${name}`
-      );
-      const versions = response.data.versions;
-
-      if (versions.length === 0) return null;
-
-      // 버전 정렬 (Conda 스타일, 내림차순)
-      const sortedVersions = [...versions].sort((a, b) =>
-        compareCondaVersions(b, a)
-      );
-
-      if (!versionSpec) {
-        return sortedVersions[0]; // 최신 버전
-      }
-
-      // 버전 스펙 필터링 (새로운 MatchSpec 파서 사용)
-      const compatible = sortedVersions.filter((v) =>
-        matchesVersionSpec(v, versionSpec)
-      );
-
-      if (compatible.length > 0) {
-        return compatible[0]; // 정렬된 목록에서 첫 번째 (최신)
-      }
-
-      // 호환 버전 없으면 최신 버전 사용
-      this.conflicts.push({
-        type: 'version',
-        packageName: name,
-        versions: [versionSpec, sortedVersions[0]],
-        resolvedVersion: sortedVersions[0],
-      });
-
-      return sortedVersions[0];
-    } catch {
-      return null;
-    }
   }
 
   /**

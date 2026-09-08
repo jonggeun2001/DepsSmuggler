@@ -7,7 +7,7 @@
 
 import axios from 'axios';
 import logger from '../../utils/logger';
-import { RegistryConfig, RegistryType, REGISTRY_CONFIGS, createCustomRegistryConfig } from './docker-utils';
+import { RegistryConfig, RegistryType } from './docker-utils';
 
 /**
  * 토큰 응답 인터페이스

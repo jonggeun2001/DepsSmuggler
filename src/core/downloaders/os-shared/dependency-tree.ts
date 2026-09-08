@@ -94,13 +94,6 @@ export class OSDependencyTree {
   }
 
   /**
-   * 패키지 이름만으로 키 생성 (버전 무관)
-   */
-  private getPackageNameKey(pkg: OSPackageInfo): string {
-    return `${pkg.name}-${pkg.architecture}`;
-  }
-
-  /**
    * 노드 추가
    */
   addNode(pkg: OSPackageInfo): void {

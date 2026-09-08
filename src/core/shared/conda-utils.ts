@@ -87,7 +87,7 @@ async function getRepoData(channel: string, subdir: string): Promise<RepoData | 
 
         return repodata;
       }
-    } catch (error) {
+    } catch {
       // 다음 URL 시도
       continue;
     }
@@ -135,7 +135,6 @@ function findPackageInRepoData(
   repodata: RepoData,
   name: string,
   version: string,
-  subdir: string,
   pythonVersion?: string
 ): { filename: string; pkg: RepoDataPackage } | null {
   // packages.conda 우선 (더 최신 형식)
@@ -287,7 +286,7 @@ export async function getCondaDownloadUrl(
   // repodata에서 패키지 찾기
   const repodata = await getRepoData(channel, subdir);
   if (repodata) {
-    const found = findPackageInRepoData(repodata, packageName, version, subdir, pythonVersion);
+    const found = findPackageInRepoData(repodata, packageName, version, pythonVersion);
     if (found) {
       const { filename, pkg } = found;
       const downloadUrl = `${CONDA_URL}/${channel}/${subdir}/${filename}`;
@@ -303,7 +302,7 @@ export async function getCondaDownloadUrl(
   // noarch에서도 확인 (Python 버전 무관)
   const noarchRepodata = await getRepoData(channel, 'noarch');
   if (noarchRepodata) {
-    const found = findPackageInRepoData(noarchRepodata, packageName, version, 'noarch');
+    const found = findPackageInRepoData(noarchRepodata, packageName, version);
     if (found) {
       const { filename, pkg } = found;
       const downloadUrl = `${CONDA_URL}/${channel}/noarch/${filename}`;

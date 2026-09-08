@@ -187,7 +187,7 @@ const HistoryPage: React.FC = () => {
     if (window.electronAPI?.openFolder) {
       try {
         await window.electronAPI.openFolder(outputPath);
-      } catch (error) {
+      } catch {
         message.error('폴더를 열 수 없습니다.');
       }
     } else {

@@ -88,7 +88,8 @@ if (isUserConfig(data)) {
 
 ### any 타입 사용 제한
 
-- 소스 코드에서 `any` 타입 사용 최소화 (50개 미만 목표)
+- 외부 오류처럼 형태가 정해지지 않은 값은 `unknown`과 타입 가드로 처리합니다.
+- 이미 정의된 POM·다운로드 결과·플랫폼 타입을 재사용하고, 같은 구조를 별도로 선언하지 않습니다.
 - 테스트 파일에서는 `any` 허용하되, 가능하면 Testable 인터페이스 패턴 사용
 
 ```typescript
@@ -116,11 +117,15 @@ expect(testable.isRunning).toBe(true);
 {
   "compilerOptions": {
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noImplicitAny": true,
     "strictNullChecks": true
   }
 }
 ```
+
+`tsconfig.json`과 `tsconfig.electron.json` 모두 미사용 선언을 검사합니다. 사용되지 않는 내부 함수·인수는 호출부와 함께 제거하고, 공개 API나 콜백의 인수 순서를 유지해야 하는 경우에만 `_` 접두어를 사용합니다. 타입 검사와 기존 동작 테스트로 정리 전후를 확인합니다.
 
 ### Null 체크
 

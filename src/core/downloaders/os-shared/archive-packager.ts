@@ -8,7 +8,7 @@ import * as path from 'path';
 import archiver from 'archiver';
 import type { OSPackageInfo, OSPackageManager, ArchiveFormat } from './types';
 import { getDownloadedFileKey, getPackageFilename } from './package-file-utils';
-import { OSScriptGenerator, type GeneratedScripts } from './script-generator';
+import { OSScriptGenerator } from './script-generator';
 
 /**
  * 아카이브 옵션

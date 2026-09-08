@@ -6,11 +6,19 @@
 import logger from '../../utils/logger';
 import { fetchPythonVersions, fetchCudaVersions } from './version-fetcher';
 
-// 브라우저 환경 체크를 위한 타입 가드
-const isBrowser = (): boolean => {
-  return typeof globalThis !== 'undefined' &&
-         typeof (globalThis as any).window !== 'undefined' &&
-         typeof (globalThis as any).localStorage !== 'undefined';
+interface BrowserCacheContext {
+  window: unknown;
+  localStorage: {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+  };
+}
+
+// DOM 타입에 의존하지 않아 Electron main과 renderer에서 함께 사용할 수 있다.
+const isBrowser = (context: typeof globalThis): context is typeof globalThis & BrowserCacheContext => {
+  return typeof context !== 'undefined' &&
+         'window' in context && typeof context.window !== 'undefined' &&
+         'localStorage' in context && typeof context.localStorage !== 'undefined';
 };
 
 /**
@@ -64,10 +72,10 @@ const FALLBACK_VERSIONS = {
  * 캐시 유효성 검증
  */
 export function isCacheValid(source: keyof typeof VERSION_CACHE_TTL): boolean {
-  if (!isBrowser()) return false; // Node.js 환경
+  if (!isBrowser(globalThis)) return false; // Node.js 환경
 
-  const timestampKey = `${source}Timestamp` as keyof typeof CACHE_KEYS;
-  const timestamp = (globalThis as any).localStorage.getItem(CACHE_KEYS[timestampKey]);
+  const timestampKey = `${source}Timestamp` as const;
+  const timestamp = globalThis.localStorage.getItem(CACHE_KEYS[timestampKey]);
 
   if (!timestamp) return false;
 
@@ -79,12 +87,11 @@ export function isCacheValid(source: keyof typeof VERSION_CACHE_TTL): boolean {
  * 캐시에서 버전 목록 가져오기
  */
 function getFromCache(source: keyof typeof VERSION_CACHE_TTL): string[] | null {
-  if (!isBrowser()) return null;
+  if (!isBrowser(globalThis)) return null;
 
   if (!isCacheValid(source)) return null;
 
-  const versionKey = source as keyof typeof CACHE_KEYS;
-  const cached = (globalThis as any).localStorage.getItem(CACHE_KEYS[versionKey]);
+  const cached = globalThis.localStorage.getItem(CACHE_KEYS[source]);
 
   if (!cached) return null;
 
@@ -99,13 +106,12 @@ function getFromCache(source: keyof typeof VERSION_CACHE_TTL): string[] | null {
  * 버전 목록 캐시 저장
  */
 function saveToCache(source: keyof typeof VERSION_CACHE_TTL, versions: string[]): void {
-  if (!isBrowser()) return;
+  if (!isBrowser(globalThis)) return;
 
-  const versionKey = source as keyof typeof CACHE_KEYS;
-  const timestampKey = `${source}Timestamp` as keyof typeof CACHE_KEYS;
+  const timestampKey = `${source}Timestamp` as const;
 
-  (globalThis as any).localStorage.setItem(CACHE_KEYS[versionKey], JSON.stringify(versions));
-  (globalThis as any).localStorage.setItem(CACHE_KEYS[timestampKey], Date.now().toString());
+  globalThis.localStorage.setItem(CACHE_KEYS[source], JSON.stringify(versions));
+  globalThis.localStorage.setItem(CACHE_KEYS[timestampKey], Date.now().toString());
 }
 
 /**
@@ -246,10 +252,10 @@ export async function refreshExpiredCaches(): Promise<void> {
  * 캐시 나이 계산 (밀리초)
  */
 export function getCacheAge(source: 'python' | 'cuda'): number | undefined {
-  if (!isBrowser()) return undefined;
+  if (!isBrowser(globalThis)) return undefined;
 
-  const timestampKey = `depssmuggler:${source}-versions-timestamp`;
-  const timestamp = (globalThis as any).localStorage.getItem(timestampKey);
+  const timestampKey = `${source}Timestamp` as const;
+  const timestamp = globalThis.localStorage.getItem(CACHE_KEYS[timestampKey]);
 
   if (!timestamp) return undefined;
 

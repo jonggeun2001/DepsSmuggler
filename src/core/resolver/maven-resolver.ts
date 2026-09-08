@@ -39,11 +39,7 @@ import {
 
 // 분리된 유틸리티 모듈
 import {
-  extractDependencies,
-  extractExclusions,
-  resolveVersionRange,
   resolveProperty,
-  resolveDependencyCoordinate,
 } from '../shared/maven-pom-utils';
 import { MavenBomProcessor } from '../shared/maven-bom-processor';
 import { MAVEN_CONSTANTS } from '../constants/maven';
@@ -143,8 +139,8 @@ export class MavenResolver implements IResolver {
       shouldIncludeDependency: (dep, includeOptional) =>
         this.shouldIncludeDependency(dep, includeOptional),
       createDependencyNode: (coord, scope) => this.createDependencyNode(coord, scope),
-      recordConflict: (coord, winnerVersion, parentPath) =>
-        this.recordConflict(coord, winnerVersion, parentPath),
+      recordConflict: (coord, winnerVersion) =>
+        this.recordConflict(coord, winnerVersion),
       skipper: {
         skipResolution: (coord, depth, parentPath) =>
           this.skipper.skipResolution(coord, depth, parentPath),
@@ -375,8 +371,7 @@ export class MavenResolver implements IResolver {
    */
   private recordConflict(
     coordinate: MavenCoordinate,
-    winnerVersion: string,
-    path: string[]
+    winnerVersion: string
   ): void {
     const packageName = coordinateToKey(coordinate);
 

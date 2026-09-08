@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import { useCartStore } from '../stores/cart-store';
 
-const { Header, Sider, Content, Footer } = Layout;
+const { Sider, Content, Footer } = Layout;
 const { Title } = Typography;
 
 const MainLayout: React.FC = () => {

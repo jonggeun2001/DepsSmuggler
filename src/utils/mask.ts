@@ -70,9 +70,6 @@ const KEY_VALUE_SENSITIVE_REGEX = new RegExp(
 // Bearer 토큰 패턴
 const BEARER_TOKEN_REGEX = /Bearer\s+[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]*/gi;
 
-// 기본 API 키 패턴 (일반적인 형태)
-const API_KEY_REGEX = /\b[A-Za-z0-9]{32,}\b/g;
-
 // 마스킹 문자열
 const MASK = '***MASKED***';
 

@@ -4,9 +4,8 @@
  */
 
 import React, { useMemo } from 'react';
-import type { OSDistribution, OSPackageManager, OSArchitecture } from '../../../core/downloaders/os-shared/types';
+import type { OSDistribution, OSPackageManager } from '../../../core/downloaders/os-shared/types';
 import {
-  OS_DISTRIBUTIONS,
   USE_CASE_RECOMMENDATIONS,
   getDistributionsByPackageManager,
   getRecommendedDistributions,
@@ -17,8 +16,6 @@ interface OSVersionSelectorProps {
   value: OSDistribution | null;
   onChange: (distribution: OSDistribution) => void;
 }
-
-type UseCase = 'enterprise' | 'legacy' | 'container' | 'development';
 
 export const OSVersionSelector: React.FC<OSVersionSelectorProps> = ({
   packageManager,

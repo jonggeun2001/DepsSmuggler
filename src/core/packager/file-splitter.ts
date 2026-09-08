@@ -54,7 +54,6 @@ export interface JoinProgress {
  * 파일 분할기 클래스
  */
 export class FileSplitter {
-  private readonly DEFAULT_CHUNK_SIZE = 25 * 1024 * 1024; // 25MB
   private readonly BUFFER_SIZE = 64 * 1024; // 64KB 버퍼
 
   /**

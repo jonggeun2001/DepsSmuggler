@@ -214,7 +214,7 @@ export class NpmTreeManager {
   /**
    * 버전이 기존 의존성들과 호환되는지 확인
    */
-  isVersionCompatibleWithExisting(name: string, version: string, path: string): boolean {
+  isVersionCompatibleWithExisting(name: string, _version: string, path: string): boolean {
     // 해당 경로 하위의 모든 노드들이 이 버전을 사용해도 되는지 확인
     for (const [nodePath, node] of this.tree.entries()) {
       if (nodePath.startsWith(path)) {
