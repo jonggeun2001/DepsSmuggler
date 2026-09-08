@@ -14,7 +14,7 @@
 | 구조·UI·IPC | [아키텍처](architecture-overview.md), [Electron / Renderer](electron-renderer.md), [IPC](ipc-handlers.md) | `electron/main.ts`, `preload.ts`, 핸들러·서비스, `src/renderer/` |
 | CLI | [CLI](cli.md) | `src/cli/index.ts`, `commands/`, `scripts/cli.cjs` |
 | 수집·해결 | [Downloaders](downloaders.md), [Factory](downloader-factory.md), [Resolvers](resolvers.md), [다운로드 유틸리티](download-utilities.md) | `src/core/downloaders/`, `resolver/`, 공용 다운로드·의존성 계약 |
-| OS·Docker | [OS 패키지](os-package-downloader.md), [Docker](docker-architecture.md) | `yum/`, `apt/`, `apk/`, `os-shared/`, Docker 인증·검색·레이어 서비스 |
+| OS·Docker | [OS 패키지](os-package-downloader.md), [Docker](docker-architecture.md) | `src/core/downloaders/{yum,apt,apk}.ts`, `src/core/resolver/{yum,apt,apk}-resolver.ts`, shared 파서 재내보내기, `os-shared/`, Docker 인증·검색·레이어 서비스 |
 | 출력·히스토리 | [Packagers](packagers.md), [히스토리](download-history.md) | `src/core/packager/`, mailer, Electron delivery pipeline, history store/handlers |
 | 공유 모듈 | [공유 개요](shared-utilities.md), [타입](shared-types.md), [HTTP](shared-http.md), [캐시](shared-cache.md), [의존성](shared-dependency.md), [파일·경로](shared-file-path.md), [기타](shared-misc.md) | `src/core/shared/`, `src/types/`, `src/core/ports/` 및 실제 호출부 |
 | 패키지별 공유 모듈 | [pip](shared-pip.md), [Conda](shared-conda.md), [Maven](shared-maven.md), [npm](shared-npm.md) | 각 shared 모듈의 export·옵션·구현·호출 테스트 |
