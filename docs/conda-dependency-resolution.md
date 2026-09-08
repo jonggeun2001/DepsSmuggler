@@ -615,9 +615,12 @@ isBuildCompatibleWithPlatform(depends: string[]): boolean {
   if (isWindows) return !(hasUnix || hasLinux || hasOSX);
   if (isMacOS) return !(hasWin || hasLinux);
 
-  return true; // noarch 등 기타
+  // OS 마커가 있지만 대상 OS를 알 수 없으면 공통 빌드로 간주하지 않는다.
+  return false;
 }
 ```
+
+예를 들어 `targetSubdir = 'noarch'`, `depends = ['__linux']`이면 `false`입니다. OS 마커가 없는 빌드는 위의 조기 반환으로 이 OS 검사 부분을 통과하며, 아키텍처·Python·CUDA 조건은 각각의 검사 결과도 만족해야 합니다.
 
 **플랫폼 마커**:
 | 마커 | 설명 | 호환 플랫폼 |
