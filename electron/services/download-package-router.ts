@@ -45,6 +45,35 @@ export interface DownloadPackageRouter {
 }
 
 export function createDownloadPackageRouter(): DownloadPackageRouter {
+  // JAR 작업도 부속 POM을 쓰므로 같은 출력 디렉터리/GAV의 다운로드와 복사를 직렬화한다.
+  const mavenDownloads = new Map<string, Promise<void>>();
+
+  async function downloadMavenInOrder(
+    pkg: DownloadPackage,
+    context: DownloadPackageContext
+  ): Promise<DownloadPackageResult> {
+    const key = JSON.stringify([path.resolve(context.packagesDir), pkg.name, pkg.version]);
+    const previous = mavenDownloads.get(key);
+    let release!: () => void;
+    const completion = new Promise<void>((resolve) => { release = resolve; });
+    mavenDownloads.set(key, completion);
+
+    await previous;
+    try {
+      if (context.state.isCancelled()) {
+        return { id: pkg.id, success: false, error: 'cancelled' };
+      }
+      await context.state.waitWhilePaused();
+      if (context.state.isCancelled()) {
+        return { id: pkg.id, success: false, error: 'cancelled' };
+      }
+      return await downloadMavenPackage(pkg, context);
+    } finally {
+      release();
+      if (mavenDownloads.get(key) === completion) mavenDownloads.delete(key);
+    }
+  }
+
   return {
     async downloadPackage(pkg, context) {
       const { packagesDir, options, progressEmitter, state } = context;
@@ -72,7 +101,7 @@ export function createDownloadPackageRouter(): DownloadPackageRouter {
         );
 
         if (pkg.type === 'maven') {
-          return await downloadMavenPackage(pkg, context);
+          return await downloadMavenInOrder(pkg, context);
         }
 
         if (pkg.type === 'docker') {
