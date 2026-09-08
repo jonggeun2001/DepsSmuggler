@@ -112,6 +112,15 @@ export function isSensitiveKey(key: string): boolean {
  * 객체 내 민감 정보를 재귀적으로 마스킹합니다.
  */
 export function maskObject(obj: unknown, depth: number = 0): unknown {
+  try {
+    return maskObjectValue(obj, depth);
+  } catch {
+    // 오류 객체의 getter/proxy도 실패할 수 있다. 로그 처리 중 원본을 노출하거나 재실패하지 않는다.
+    return '[UNREADABLE]';
+  }
+}
+
+function maskObjectValue(obj: unknown, depth: number): unknown {
   // 순환 참조 방지를 위한 깊이 제한
   const MAX_DEPTH = 10;
   if (depth > MAX_DEPTH) {
@@ -132,6 +141,7 @@ export function maskObject(obj: unknown, depth: number = 0): unknown {
   if (typeof obj === 'number' || typeof obj === 'boolean') {
     return obj;
   }
+  if (typeof obj === 'bigint') return obj.toString();
 
   // 배열
   if (Array.isArray(obj)) {
@@ -156,14 +166,19 @@ export function maskObject(obj: unknown, depth: number = 0): unknown {
   if (typeof obj === 'object') {
     const result: Record<string, unknown> = {};
 
-    for (const [key, value] of Object.entries(obj)) {
+    for (const key of Object.keys(obj)) {
+      let value: unknown;
       if (isSensitiveKey(key)) {
         // 민감한 키의 값은 완전히 마스킹
-        result[key] = MASK;
+        value = MASK;
       } else {
-        // 재귀적으로 처리
-        result[key] = maskObject(value, depth + 1);
+        try {
+          value = maskObject((obj as Record<string, unknown>)[key], depth + 1);
+        } catch {
+          value = '[UNREADABLE]';
+        }
       }
+      Object.defineProperty(result, key, { value, enumerable: true, configurable: true, writable: true });
     }
 
     return result;

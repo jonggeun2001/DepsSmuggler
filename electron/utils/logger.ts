@@ -8,7 +8,7 @@ import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import { maskSensitiveData } from '../../src/utils/mask';
+import { mask, maskSensitiveData, maskString } from '../../src/utils/mask';
 
 // 로그 디렉토리 설정 (~/.depssmuggler/logs로 통합)
 const getLogPath = (): string => {
@@ -27,7 +27,14 @@ const ensureLogDirectory = (logPath: string): void => {
 // 로거 초기화
 const initLogger = (): typeof log => {
   const logPath = getLogPath();
-  ensureLogDirectory(logPath);
+  try {
+    ensureLogDirectory(logPath);
+  } catch (error) {
+    log.transports.file.level = false;
+    log.transports.console.level = 'debug';
+    console.error('[logger:init] 로그 디렉토리 사용 불가, 콘솔 로깅 사용:', mask(error));
+    return log;
+  }
 
   // 파일 전송 설정
   log.transports.file.resolvePathFn = () => {
@@ -94,20 +101,32 @@ export const getLogger = (): typeof log => {
 
 // 편의 메서드 export (민감 정보 마스킹 적용)
 export const logDebug = (message: string, ...args: unknown[]): void => {
-  getLogger().debug(message, ...maskSensitiveData(...args));
+  writeLog('debug', message, args);
 };
 
 export const logInfo = (message: string, ...args: unknown[]): void => {
-  getLogger().info(message, ...maskSensitiveData(...args));
+  writeLog('info', message, args);
 };
 
 export const logWarn = (message: string, ...args: unknown[]): void => {
-  getLogger().warn(message, ...maskSensitiveData(...args));
+  writeLog('warn', message, args);
 };
 
 export const logError = (message: string, ...args: unknown[]): void => {
-  getLogger().error(message, ...maskSensitiveData(...args));
+  writeLog('error', message, args);
 };
+
+function writeLog(level: 'debug' | 'info' | 'warn' | 'error', message: string, args: unknown[]): void {
+  try {
+    getLogger()[level](maskString(message), ...maskSensitiveData(...args));
+  } catch (error) {
+    try {
+      console.error(`[logger:${level}] ${maskString(message)}`, mask(error), ...maskSensitiveData(...args));
+    } catch {
+      // 오류 기록 자체의 실패가 호출자에게 전파되지 않도록 한다.
+    }
+  }
+}
 
 // 특정 모듈용 스코프 로거 생성
 export const createScopedLogger = (scope: string) => {

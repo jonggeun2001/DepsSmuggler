@@ -2,7 +2,30 @@ import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { createDownloadSessionRunner } from './download-session';
 
+const logError = vi.hoisted(() => vi.fn());
+vi.mock('../../utils/logger', () => ({ createScopedLogger: () => ({ error: logError }) }));
+
 describe('createDownloadSessionRunner', () => {
+  it('초기 limiter 생성 실패도 실패 완료 이벤트와 로그를 남긴다', async () => {
+    const emitAllComplete = vi.fn();
+    const ensureDir = vi.fn();
+    const runner = createDownloadSessionRunner({
+      ensureDir,
+      createLimiter: () => { throw new Error('limiter failed'); },
+      packageRouter: { downloadPackage: vi.fn() },
+      deliveryPipeline: { finalizeDownload: vi.fn() },
+    });
+    await expect(runner.run({
+      packages: [{ id: 'p', type: 'pip', name: 'requests', version: '1' }],
+      options: { outputDir: '/tmp/out', outputFormat: 'zip', includeScripts: false },
+    }, { emitAllComplete } as never, {
+      isCancelled: () => false, isPaused: () => false, waitWhilePaused: async () => undefined,
+    })).resolves.toBeUndefined();
+    expect(emitAllComplete).toHaveBeenCalledWith({ success: false, outputPath: '/tmp/out', error: 'limiter failed' });
+    expect(logError).toHaveBeenCalled();
+    expect(ensureDir).not.toHaveBeenCalled();
+  });
+
   it('성공한 패키지만 DeliveryPipeline으로 넘기고 completion payload를 emit해야 함', async () => {
     const ensureDir = vi.fn().mockResolvedValue(undefined);
     const limit = vi.fn(async (task: () => Promise<unknown>) => task());

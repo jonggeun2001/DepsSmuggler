@@ -10,6 +10,17 @@ vi.mock('../utils/logger', () => ({
 }));
 
 describe('createSearchOrchestrator', () => {
+  it('백그라운드 사전 로딩 실패가 일반 검색을 막지 않는다', async () => {
+    const { createSearchOrchestrator } = await import('./search-orchestrator');
+    const orchestrator = createSearchOrchestrator({ packageRouter: {
+      prime: vi.fn().mockRejectedValue(new Error('offline')),
+      searchPackages: vi.fn().mockResolvedValue([{ name: 'requests', version: '1' }]),
+      getVersions: vi.fn(), suggest: vi.fn(),
+    } });
+    await expect(orchestrator.prime()).resolves.toBeUndefined();
+    expect(await orchestrator.searchPackages('pip', 'requests')).toEqual({ results: [{ name: 'requests', version: '1' }] });
+  });
+
   it('패키지 타입별 검색과 버전 조회를 router에 위임한다', async () => {
     const { createSearchOrchestrator } = await import('./search-orchestrator');
 

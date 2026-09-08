@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { machineIdSync } from 'node-machine-id';
+import { mask } from '../utils/mask';
 
 // 설정 인터페이스 정의
 export interface Config {
@@ -32,6 +33,18 @@ const DEFAULT_CONFIG: Config = {
   defaultOutputFormat: 'archive',
   defaultArchiveType: 'zip',
 };
+
+const isPositiveNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0;
+const isPositiveInteger = (value: unknown): value is number =>
+  isPositiveNumber(value) && Number.isSafeInteger(value);
+
+function readConfigObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('설정 파일은 객체여야 합니다');
+  }
+  return value as Record<string, unknown>;
+}
 
 // CLI용 설정 인터페이스
 export interface CLIConfig {
@@ -100,14 +113,38 @@ export class ConfigManager {
    * 설정을 로드합니다. 파일이 없으면 기본값을 생성합니다.
    */
   async loadConfig(): Promise<Config> {
-    await this.ensureDirectories();
     this.needsEncryptionMigration = false; // 마이그레이션 플래그 초기화
 
     try {
+      await this.ensureDirectories();
       if (await fs.pathExists(this.configPath)) {
-        const rawConfig = await fs.readJson(this.configPath);
+        const rawConfig = readConfigObject(await fs.readJson(this.configPath));
         // 저장된 설정과 기본값을 병합 (새로운 설정 항목 대응)
         const config: Config = { ...DEFAULT_CONFIG, ...rawConfig };
+        const invalidFields: string[] = [];
+        if (!isPositiveInteger(config.concurrentDownloads)) {
+          config.concurrentDownloads = DEFAULT_CONFIG.concurrentDownloads;
+          invalidFields.push('concurrentDownloads');
+        }
+        if (!isPositiveNumber(config.fileSplitSizeMB)) {
+          config.fileSplitSizeMB = DEFAULT_CONFIG.fileSplitSizeMB;
+          invalidFields.push('fileSplitSizeMB');
+        }
+        if (typeof config.cachingEnabled !== 'boolean') {
+          config.cachingEnabled = DEFAULT_CONFIG.cachingEnabled;
+          invalidFields.push('cachingEnabled');
+        }
+        for (const key of ['smtpHost', 'smtpUser', 'smtpPassword', 'smtpFrom', 'smtpTo'] as const) {
+          if (config[key] !== undefined && typeof config[key] !== 'string') {
+            delete config[key];
+            invalidFields.push(key);
+          }
+        }
+        if (config.smtpPort !== undefined && (!isPositiveInteger(config.smtpPort) || config.smtpPort > 65535)) {
+          delete config.smtpPort;
+          invalidFields.push('smtpPort');
+        }
+        if (invalidFields.length) console.warn('[config:load] 잘못된 설정 필드에 기본값 사용:', invalidFields);
 
         // SMTP 비밀번호 복호화
         if (config.smtpPassword) {
@@ -117,19 +154,23 @@ export class ConfigManager {
         // 레거시 키로 복호화된 경우 새 키로 마이그레이션
         if (this.needsEncryptionMigration && config.smtpPassword) {
           console.info('[config] 암호화 키 마이그레이션을 수행합니다...');
-          await this.saveConfig(config);
-          this.needsEncryptionMigration = false;
-          console.info('[config] 암호화 키 마이그레이션 완료.');
+          try {
+            await this.saveConfig(config);
+            this.needsEncryptionMigration = false;
+            console.info('[config] 암호화 키 마이그레이션 완료.');
+          } catch (error) {
+            console.error('[config:migrate] 설정은 읽었지만 마이그레이션 저장 실패:', mask(error));
+          }
         }
 
         return config;
       }
+      // 파일이 없는 경우에만 기본값 저장을 시도한다. 읽기 실패한 원본은 보존한다.
+      await this.saveConfig(DEFAULT_CONFIG);
     } catch (error) {
-      console.error('설정 파일 로드 실패, 기본값 사용:', error);
+      console.error('[config:load] 설정 로드/초기화 실패, 메모리 기본값 사용:', mask(error));
     }
 
-    // 기본 설정 생성 및 저장
-    await this.saveConfig(DEFAULT_CONFIG);
     return { ...DEFAULT_CONFIG };
   }
 
@@ -197,18 +238,30 @@ export class ConfigManager {
     try {
       fs.ensureDirSync(this.configDir);
       if (fs.pathExistsSync(this.configPath)) {
-        const rawConfig = fs.readJsonSync(this.configPath);
+        const rawConfig = readConfigObject(fs.readJsonSync(this.configPath));
+        const cacheEnabled = rawConfig.enableCache ?? rawConfig.cachingEnabled;
+        const validConcurrency = isPositiveInteger(rawConfig.concurrentDownloads);
+        const validCacheEnabled = typeof cacheEnabled === 'boolean';
+        const validCachePath = typeof rawConfig.cachePath === 'string' && rawConfig.cachePath.trim().length > 0;
+        const validLogLevel = typeof rawConfig.logLevel === 'string' &&
+          ['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly'].includes(rawConfig.logLevel);
+        if ((!validConcurrency && rawConfig.concurrentDownloads !== undefined) ||
+            (!validCacheEnabled && cacheEnabled !== undefined) ||
+            (!validCachePath && rawConfig.cachePath !== undefined && rawConfig.cachePath !== '') ||
+            (!validLogLevel && rawConfig.logLevel !== undefined)) {
+          console.warn('[config:get] 잘못된 CLI 설정에 기본값 사용');
+        }
         return {
-          concurrentDownloads: rawConfig.concurrentDownloads || DEFAULT_CONFIG.concurrentDownloads,
+          concurrentDownloads: validConcurrency ? rawConfig.concurrentDownloads as number : DEFAULT_CONFIG.concurrentDownloads,
           // settings.json은 enableCache 사용, 기존 cachingEnabled도 호환
-          cacheEnabled: rawConfig.enableCache ?? rawConfig.cachingEnabled ?? DEFAULT_CONFIG.cachingEnabled,
-          cachePath: rawConfig.cachePath || this.cacheDir,
+          cacheEnabled: validCacheEnabled ? cacheEnabled : DEFAULT_CONFIG.cachingEnabled,
+          cachePath: validCachePath ? rawConfig.cachePath as string : this.cacheDir,
           maxCacheSize: 10 * 1024 * 1024 * 1024, // 10GB
-          logLevel: rawConfig.logLevel || 'info',
+          logLevel: validLogLevel ? rawConfig.logLevel as string : 'info',
         };
       }
-    } catch {
-      // 에러 무시
+    } catch (error) {
+      console.error('[config:get] CLI 설정 로드 실패, 기본값 사용:', mask(error));
     }
     return {
       concurrentDownloads: DEFAULT_CONFIG.concurrentDownloads,

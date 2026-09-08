@@ -152,7 +152,13 @@ depssmuggler/
 - 설정 화면의 저장 계약은 `settings-form-utils.ts`가 form 값과 store shape 간 변환을 맡아 유지합니다.
 - 장바구니는 persist 기반이고, 히스토리는 `history.json`을 source of truth로 사용하는 file-backed store입니다.
 
+### 설정 읽기 실패의 격리
+
+`ConfigManager.loadConfig()`는 디렉터리 생성·읽기·최초 기본값 저장 실패 시 메모리 기본값을 반환합니다. 읽기에 실패한 기존 파일을 기본값으로 덮어쓰지 않으며, 명시적인 저장/초기화 실패는 계속 호출자에게 전달합니다. 잘못된 동시 다운로드 수·분할 크기·캐시 여부·SMTP 필드는 기본값/미설정 값으로 복구하고 정상 필드는 유지합니다. 암호화 마이그레이션 저장이 실패해도 이미 읽은 설정은 반환합니다. 로그의 `[config:load]`, `[config:get]`, `[config:migrate]`로 실패 지점을 구분합니다. `src/core/config.test.ts`는 임시 홈에서 권한/용량 오류와 원본 보존을 검증합니다.
+
 ## 업데이트 및 버전 프리로드
+
+Electron의 앱 준비/창 생성과 활성화 시 창 재생성 Promise는 실패를 `Main` 로그에 기록합니다. 처리되지 않은 Promise 예외로 방치하지 않으며, 화면 파일 손상처럼 창을 로드할 수 없는 상황을 성공으로 취급하거나 새 자동 복구 기능을 추가하지는 않습니다. `electron/main-lifecycle.test.ts`로 검증합니다.
 
 - 자동 업데이트는 `electron/updater.ts`와 `src/renderer/components/UpdateNotification.tsx`가 담당합니다.
 - 버전 프리로드는 `electron/version-handlers.ts`와 `src/core/shared/version-preloader.ts`가 담당합니다.

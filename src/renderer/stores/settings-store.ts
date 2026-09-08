@@ -219,6 +219,50 @@ const migrateLegacyOutputSettings = (fileConfig: Record<string, unknown>): Recor
   return migratedConfig;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function normalizeFileSettings(fileConfig: Record<string, unknown>): Record<string, unknown> {
+  const normalized = migrateLegacyOutputSettings(fileConfig);
+  const invalidFields: string[] = [];
+  for (const [key, fallback] of Object.entries(defaultSettings)) {
+    if (!(key in normalized)) continue;
+    const value = normalized[key];
+    let valid = typeof value === typeof fallback;
+    if (typeof fallback === 'number') {
+      valid = typeof value === 'number' && Number.isFinite(value) &&
+        (key === 'downloadRenderInterval' ? value >= 0 : value > 0);
+      if (key === 'concurrentDownloads' || key === 'smtpPort') valid &&= Number.isSafeInteger(value);
+      if (key === 'smtpPort') valid &&= (value as number) <= 65535;
+    } else if (key === 'cudaVersion') {
+      valid = value === null || typeof value === 'string';
+    } else if (key === 'customCondaChannels') {
+      valid = Array.isArray(value) && value.every(item => typeof item === 'string');
+    } else if (key === 'customPipIndexUrls') {
+      valid = Array.isArray(value) && value.every(item => isRecord(item) &&
+        typeof item.label === 'string' && typeof item.url === 'string');
+    } else if (key === 'pipTargetPlatform') {
+      valid = isRecord(value) && typeof value.os === 'string' && typeof value.arch === 'string' &&
+        ['pythonVersion', 'linuxDistro', 'glibcVersion', 'macosVersion'].every(field =>
+          value[field] === undefined || typeof value[field] === 'string');
+    } else if (isRecord(fallback)) {
+      valid = isRecord(value) && Object.entries(fallback).every(([field, defaultValue]) =>
+        typeof value[field] === typeof defaultValue);
+    }
+    if (!valid) {
+      normalized[key] = fallback;
+      invalidFields.push(key);
+    }
+  }
+  // 설정 파일의 데이터가 스토어 액션을 가리지 못하게 한다. 알 수 없는 데이터 필드는 호환성을 위해 보존한다.
+  for (const key of ['updateSettings', 'resetSettings', 'initializeFromFile', 'addCustomCondaChannel',
+    'removeCustomCondaChannel', 'addCustomPipIndexUrl', 'removeCustomPipIndexUrl', '_initialized', '__proto__', 'constructor']) {
+    delete normalized[key];
+  }
+  if (invalidFields.length) console.warn('[settings-store:load] 잘못된 설정 필드에 기본값 사용:', invalidFields);
+  return normalized;
+}
+
 // Electron IPC를 통한 파일 기반 스토리지 (Windows, macOS, Linux 지원)
 // 설정 파일 위치: ~/.depssmuggler/settings.json
 const electronStorage: StateStorage = {
@@ -236,11 +280,20 @@ const electronStorage: StateStorage = {
       }
     }
     // 브라우저 환경 또는 Electron IPC 실패 시 localStorage 사용
-    return localStorage.getItem(name);
+    try {
+      return localStorage.getItem(name);
+    } catch (error) {
+      console.error('[settings-store:read] 브라우저 저장소 읽기 실패:', error);
+      return null;
+    }
   },
   setItem: async (name: string, value: string): Promise<void> => {
     // localStorage에도 저장 (백업 및 브라우저 환경 지원)
-    localStorage.setItem(name, value);
+    try {
+      localStorage.setItem(name, value);
+    } catch (error) {
+      console.error('[settings-store:write] 브라우저 저장소 저장 실패:', error);
+    }
 
     // Electron 환경에서는 IPC를 통해 파일에 저장
     if (typeof window !== 'undefined' && window.electronAPI?.config?.set) {
@@ -250,14 +303,19 @@ const electronStorage: StateStorage = {
         // 액션 함수와 내부 상태는 제외하고 저장
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { updateSettings, resetSettings, initializeFromFile, addCustomCondaChannel, removeCustomCondaChannel, addCustomPipIndexUrl, removeCustomPipIndexUrl, _initialized, ...settingsToSave } = state;
-        await window.electronAPI.config.set(settingsToSave);
+        const result = await window.electronAPI.config.set(settingsToSave);
+        if (result?.success === false) throw new Error(result.error || '설정 저장 실패');
       } catch (error) {
         console.error('설정 저장 실패:', error);
       }
     }
   },
   removeItem: async (name: string): Promise<void> => {
-    localStorage.removeItem(name);
+    try {
+      localStorage.removeItem(name);
+    } catch (error) {
+      console.error('[settings-store:remove] 브라우저 저장소 삭제 실패:', error);
+    }
     // Electron 환경에서는 파일도 삭제
     if (typeof window !== 'undefined' && window.electronAPI?.config?.reset) {
       try {
@@ -317,8 +375,8 @@ export const useSettingsStore = create<SettingsState>()(
         if (typeof window !== 'undefined' && window.electronAPI?.config?.get) {
           try {
             const fileConfig = await window.electronAPI.config.get();
-            if (fileConfig && typeof fileConfig === 'object') {
-              const normalizedConfig = migrateLegacyOutputSettings(fileConfig as Record<string, unknown>);
+            if (isRecord(fileConfig)) {
+              const normalizedConfig = normalizeFileSettings(fileConfig);
               // 파일에 저장된 설정을 현재 상태와 병합 (새 설정 항목 대응)
               const mergedConfig = { ...defaultSettings, ...normalizedConfig, _initialized: true };
               set(mergedConfig);
@@ -371,5 +429,5 @@ if (typeof window !== 'undefined') {
     }
   };
 
-  initSettings();
+  void initSettings().catch(error => console.error('[settings-store:init] 설정 초기화 실패:', error));
 }

@@ -2,7 +2,15 @@ import * as winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import * as path from 'path';
 import { getConfigManager } from '../core/config';
-import { mask } from './mask';
+import { mask, maskString } from './mask';
+
+function reportLoggingFailure(error: unknown, message = '로그 기록 실패', meta?: Record<string, unknown>): void {
+  try {
+    console.error(`[logger] ${maskString(message)}`, mask(error), mask(meta));
+  } catch {
+    // 콘솔까지 사용할 수 없으면 로그 실패가 원래 작업으로 전파되지 않게 한다.
+  }
+}
 
 // 개발 모드 여부
 const isDev = process.env.NODE_ENV === 'development';
@@ -51,6 +59,7 @@ class Logger {
         }),
       ],
     });
+    this.logger.on('error', error => reportLoggingFailure(error));
   }
 
   /**
@@ -102,6 +111,7 @@ class Logger {
       format: logFormat,
       transports,
     });
+    this.logger.on('error', error => reportLoggingFailure(error));
 
     this.initialized = true;
     this.info('로거 초기화 완료', { logsDir });
@@ -111,28 +121,36 @@ class Logger {
    * 에러 로그 (민감 정보 마스킹 적용)
    */
   error(message: string, meta?: Record<string, unknown>): void {
-    this.logger.error(message, meta ? (mask(meta) as Record<string, unknown>) : undefined);
+    this.write('error', message, meta);
   }
 
   /**
    * 경고 로그 (민감 정보 마스킹 적용)
    */
   warn(message: string, meta?: Record<string, unknown>): void {
-    this.logger.warn(message, meta ? (mask(meta) as Record<string, unknown>) : undefined);
+    this.write('warn', message, meta);
   }
 
   /**
    * 정보 로그 (민감 정보 마스킹 적용)
    */
   info(message: string, meta?: Record<string, unknown>): void {
-    this.logger.info(message, meta ? (mask(meta) as Record<string, unknown>) : undefined);
+    this.write('info', message, meta);
   }
 
   /**
    * 디버그 로그 (민감 정보 마스킹 적용)
    */
   debug(message: string, meta?: Record<string, unknown>): void {
-    this.logger.debug(message, meta ? (mask(meta) as Record<string, unknown>) : undefined);
+    this.write('debug', message, meta);
+  }
+
+  private write(level: 'error' | 'warn' | 'info' | 'debug', message: string, meta?: Record<string, unknown>): void {
+    try {
+      this.logger[level](maskString(message), meta ? mask(meta) as Record<string, unknown> : undefined);
+    } catch (error) {
+      reportLoggingFailure(error, message, meta);
+    }
   }
 
   /**

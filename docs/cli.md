@@ -4,6 +4,8 @@
 
 CLI 엔트리포인트는 `src/cli/index.ts`이며 Commander 기반으로 구성됩니다. 현재 CLI는 일반 패키지 작업과 OS 패키지 보조 명령을 함께 제공합니다.
 
+비동기 명령은 `parseAsync`로 완료/실패까지 기다립니다. 명령 예외는 `CLI 명령 실행 실패` 로그와 콘솔 오류를 남기고 종료 코드 `1`로 마무리하며, 실패를 성공으로 취급하지 않습니다. 파일 로거 초기화가 실패하면 경고를 남기고 콘솔 로깅으로 명령 실행을 계속합니다. `src/cli/index.test.ts`가 두 실패 경계를 검증합니다.
+
 ## 실행
 
 ```bash
@@ -216,6 +218,8 @@ depssmuggler os cache clear
 ## `config`
 
 설정 파일은 `~/.depssmuggler/settings.json`을 사용합니다.
+
+읽기에 실패하거나 동시 다운로드 수·캐시 여부·캐시 경로·로그 레벨의 타입/범위가 잘못된 경우 해당 값은 기존 CLI 기본값을 사용하고 `[config:get]` 로그를 남깁니다. 읽기만으로 손상된 파일을 덮어쓰지 않으며, 명시적인 설정 저장/초기화 실패는 오류로 유지합니다.
 
 ```bash
 depssmuggler config get
