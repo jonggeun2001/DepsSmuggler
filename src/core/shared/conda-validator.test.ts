@@ -23,6 +23,20 @@ describe('Conda 채널 검증', () => {
     expect(validate(403)).toBe(false);
   });
 
+  it('defaults는 공식 main repository의 noarch endpoint를 검증한다', async () => {
+    vi.mocked(axios.head).mockResolvedValue({ status: 200 });
+
+    await expect(validateCondaChannel('defaults')).resolves.toBe(true);
+    expect(axios.head).toHaveBeenCalledWith(
+      'https://repo.anaconda.com/pkgs/main/noarch/repodata.json',
+      expect.objectContaining({ timeout: 5000 })
+    );
+    expect(axios.head).not.toHaveBeenCalledWith(
+      'https://conda.anaconda.org/defaults/noarch/repodata.json',
+      expect.anything()
+    );
+  });
+
   it('200 이외의 응답은 유효하지 않다', async () => {
     vi.mocked(axios.head).mockResolvedValue({ status: 204 });
     await expect(validateCondaChannel('empty-channel')).resolves.toBe(false);

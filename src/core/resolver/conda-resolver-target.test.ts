@@ -674,6 +674,41 @@ describe('CondaRepoDataProcessor Python 호환성', () => {
 });
 
 describe('CondaResolver 대상 아티팩트 선택', () => {
+  it.each([
+    ['linux-64', { system: 'Linux', machine: 'x86_64' }, 'https://repo.anaconda.com/pkgs/main/linux-64/'],
+    ['noarch', { machine: 'x86_64' }, 'https://repo.anaconda.com/pkgs/main/noarch/'],
+  ] as const)('defaults %s artifact URL uses the canonical repository base', async (subdir, targetPlatform, base) => {
+    const resolver = new CondaResolver();
+    const processor = (resolver as any).repoDataProcessor;
+    vi.spyOn(processor, 'getRepoData').mockResolvedValue({ packages: {}, 'packages.conda': {}, info: { subdir } });
+    vi.spyOn(processor, 'findPackageCandidates').mockReturnValue([
+      {
+        filename: `demo-1.0.0-${subdir}.conda`,
+        name: 'demo',
+        version: '1.0.0',
+        build: '0',
+        buildNumber: 0,
+        depends: [],
+        subdir,
+        size: 1,
+        isPythonMatch: true,
+      },
+    ]);
+
+    const result = await resolver.resolveDependencies('demo', '1.0.0', {
+      maxDepth: 0,
+      channel: 'defaults',
+      targetPlatform,
+    });
+
+    expect(result.root.package.metadata).toMatchObject({
+      repository: 'defaults/demo',
+      subdir,
+      downloadUrl: `${base}demo-1.0.0-${subdir}.conda`,
+    });
+    expect(result.root.package.metadata.downloadUrl).not.toContain('conda.anaconda.org/defaults');
+  });
+
   it('대상 OS가 없으면 linux-64 대신 noarch만 조회한다', async () => {
     const resolver = new CondaResolver();
     const processor = (

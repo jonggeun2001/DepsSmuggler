@@ -287,6 +287,8 @@ torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl
 - 캐시: `src/core/shared/conda-cache.ts` 모듈 사용 (repodata 디스크 캐시와 processor의 요청 중 메모리 캐시)
 - **알고리즘**: BFS 큐 기반 (call stack overflow 방지)
 
+`defaults` 채널은 `https://repo.anaconda.com/pkgs/main`을 기준으로 대상 subdir와 `noarch`의 repodata를 조회하고 다운로드 URL을 생성합니다. `metadata.repository`에는 요청한 `defaults/<name>`을 유지합니다. 명시적인 `main` 등 일반 채널은 `https://conda.anaconda.org/<채널>`을 사용합니다. 채널 URL 변환은 [공유 헬퍼](shared-conda.md#채널-url-conda-channelts)에 모으며, 버전·빌드 선택은 계속 repodata에 한정합니다.
+
 ### 모듈 구조
 
 ```

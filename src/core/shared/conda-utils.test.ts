@@ -354,6 +354,26 @@ describe('Conda Anaconda API fallback and errors', () => {
     });
   });
 
+  it('uses the official defaults repository and main API owner for fallback files', async () => {
+    serveIndexes({}, [
+      apiFile({
+        basename: 'noarch/defaults-package.conda',
+        attrs: { subdir: 'noarch', build: 'pyhd8ed1ab_0', build_number: 0 },
+      }),
+    ]);
+
+    await expect(
+      getCondaDownloadUrl('numpy', '2.0.0', undefined, undefined, 'defaults')
+    ).resolves.toEqual({
+      url: 'https://repo.anaconda.com/pkgs/main/noarch/defaults-package.conda',
+      filename: 'defaults-package.conda',
+      size: 8192,
+    });
+    expect(mocks.get.mock.calls.map(([url]) => url)).toContain(
+      'https://api.anaconda.org/package/main/numpy/files'
+    );
+  });
+
   it.each<{ files: AnacondaFileInfo[] }>([
     { files: [] },
     { files: [apiFile({ version: '1.0.0' })] },

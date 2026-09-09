@@ -16,6 +16,7 @@ import {
 import {
   CondaRepoDataProcessor,
 } from './conda-repodata-processor';
+import { getCondaRepositoryBase } from '../shared/conda-channel';
 import type { ResolutionSession } from '../shared/internal/resolution-session';
 import {
   attachResolutionSession,
@@ -352,7 +353,7 @@ export class CondaResolver implements IResolver {
 
     // 다운로드 URL 생성
     const downloadUrl =
-      `${this.condaUrl}/${channel}/${resolvedSubdir}/${resolvedFilename}`;
+      `${getCondaRepositoryBase(channel, this.condaUrl)}/${resolvedSubdir}/${resolvedFilename}`;
 
     const packageInfo: PackageInfo = {
       type: 'conda',

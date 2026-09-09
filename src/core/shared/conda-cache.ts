@@ -10,6 +10,7 @@ import * as path from 'path';
 import axios, { AxiosResponse } from 'axios';
 import * as fzstd from 'fzstd';
 import { createMemoryCache } from './cache/cache-store';
+import { CONDA_STANDARD_ORIGIN, getCondaRepositoryBase } from './conda-channel';
 import { RepoData } from './conda-types';
 import logger from '../../utils/logger';
 
@@ -205,7 +206,7 @@ export async function fetchRepodata(
   options: FetchRepodataOptions = {}
 ): Promise<CacheResult | null> {
   const {
-    baseUrl = 'https://conda.anaconda.org',
+    baseUrl = CONDA_STANDARD_ORIGIN,
     cacheDir = getDefaultCacheDir(),
     useCache = true,
     forceRefresh = false,
@@ -240,10 +241,11 @@ export async function fetchRepodata(
   const requestKey = getRequestKey(baseUrl, cacheDir, channel, subdir, useCache, forceRefresh);
   const result = await repodataRequestCache.dedupeFetch(requestKey, async () => {
     // 2. HTTP 요청 준비
+    const repositoryBase = getCondaRepositoryBase(channel, baseUrl);
     const urls = [
-      { url: `${baseUrl}/${channel}/${subdir}/repodata.json.zst`, compressed: true },
-      { url: `${baseUrl}/${channel}/${subdir}/current_repodata.json`, compressed: false },
-      { url: `${baseUrl}/${channel}/${subdir}/repodata.json`, compressed: false },
+      { url: `${repositoryBase}/${subdir}/repodata.json.zst`, compressed: true },
+      { url: `${repositoryBase}/${subdir}/current_repodata.json`, compressed: false },
+      { url: `${repositoryBase}/${subdir}/repodata.json`, compressed: false },
     ];
 
     // 기존 캐시 메타데이터 (조건부 요청용)

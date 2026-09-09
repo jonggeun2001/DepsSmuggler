@@ -139,6 +139,8 @@ await downloader.searchPackages('numpy', 'conda-forge');
 await downloader.searchPackages('numpy', 'all'); // 검색에서만 채널 필터 생략
 ```
 
+`defaults`의 repodata와 패키지 파일은 `https://repo.anaconda.com/pkgs/main/<subdir>/`에서 조회합니다. 버전·파일 목록 API에서는 공식 `main` 소유자를 사용하며, 선택한 채널은 패키지 메타데이터의 `defaults/<name>`으로 유지합니다. API 파일명이 `noarch/six-….conda`처럼 subdir를 포함해도 다운로드 URL에 subdir를 한 번만 붙입니다. 명시적인 `main`은 기존 `https://conda.anaconda.org/main` 채널로 유지하고, 다른 채널도 기존 주소를 사용합니다. URL 규칙은 [공유 Conda 유틸리티](shared-conda.md#채널-url-conda-channelts)를 참고하세요.
+
 ### Subdir 매핑
 
 | OS + 아키텍처 | Subdir |

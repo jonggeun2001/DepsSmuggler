@@ -158,4 +158,27 @@ describe('conda-cache', () => {
     expect(second?.data.info.subdir).toBe(subdir);
     expect(mockedAxiosGet).toHaveBeenCalledTimes(2);
   });
+
+  it('defaults는 공식 repository URL을 사용하면서 논리 채널 캐시 경로를 유지해야 함', async () => {
+    const data: RepoData = {
+      info: { subdir: 'noarch' },
+      packages: { 'defaults-package-1.0-0.tar.bz2': {} as never },
+      'packages.conda': {},
+    };
+    mockedAxiosGet.mockImplementation(async (url: string) => {
+      if (url.endsWith('repodata.json.zst')) throw new Error('zstd unavailable');
+      return { status: 200, data, headers: {} } as never;
+    });
+
+    const result = await fetchRepodata('defaults', 'noarch', { cacheDir });
+    const { metaPath } = getCachePaths(cacheDir, 'defaults', 'noarch');
+    const meta = await fs.readJson(metaPath);
+
+    expect(result?.data).toEqual(data);
+    expect(meta.url).toBe('https://repo.anaconda.com/pkgs/main/noarch/current_repodata.json');
+    expect(mockedAxiosGet.mock.calls.map(([url]) => url)).toEqual([
+      'https://repo.anaconda.com/pkgs/main/noarch/repodata.json.zst',
+      'https://repo.anaconda.com/pkgs/main/noarch/current_repodata.json',
+    ]);
+  });
 });

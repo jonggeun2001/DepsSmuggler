@@ -1,20 +1,21 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
-import { createScopedLogger } from '../utils/logger';
-import { getPyPIDownloadUrl, downloadFile } from '../../src/core/shared';
-import type {
-  Architecture,
-  DownloadOptions,
-  DownloadPackage,
-  DownloadPackageResult,
-} from '../../src/core/shared';
 import {
   getCondaDownloader,
   getDockerDownloader,
   getMavenDownloader,
   getNpmDownloader,
 } from '../../src/core';
+import { getPyPIDownloadUrl, downloadFile } from '../../src/core/shared';
+import { getCondaRepositoryBase } from '../../src/core/shared/conda-channel';
+import { createScopedLogger } from '../utils/logger';
 import type { DownloadProgressEmitter } from './download-progress';
+import type {
+  Architecture,
+  DownloadOptions,
+  DownloadPackage,
+  DownloadPackageResult,
+} from '../../src/core/shared';
 
 const log = createScopedLogger('DownloadPackageRouter');
 
@@ -221,7 +222,8 @@ async function resolveDownloadTarget(
       const subdir = pkg.metadata?.subdir as string | undefined;
       const filename = pkg.metadata?.filename as string | undefined;
       if (subdir && filename) {
-        condaDownloadUrl = `https://conda.anaconda.org/${channel}/${subdir}/${filename}`;
+        const artifactFilename = filename.split('/').pop() || filename;
+        condaDownloadUrl = `${getCondaRepositoryBase(channel)}/${subdir}/${artifactFilename}`;
       } else {
         const arch = (pkg.architecture || architecture || 'x86_64') as Architecture;
         const metadata = await condaDownloader.getPackageMetadata(
