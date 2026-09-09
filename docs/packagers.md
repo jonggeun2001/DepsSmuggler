@@ -141,6 +141,7 @@ interface ScriptOptions {
   packageDir?: string;            // 기본 './packages'
   npmPackageFiles?: { filePath: string; relativePath: string }[];
   npmRootPackages?: PackageInfo[]; // 직접 요청한 npm 패키지의 해결된 버전
+  condaPackageFiles?: { relativePath: string }[]; // packages/ 안의 실제 Conda 파일 경로
 }
 
 interface GeneratedScript {
@@ -178,7 +179,7 @@ Get-ChildItem -Path $PackageDir -Directory -Recurse | ForEach-Object {
 pip install --no-index @FindLinkArgs requests==2.31.0
 ```
 
-실제 파일은 헤더, 패키지 디렉터리와 실행 도구 확인, 로그 함수와 타입별 설치 함수를 포함합니다. Python은 하위 디렉터리마다 `--find-links`를 추가합니다. Maven은 패키지 메타데이터의 GAV 좌표로 canonical 저장소 경로를 선택해 `packages/<group>/<artifact>/<version>/`를 `MAVEN_REPO_LOCAL` 또는 기본 `~/.m2/repository`에 그대로 복사합니다. GUI 출력의 `packages/m2repo/` 구조도 지원하며, 같은 GAV 디렉터리의 원본 POM, parent/BOM POM, POM-only 항목, classifier와 checksum을 보존합니다. Bash와 PowerShell 모두 Maven 플러그인이나 네트워크를 호출하지 않고, 좌표 디렉터리가 없거나 복사에 실패하면 오류로 종료합니다. Bash는 pip/conda·npm·Maven·YUM·Docker 블록을, PowerShell은 pip/conda·npm·Maven·Docker 블록을 생성하며 YUM 설치 블록은 없습니다.
+실제 파일은 헤더, 패키지 디렉터리와 실행 도구 확인, 로그 함수와 타입별 설치 함수를 포함합니다. pip은 하위 디렉터리마다 `--find-links`를 추가합니다. Maven은 패키지 메타데이터의 GAV 좌표로 canonical 저장소 경로를 선택해 `packages/<group>/<artifact>/<version>/`를 `MAVEN_REPO_LOCAL` 또는 기본 `~/.m2/repository`에 그대로 복사합니다. GUI 출력의 `packages/m2repo/` 구조도 지원하며, 같은 GAV 디렉터리의 원본 POM, parent/BOM POM, POM-only 항목, classifier와 checksum을 보존합니다. Bash와 PowerShell 모두 Maven 플러그인이나 네트워크를 호출하지 않고, 좌표 디렉터리가 없거나 복사에 실패하면 오류로 종료합니다. Bash는 pip·Conda·npm·Maven·YUM·Docker 블록을, PowerShell은 pip·Conda·npm·Maven·Docker 블록을 생성하며 YUM 설치 블록은 없습니다.
 
 Maven의 `_remote.repositories`는 대상 저장소의 기존 내용을 보존하며 복사한 아티팩트에만 `파일명>=` 로컬 설치 기록을 추가합니다. `.demo`처럼 점으로 시작하는 아티팩트의 POM·JAR·체크섬도 복사합니다. 체크섬과 대상에만 존재하는 파일은 등록하지 않고, 원본에 있는 추적 파일로 대상 기록을 덮어쓰지도 않습니다. 재실행해도 로컬 기록은 중복되지 않습니다. 기록 저장에 실패하거나 좌표 디렉터리에 아티팩트가 없으면 오류로 종료합니다. 생성된 PowerShell 파일은 Windows PowerShell 5의 한글 해석을 위해 UTF-8 BOM을 포함합니다.
 
@@ -194,7 +195,13 @@ CLI는 `npmRootPackages`에 실제 직접 요청 목록과 해결된 버전을 �
 
 상위 폴더의 사용자 `package.json`은 변경하지 않습니다. `npm-project`는 비어 있거나 이 스크립트가 생성한 프로젝트여야 하며, 소유 표시가 없는 기존 프로젝트나 심볼릭 링크 대상은 오류로 처리합니다. 설치용 manifest는 유지하지만 프로젝트 루트의 lockfile은 생성하지 않으며 npm 자체 업데이트 확인도 끕니다. Node.js와 npm이 필요하며, 도구 부재·빈 파일 목록·의존성 누락·손상된 tarball·설치 명령 실패는 오류 종료로 이어집니다. npm의 일반 설치 lifecycle은 유지합니다. 이 스크립트는 의존성을 전달된 파일에 연결하며, OS·아키텍처 간 네이티브 패키지 변환이나 설치 lifecycle의 외부 다운로드 대체는 수행하지 않습니다.
 
-일반 `ScriptGenerator`에는 APT·APK 전용 설치 블록이 없고, Conda 항목도 pip 설치 블록으로 묶입니다. `.conda` 파일을 설치하는 Conda 전용 스크립트로 간주하면 안 됩니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
+Conda는 pip와 별도의 설치 블록을 생성합니다. CLI는 완료된 Conda 다운로드 항목의 실제 파일 경로를 `condaPackageFiles`로 전달하므로 `--no-deps` 입력의 메타데이터에 파일명이 없어도 다운로드한 파일을 참조합니다. 이 옵션을 생략한 API 호출은 각 Conda 항목의 정확한 `metadata.filename`을 사용합니다. 파일명 누락·빈 명시 목록·잘못된 상대 경로·지원하지 않는 확장자는 생성 오류이며, 다른 패키지의 `.tar.bz2`를 함께 설치하지 않도록 폴더 전체를 확장자로 탐색하지 않습니다. 실행 시에는 선언된 파일의 존재를 확인합니다.
+
+Conda 블록은 [명시적 로컬 아카이브 설치](https://docs.conda.io/projects/conda/en/stable/commands/install.html)를 사용합니다. 기본 대상 `SCRIPT_DIR/conda-env`가 없으면 `conda create --offline --yes --no-default-packages --prefix ...`를, 기존 Conda 환경이면 `conda install --offline --yes --prefix ...`를 실행합니다. `DEPS_SMUGGLER_CONDA_PREFIX`로 대상을 지정할 수 있고 상대 경로는 스크립트 폴더 기준입니다. 일반 파일·디렉터리를 기존 환경으로 덮어쓰지 않으며, 필수 파일이나 Conda가 없거나 명령이 실패하면 Bash·PowerShell 모두 non-zero로 종료합니다. `includeErrorHandling: false`여도 Conda 실패를 성공으로 처리하지 않습니다.
+
+명시적 파일 설치는 전달된 파일 집합을 설치하며 의존성·버전·아키텍처 호환성을 다시 해결하지 않습니다. Python noarch 패키지는 대상 환경에 호환되는 Python이 필요하므로, `--no-deps` 묶음은 기존 환경을 지정하거나 런타임을 별도로 준비해야 합니다. 이 내용은 CLI의 `ScriptGenerator`에 관한 것으로 Electron의 별도 `shared/script-utils` 생성기를 변경하지 않습니다.
+
+일반 `ScriptGenerator`에는 APT·APK 전용 설치 블록이 없습니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
 
 Docker 설치 블록은 다운로더와 같은 `buildDockerArchiveFilename()`을 사용해 `packages/<repo>-<tag>.tar`를 로드합니다. namespace·registry 제거와 파일명 정규화도 동일하게 적용하므로 `busybox:1.36`은 `busybox-1.36.tar`를 참조합니다. Bash와 PowerShell 모두 파일명을 인용해 공백이 포함된 추출 경로에서도 하나의 `docker load -i` 인자로 전달합니다. 아키텍처나 ZIP·tar.gz 선택은 내부 이미지 tar 이름에 영향을 주지 않습니다.
 

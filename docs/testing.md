@@ -233,6 +233,18 @@ DEPS_SMUGGLER_NATIVE_DOCKER=1 bash scripts/verify-worktree.sh \
 
 실제 CLI 다운로드 검증은 `busybox:1.36`의 `--arch amd64 --format zip`과 `--arch arm64 --format tar.gz` 출력에서 `packages/busybox-1.36.tar`, tar 내부 manifest와 config 아키텍처, 원본 설치 스크립트의 참조 경로를 함께 확인합니다. Docker가 없는 환경의 파일·스크립트 검사와 엔진을 사용한 로드 결과는 구분해 기록합니다.
 
+### Conda 설치 스크립트 오프라인 검증
+
+`src/core/packager/conda-install-script.integration.test.ts`는 생성한 Bash와 Windows PowerShell 스크립트를 실제 프로세스로 실행합니다. 기본 회귀는 기록용 실행 파일로 pip·Conda 인자 분리, `.conda`·`.tar.bz2`의 정확한 경로, 공백·인용 문자, 루트만 포함한 목록, 환경 경로 지정, 재실행과 오류 종료를 검사합니다. 기록용 실행 파일의 성공을 실제 Conda 설치 성공으로 간주하지 않습니다. CLI 단위 테스트는 다운로드 항목에 메타데이터 파일명이 없어도 실제 완료 경로를 전달하며 다른 타입의 파일을 Conda 목록에 섞지 않는지 확인합니다.
+
+`src/core/packager/conda-native-consumer.integration.test.ts`는 Ubuntu CI의 기존 Miniconda를 사용하는 native 검증을 별도로 실행합니다.
+
+```bash
+DEPS_SMUGGLER_NATIVE_CONDA=1 bash scripts/verify-worktree.sh src/core/packager/conda-native-consumer.integration.test.ts
+```
+
+기본 실행에서는 native 검증을 건너뛰며, 명시적으로 opt-in한 환경에서 Linux나 필수 도구 조건이 맞지 않으면 실패합니다. 임시 prefix·캐시·설정과 `CONDA_REGISTER_ENVS=false`로 사용자 환경 등록 파일까지 격리합니다. 실제 Conda로 두 아카이브 형식을 설치하고 패키지 목록과 설치 파일을 검사하며, 설정한 로컬 채널의 HTTP 요청이 없는지 확인합니다. Python noarch 설치는 호환되는 Python이 있는 임시 환경에서 별도로 검사합니다. 일반 noarch 파일의 설치만으로 Python import 성공을 주장하지 않습니다. 도구 설치나 호스트 base 환경 변경은 수행하지 않습니다.
+
 ### npm 설치 스크립트 오프라인 검증
 
 `src/cli/npm-manifest.integration.test.ts`는 로컬 레지스트리와 실제 tarball을 제공하고 별도 CLI 프로세스에서 `--no-deps` 다운로드를 실행합니다. `latest`와 고정 버전 요청 모두 ZIP의 manifest 버전이 tarball 내부 `package/package.json`의 버전과 일치하는지 확인합니다. 이 검증은 npm 설치를 실행하지 않습니다. npm 다운로더 단위 테스트는 성공 후 버전·메타데이터 갱신과 기존 입력 정보 보존, 실패 시 입력 미변경을 검증합니다.

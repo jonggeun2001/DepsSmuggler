@@ -968,6 +968,77 @@ describe('downloadCommand', () => {
     ]);
   });
 
+  it('Conda 스크립트에는 완료된 실제 archive 경로만 전달한다', async () => {
+    const outputRoot = '/tmp/conda script output';
+    const condaArchive = `${outputRoot}/nested dir/six-1.17.0-py312h06a4308_0.tar.bz2`;
+    const condaDependencyArchive = `${outputRoot}/nested dir/python_abi-3.12-0.conda`;
+    const pipArchive = `${outputRoot}/pip/requests-2.32.0.tar.bz2`;
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'conda-six-1.17.0',
+          type: 'conda',
+          name: 'six',
+          version: '1.17.0',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'conda-six-1.17.0',
+          type: 'conda',
+          name: 'six',
+          version: '1.17.0',
+          architecture: 'x86_64',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [],
+    });
+    startDownload.mockResolvedValueOnce({
+      success: true,
+      totalSize: 1024,
+      duration: 1000,
+      items: [{
+        id: 'conda-six-1.17.0',
+        package: { type: 'conda', name: 'six', version: '1.17.0' },
+        status: 'completed',
+        progress: 100,
+        filePath: condaArchive,
+        filePaths: [condaArchive, condaDependencyArchive, condaDependencyArchive],
+      }, {
+        id: 'pip-requests-2.32.0',
+        package: { type: 'pip', name: 'requests', version: '2.32.0' },
+        status: 'completed',
+        progress: 100,
+        filePath: pipArchive,
+        filePaths: [pipArchive],
+      }],
+    });
+
+    await downloadCommand(commandOptions({
+      type: 'conda',
+      package: 'six',
+      pkgVersion: '1.17.0',
+      deps: false,
+      output: outputRoot,
+    }));
+
+    expect(generateAllScripts).toHaveBeenCalledWith(
+      expect.any(Array),
+      outputRoot,
+      expect.objectContaining({
+        condaPackageFiles: [
+          { relativePath: 'nested dir/six-1.17.0-py312h06a4308_0.tar.bz2' },
+          { relativePath: 'nested dir/python_abi-3.12-0.conda' },
+        ],
+      }),
+    );
+    expect(generateAllScripts.mock.calls[0][2].condaPackageFiles).not.toContainEqual({
+      relativePath: 'pip/requests-2.32.0.tar.bz2',
+    });
+  });
+
   it('기본 Maven --no-deps의 latest는 concrete root artifact를 resolver로 검증한다', async () => {
     const concreteRoot = {
       id: 'maven-org.example:demo-3.0.2',
