@@ -103,7 +103,7 @@ const versions = await mavenDownloader.getVersions('org.springframework:spring-c
 ```typescript
 import { setTestDownloader, clearAllTestDownloaders } from './downloaders/factory';
 
-describe('DownloadManager', () => {
+describe('Downloader factory', () => {
   beforeEach(() => {
     // 모킹된 다운로더 설정
     const mockPipDownloader = {
@@ -130,6 +130,8 @@ describe('DownloadManager', () => {
   });
 });
 ```
+
+위 `setTestDownloader()`는 factory의 `getDownloader()`를 사용하는 호출에 적용됩니다. CLI의 `DownloadManager`는 `registry.ts`의 `createRegisteredDownloader()`를 직접 사용하므로 이 factory override로 교체되지 않습니다. CLI 프로세스의 다운로드·종료 상태 검증은 [테스트 문서](./testing.md)를 참고합니다.
 
 ### 비동기 초기화 보장
 

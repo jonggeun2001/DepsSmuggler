@@ -435,6 +435,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
           console.log(chalk.red(`  - ${item.package.name}@${item.package.version}: ${item.error}`));
         }
       }
+      process.exitCode = 1;
     }
   } catch (error) {
     console.log(chalk.red('✗ 다운로드 실패'));
