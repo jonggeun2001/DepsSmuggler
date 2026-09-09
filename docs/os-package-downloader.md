@@ -365,6 +365,8 @@ ${baseUrl}/pool/${component}/${prefix}/${name}/${filename}.deb
 
 `D:`의 `so:`, `cmd:`, `pc:` 항목을 시스템에 이미 설치된 것으로 간주해 버리지 않고 의존성으로 보존합니다. Resolver는 호환 아키텍처의 `p:` provides에서 제공자를 찾아 전이 목록에 포함합니다. 버전 조건이 있으면 제공 APK 자체의 버전 대신 같은 capability의 제공 버전을 비교하며, 버전 없는 제공은 버전 조건을 충족한 것으로 간주하지 않습니다. 제공자가 없거나 버전이 맞지 않으면 기존 unresolved/warning 결과에 남깁니다.
 
+서로 다른 APK가 같은 capability나 `/bin/sh` 같은 경로를 제공하면 기존 최선 후보 선택 규칙으로 하나의 제공 패키지 이름을 선택하며, 이를 같은 패키지의 여러 버전과 구분합니다. APKINDEX 파싱 결과 캐시에는 스키마 버전을 저장하므로 capability를 누락한 이전 캐시는 다시 파싱하고 이후 요청부터 새 결과를 재사용합니다.
+
 APK INDEX 형식:
 
 ```
@@ -406,6 +408,8 @@ D:pcre2 zlib
 5. **위상 정렬 (Topological Sort)**로 설치 순서 결정
 6. **충돌 감지**: 여러 호환 버전을 conflict에 기록하고 최신 후보를 그래프에 선택; CLI backend는 conflict 후보도 다운로드 목록에 병합
 7. **MAX_ITERATIONS (10000)** 제한으로 무한 루프 방지
+
+버전·아키텍처 필터링 후 `selectCandidatesForDependency` 확장 지점을 거칩니다. 기본 구현은 후보를 그대로 유지하고, APK 구현은 서로 다른 제공 패키지 이름 중 하나를 선택한 뒤 그 패키지의 버전 충돌을 계산합니다.
 
 #### DependencyResolutionResult
 

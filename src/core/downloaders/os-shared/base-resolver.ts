@@ -209,9 +209,11 @@ export abstract class BaseOSDependencyResolver {
           continue;
         }
 
+        const selectedPackages = this.selectCandidatesForDependency(compatiblePackages, dep);
+
         // 여러 버전이 있으면 충돌로 기록 (모든 버전 다운로드)
-        if (compatiblePackages.length > 1) {
-          const uniqueVersions = this.getUniqueVersions(compatiblePackages);
+        if (selectedPackages.length > 1) {
+          const uniqueVersions = this.getUniqueVersions(selectedPackages);
           if (uniqueVersions.length > 1) {
             tree.addConflict(dep.name, uniqueVersions, [
               { package: currentPkg, requiredVersion: dep.version },
@@ -220,7 +222,7 @@ export abstract class BaseOSDependencyResolver {
         }
 
         // 최선의 패키지 선택 (최신 버전)
-        const bestMatch = this.selectBestMatch(compatiblePackages);
+        const bestMatch = this.selectBestMatch(selectedPackages);
         const bestMatchKey = this.getPackageKey(bestMatch);
 
         // 엣지 추가
@@ -266,6 +268,18 @@ export abstract class BaseOSDependencyResolver {
     return packages.filter((pkg) =>
       this.compareVersionWithOperator(pkg.version, dep.operator!, dep.version!)
     );
+  }
+
+  /**
+   * Select compatible candidates for a dependency after architecture filtering.
+   * Subclasses can narrow mutually substitutable candidates without changing
+   * the shared version or architecture mismatch semantics.
+   */
+  protected selectCandidatesForDependency(
+    packages: OSPackageInfo[],
+    _dep: PackageDependency
+  ): OSPackageInfo[] {
+    return packages;
   }
 
   /**

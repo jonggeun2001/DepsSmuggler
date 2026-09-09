@@ -740,6 +740,8 @@ OS resolver는 `parseFromText()`나 공개 `clearCache()`를 제공하지 않습
 
 제공자 누락은 `not_found`, 제공 버전 불일치는 `version_mismatch`로 기록하며 경고·unresolved 결과에 포함합니다. CLI의 `--no-deps`는 이 전이 탐색을 우회합니다.
 
+서로 다른 이름의 APK 제공자는 대체 관계이므로 기존 `selectBestMatch`로 선택한 패키지 이름의 후보만 남깁니다. 이 규칙은 `/bin/sh` 같은 경로 제공자에도 적용합니다. 선택한 패키지 자체에 조건을 만족하는 여러 버전이 있을 때는 기존 버전 충돌 정책을 유지합니다. 파싱 결과 캐시는 스키마 버전을 확인하여 이전의 capability 누락 결과를 재사용하지 않습니다.
+
 ### 개요
 - 목적: APK 패키지 의존성 해결 (Alpine Linux)
 - 위치: `src/core/resolver/apk-resolver.ts`
@@ -752,6 +754,7 @@ OS resolver는 `parseFromText()`나 공개 `clearCache()`를 제공하지 않습
 | `searchPackages` | query, matchType? | Promise<OSPackageSearchResult[]> | 패키지 검색 |
 | `findPackagesForDependency` (protected) | dependency | Promise<OSPackageInfo[]> | 의존성에 해당하는 패키지 찾기 |
 | `filterByVersion` (protected) | packages, dependency | OSPackageInfo[] | capability 제공 버전 또는 일반 패키지 버전으로 조건 확인 |
+| `selectCandidatesForDependency` (protected) | packages, dependency | OSPackageInfo[] | 버전·아키텍처 조건을 통과한 후보에서 하나의 제공 패키지 이름 선택 |
 
 ### 내부 메서드
 

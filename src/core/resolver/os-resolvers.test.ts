@@ -204,6 +204,147 @@ describe('OS dependency resolvers', () => {
     expect(result.packages.map((pkg) => pkg.name)).not.toContain('wrong-zlib');
   });
 
+  it.each([
+    'so:libshared.so.1',
+    'cmd:shared-command',
+    'pc:shared.pc',
+    '/bin/sh',
+  ])('APK resolver는 제공 alias %s의 서로 다른 provider 이름 중 하나만 선택한다', async (alias) => {
+    const dependency = alias === '/bin/sh'
+      ? { name: alias }
+      : { name: alias, operator: '>=' as const, version: '1.0.0' };
+    const provider = (name: string, version: string, dependencyName: string) => ({
+      ...createPackage(
+        name,
+        version,
+        'x86_64',
+        [alias === '/bin/sh' ? alias : `${alias}=1.0.0`]
+      ),
+      dependencies: [{ name: dependencyName }],
+    });
+    const root = {
+      ...createPackage('app', '1.0.0'),
+      dependencies: [dependency],
+    };
+    const providerA = provider('provider-a', '1.0.0', 'provider-a-dependency');
+    const providerB = provider('provider-b', '2.0.0', 'provider-b-dependency');
+    const providerADependency = createPackage('provider-a-dependency', '1.0.0');
+    const providerBDependency = createPackage('provider-b-dependency', '1.0.0');
+    vi.spyOn(ApkMetadataParser.prototype, 'parseIndex').mockResolvedValue([
+      root,
+      providerA,
+      providerB,
+      providerADependency,
+      providerBDependency,
+    ]);
+    const resolver = new ApkDependencyResolver({
+      ...createOptions(repo),
+      distribution: {
+        id: 'alpine-3.21',
+        name: 'Alpine Linux 3.21',
+        version: '3.21',
+        packageManager: 'apk',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+
+    const result = await resolver.resolveDependencies([root]);
+
+    expect(result.conflicts).toEqual([]);
+    expect(result.packages.map((pkg) => pkg.name).sort()).toEqual([
+      'app',
+      'provider-b',
+      'provider-b-dependency',
+    ]);
+  });
+
+  it('APK resolver는 선택된 provider 이름의 여러 버전을 실제 버전 충돌로 보존한다', async () => {
+    const root = {
+      ...createPackage('app', '1.0.0'),
+      dependencies: [
+        { name: 'so:libshared.so.1', operator: '>=' as const, version: '1.0.0' },
+      ],
+    };
+    const providerV1 = createPackage('provider', '1.0.0', 'x86_64', ['so:libshared.so.1=1.0.0']);
+    const providerV2 = createPackage('provider', '2.0.0', 'x86_64', ['so:libshared.so.1=1.0.0']);
+    const unrelatedProvider = createPackage('other-provider', '0.1.0', 'x86_64', [
+      'so:libshared.so.1=1.0.0',
+    ]);
+    vi.spyOn(ApkMetadataParser.prototype, 'parseIndex').mockResolvedValue([
+      root,
+      providerV1,
+      providerV2,
+      unrelatedProvider,
+    ]);
+    const resolver = new ApkDependencyResolver({
+      ...createOptions(repo),
+      distribution: {
+        id: 'alpine-3.21',
+        name: 'Alpine Linux 3.21',
+        version: '3.21',
+        packageManager: 'apk',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+
+    const result = await resolver.resolveDependencies([root]);
+
+    expect(result.conflicts).toEqual([
+      expect.objectContaining({
+        package: 'so:libshared.so.1',
+        versions: expect.arrayContaining([
+          expect.objectContaining({ name: 'provider', version: '1.0.0' }),
+          expect.objectContaining({ name: 'provider', version: '2.0.0' }),
+        ]),
+      }),
+    ]);
+    expect(result.conflicts[0].versions).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'other-provider' })])
+    );
+  });
+
+  it('APK resolver는 legacy 배열 캐시를 재파싱하고 새 envelope 캐시를 재사용한다', async () => {
+    const cachedLegacy = [createPackage('cached-provider', '1.0.0')];
+    const parsedPackages = [
+      createPackage('parsed-provider', '1.0.0', 'x86_64', ['so:libparsed.so.1=1.0.0']),
+    ];
+    const cacheGet = vi.fn().mockResolvedValueOnce(cachedLegacy);
+    const cacheSet = vi.fn().mockResolvedValue(undefined);
+    const parseIndex = vi.spyOn(ApkMetadataParser.prototype, 'parseIndex')
+      .mockResolvedValue(parsedPackages);
+    const createApkResolver = () => new ApkDependencyResolver({
+      ...createOptions(repo),
+      cacheManager: { get: cacheGet, set: cacheSet } as never,
+      distribution: {
+        id: 'alpine-3.21',
+        name: 'Alpine Linux 3.21',
+        version: '3.21',
+        packageManager: 'apk',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+
+    await accessResolverForTest(createApkResolver()).loadMetadata();
+
+    expect(parseIndex).toHaveBeenCalledOnce();
+    expect(cacheSet).toHaveBeenCalledWith(
+      expect.any(String),
+      { schemaVersion: 1, packages: parsedPackages }
+    );
+    const writtenEnvelope = cacheSet.mock.calls[0][1];
+    cacheGet.mockResolvedValueOnce(writtenEnvelope);
+
+    await accessResolverForTest(createApkResolver()).loadMetadata();
+
+    expect(parseIndex).toHaveBeenCalledOnce();
+  });
+
   it('APK resolver는 capability 버전을 패키지 버전과 구분하고 불일치를 unresolved로 남긴다', async () => {
     const root = {
       ...createPackage('app', '1.0.0'),

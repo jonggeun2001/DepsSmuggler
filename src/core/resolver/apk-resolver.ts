@@ -10,6 +10,13 @@ import { isArchitectureCompatible } from '../downloaders/os-shared/repositories'
 import { ApkMetadataParser } from '../shared/apk-metadata-parser';
 import type { OSPackageInfo, PackageDependency, OSPackageSearchResult } from '../downloaders/os-shared/types';
 
+const APK_INDEX_CACHE_SCHEMA_VERSION = 1;
+
+interface ApkIndexCacheEnvelope {
+  schemaVersion: typeof APK_INDEX_CACHE_SCHEMA_VERSION;
+  packages: OSPackageInfo[];
+}
+
 /**
  * APK 의존성 해결기
  */
@@ -47,11 +54,15 @@ export class ApkDependencyResolver extends BaseOSDependencyResolver {
           this.options.architecture,
           'apkindex'
         );
-        let packages = await this.options.cacheManager?.get<OSPackageInfo[]>(cacheKey);
+        const cached = await this.options.cacheManager?.get<unknown>(cacheKey);
+        let packages = this.readCacheEnvelope(cached);
 
         if (!packages) {
           packages = await parser.parseIndex();
-          await this.options.cacheManager?.set(cacheKey, packages);
+          await this.options.cacheManager?.set(cacheKey, {
+            schemaVersion: APK_INDEX_CACHE_SCHEMA_VERSION,
+            packages,
+          } satisfies ApkIndexCacheEnvelope);
         }
 
         // 아키텍처 필터링
@@ -191,6 +202,31 @@ export class ApkDependencyResolver extends BaseOSDependencyResolver {
           this.compareVersionWithOperator(providedVersion, operator, requiredVersion);
       })
     );
+  }
+
+  /**
+   * APK dependencies may be satisfied by alternative provider names. Keep one provider name,
+   * while retaining all matching versions of that selected package name for
+   * the shared conflict/all-version policy.
+   */
+  protected override selectCandidatesForDependency(
+    packages: OSPackageInfo[],
+    _dep: PackageDependency
+  ): OSPackageInfo[] {
+    const selectedName = this.selectBestMatch([...packages]).name;
+    return packages.filter((pkg) => pkg.name === selectedName);
+  }
+
+  private readCacheEnvelope(cached: unknown): OSPackageInfo[] | null {
+    if (!cached || typeof cached !== 'object') {
+      return null;
+    }
+
+    const envelope = cached as Partial<ApkIndexCacheEnvelope>;
+    return envelope.schemaVersion === APK_INDEX_CACHE_SCHEMA_VERSION &&
+      Array.isArray(envelope.packages)
+      ? envelope.packages
+      : null;
   }
 
   /**
