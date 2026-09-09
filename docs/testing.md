@@ -119,6 +119,8 @@ bash scripts/verify-worktree.sh \
 
 `src/core/packager/script-generator.test.ts`의 canonical tree 회귀는 Maven 없이도 실행할 수 있습니다. 공백이 포함된 임시 추출 경로에서 실제 Bash subprocess(Windows에서는 native PowerShell)를 생성·실행하고, CLI `packages/<m2path>`와 GUI `packages/m2repo/<m2path>`의 JAR-only·companion POM·parent/BOM POM-only·classifier·checksum을 `MAVEN_REPO_LOCAL`에 경로·바이트 그대로 복사하는지 검사합니다. pip 파일과 flat 파일은 대상 저장소에 복사되지 않습니다. Maven native offline consumer 검증과 macOS에서 PowerShell이 없는 경우는 별도 환경 제한으로 기록합니다.
 
+`src/core/packager/maven-install-script.integration.test.ts`는 실제 생성 스크립트를 실행해 기존 Maven 추적 기록 보존, 원본 파일에 한정한 로컬 설치 등록, 마지막 개행이 없는 기록 병합, 반복 실행과 기록 쓰기 실패를 검증합니다. Windows CI에서는 `powershell.exe`를 사용하며, 로컬에 PowerShell이 없는 경우의 Bash 성공과 구분합니다.
+
 ### Maven 다운로드 목록과 미리보기 검증
 
 모델 POM이 `flatList`에는 있지만 `root` 실행 의존성 그래프에는 없는 응답을 사용해 화면 표시를 검증합니다. 다음 회귀는 renderer 변환과 상태·DOM을 검사하며, 실제 resolver 조회나 파일 다운로드를 실행하지 않습니다.
