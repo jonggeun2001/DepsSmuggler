@@ -115,6 +115,16 @@ bash scripts/verify-worktree.sh \
 
 이 fixture 검증은 실제 Maven Central의 현재 파일 존재 여부나 외부 Maven 실행의 오프라인 성공을 보장하지 않습니다. 외부 저장소 검증에는 아래 통합 테스트를 별도로 사용하고, 실행 명령·대상 좌표·파일 확인 결과를 해당 작업의 검증 기록에 남깁니다.
 
+### Maven 설치 스크립트 canonical 저장소 검증
+
+`src/core/packager/script-generator.test.ts`의 canonical tree 회귀는 Maven 없이도 실행할 수 있습니다. 공백이 포함된 임시 추출 경로에서 실제 Bash subprocess(Windows에서는 native PowerShell)를 생성·실행하고, CLI `packages/<m2path>`와 GUI `packages/m2repo/<m2path>`의 JAR-only·companion POM·parent/BOM POM-only·classifier·checksum을 `MAVEN_REPO_LOCAL`에 경로·바이트 그대로 복사하는지 검사합니다. pip 파일과 flat 파일은 대상 저장소에 복사되지 않습니다. Maven native offline consumer 검증과 macOS에서 PowerShell이 없는 경우는 별도 환경 제한으로 기록합니다.
+
+`src/core/packager/maven-install-script.integration.test.ts`는 실제 생성 스크립트를 실행해 기존 Maven 추적 기록 보존, 원본 파일에 한정한 로컬 설치 등록, 마지막 개행이 없는 기록 병합, 반복 실행과 기록 쓰기 실패를 검증합니다. Windows CI에서는 `powershell.exe`를 사용하며, 로컬에 PowerShell이 없는 경우의 Bash 성공과 구분합니다.
+
+스크립트 폴더 밖에서 상대 `MAVEN_REPO_LOCAL`을 지정하는 경우에도 아티팩트와 추적 기록이 같은 대상에 저장되는지 검사합니다. Windows PowerShell 프로세스의 시작 지연을 고려해 subprocess 제한과 여러 번 실행하는 테스트의 전체 제한을 별도로 둡니다.
+
+`m2repo.example` 그룹 단독 및 `example` 그룹과 함께 있는 CLI·GUI 경로도 실제 스크립트로 검증하여 그룹 이름을 GUI 저장소 폴더로 오인하거나 다른 그룹의 파일을 설치하는 회귀를 방지합니다. 모호하거나 두 구조에 분산된 원본은 설치 전에 실패하는지도 확인합니다. `.demo`처럼 점으로 시작하는 아티팩트도 파일 복사와 로컬 설치 기록에서 누락되지 않는지 검사합니다.
+
 ### Maven 다운로드 목록과 미리보기 검증
 
 모델 POM이 `flatList`에는 있지만 `root` 실행 의존성 그래프에는 없는 응답을 사용해 화면 표시를 검증합니다. 다음 회귀는 renderer 변환과 상태·DOM을 검사하며, 실제 resolver 조회나 파일 다운로드를 실행하지 않습니다.
