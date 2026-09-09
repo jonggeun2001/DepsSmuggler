@@ -77,6 +77,14 @@ export class YumMetadataParser {
       textNodeName: '#text',
       parseAttributeValue: true,
       trimValues: true,
+      processEntities: {
+        enabled: true,
+        // Rocky primary XML의 표준 엔티티도 치환 횟수에 포함됩니다.
+        maxTotalExpansions: 100_000,
+        maxEntityCount: 100,
+        maxEntitySize: 10_000,
+        maxExpandedLength: 100_000,
+      },
     });
   }
 
@@ -188,6 +196,9 @@ export class YumMetadataParser {
 
       return result;
     } catch (error) {
+      if ((error as { name?: string })?.name === 'AbortError') {
+        throw error;
+      }
       throw new Error(`Failed to parse repomd.xml from ${repomdUrl}: ${(error as Error).message}`);
     }
   }
@@ -256,6 +267,9 @@ export class YumMetadataParser {
 
       return packages;
     } catch (error) {
+      if ((error as { name?: string })?.name === 'AbortError') {
+        throw error;
+      }
       throw new Error(
         `Failed to parse primary.xml from ${primaryUrl}: ${(error as Error).message}`
       );

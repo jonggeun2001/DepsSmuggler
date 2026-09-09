@@ -658,6 +658,8 @@ YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 �
 
 실제 클래스명은 `YumDependencyResolver`이며 `YumResolver`는 호환성 alias입니다. `BaseOSDependencyResolver`를 상속하고 생성자에서 `DependencyResolverOptions`를 받습니다.
 
+메타데이터는 모든 활성 저장소의 조회·파싱이 성공한 뒤 메모리 목록과 이름/provides 인덱스에 반영합니다. primary 누락이나 저장소 오류가 있으면 저장소 이름과 원인을 포함한 오류를 전달하며, 취소 오류는 유지합니다. 실패 시 일부 패키지가 로드 완료 상태로 남지 않아 같은 인스턴스의 재시도가 가능합니다. 파서는 각 저장소를 읽을 때 생성하며 사용하지 않는 인스턴스 맵은 보관하지 않습니다. 비활성 저장소는 조회하지 않으며 정상적인 저장소별 디스크 캐시는 재시도에서 재사용할 수 있습니다.
+
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `searchPackages` | query, matchType? | Promise<OSPackageSearchResult[]> | 이름별 검색 |
@@ -677,7 +679,6 @@ YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 �
 
 | 속성 | 타입 | 설명 |
 |------|------|------|
-| `parsers` | Map<string, YumMetadataParser> | 저장소별 파서 |
 | `allPackages` | OSPackageInfo[] | 호환 아키텍처의 패키지 목록 |
 | `providesMap` | Map<string, OSPackageInfo[]> | capability 제공자 인덱스 |
 | `metadataCache` (상속) | PackageMetadataCache | 이름별 패키지 목록 |

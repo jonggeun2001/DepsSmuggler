@@ -300,6 +300,10 @@ console.log(downloadResult.downloadedFiles);
 
 #### 메타데이터 파싱 (YumMetadataParser)
 
+Rocky의 큰 primary XML에 포함된 표준 엔티티를 처리하도록 `fast-xml-parser`의 엔티티 처리를 유지하면서 파서가 집계하는 치환 횟수를 100,000회로 제한합니다. DTD 선언 수 100개, 단일 엔티티 크기 10,000, DTD 치환에 따른 누적 확장 길이 100,000의 기존 제한도 명시적으로 유지합니다. `&amp;` 같은 표준 XML 값은 디코딩되며, 제한을 넘는 입력은 파싱 오류로 보고합니다. 이 값은 전체 XML이나 압축 해제 크기의 상한이 아닙니다.
+
+`YumDependencyResolver`는 모든 활성 저장소의 로딩이 성공한 뒤 패키지·provides 인덱스를 반영합니다. primary 누락이나 조회·파싱 실패를 빈 검색 결과로 숨기지 않으며, 실패한 시도의 일부 목록은 다음 재시도에서 사용하지 않습니다. 정상적으로 저장한 저장소별 디스크 캐시는 재사용합니다.
+
 ```typescript
 interface RepomdInfo {
   revision: string;

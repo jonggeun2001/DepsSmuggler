@@ -121,6 +121,18 @@ bash scripts/verify-worktree.sh \
 
 `src/cli/empty-package-file.integration.test.ts`는 빈 파일·공백만 있는 파일·주석만 있는 파일을 별도 Node.js 프로세스에서 실행합니다. 테스트 전용 user directory와 경로에 공백이 있는 출력 디렉터리를 사용하며, 입력 오류가 종료 코드 `1`을 반환하고 archive와 설치 스크립트를 만들지 않는지 확인합니다. 단위 테스트는 parser 결과가 비어 있을 때 resolver, 출력 디렉터리, 다운로드 큐, archive, script generator가 호출되지 않는 순서를 검증합니다.
 
+### YUM 메타데이터와 검색 오류 검증
+
+`src/core/downloaders/os-metadata-parsers.test.ts`는 실제 gzip XML 파서에 1,001개의 표준 엔티티를 전달해 정상 디코딩을 확인하고, 100,000회 한도 초과 및 취소 오류 전달을 검증합니다. `src/core/resolver/os-resolvers.test.ts`는 primary 누락, 비활성 저장소 제외, 뒤쪽 저장소 실패 후 일부 목록이 남지 않는지와 동일 resolver 재시도를 확인합니다.
+
+`src/cli/yum-metadata-failure.integration.test.ts`는 로컬 HTTP 서버의 repomd/primary XML을 실제 자식 CLI로 읽습니다. XML 제한 초과 시 저장소·원인과 종료 코드 `1`이 전달되고 빈 검색 성공으로 바뀌지 않아야 합니다. 이 세 파일은 외부 저장소 없이 기본 테스트에서 실행합니다.
+
+`src/core/downloaders/yum.integration.test.ts`는 현재 OS backend API로 실제 Rocky Linux 9 저장소의 `zlib` 검색(limit 3)과 의존성 없는 RPM ZIP 다운로드를 검증합니다. 오래된 다운로더 API와 조용한 조기 성공 처리를 제거했으며, 아래 명령으로 명시적으로 실행합니다. 외부 네트워크를 사용하고 임시 캐시·출력을 정리합니다. 네이티브 Yum/RPM 설치 트랜잭션을 수행하는 테스트는 아닙니다.
+
+```bash
+INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/yum.integration.test.ts
+```
+
 ### CLI 다운로드 실패 종료 코드 검증
 
 `src/cli/download-failure-exit.integration.test.ts`는 별도 Node.js 프로세스에서 실제 CLI 엔트리포인트와 Commander 인자를 실행합니다. 부모 프로세스의 로컬 HTTP 서버가 404를 반환하고, 자식의 테스트 전용 설정이 실제 `MavenDownloader`의 저장소 주소만 이 서버로 연결합니다. 실제 다운로드 매니저가 실패 결과를 반환한 뒤 CLI가 종료 코드 `1`과 실패 원인을 남기고, 새 아카이브와 설치 스크립트를 생성하지 않는지 확인합니다. 설정·로그·출력은 임시 디렉터리로 격리하며 외부 레지스트리에 연결하지 않습니다.

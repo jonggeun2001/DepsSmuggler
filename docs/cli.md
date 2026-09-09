@@ -217,6 +217,7 @@ depssmuggler os search bash --distro ubuntu-22.04 --arch amd64
 
 - 배포판 ID와 아키텍처를 기준으로 저장소 메타데이터를 직접 조회합니다.
 - 배포판별 parser는 shared shim(`src/core/shared/{yum,apt,apk}-metadata-parser.ts`)을 통해 사용합니다.
+- YUM 저장소의 메타데이터 조회·파싱에 실패하거나 활성 저장소에 primary 메타데이터가 없으면 저장소 이름과 원인을 표시하고 종료 코드 `1`을 반환합니다. 일부 저장소만 읽은 결과를 정상 검색 목록으로 반환하지 않습니다. 정상적으로 읽은 목록에서 일치하는 패키지가 없는 경우에는 빈 검색 결과로 종료합니다.
 - `-d, --distro`는 필수이고, `-a, --arch` 기본값은 `x86_64`, `-l, --limit` 기본값은 `20`입니다. APT 배포판에는 예시처럼 `amd64` 등 해당 프리셋이 지원하는 아키텍처를 명시해야 합니다.
 
 ### `os download`
@@ -233,6 +234,7 @@ depssmuggler os download bash --distro ubuntu-22.04 --arch amd64 --format reposi
 - `--archive-format zip|tar.gz`로 압축 형식을 선택하며 기본값은 `zip`입니다. `--no-deps`는 의존성 해결을 끕니다.
 - `-d, --distro`는 필수입니다. `--arch` 기본값은 `x86_64`, `-o, --output`은 `./os-packages`, `--concurrency`는 `3`입니다.
 - OS 메타데이터 캐시는 `<cachePath>/os-packages` 아래 persistent JSON 파일로 관리됩니다. 기본 경로는 `~/.depssmuggler/cache/os-packages`이며 CLI 설정의 `cachePath`와 `cacheEnabled`를 따릅니다.
+- YUM의 메타데이터 로딩 실패는 다운로드에서도 원인을 포함한 오류로 전달됩니다. 같은 resolver에서 재시도할 때 실패 직전의 일부 패키지 목록을 완성된 목록으로 재사용하지 않으며, 정상 저장된 저장소별 디스크 캐시는 재사용할 수 있습니다.
 
 ### `os cache`
 

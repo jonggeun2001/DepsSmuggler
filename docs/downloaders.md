@@ -485,6 +485,8 @@ const downloadResult = await downloadOSPackages({
 | `searchPackages(query)` | 패키지 검색 |
 | `getPackageVersions(name)` | 버전 목록 조회 |
 
+YUM XML 파서는 표준 엔티티 디코딩을 유지하며 전체 치환 횟수와 DTD 선언·확장 크기에 유한한 제한을 적용합니다. 큰 Rocky primary XML의 정상 파싱과 한도 초과 오류를 함께 검증합니다. 로딩 실패는 resolver에서 검색·다운로드 호출자에게 전달하며, 상세 제한과 캐시 반영 규칙은 [OS 패키지 문서](os-package-downloader.md#메타데이터-파싱-yummetadataparser)를 참고하세요.
+
 ### 타입 정의
 
 | 타입 | 설명 |

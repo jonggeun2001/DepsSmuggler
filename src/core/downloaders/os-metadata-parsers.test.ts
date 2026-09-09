@@ -16,6 +16,31 @@ describe('OS metadata parsers', () => {
     isOfficial: true,
   };
 
+  const createYumRepomdXml = (): string => [
+    '<repomd>',
+    '  <revision>123</revision>',
+    '  <data type="primary">',
+    '    <checksum type="sha256">deadbeef</checksum>',
+    '    <location href="repodata/primary.xml.gz" />',
+    '  </data>',
+    '</repomd>',
+  ].join('');
+
+  const createYumPrimaryXml = (description: string, summary: string): string => [
+    '<metadata>',
+    '  <package>',
+    '    <name>zlib</name>',
+    '    <arch>x86_64</arch>',
+    '    <version epoch="0" ver="1.2.13" rel="1.el9" />',
+    '    <checksum type="sha256">feedface</checksum>',
+    `    <summary>${summary}</summary>`,
+    `    <description>${description}</description>`,
+    '    <size package="4096" installed="8192" />',
+    '    <location href="Packages/z/zlib.rpm" />',
+    '  </package>',
+    '</metadata>',
+  ].join('');
+
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
@@ -173,7 +198,8 @@ describe('OS metadata parsers', () => {
       .mockResolvedValueOnce(new Response(gzipSync(primaryXml)));
 
     const repomd = await parser.parseRepomd();
-    const packages = await parser.parsePrimary(repomd.primary!.location);
+    expect(repomd.primary).toBeDefined();
+    const packages = await parser.parsePrimary(repomd.primary?.location ?? '');
 
     expect(repomd).toEqual(
       expect.objectContaining({
@@ -211,5 +237,75 @@ describe('OS metadata parsers', () => {
         ],
       }),
     ]);
+  });
+
+  it('YUM parser는 1000개를 초과하는 표준 entity와 amp entity를 보존해 파싱한다', async () => {
+    const parser = new YumMetadataParser(
+      {
+        ...repo,
+        id: 'rocky-9-baseos',
+        baseUrl: 'https://mirror.example.test/$releasever/BaseOS/$basearch/os',
+      },
+      'x86_64'
+    );
+    const expandedDescription = '"'.repeat(1001);
+    fetchMock
+      .mockResolvedValueOnce(new Response(createYumRepomdXml()))
+      .mockResolvedValueOnce(
+        new Response(gzipSync(createYumPrimaryXml('&quot;'.repeat(1001), 'Rocky &amp; BaseOS')))
+      );
+
+    const repomd = await parser.parseRepomd();
+    expect(repomd.primary).toBeDefined();
+    const packages = await parser.parsePrimary(repomd.primary?.location ?? '');
+
+    expect(packages).toEqual([
+      expect.objectContaining({
+        name: 'zlib',
+        summary: 'Rocky & BaseOS',
+        description: expandedDescription,
+      }),
+    ]);
+  });
+
+  it('YUM parser는 유한 entity expansion 한도를 초과하면 실패한다', async () => {
+    const parser = new YumMetadataParser(
+      {
+        ...repo,
+        id: 'rocky-9-baseos',
+        baseUrl: 'https://mirror.example.test/$releasever/BaseOS/$basearch/os',
+      },
+      'x86_64'
+    );
+    fetchMock
+      .mockResolvedValueOnce(new Response(createYumRepomdXml()))
+      .mockResolvedValueOnce(
+        new Response(gzipSync(createYumPrimaryXml('&quot;'.repeat(100001), 'Rocky &amp; BaseOS')))
+      );
+
+    const repomd = await parser.parseRepomd();
+    expect(repomd.primary).toBeDefined();
+
+    await expect(parser.parsePrimary(repomd.primary?.location ?? '')).rejects.toThrow(/100000/);
+  });
+
+  it.each(['repomd', 'primary'] as const)('YUM parser는 %s fetch의 AbortError identity를 보존한다', async (target) => {
+    const parser = new YumMetadataParser(
+      {
+        ...repo,
+        id: 'rocky-9-baseos',
+        baseUrl: 'https://mirror.example.test/$releasever/BaseOS/$basearch/os',
+      },
+      'x86_64'
+    );
+    const abortError = new Error(`cancelled ${target}`);
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+
+    const parse = target === 'repomd'
+      ? parser.parseRepomd()
+      : parser.parsePrimary('repodata/primary.xml.gz');
+
+    await expect(parse).rejects.toBe(abortError);
   });
 });
