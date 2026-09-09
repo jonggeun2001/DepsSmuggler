@@ -576,6 +576,8 @@ const versions = results[0]?.versions ?? [];
 
 APKINDEX의 `D:`에 있는 `so:`, `cmd:`, `pc:` capability를 버전 조건과 함께 보존합니다. Resolver가 `p:` provides와 매칭해 실제 제공 APK를 다운로드 목록에 포함하며, 제공자 누락·버전 불일치는 unresolved로 전달합니다. 상세 비교 규칙은 [APK Resolver](resolvers.md#apkresolver)를 참고하세요.
 
+원본 필드는 JSON으로 저장 가능한 `OSPackageInfo.apkIndexFields`에도 유지합니다. 저장소 생성은 이 원본의 `D:` 연산자(`~`, `!` 포함), 버전이 있는 `p:`, 체크섬 `C:`, 설치 크기 `I:` 등을 사용합니다. Resolver가 사용하는 정규화된 의존성과 원본 출력 필드는 구분되며, 원본 보존이 resolver의 버전 비교 규칙을 확장하지는 않습니다. APK 파싱 캐시는 스키마 2를 사용하여 원본 필드가 없는 이전 결과를 다시 조회합니다.
+
 | 메서드 | 설명 |
 |--------|------|
 | `parseIndex()` | APKINDEX.tar.gz 파싱 |
@@ -592,9 +594,10 @@ APKINDEX의 `D:`에 있는 `so:`, `cmd:`, `pc:` capability를 버전 조건과 �
 | `V` | Version |
 | `A` | Architecture |
 | `D` | Dependencies |
-| `S` | Size |
+| `S` | APK 파일 크기 (바이트); 저장소 출력은 실제 전달 파일 기준 |
+| `I` | 설치 크기 (바이트); APK 파일 크기와 구분 |
 | `p` | Provides |
-| `C` | Checksum (SHA1) |
+| `C` | 패키지 식별 체크섬; `Q1` + SHA1 Base64 등 APKINDEX 표기 |
 | `T` | Description |
 
 ### 지원 배포판

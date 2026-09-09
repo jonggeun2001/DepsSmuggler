@@ -212,6 +212,7 @@ export class ApkMetadataParser {
       license,
       dependencies,
       provides: provides.length > 0 ? provides : undefined,
+      apkIndexFields: Object.fromEntries(fields),
     };
   }
 

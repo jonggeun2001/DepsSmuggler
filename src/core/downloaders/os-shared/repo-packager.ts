@@ -15,6 +15,59 @@ import { OSScriptGenerator } from './script-generator';
 import { getWriteOptions } from '../../shared/path-utils';
 
 const gzip = promisify(zlib.gzip);
+const APK_INDEX_GENERATED_FIELDS = new Set(['P', 'V', 'A', 'S', 'I', 'C', 'D', 'p', 'T']);
+
+function isSafeNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isCanonicalBase64(value: string, byteLength: number): boolean {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
+    return false;
+  }
+  const decoded = Buffer.from(value, 'base64');
+  return decoded.length === byteLength && decoded.toString('base64') === value;
+}
+
+function validateApkIndexChecksum(value: string): string {
+  if (/^Q1[A-Za-z0-9+/]{27}={0,2}$/.test(value)) {
+    const digest = value.substring(2);
+    if (isCanonicalBase64(digest, 20)) return value;
+  }
+  if (/^X1[0-9a-fA-F]{40}$/.test(value)) return value;
+  if (/^[0-9a-f]{32}$/i.test(value)) return value;
+  throw new Error(`APK 체크섬 형식이 유효하지 않습니다: ${value}`);
+}
+
+function formatApkChecksum(pkg: OSPackageInfo): string {
+  const rawChecksum = pkg.apkIndexFields?.C;
+  if (rawChecksum !== undefined) return validateApkIndexChecksum(rawChecksum);
+
+  const checksum = pkg.checksum;
+  if (!checksum?.value) {
+    throw new Error(`APK 체크섬이 없습니다: ${pkg.name}-${pkg.version}`);
+  }
+  if (checksum.type === 'sha1') {
+    if (/^[0-9a-f]{40}$/i.test(checksum.value)) {
+      return `Q1${Buffer.from(checksum.value, 'hex').toString('base64')}`;
+    }
+    if (isCanonicalBase64(checksum.value, 20)) return `Q1${checksum.value}`;
+  }
+  if (checksum.type === 'md5' && /^[0-9a-f]{32}$/i.test(checksum.value)) {
+    return checksum.value;
+  }
+  throw new Error(`APK 체크섬 형식을 지원하지 않습니다: ${pkg.name}-${pkg.version}`);
+}
+
+function resolveApkInstalledSize(pkg: OSPackageInfo): string {
+  const rawInstalledSize = pkg.apkIndexFields?.I;
+  if (rawInstalledSize !== undefined && /^\d+$/.test(rawInstalledSize)) {
+    const parsed = Number(rawInstalledSize);
+    if (isSafeNonNegativeInteger(parsed)) return rawInstalledSize;
+  }
+  if (isSafeNonNegativeInteger(pkg.installedSize)) return String(pkg.installedSize);
+  throw new Error(`APK 설치 크기 메타데이터가 없습니다: ${pkg.name}-${pkg.version}`);
+}
 
 /**
  * 저장소 옵션
@@ -81,7 +134,7 @@ export class OSRepoPackager {
         metadataFiles = await this.createAptRepoMetadata(packages, repoPath, downloadedFiles);
         break;
       case 'apk':
-        metadataFiles = await this.createApkRepoMetadata(packages, repoPath);
+        metadataFiles = await this.createApkRepoMetadata(packages, repoPath, downloadedFiles);
         break;
     }
 
@@ -463,12 +516,14 @@ export class OSRepoPackager {
    */
   private async createApkRepoMetadata(
     packages: OSPackageInfo[],
-    repoPath: string
+    repoPath: string,
+    downloadedFiles: Map<string, string>
   ): Promise<string[]> {
     const metadataFiles: string[] = [];
+    const deliveredFiles = this.resolveApkDeliveredFiles(packages, downloadedFiles, repoPath);
 
     // APKINDEX 내용 생성
-    const apkindexContent = this.generateApkIndexContent(packages);
+    const apkindexContent = this.generateApkIndexContent(packages, deliveredFiles);
 
     // Keep caller-owned repository files untouched until the completed archive is ready.
     const stagingDir = fs.mkdtempSync(path.join(repoPath, '.depssmuggler-apkindex-'));
@@ -500,37 +555,76 @@ export class OSRepoPackager {
   /**
    * APK 인덱스 내용 생성
    */
-  private generateApkIndexContent(packages: OSPackageInfo[]): string {
+  private generateApkIndexContent(
+    packages: OSPackageInfo[],
+    deliveredFiles: Map<string, string>
+  ): string {
     const entries: string[] = [];
 
     for (const pkg of packages) {
+      const deliveredPath = deliveredFiles.get(getDownloadedFileKey(pkg));
+      if (!deliveredPath) {
+        throw new Error(`APK 패키지 파일을 찾을 수 없습니다: ${pkg.name}-${pkg.version}`);
+      }
+      const deliveredSize = fs.statSync(deliveredPath).size;
+      const rawFields = pkg.apkIndexFields;
       const lines: string[] = [];
       lines.push(`P:${pkg.name}`);
       lines.push(`V:${pkg.version}`);
       lines.push(`A:${pkg.architecture}`);
-      lines.push(`S:${pkg.size}`);
-      lines.push(`I:${pkg.size}`);
-      lines.push(`T:${pkg.description || pkg.name}`);
+      lines.push(`S:${deliveredSize}`);
+      lines.push(`I:${resolveApkInstalledSize(pkg)}`);
+      lines.push(`T:${rawFields?.T ?? pkg.description ?? pkg.name}`);
+      for (const [field, value] of Object.entries(rawFields || {})) {
+        if (!APK_INDEX_GENERATED_FIELDS.has(field)) lines.push(`${field}:${value}`);
+      }
 
-      if (pkg.dependencies.length > 0) {
+      if (rawFields?.D !== undefined) {
+        if (rawFields.D) lines.push(`D:${rawFields.D}`);
+      } else if (pkg.dependencies.length > 0) {
         const deps = pkg.dependencies
           .filter((d) => !d.isOptional)
-          .map((d) => d.name)
+          .map((d) => `${d.name}${d.operator || ''}${d.version || ''}`)
           .join(' ');
         if (deps) {
           lines.push(`D:${deps}`);
         }
       }
 
-      if (pkg.checksum) {
-        lines.push(`C:${pkg.checksum.value}`);
+      if (rawFields?.p !== undefined) {
+        if (rawFields.p) lines.push(`p:${rawFields.p}`);
+      } else if (pkg.provides?.length) {
+        lines.push(`p:${pkg.provides.join(' ')}`);
       }
+
+      lines.push(`C:${formatApkChecksum(pkg)}`);
 
       lines.push('');
       entries.push(lines.join('\n'));
     }
 
     return entries.join('\n');
+  }
+
+  private resolveApkDeliveredFiles(
+    packages: OSPackageInfo[],
+    downloadedFiles: Map<string, string>,
+    repoPath: string
+  ): Map<string, string> {
+    const deliveredFiles = new Map<string, string>();
+    for (const pkg of packages) {
+      const key = getDownloadedFileKey(pkg);
+      const sourcePath = downloadedFiles.get(key);
+      if (!sourcePath || !fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+        throw new Error(`APK 패키지 파일을 찾을 수 없습니다: ${pkg.name}-${pkg.version}`);
+      }
+      const copiedPath = path.join(repoPath, path.basename(sourcePath));
+      if (!fs.existsSync(copiedPath) || !fs.statSync(copiedPath).isFile()) {
+        throw new Error(`APK 패키지 파일을 저장하지 못했습니다: ${pkg.name}-${pkg.version}`);
+      }
+      deliveredFiles.set(key, copiedPath);
+    }
+    return deliveredFiles;
   }
 
   /**

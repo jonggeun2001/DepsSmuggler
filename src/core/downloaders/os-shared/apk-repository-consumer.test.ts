@@ -17,6 +17,7 @@ function createApkPackage(): OSPackageInfo {
     version: '1.2.3-r0',
     architecture: 'x86_64',
     size: 17,
+    installedSize: 32,
     checksum: {
       type: 'sha1',
       value: Buffer.alloc(20, 1).toString('base64'),
@@ -32,6 +33,7 @@ function createApkPackage(): OSPackageInfo {
     },
     description: 'A package used by the APK repository consumer regression test',
     dependencies: [{ name: 'fixture-dependency' }],
+    provides: ['so:libfixture.so.1=1.0'],
   };
 }
 
@@ -95,7 +97,8 @@ describe('APK repository archive consumer contract', () => {
     expect(entries.get('APKINDEX')).toContain('V:1.2.3-r0');
     expect(entries.get('APKINDEX')).toContain('A:x86_64');
     expect(entries.get('APKINDEX')).toContain('D:fixture-dependency');
-    // Native checksum encoding and versioned constraints are covered by issue #97.
+    expect(entries.get('APKINDEX')).toContain('I:32');
+    expect(entries.get('APKINDEX')).toContain(`C:Q1${pkg.checksum.value}`);
 
     const server = http.createServer((request, response) => {
       if (request.url === '/x86_64/APKINDEX.tar.gz') {
@@ -127,6 +130,19 @@ describe('APK repository archive consumer contract', () => {
       expect(parsed[0].dependencies).toEqual([
         { name: 'fixture-dependency', version: undefined, operator: undefined },
       ]);
+      expect(parsed[0]).toMatchObject({
+        size: 17,
+        installedSize: 32,
+        checksum: { type: 'sha1', value: pkg.checksum.value },
+        provides: ['so:libfixture.so.1=1.0'],
+        apkIndexFields: {
+          S: '17',
+          I: '32',
+          C: `Q1${pkg.checksum.value}`,
+          D: 'fixture-dependency',
+          p: 'so:libfixture.so.1=1.0',
+        },
+      });
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve()))

@@ -165,8 +165,8 @@ describe('OS metadata parsers', () => {
         'I:2048',
         'T:Busybox utilities',
         'L:GPL-2.0-only',
-        'C:Q1YWJjZA==',
-        'D:so:libc.musl-x86_64.so.1=1.0 cmd:sh>=1.0 pc:bar=2.0 ssl-client>=1.0',
+        'C:Q1AQEBAQEBAQEBAQEBAQEBAQEBAQE=',
+        'D:so:libc.musl-x86_64.so.1=1.0 cmd:sh>=1.0 pc:bar=2.0 ssl-client>=1.0 compat~1.0 !conflict>=1.0',
         'p:cmd:sh=1.0 so:libcrypto.so.3=3.0.0 pc:bar=2.0',
       ].join('\n')
     );
@@ -182,8 +182,8 @@ describe('OS metadata parsers', () => {
       expect.objectContaining({
         name: 'busybox',
         location: 'x86_64/busybox-1.36.1-r0.apk',
-        checksum: { type: 'sha1', value: 'YWJjZA==' },
-        dependencies: [
+        checksum: { type: 'sha1', value: 'AQEBAQEBAQEBAQEBAQEBAQEBAQE=' },
+        dependencies: expect.arrayContaining([
           { name: 'so:libc.musl-x86_64.so.1', operator: '=', version: '1.0' },
           { name: 'cmd:sh', operator: '>=', version: '1.0' },
           { name: 'pc:bar', operator: '=', version: '2.0' },
@@ -192,10 +192,30 @@ describe('OS metadata parsers', () => {
             operator: '>=',
             version: '1.0',
           }),
-        ],
+        ]),
         provides: ['cmd:sh=1.0', 'so:libcrypto.so.3=3.0.0', 'pc:bar=2.0'],
+        apkIndexFields: {
+          P: 'busybox',
+          V: '1.36.1-r0',
+          A: 'x86_64',
+          S: '1024',
+          I: '2048',
+          T: 'Busybox utilities',
+          L: 'GPL-2.0-only',
+          C: 'Q1AQEBAQEBAQEBAQEBAQEBAQEBAQE=',
+          D: 'so:libc.musl-x86_64.so.1=1.0 cmd:sh>=1.0 pc:bar=2.0 ssl-client>=1.0 compat~1.0 !conflict>=1.0',
+          p: 'cmd:sh=1.0 so:libcrypto.so.3=3.0.0 pc:bar=2.0',
+        },
       }),
     ]);
+
+    const roundTripped = JSON.parse(JSON.stringify(packages[0]));
+    expect(roundTripped.apkIndexFields).toEqual(expect.objectContaining({
+      C: 'Q1AQEBAQEBAQEBAQEBAQEBAQEBAQE=',
+      D: 'so:libc.musl-x86_64.so.1=1.0 cmd:sh>=1.0 pc:bar=2.0 ssl-client>=1.0 compat~1.0 !conflict>=1.0',
+      p: 'cmd:sh=1.0 so:libcrypto.so.3=3.0.0 pc:bar=2.0',
+      I: '2048',
+    }));
   });
 
   it('YUM parser는 repomd와 primary.xml.gz를 읽어 시스템 requires를 제외한다', async () => {
