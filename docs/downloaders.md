@@ -446,6 +446,7 @@ const common = {
   architecture: 'x86_64' as const,
   cacheDirectory: '/tmp/depssmuggler-os-cache',
   cacheEnabled: true,
+  cacheMaxSize: 1024 * 1024, // 선택: 추정 메타데이터 크기 한도 (바이트)
 };
 const result = await searchOSPackages({ ...common, query: 'nginx', matchType: 'partial' });
 const downloadResult = await downloadOSPackages({

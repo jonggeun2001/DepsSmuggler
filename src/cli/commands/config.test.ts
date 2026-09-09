@@ -44,7 +44,7 @@ describe('CLI 설정 명령', () => {
     ['cacheEnabled', 'true', true],
     ['cacheEnabled', 'false', false],
     ['concurrentDownloads', '5', 5],
-    ['maxCacheSize', '0', 0],
+    ['maxCacheSize', '1048576', 1048576],
     ['cachePath', '/tmp/package-cache', '/tmp/package-cache'],
     ['logLevel', 'debug', 'debug'],
   ])('%s=%s를 기존 CLI 변환 규칙으로 저장한다', async (key, input, expected) => {

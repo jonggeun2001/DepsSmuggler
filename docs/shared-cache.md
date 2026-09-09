@@ -243,6 +243,17 @@ interface CacheStoreOptions<T> {
 
 ---
 
+## OS 메타데이터 캐시 설정
+
+`src/core/downloaders/os-shared/cache-manager.ts`의 `OsPackageCache`는 OS 저장소 메타데이터를 관리합니다. CLI의 `os search`와 `os download`는 `settings.json`에서 읽은 캐시 사용 여부와 경로, 최대 크기를 이 캐시에 전달합니다.
+
+- CLI 설정 `cacheEnabled`는 GUI와 같은 저장 키 `enableCache`로 연결됩니다. 비동기 `ConfigManager` API의 이름은 `cachingEnabled`로 유지합니다. 읽기 우선순위와 입력 검증은 [CLI 설정](cli.md#config)을 참고하세요.
+- CLI의 `maxCacheSize` 기본값은 10GiB입니다. OS backend를 직접 호출하면서 `cacheMaxSize`를 생략한 경우에는 기존 생성자 기본값인 500MiB를 사용합니다.
+- 크기 예산은 저장 데이터의 `JSON.stringify(data).length * 2` 추정값이며, 파일의 JSON 부가 필드와 다른 캐시 디렉터리의 크기는 포함하지 않습니다. 저장과 디스크 캐시 로드 시 LRU로 공간을 확보하며, 항목 하나가 한도보다 크면 저장을 생략합니다. 캐시 저장 가능 여부 때문에 정상적인 검색·다운로드를 실패 처리하지 않습니다.
+- 캐시를 비활성화하면 새 데이터를 메모리·디스크 캐시에 저장하지 않습니다. 기존 파일을 지우려면 캐시 삭제 명령을 사용합니다.
+
+이 설정은 OS CLI 경로에 전달됩니다. `ArtifactCacheManager.maxSizeGB`와 pip·Maven·Conda 등의 개별 메타데이터 캐시 옵션은 각각 별도입니다.
+
 ## 패키지별 캐시 요약
 
 | 패키지 타입 | 메모리 캐시 | 디스크 캐시 | TTL | 문서 |

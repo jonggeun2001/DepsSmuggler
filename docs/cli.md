@@ -236,7 +236,7 @@ depssmuggler os download bash --distro ubuntu-22.04 --arch amd64 --format reposi
 - `--scripts`를 주면 의존성 순서 설치 스크립트와 로컬 저장소 설정 스크립트를 생성합니다. 버전 충돌이 있으면 자동 설치 스크립트 생성을 생략하고 경고합니다.
 - `--archive-format zip|tar.gz`로 압축 형식을 선택하며 기본값은 `zip`입니다. `--no-deps`는 의존성 해결을 끕니다.
 - `-d, --distro`는 필수입니다. `--arch` 기본값은 `x86_64`, `-o, --output`은 `./os-packages`, `--concurrency`는 `3`입니다.
-- OS 메타데이터 캐시는 `<cachePath>/os-packages` 아래 persistent JSON 파일로 관리됩니다. 기본 경로는 `~/.depssmuggler/cache/os-packages`이며 CLI 설정의 `cachePath`와 `cacheEnabled`를 따릅니다.
+- OS 메타데이터 캐시는 `<cachePath>/os-packages` 아래 persistent JSON 파일로 관리됩니다. 기본 경로는 `~/.depssmuggler/cache/os-packages`이며 CLI 설정의 `cachePath`, `cacheEnabled`, `maxCacheSize`를 따릅니다. `cacheEnabled=false`이면 새 메타데이터를 캐시에 저장하지 않습니다. 최대 크기의 CLI 기본값은 10GiB이며, 저장할 때 추정 데이터 크기를 기준으로 LRU 정리를 수행합니다.
 - YUM의 메타데이터 로딩 실패는 다운로드에서도 원인을 포함한 오류로 전달됩니다. 같은 resolver에서 재시도할 때 실패 직전의 일부 패키지 목록을 완성된 목록으로 재사용하지 않으며, 정상 저장된 저장소별 디스크 캐시는 재사용할 수 있습니다.
 
 ### `os cache`
@@ -253,12 +253,16 @@ depssmuggler os cache clear
 
 설정 파일은 `~/.depssmuggler/settings.json`을 사용합니다.
 
-읽기에 실패하거나 동시 다운로드 수·캐시 여부·캐시 경로·로그 레벨의 타입/범위가 잘못된 경우 해당 값은 기존 CLI 기본값을 사용하고 `[config:get]` 로그를 남깁니다. 읽기만으로 손상된 파일을 덮어쓰지 않으며, 명시적인 설정 저장/초기화 실패는 오류로 유지합니다.
+읽기에 실패하거나 동시 다운로드 수·캐시 여부·최대 캐시 크기·캐시 경로·로그 레벨의 타입/범위가 잘못된 경우 해당 값은 기존 CLI 기본값을 사용하고 `[config:get]` 로그를 남깁니다. 읽기만으로 손상된 파일을 덮어쓰지 않으며, 명시적인 설정 저장/초기화 실패는 오류로 유지합니다.
 
 ```bash
 depssmuggler config get
 depssmuggler config get concurrentDownloads
 depssmuggler config set concurrentDownloads 5
+depssmuggler config set cacheEnabled false
+depssmuggler config get cacheEnabled
+depssmuggler config set maxCacheSize 1048576
+depssmuggler config get maxCacheSize
 depssmuggler config list
 depssmuggler config reset
 ```
@@ -270,6 +274,10 @@ depssmuggler config reset
 - `cachePath`
 - `maxCacheSize`
 - `logLevel`
+
+`cacheEnabled`는 불리언만, `maxCacheSize`는 0보다 큰 유한한 안전 정수(바이트)만 저장할 수 있습니다. 잘못된 값은 파일을 바꾸지 않고 오류로 종료합니다. 최대 크기는 OS 메타데이터 캐시의 추정 데이터 크기 한도이며, JSON 파일의 부가 필드까지 포함한 디스크 사용량이나 다른 라이브러리 캐시 전체의 합계를 제한하는 값은 아닙니다. 한 항목이 한도보다 크면 검색·다운로드는 계속하고 해당 항목의 캐시 저장만 생략합니다. 한도를 낮춘 뒤 다시 실행하면 기존 캐시도 새 한도에 맞게 정리합니다.
+
+설정 파일에는 캐시 여부를 GUI와 같은 `enableCache`로 저장합니다. 기존 파일은 `enableCache`, `cachingEnabled`, `cacheEnabled` 순서로 처음 나온 null/undefined가 아닌 값을 읽고 불리언인지 확인합니다. 캐시 여부를 명시적으로 저장하면 이전 별칭을 제거하며 다른 설정은 보존합니다. CLI 조회 이름은 계속 `cacheEnabled`입니다.
 
 `config set`은 문자열 `true`/`false`와 숫자를 변환하고 나머지는 문자열로 저장합니다. JSON 객체 입력이나 점 표기법으로 중첩 SMTP 설정을 만드는 명령은 아닙니다. 일반 `download`의 동시성 기본값은 명령에 선언된 `3`이므로 `config set concurrentDownloads 5`만으로 기본 다운로드 병렬도가 바뀌지는 않습니다.
 

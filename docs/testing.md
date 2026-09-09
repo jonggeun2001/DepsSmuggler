@@ -93,6 +93,12 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 
 커버리지는 `npm run test:coverage`로 확인합니다. 현재 커버리지 집계 대상은 `src/core/**/*.ts`이며 테스트 파일과 index barrel은 제외합니다. 따라서 CLI, Electron, 렌더러, E2E 테스트의 검증 범위와 구분해야 합니다. text 보고서는 콘솔에, JSON/HTML 보고서는 `coverage/`에 생성되며 커버리지 최소 비율은 설정되어 있지 않습니다. 외부 레지스트리 실제 연동 및 OS별 파일시스템 동작 전체를 mock 테스트가 보장하지는 않습니다.
 
+### CLI 캐시 설정 검증
+
+`src/cli/cache-settings.integration.test.ts`는 격리한 사용자 디렉터리와 별도 CLI 프로세스로 설정 저장·조회가 연결되는지 확인합니다. 로컬 HTTP APK 저장소를 이용해 캐시 비활성화 시 재요청과 파일 미생성, 활성화 시 저장·재사용, 설정한 크기 한도에 따른 캐시 저장 생략도 검사합니다. 잘못된 입력의 종료 코드와 설정 파일 보존은 실제 CLI 경계에서 확인합니다.
+
+`src/core/config.test.ts`는 저장 키와 이전 별칭의 우선순위, 비동기 API와의 호환성, 불리언·양의 안전 정수 검증을 담당합니다. OS backend 테스트는 옵션 전달을 확인하고, `cache-manager.test.ts`는 실제 임시 디렉터리에서 LRU와 한도 초과 항목의 저장 생략을 검증합니다. 저장 순서와 조회 순서를 다르게 만든 뒤 작은 용량으로 다시 열어도 최근 조회한 항목이 남는지 확인합니다. 이 테스트에는 native apt/yum/apk 실행 파일이 필요하지 않습니다.
+
 ### Conda defaults 채널 검증
 
 - `conda-channel.test.ts`, `conda-cache.test.ts`, `conda-utils.test.ts`: 기본 `defaults`의 공식 URL, 명시적 `main`과 사용자 지정 origin 유지, repodata 요청 및 API 파일 URL 구성을 검증합니다.
