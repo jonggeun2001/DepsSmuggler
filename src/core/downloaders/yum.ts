@@ -20,6 +20,13 @@ import type {
 import { BaseOSDownloader, type BaseDownloaderOptions } from './os-shared/base-downloader';
 import { resolveRepoUrl } from './os-shared/repositories';
 
+function parseNumericAttribute(value: unknown, fallback?: number): number | undefined {
+  if (value === undefined || value === null || value === '') return fallback;
+
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 /**
  * repomd.xml 파싱 결과
  */
@@ -75,7 +82,7 @@ export class YumMetadataParser {
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
       textNodeName: '#text',
-      parseAttributeValue: true,
+      parseAttributeValue: false,
       trimValues: true,
       processEntities: {
         enabled: true,
@@ -293,11 +300,11 @@ export class YumMetadataParser {
     // 버전 정보
     const version = (versionEl?.['@_ver'] as string) || '';
     const release = (versionEl?.['@_rel'] as string) || undefined;
-    const epoch = versionEl?.['@_epoch'] as number | undefined;
+    const epoch = parseNumericAttribute(versionEl?.['@_epoch']);
 
     // 크기 정보
-    const size = (sizeEl?.['@_package'] as number) || 0;
-    const installedSize = (sizeEl?.['@_installed'] as number) || undefined;
+    const size = parseNumericAttribute(sizeEl?.['@_package'], 0) ?? 0;
+    const installedSize = parseNumericAttribute(sizeEl?.['@_installed']);
 
     // 체크섬
     const checksum: Checksum = {
@@ -368,7 +375,7 @@ export class YumMetadataParser {
 
       const flags = entryObj['@_flags'] as string | undefined;
       const ver = entryObj['@_ver'] as string | undefined;
-      const pre = entryObj['@_pre'] as number | undefined;
+      const pre = parseNumericAttribute(entryObj['@_pre']);
 
       dependencies.push({
         name,

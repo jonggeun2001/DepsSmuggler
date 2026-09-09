@@ -10,6 +10,42 @@ import { isArchitectureCompatible } from '../downloaders/os-shared/repositories'
 import { YumMetadataParser } from '../shared/yum-metadata-parser';
 import type { OSPackageInfo, PackageDependency, OSPackageSearchResult } from '../downloaders/os-shared/types';
 
+const YUM_CACHE_SCHEMA_VERSION = 1;
+
+function isYumCachePackage(value: unknown): value is OSPackageInfo {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+
+  const pkg = value as Partial<OSPackageInfo>;
+  if (
+    typeof pkg.name !== 'string' ||
+    typeof pkg.version !== 'string' ||
+    (pkg.release !== undefined && typeof pkg.release !== 'string') ||
+    !Array.isArray(pkg.dependencies)
+  ) {
+    return false;
+  }
+
+  return pkg.dependencies.every((dependency) => (
+    dependency &&
+    typeof dependency === 'object' &&
+    typeof dependency.name === 'string' &&
+    (dependency.version === undefined || typeof dependency.version === 'string')
+  ));
+}
+
+function readYumCache(value: unknown): OSPackageInfo[] | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const envelope = value as { schemaVersion?: unknown; packages?: unknown };
+  if (envelope.schemaVersion !== YUM_CACHE_SCHEMA_VERSION || !Array.isArray(envelope.packages)) {
+    return null;
+  }
+
+  return envelope.packages.every(isYumCachePackage)
+    ? envelope.packages
+    : null;
+}
+
 /**
  * YUM 의존성 해결기
  */
@@ -48,7 +84,8 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
           this.options.architecture,
           'primary'
         );
-        let packages = await this.options.cacheManager?.get<OSPackageInfo[]>(cacheKey);
+        const cachedValue = await this.options.cacheManager?.get<unknown>(cacheKey);
+        let packages = readYumCache(cachedValue);
 
         if (!packages) {
           const repomd = await parser.parseRepomd();
@@ -57,7 +94,10 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
           }
 
           packages = await parser.parsePrimary(repomd.primary.location);
-          await this.options.cacheManager?.set(cacheKey, packages);
+          await this.options.cacheManager?.set(cacheKey, {
+            schemaVersion: YUM_CACHE_SCHEMA_VERSION,
+            packages,
+          });
         }
 
         // 아키텍처 필터링

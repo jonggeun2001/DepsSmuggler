@@ -614,6 +614,97 @@ describe('OS dependency resolvers', () => {
     expect(parsePrimary).not.toHaveBeenCalled();
   });
 
+  it('YUM resolver는 legacy 캐시를 재파싱하고 문자열 identity envelope을 재사용한다', async () => {
+    const parsedPackages = [{
+      ...createPackage('fixture-package', '1.0'),
+      release: '01',
+      epoch: 0,
+      dependencies: [{ name: 'fixture-dependency', operator: '=', version: '1.0' }],
+    }];
+    const cachedLegacy = [{
+      ...parsedPackages[0],
+      version: 1,
+      release: 1,
+      dependencies: [{ name: 'fixture-dependency', operator: '=', version: 1 }],
+    }] as unknown as OSPackageInfo[];
+    const cacheGet = vi.fn().mockResolvedValueOnce(cachedLegacy);
+    const cacheSet = vi.fn().mockResolvedValue(undefined);
+    const parseRepomd = vi.spyOn(YumMetadataParser.prototype, 'parseRepomd').mockResolvedValue({
+      revision: '1',
+      primary: {
+        location: 'repodata/primary.xml.gz',
+        checksum: { type: 'sha256', value: 'deadbeef' },
+      },
+      filelists: null,
+      other: null,
+    });
+    const parsePrimary = vi.spyOn(YumMetadataParser.prototype, 'parsePrimary')
+      .mockResolvedValue(parsedPackages);
+    const createResolver = () => new YumDependencyResolver({
+      ...createOptions(repo),
+      cacheManager: { get: cacheGet, set: cacheSet },
+    });
+
+    await accessResolverForTest(createResolver()).loadMetadata();
+
+    expect(parseRepomd).toHaveBeenCalledOnce();
+    expect(parsePrimary).toHaveBeenCalledOnce();
+    expect(cacheSet).toHaveBeenCalledWith(
+      expect.any(String),
+      { schemaVersion: 1, packages: parsedPackages }
+    );
+    const writtenEnvelope = cacheSet.mock.calls[0][1];
+    cacheGet.mockResolvedValueOnce(JSON.parse(JSON.stringify(writtenEnvelope)));
+
+    await accessResolverForTest(createResolver()).loadMetadata();
+
+    expect(parseRepomd).toHaveBeenCalledOnce();
+    expect(parsePrimary).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['unknown schema', { schemaVersion: 2, packages: [] }],
+    ['packages object', { schemaVersion: 1, packages: {} }],
+    ['non-object package', { schemaVersion: 1, packages: [null] }],
+    ['numeric package version', { schemaVersion: 1, packages: [{ ...createPackage('fixture', '1.0'), version: 1 }] }],
+    ['numeric package release', { schemaVersion: 1, packages: [{ ...createPackage('fixture', '1.0'), release: 1 }] }],
+    ['numeric dependency version', {
+      schemaVersion: 1,
+      packages: [{
+        ...createPackage('fixture', '1.0'),
+        dependencies: [{ name: 'dependency', operator: '=', version: 1 }],
+      }],
+    }],
+  ])('YUM resolver는 %s 캐시를 miss로 처리한다', async (_label, cachedValue) => {
+    const parsedPackages = [createPackage('reparsed-package', '1.0')];
+    const cacheGet = vi.fn().mockResolvedValue(cachedValue);
+    const cacheSet = vi.fn().mockResolvedValue(undefined);
+    const parseRepomd = vi.spyOn(YumMetadataParser.prototype, 'parseRepomd').mockResolvedValue({
+      revision: '1',
+      primary: {
+        location: 'repodata/primary.xml.gz',
+        checksum: { type: 'sha256', value: 'deadbeef' },
+      },
+      filelists: null,
+      other: null,
+    });
+    const parsePrimary = vi.spyOn(YumMetadataParser.prototype, 'parsePrimary')
+      .mockResolvedValue(parsedPackages);
+    const resolver = new YumDependencyResolver({
+      ...createOptions(repo),
+      cacheManager: { get: cacheGet, set: cacheSet },
+    });
+
+    await accessResolverForTest(resolver).loadMetadata();
+
+    expect(parseRepomd).toHaveBeenCalledOnce();
+    expect(parsePrimary).toHaveBeenCalledOnce();
+    expect(cacheSet).toHaveBeenCalledWith(
+      expect.any(String),
+      { schemaVersion: 1, packages: parsedPackages }
+    );
+  });
+
   it('YUM resolver는 저장소 AbortError identity를 보존한다', async () => {
     const abortError = new Error('metadata load cancelled');
     abortError.name = 'AbortError';
