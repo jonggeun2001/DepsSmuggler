@@ -25,6 +25,7 @@ export async function cacheSize(): Promise<void> {
       console.log(chalk.yellow('캐시 디렉토리가 존재하지 않습니다'));
     } else {
       console.error(chalk.red(`캐시 크기 확인 실패: ${(error as Error).message}`));
+      process.exitCode = 1;
     }
   }
 }
@@ -54,6 +55,7 @@ export async function cacheClear(options: { force?: boolean }): Promise<void> {
       console.log(chalk.yellow('삭제할 캐시가 없습니다'));
     } else {
       console.error(chalk.red(`캐시 삭제 실패: ${(error as Error).message}`));
+      process.exitCode = 1;
     }
   }
 }
@@ -67,12 +69,6 @@ export async function cacheList(): Promise<void> {
   const cachePath = config.cachePath;
 
   try {
-    const exists = await fs.pathExists(cachePath);
-    if (!exists) {
-      console.log(chalk.yellow('캐시된 패키지가 없습니다'));
-      return;
-    }
-
     const entries = await fs.readdir(cachePath, { withFileTypes: true });
     const dirs = entries
       .filter((entry) => entry.isDirectory())
@@ -119,7 +115,12 @@ export async function cacheList(): Promise<void> {
     console.log(table.toString());
     console.log(chalk.gray(`\n총 ${dirs.length}개 패키지`));
   } catch (error) {
-    console.error(chalk.red(`캐시 목록 조회 실패: ${(error as Error).message}`));
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      console.log(chalk.yellow('캐시된 패키지가 없습니다'));
+    } else {
+      console.error(chalk.red(`캐시 목록 조회 실패: ${(error as Error).message}`));
+      process.exitCode = 1;
+    }
   }
 }
 
@@ -129,10 +130,13 @@ export async function cacheList(): Promise<void> {
 async function getDirectorySize(dirPath: string): Promise<number> {
   let size = 0;
 
-  const exists = await fs.pathExists(dirPath);
-  if (!exists) return 0;
-
-  const files = await fs.readdir(dirPath);
+  let files: string[];
+  try {
+    files = await fs.readdir(dirPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+    throw error;
+  }
 
   for (const file of files) {
     const filePath = path.join(dirPath, file);

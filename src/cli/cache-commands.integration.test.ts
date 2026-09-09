@@ -114,4 +114,109 @@ describe('CLI cache commands integration', () => {
     expect(listed.stdout.match(/1\.2\.3/g)).toHaveLength(1);
     expect(listed.stdout).toContain('총 1개 패키지');
   }, 120_000);
+
+  it('returns non-zero for cache commands when cachePath is a regular file', async () => {
+    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-cache-file-'));
+    const harnessPath = path.join(tempRoot, 'cli-harness.cjs');
+    const isolatedHome = path.join(tempRoot, 'isolated user');
+    const cacheFile = path.join(tempRoot, 'configured cache file');
+    const originalContents = 'regular cache path fixture\n';
+    await fs.writeFile(harnessPath, childHarness);
+    await fs.writeFile(cacheFile, originalContents);
+
+    const configured = await runChild(
+      harnessPath,
+      isolatedHome,
+      ['config', 'set', 'cachePath', cacheFile],
+    );
+    expect(configured.status, `${configured.stdout}\n${configured.stderr}`).toBe(0);
+    expect(configured.signal).toBeNull();
+
+    for (const args of [
+      ['cache', 'size'],
+      ['cache', 'list'],
+      ['cache', 'clear', '--force'],
+    ]) {
+      const result = await runChild(harnessPath, isolatedHome, args);
+      const output = `${result.stdout}\n${result.stderr}`;
+      expect(result.status, output).toBe(1);
+      expect(result.signal).toBeNull();
+      expect(output).toContain('ENOTDIR');
+      expect(output).not.toContain('✓');
+      await expect(fs.readFile(cacheFile, 'utf8')).resolves.toBe(originalContents);
+    }
+  }, 180_000);
+
+  it('keeps missing cache directories as successful empty-cache controls', async () => {
+    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-cache-missing-'));
+    const harnessPath = path.join(tempRoot, 'cli-harness.cjs');
+    const isolatedHome = path.join(tempRoot, 'isolated user');
+    const missingPath = path.join(tempRoot, 'missing cache directory');
+    await fs.writeFile(harnessPath, childHarness);
+
+    const configured = await runChild(
+      harnessPath,
+      isolatedHome,
+      ['config', 'set', 'cachePath', missingPath],
+    );
+    expect(configured.status, `${configured.stdout}\n${configured.stderr}`).toBe(0);
+    expect(configured.signal).toBeNull();
+
+    for (const args of [
+      ['cache', 'size'],
+      ['cache', 'list'],
+      ['cache', 'clear', '--force'],
+    ]) {
+      const result = await runChild(harnessPath, isolatedHome, args);
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.signal).toBeNull();
+      expect(result.stdout.trim().length).toBeGreaterThan(0);
+      expect(result.stderr).not.toMatch(/failure|실패|error/i);
+      expect(await fs.pathExists(missingPath)).toBe(false);
+    }
+  }, 180_000);
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'returns non-zero for permission-denied cache roots on supported non-root POSIX runs',
+    async () => {
+      tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-cache-permission-'));
+      const harnessPath = path.join(tempRoot, 'cli-harness.cjs');
+      const isolatedHome = path.join(tempRoot, 'isolated user');
+      await fs.writeFile(harnessPath, childHarness);
+
+      for (const blockedPart of ['root', 'parent'] as const) {
+        const cacheParent = path.join(tempRoot, `permission ${blockedPart} parent`);
+        const cacheRoot = path.join(cacheParent, 'permission cache root');
+        const blockedPath = blockedPart === 'root' ? cacheRoot : cacheParent;
+        await fs.ensureDir(cacheRoot);
+
+        try {
+          await fs.chmod(blockedPath, 0o000);
+          const configured = await runChild(
+            harnessPath,
+            isolatedHome,
+            ['config', 'set', 'cachePath', cacheRoot],
+          );
+          expect(configured.status, `${configured.stdout}\n${configured.stderr}`).toBe(0);
+          expect(configured.signal).toBeNull();
+
+          for (const args of [
+            ['cache', 'size'],
+            ['cache', 'list'],
+            ['cache', 'clear', '--force'],
+          ]) {
+            const result = await runChild(harnessPath, isolatedHome, args);
+            const output = `${result.stdout}\n${result.stderr}`;
+            expect(result.status, output).toBe(1);
+            expect(result.signal).toBeNull();
+            expect(output).toContain('EACCES');
+            expect(output).not.toContain('✓');
+          }
+        } finally {
+          await fs.chmod(blockedPath, 0o755);
+        }
+      }
+    },
+    180_000,
+  );
 });
