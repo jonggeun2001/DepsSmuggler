@@ -245,6 +245,8 @@ DEPS_SMUGGLER_NATIVE_CONDA=1 bash scripts/verify-worktree.sh src/core/packager/c
 
 기본 실행에서는 native 검증을 건너뛰며, 명시적으로 opt-in한 환경에서 Linux나 필수 도구 조건이 맞지 않으면 실패합니다. 임시 prefix·캐시·설정과 `CONDA_REGISTER_ENVS=false`로 사용자 환경 등록 파일까지 격리합니다. 실제 Conda로 두 아카이브 형식을 설치하고 패키지 목록과 설치 파일을 검사하며, 설정한 로컬 채널의 HTTP 요청이 없는지 확인합니다. Python noarch 설치는 호환되는 Python이 있는 임시 환경에서 별도로 검사합니다. 일반 noarch 파일의 설치만으로 Python import 성공을 주장하지 않습니다. 도구 설치나 호스트 base 환경 변경은 수행하지 않습니다.
 
+Python 검증 환경은 runner의 base 환경에 설치된 Python과 전이 의존성 기록에 해당하는 캐시 아카이브만 임시 경로로 복사해 준비합니다. 필요한 아카이브가 없으면 구체적인 준비 오류로 실패합니다. 생성 스크립트에는 `CONDA_OFFLINE=false`를 전달해 스크립트 자체의 `--offline` 옵션을 검증하며, 환경 준비·설치·import 단계별 실행 시간을 CI 로그에 남깁니다.
+
 ### npm 설치 스크립트 오프라인 검증
 
 `src/cli/npm-manifest.integration.test.ts`는 로컬 레지스트리와 실제 tarball을 제공하고 별도 CLI 프로세스에서 `--no-deps` 다운로드를 실행합니다. `latest`와 고정 버전 요청 모두 ZIP의 manifest 버전이 tarball 내부 `package/package.json`의 버전과 일치하는지 확인합니다. 이 검증은 npm 설치를 실행하지 않습니다. npm 다운로더 단위 테스트는 성공 후 버전·메타데이터 갱신과 기존 입력 정보 보존, 실패 시 입력 미변경을 검증합니다.

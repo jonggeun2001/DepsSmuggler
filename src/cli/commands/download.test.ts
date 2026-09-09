@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { downloadCommand } from './download';
 import { resolveAllDependencies } from '../../core/shared';
@@ -969,10 +970,10 @@ describe('downloadCommand', () => {
   });
 
   it('Conda 스크립트에는 완료된 실제 archive 경로만 전달한다', async () => {
-    const outputRoot = '/tmp/conda script output';
-    const condaArchive = `${outputRoot}/nested dir/six-1.17.0-py312h06a4308_0.tar.bz2`;
-    const condaDependencyArchive = `${outputRoot}/nested dir/python_abi-3.12-0.conda`;
-    const pipArchive = `${outputRoot}/pip/requests-2.32.0.tar.bz2`;
+    const outputRoot = path.resolve('tmp', 'conda script output');
+    const condaArchive = path.join(outputRoot, 'nested dir', 'six-1.17.0-py312h06a4308_0.tar.bz2');
+    const condaDependencyArchive = path.join(outputRoot, 'nested dir', 'python_abi-3.12-0.conda');
+    const pipArchive = path.join(outputRoot, 'pip', 'requests-2.32.0.tar.bz2');
     vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
       originalPackages: [
         {

@@ -31,6 +31,37 @@ function condaOptions(relativePaths: string[]): ScriptOptions {
   return { condaPackageFiles: relativePaths.map((relativePath) => ({ relativePath })) };
 }
 
+function nativeProcessEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.CONDA_PREFIX;
+  delete env.CONDA_DEFAULT_ENV;
+  delete env.PYTHONHOME;
+  delete env.PYTHONPATH;
+  return {
+    ...env,
+    CONDA_NO_PLUGINS: 'true',
+    CONDA_SOLVER: 'classic',
+    CONDA_OFFLINE: 'true',
+    CONDA_REGISTER_ENVS: 'false',
+    PYTHONDONTWRITEBYTECODE: '1',
+    PYTHONNOUSERSITE: '1',
+    ...overrides,
+  };
+}
+
+async function nativePhase<T>(name: string, action: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  console.log(`native phase: ${name} start`);
+  try {
+    const result = await action();
+    console.log(`native phase: ${name} end (${Date.now() - started}ms)`);
+    return result;
+  } catch (error) {
+    console.error(`native phase: ${name} failed (${Date.now() - started}ms)`, error);
+    throw error;
+  }
+}
+
 async function runBash(
   scriptPath: string,
   env: NodeJS.ProcessEnv,
@@ -52,29 +83,51 @@ async function runBash(
 }
 
 async function findConda(): Promise<{ executable: string; root: string; python: string }> {
-  const candidates = [
+  const candidates = [...new Set([
     process.env.CONDA ? path.join(process.env.CONDA, 'bin', 'conda') : undefined,
     '/usr/share/miniconda/bin/conda',
     'conda',
-  ].filter((candidate): candidate is string => Boolean(candidate));
+  ].filter((candidate): candidate is string => Boolean(candidate)))];
+  const failures: string[] = [];
   for (const executable of candidates) {
+    const started = Date.now();
     try {
-      const version = await execFile(executable, ['--version'], { timeout: 15_000 });
+      const version = await execFile(executable, ['--version'], {
+        env: nativeProcessEnv({ CONDA_OFFLINE: 'true' }),
+        timeout: 60_000,
+      });
       const root = (
-        await execFile(executable, ['info', '--base'], { timeout: 15_000 })
+        await execFile(executable, ['info', '--base'], {
+          env: nativeProcessEnv({ CONDA_OFFLINE: 'true' }),
+          timeout: 60_000,
+        })
       ).stdout.trim();
       if (!root) throw new Error(`Conda did not report a base prefix for ${executable}`);
       const python = path.join(root, 'bin', 'python');
-      await execFile(python, ['--version'], { timeout: 15_000 });
+      await execFile(python, ['--version'], {
+        env: nativeProcessEnv({ CONDA_OFFLINE: 'true' }),
+        timeout: 60_000,
+      });
       console.log(
         `native conda: ${executable} (${version.stdout.trim() || version.stderr.trim()})`
       );
       return { executable, root, python };
-    } catch {
-      // Probe the next runner-provided installation.
+    } catch (error) {
+      const elapsed = Date.now() - started;
+      const details = error as {
+        message?: string;
+        stderr?: string;
+        code?: number | string;
+        signal?: string;
+      };
+      const message = `${executable}: ${details.message ?? 'probe failed'}${details.code !== undefined ? ` (code ${details.code})` : ''}${details.signal ? ` (signal ${details.signal})` : ''}${details.stderr ? `: ${details.stderr.trim()}` : ''}`;
+      failures.push(message);
+      console.error(`native conda probe failed (${elapsed}ms): ${message}`);
     }
   }
-  throw new Error('DEPS_SMUGGLER_NATIVE_CONDA=1 requires an existing Conda installation');
+  throw new Error(
+    `DEPS_SMUGGLER_NATIVE_CONDA=1 requires an existing Conda installation; probes failed:\n${failures.join('\n')}`
+  );
 }
 
 async function createFixture(
@@ -90,7 +143,7 @@ async function createFixture(
   ].join('\n');
   await execFile(python, ['-c', script, source, filename, output], {
     timeout: 30_000,
-    env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONPATH: undefined, PYTHONHOME: undefined },
+    env: nativeProcessEnv(),
   });
   const archive = path.join(output, filename);
   if (!fs.existsSync(archive)) throw new Error(`conda-package-handling did not create ${filename}`);
@@ -154,7 +207,7 @@ async function writeIsolatedEnv(root: string, trapPort: number): Promise<NodeJS.
     `channels:\n  - http://127.0.0.1:${trapPort}/trap\ncreate_default_packages:\n  - unavailable-test-default\n`
   );
   return {
-    ...process.env,
+    ...nativeProcessEnv(),
     DEPS_SMUGGLER_CONDA_PREFIX: '',
     PYTHONDONTWRITEBYTECODE: '1',
     PYTHONNOUSERSITE: '1',
@@ -163,11 +216,62 @@ async function writeIsolatedEnv(root: string, trapPort: number): Promise<NodeJS.
     CONDA_REGISTER_ENVS: 'false',
     CONDA_NO_PLUGINS: 'true',
     CONDA_SOLVER: 'classic',
+    CONDA_OFFLINE: 'false',
     CONDA_ENVS_PATH: envs,
     CONDA_PKGS_DIRS: cache,
     CONDARC: condarc,
     CONDA_CHANNELS: `http://127.0.0.1:${trapPort}/trap`,
   };
+}
+
+type RuntimeArchive = { name: string; filename: string; source: string };
+
+async function collectPythonRuntimeArchives(
+  setup: { python: string; root: string; tempRoot: string; env: NodeJS.ProcessEnv }
+): Promise<RuntimeArchive[]> {
+  return nativePhase('python prerequisite discovery', async () => {
+    const script = [
+      'import glob, json, os, sys',
+      'from conda.models.match_spec import MatchSpec',
+      'base, cache = sys.argv[1:3]',
+      'records = {}',
+      'for filename in glob.glob(os.path.join(base, "conda-meta", "*.json")):',
+      '  with open(filename, encoding="utf-8") as stream: record = json.load(stream)',
+      '  if record.get("name"): records[record["name"]] = record',
+      'queue, selected = ["python"], {}',
+      'while queue:',
+      '  name = queue.pop(0)',
+      '  if not name or name.startswith("__") or name in selected: continue',
+      '  record = records.get(name)',
+      '  if record is None: raise RuntimeError(f"missing installed runtime record: {name}")',
+      '  selected[name] = record',
+      '  for dependency in record.get("depends", []):',
+      '    dependency_name = MatchSpec(dependency).name',
+      '    if dependency_name and not dependency_name.startswith("__") and dependency_name not in selected: queue.append(dependency_name)',
+      'result = []',
+      'for name, record in selected.items():',
+      '  candidates = [record.get("fn"), record.get("name") + "-" + record.get("version") + "-" + record.get("build") + ".conda", record.get("name") + "-" + record.get("version") + "-" + record.get("build") + ".tar.bz2"]',
+      '  archive = next((candidate for candidate in candidates if candidate and os.path.isfile(os.path.join(cache, candidate))), None)',
+      '  if archive is None: raise RuntimeError("missing cached archive for runtime record: " + name + " (" + str(record.get("fn")) + ")")',
+      '  result.append({"name": name, "filename": archive, "source": os.path.join(cache, archive)})',
+      'print(json.dumps(result))',
+    ].join('\n');
+    const result = await execFile(
+      setup.python,
+      ['-c', script, setup.root, path.join(setup.root, 'pkgs')],
+      { env: setup.env, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 }
+    );
+    const archives = JSON.parse(result.stdout) as RuntimeArchive[];
+    if (!archives.length) throw new Error('No installed Python runtime records were discovered');
+    const runtimeDir = path.join(setup.tempRoot, 'runtime-artifacts');
+    await fs.promises.mkdir(runtimeDir, { recursive: true });
+    for (const archive of archives) {
+      const destination = path.join(runtimeDir, archive.filename);
+      await fs.promises.copyFile(archive.source, destination);
+      archive.source = destination;
+    }
+    return archives;
+  });
 }
 
 nativeSuite('native Conda offline installer consumer', () => {
@@ -232,20 +336,24 @@ nativeSuite('native Conda offline installer consumer', () => {
       'depssmuggler-native-dependency',
       '1.0.0'
     );
-    const fixtureDir = path.join(setup.tempRoot, 'fixtures');
-    await fs.promises.mkdir(fixtureDir, { recursive: true });
-    const archive = await createFixture(
-      setup.python,
-      source,
-      fixtureDir,
-      'depssmuggler-native-data-1.0.0-0.conda'
-    );
-    const dependencyArchive = await createFixture(
-      setup.python,
-      dependencySource,
-      fixtureDir,
-      'depssmuggler-native-dependency-1.0.0-0.tar.bz2'
-    );
+    const { archive, dependencyArchive } = await nativePhase('generic fixture', async () => {
+      const fixtureDir = path.join(setup.tempRoot, 'fixtures');
+      await fs.promises.mkdir(fixtureDir, { recursive: true });
+      return {
+        archive: await createFixture(
+          setup.python,
+          source,
+          fixtureDir,
+          'depssmuggler-native-data-1.0.0-0.conda'
+        ),
+        dependencyArchive: await createFixture(
+          setup.python,
+          dependencySource,
+          fixtureDir,
+          'depssmuggler-native-dependency-1.0.0-0.tar.bz2'
+        ),
+      };
+    });
     const outputDir = path.join(setup.tempRoot, 'bundle');
     const packageDir = path.join(outputDir, 'packages');
     await fs.promises.mkdir(packageDir, { recursive: true });
@@ -266,12 +374,14 @@ nativeSuite('native Conda offline installer consumer', () => {
       version: '1.0.0',
       metadata: { filename: path.basename(dependencyArchive) },
     };
-    const scripts = await getScriptGenerator().generateAllScripts(
-      [pkg, dependencyPkg],
-      outputDir,
-      condaOptions([path.basename(archive), path.basename(dependencyArchive)])
-    );
-    const result = await runBash(generatedScript(scripts).path, setup.env);
+    const result = await nativePhase('generic create/install', async () => {
+      const scripts = await getScriptGenerator().generateAllScripts(
+        [pkg, dependencyPkg],
+        outputDir,
+        condaOptions([path.basename(archive), path.basename(dependencyArchive)])
+      );
+      return runBash(generatedScript(scripts).path, setup.env);
+    });
     expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.signal).toBeNull();
     const listed = JSON.parse(
@@ -309,49 +419,55 @@ nativeSuite('native Conda offline installer consumer', () => {
     expect(requests).toBe(0);
   }, 240_000);
 
-  it('installs a unique Python noarch tar.bz2 into a cloned temporary Python prefix and preserves it on repeat', async () => {
+  it('installs a unique Python noarch tar.bz2 into a temporary Python prefix and preserves it on repeat', async () => {
     const setup = await prepareNative();
-    const basePrefix = setup.root;
-    const sourceCache = path.join(setup.root, 'pkgs');
-    if (!fs.existsSync(sourceCache)) {
-      throw new Error(`Native Conda cache prerequisite missing: ${sourceCache}`);
-    }
     const isolatedCache = setup.env.CONDA_PKGS_DIRS;
     if (!isolatedCache) throw new Error('Native Conda isolated cache was not configured');
-    await fs.promises.cp(sourceCache, isolatedCache, { recursive: true });
+    const runtimeArchives = await collectPythonRuntimeArchives(setup);
     const source = await createPackageSource(
       setup.tempRoot,
       'depssmuggler-native-python',
       '1.0.0',
       'depssmuggler_native_fixture'
     );
-    const fixtureDir = path.join(setup.tempRoot, 'fixtures');
-    await fs.promises.mkdir(fixtureDir, { recursive: true });
-    const archive = await createFixture(
-      setup.python,
-      source,
-      fixtureDir,
-      'depssmuggler-native-python-1.0.0-0.tar.bz2'
-    );
+    const archive = await nativePhase('Python fixture', async () => {
+      const fixtureDir = path.join(setup.tempRoot, 'fixtures');
+      await fs.promises.mkdir(fixtureDir, { recursive: true });
+      return createFixture(
+        setup.python,
+        source,
+        fixtureDir,
+        'depssmuggler-native-python-1.0.0-0.tar.bz2'
+      );
+    });
     const outputDir = path.join(setup.tempRoot, 'bundle');
     const packageDir = path.join(outputDir, 'packages');
     await fs.promises.mkdir(packageDir, { recursive: true });
     await fs.promises.copyFile(archive, path.join(packageDir, path.basename(archive)));
     const prefix = path.join(setup.tempRoot, 'python-prefix');
-    await execFile(
-      setup.executable,
-      [
-        'create',
-        '--offline',
-        '--yes',
-        '--no-default-packages',
-        '--clone',
-        basePrefix,
-        '--prefix',
-        prefix,
-      ],
-      { env: setup.env, timeout: 120_000 }
+    await nativePhase('Python runtime create', async () => {
+      await execFile(
+        setup.executable,
+        [
+          'create',
+          '--offline',
+          '--yes',
+          '--no-default-packages',
+          '--prefix',
+          prefix,
+          ...runtimeArchives.map((archive) => archive.source),
+        ],
+        { env: setup.env, timeout: 120_000, maxBuffer: 2 * 1024 * 1024 }
+      );
+    });
+    const env = { ...setup.env, DEPS_SMUGGLER_CONDA_PREFIX: prefix };
+    const prefixPython = await nativePhase('temporary Python prerequisite', () =>
+      execFile(path.join(prefix, 'bin', 'python'), ['-c', 'import sys; print(sys.prefix)'], {
+        env,
+        timeout: 60_000,
+      })
     );
+    expect(prefixPython.stdout.trim()).toBe(prefix);
     const before = JSON.parse(
       (
         await execFile(setup.executable, ['list', '--json', '--prefix', prefix], {
@@ -372,17 +488,20 @@ nativeSuite('native Conda offline installer consumer', () => {
       outputDir,
       condaOptions([path.basename(archive)])
     );
-    const env = { ...setup.env, DEPS_SMUGGLER_CONDA_PREFIX: prefix };
-    const first = await runBash(generatedScript(scripts).path, env);
+    const first = await nativePhase('generated Python install', () =>
+      runBash(generatedScript(scripts).path, env)
+    );
     expect(first.code, `${first.stdout}\n${first.stderr}`).toBe(0);
     expect(first.signal).toBeNull();
-    const importResult = await execFile(
-      path.join(prefix, 'bin', 'python'),
-      [
-        '-c',
-        'import json,sys,depssmuggler_native_fixture as m; print(json.dumps({"prefix":sys.prefix,"file":m.__file__,"version":m.__version__,"payload":m.PAYLOAD}))',
-      ],
-      { env, timeout: 30_000 }
+    const importResult = await nativePhase('Python import', () =>
+      execFile(
+        path.join(prefix, 'bin', 'python'),
+        [
+          '-c',
+          'import json,sys,depssmuggler_native_fixture as m; print(json.dumps({"prefix":sys.prefix,"file":m.__file__,"version":m.__version__,"payload":m.PAYLOAD}))',
+        ],
+        { env, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 }
+      )
     );
     const imported = JSON.parse(importResult.stdout.trim()) as {
       prefix: string;
@@ -396,7 +515,9 @@ nativeSuite('native Conda offline installer consumer', () => {
     expect(imported.payload).toBe('depssmuggler-native-payload');
     const sentinel = path.join(prefix, 'sentinel');
     await fs.promises.writeFile(sentinel, 'preserve');
-    const second = await runBash(generatedScript(scripts).path, env);
+    const second = await nativePhase('generated Python repeat install', () =>
+      runBash(generatedScript(scripts).path, env)
+    );
     expect(second.code, `${second.stdout}\n${second.stderr}`).toBe(0);
     expect(second.signal).toBeNull();
     expect(await fs.promises.readFile(sentinel, 'utf8')).toBe('preserve');
