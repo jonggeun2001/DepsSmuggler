@@ -6,7 +6,6 @@ import { useCartStore } from '../../../stores/cart-store';
 import {
   useDownloadStore,
   type DownloadStoreItem,
-  type DownloadStoreStatus,
 } from '../../../stores/download-store';
 import { useHistoryStore } from '../../../stores/history-store';
 import { useSettingsStore } from '../../../stores/settings-store';
@@ -22,6 +21,7 @@ import {
   persistHistoryAndMaybeClearCart,
 } from '../utils';
 import { deriveDownloadPageMode, getDownloadCounts, hasRecoverableArtifacts } from '../view-state';
+import { createResolvedDownloadItems, type ResolvedDownloadData } from '../resolved-items';
 import { useOSDownloadFlow } from './use-os-download-flow';
 import type {
   HistoryDeliveryResult,
@@ -695,83 +695,15 @@ export function useDownloadPageController() {
     });
 
     const unsubDepsResolved = window.electronAPI.download.onDepsResolved?.((data) => {
-      interface DependencyNodeData {
-        package: { name: string; version: string; type?: string };
-        dependencies: DependencyNodeData[];
-      }
-      interface DependencyTreeData {
-        root: DependencyNodeData;
-      }
-
-      const originalPackages = data.originalPackages as Array<{ id: string; name: string; version: string; type: string; filename?: string }>;
-      const allPackages = data.allPackages as Array<{ id: string; name: string; version: string; type: string; filename?: string }>;
-      const dependencyTrees = data.dependencyTrees as DependencyTreeData[] | undefined;
-      const failedPackages = data.failedPackages as Array<{ name: string; version: string; error: string }> | undefined;
+      const resolvedData = data as ResolvedDownloadData;
+      const { originalPackages, allPackages, failedPackages } = resolvedData;
 
       scheduleLogBatch(
         'info',
         `의존성 해결 완료: ${originalPackages.length}개 → ${allPackages.length}개 패키지`
       );
 
-      const dependencyMap = new Map<string, { parentId: string; parentName: string }>();
-      const originalIds = new Set(originalPackages.map((pkg) => pkg.id));
-
-      if (dependencyTrees) {
-        dependencyTrees.forEach((tree) => {
-          const rootPkg = tree.root.package;
-          const rootId = `${rootPkg.type || 'pip'}-${rootPkg.name}-${rootPkg.version}`;
-          const rootName = rootPkg.name;
-          const stack: DependencyNodeData[] = [tree.root];
-          const visited = new Set<string>();
-
-          while (stack.length > 0) {
-            const node = stack.pop();
-            if (!node) {
-              continue;
-            }
-            const nodeId = `${node.package.type || 'pip'}-${node.package.name}-${node.package.version}`;
-
-            if (visited.has(nodeId)) {
-              continue;
-            }
-            visited.add(nodeId);
-
-            node.dependencies.forEach((dep) => {
-              const depPkg = dep.package;
-              const depId = `${depPkg.type || 'pip'}-${depPkg.name}-${depPkg.version}`;
-
-              if (!originalIds.has(depId)) {
-                dependencyMap.set(depId, { parentId: rootId, parentName: rootName });
-              }
-
-              if (!visited.has(depId)) {
-                stack.push(dep);
-              }
-            });
-          }
-        });
-      }
-
-      const newItems: DownloadStoreItem[] = allPackages.map((pkg) => {
-        const depInfo = dependencyMap.get(pkg.id);
-        const isOriginal = originalIds.has(pkg.id);
-
-        return {
-          id: pkg.id,
-          name: pkg.name,
-          version: pkg.version,
-          type: pkg.type,
-          status: 'pending' as DownloadStoreStatus,
-          progress: 0,
-          downloadedBytes: 0,
-          totalBytes: 0,
-          speed: 0,
-          isDependency: !isOriginal,
-          parentId: depInfo?.parentId,
-          dependencyOf: depInfo?.parentName,
-          filename: pkg.filename,
-        };
-      });
+      const newItems = createResolvedDownloadItems(resolvedData);
       setItems(newItems);
       downloadItemsRef.current = newItems;
 
@@ -968,92 +900,11 @@ export function useDownloadPageController() {
         throw new Error('의존성 해결 API를 사용할 수 없습니다');
       }
 
-      const data = await dependencyAPI.resolve({ packages, options }) as {
-        originalPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; filename?: string; metadata?: Record<string, unknown>; classifier?: string }>;
-        allPackages: Array<{ id: string; name: string; version: string; type: string; size?: number; downloadUrl?: string; filename?: string; metadata?: Record<string, unknown>; classifier?: string }>;
-        dependencyTrees: Array<{
-          root: {
-            package: { name: string; version: string; type?: string };
-            dependencies: Array<unknown>;
-          };
-        }>;
-        failedPackages: Array<{ name: string; version: string; error: string }>;
-      };
+      const data = await dependencyAPI.resolve({ packages, options }) as ResolvedDownloadData;
 
       addLog('info', `의존성 해결 완료: ${data.originalPackages.length}개 → ${data.allPackages.length}개 패키지`);
 
-      interface DependencyNodeData {
-        package: { name: string; version: string; type?: string };
-        dependencies: DependencyNodeData[];
-      }
-
-      const dependencyMap = new Map<string, { parentId: string; parentName: string }>();
-      const originalNames = new Set(data.originalPackages.map((pkg) => `${pkg.name}-${pkg.version}`));
-      const originalIdByName = new Map<string, string>();
-      data.originalPackages.forEach((pkg) => {
-        originalIdByName.set(pkg.name, pkg.id);
-      });
-
-      if (data.dependencyTrees) {
-        data.dependencyTrees.forEach((tree) => {
-          const rootPkg = tree.root.package;
-          const rootId = originalIdByName.get(rootPkg.name) || `${rootPkg.type || 'pip'}-${rootPkg.name}-${rootPkg.version}`;
-          const rootName = rootPkg.name;
-          const stack: DependencyNodeData[] = [tree.root as DependencyNodeData];
-          const visited = new Set<string>();
-
-          while (stack.length > 0) {
-            const node = stack.pop();
-            if (!node) {
-              continue;
-            }
-            const nodeKey = `${node.package.name}-${node.package.version}`;
-
-            if (visited.has(nodeKey)) {
-              continue;
-            }
-            visited.add(nodeKey);
-
-            node.dependencies.forEach((dep) => {
-              const depPkg = dep.package;
-              const depKey = `${depPkg.name}-${depPkg.version}`;
-
-              if (!originalNames.has(depKey)) {
-                dependencyMap.set(depKey, { parentId: rootId, parentName: rootName });
-              }
-
-              if (!visited.has(depKey)) {
-                stack.push(dep);
-              }
-            });
-          }
-        });
-      }
-
-      const newItems: DownloadStoreItem[] = data.allPackages.map((pkg) => {
-        const pkgKey = `${pkg.name}-${pkg.version}`;
-        const depInfo = dependencyMap.get(pkgKey);
-        const isOriginal = originalNames.has(pkgKey);
-
-        return {
-          id: pkg.id,
-          name: pkg.name,
-          version: pkg.version,
-          type: pkg.type,
-          status: 'pending' as DownloadStoreStatus,
-          progress: 0,
-          downloadedBytes: 0,
-          totalBytes: pkg.size || 0,
-          speed: 0,
-          isDependency: !isOriginal,
-          parentId: depInfo?.parentId,
-          dependencyOf: depInfo?.parentName,
-          downloadUrl: pkg.downloadUrl,
-          filename: pkg.filename,
-          metadata: pkg.metadata,
-          classifier: pkg.classifier,
-        };
-      });
+      const newItems = createResolvedDownloadItems(data);
 
       setItems(newItems);
       downloadItemsRef.current = newItems;

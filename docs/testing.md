@@ -113,6 +113,33 @@ bash scripts/verify-worktree.sh \
 
 이 fixture 검증은 실제 Maven Central의 현재 파일 존재 여부나 외부 Maven 실행의 오프라인 성공을 보장하지 않습니다. 외부 저장소 검증에는 아래 통합 테스트를 별도로 사용하고, 실행 명령·대상 좌표·파일 확인 결과를 해당 작업의 검증 기록에 남깁니다.
 
+### Maven 다운로드 목록과 미리보기 검증
+
+모델 POM이 `flatList`에는 있지만 `root` 실행 의존성 그래프에는 없는 응답을 사용해 화면 표시를 검증합니다. 다음 회귀는 renderer 변환과 상태·DOM을 검사하며, 실제 resolver 조회나 파일 다운로드를 실행하지 않습니다.
+
+| 테스트 | 검증 범위 |
+|--------|-----------|
+| `src/renderer/pages/download-page/resolved-items.test.ts` | flatList의 부모/BOM POM 연결, 실제 원본 ID와 다운로드 메타데이터 보존, GAV·type·classifier별 그룹, 공유 POM 중복 표시 방지, 이전 응답의 순환 트리 처리, 미연결 행 표시 |
+| `src/renderer/pages/download-page/hooks/use-download-page-controller.test.tsx` | 수동 의존성 확인과 `onDepsResolved` 이벤트 양쪽에서 71개 fixture 항목과 모델 POM의 그룹·ID·파일 정보 보존 |
+| `src/renderer/components/DependencyTree.test.tsx` | 그래프 밖 POM 목록 펼치기와 파일 상세, 중복·기존 그래프 POM 제외, 같은 GAV의 JAR/POM/classifier 구분, 원본 실행 그래프 유지 |
+| `tests/e2e/maven-pom-preview.spec.ts` | Chromium의 실제 의존성 확인 화면에서 전체 71개·하위 70개·POM 35개 표시, `flink-metrics-1.20.5.pom` 가시성 확인 |
+
+71개 fixture의 개수는 화면 회귀를 위한 고정 데이터이며 Maven Central의 실시간 의존성 개수가 아닙니다. 훅과 컴포넌트 테스트는 jsdom에서 Electron bridge 또는 트리 렌더링 경계를 모킹합니다. 그룹 상태 집계와 목록 스캔은 기존 `download-page/utils.test.ts`도 함께 확인합니다.
+
+```bash
+bash scripts/verify-worktree.sh \
+  src/renderer/pages/download-page/resolved-items.test.ts \
+  src/renderer/pages/download-page/utils.test.ts \
+  src/renderer/pages/download-page/hooks/use-download-page-controller.test.tsx \
+  src/renderer/components/DependencyTree.test.tsx
+```
+
+Playwright 회귀는 Electron bridge의 `dependency.resolve` 응답을 fixture로 대체하고 실제 Chromium에서 의존성 확인 버튼과 다운로드 목록을 검사합니다. 외부 Maven Central 호출과 파일 다운로드는 이 화면 검증에 포함하지 않습니다.
+
+```bash
+npx playwright test tests/e2e/maven-pom-preview.spec.ts --project=chromium
+```
+
 ### 2. 통합 테스트
 
 - 파일명 관례: `*.integration.test.ts`
@@ -149,6 +176,7 @@ bash scripts/verify-worktree.sh \
 - `tests/e2e/history-email-restore.spec.ts`: 이메일 전달 히스토리 재다운로드 시 수신자 복원과 전역 설정 보존
 - `tests/e2e/os-package-download.spec.ts`: OS 패키지 전용 검색/다운로드 흐름
 - `tests/e2e/cart-input-regression.spec.ts`: 빈 장바구니·입력, requirements 중복·주석·파일 업로드, 최신 버전 조회 실패, package.json 오류·scoped/dev 의존성, Maven JAR/POM 구분과 저장 복원
+- `tests/e2e/maven-pom-preview.spec.ts`: 의존성 해결 응답을 대체한 Chromium 화면에서 부모 POM을 포함한 전체 다운로드 목록·그룹 개수·파일명 표시
 - `tests/e2e/download-cancel-retry.spec.ts`: 실제 시작·패키지 완료 상태를 기다린 뒤 취소와 새 세션 재시도를 검증
 
 빈 다운로드 화면의 `UI-DL-003`은 `cart-input-regression.spec.ts`에서 이미 검증합니다. 홈 진입·일반 위자드 검색과 전달 방식 왕복 전환은 전용 E2E의 추가 후보이며, 기존 완료/히스토리 테스트가 일부 상태만 검증합니다.

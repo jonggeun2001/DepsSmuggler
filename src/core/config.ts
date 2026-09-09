@@ -1,7 +1,8 @@
-import * as fs from 'fs-extra';
-import * as path from 'path';
-import * as os from 'os';
 import * as crypto from 'crypto';
+import { TextDecoder } from 'node:util';
+import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs-extra';
 import { machineIdSync } from 'node-machine-id';
 import { mask } from '../utils/mask';
 
@@ -321,6 +322,9 @@ export class ConfigManager {
       }
       const iv = Buffer.from(parts[0], 'hex');
       const encrypted = parts[1];
+      // 잘못된 키도 CBC 패딩 검사를 통과할 수 있으므로 UTF-8 유효성까지 확인한다.
+      // 비밀번호에 포함된 선행 BOM은 제거하지 않는다.
+      const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
       
       // 새로운 머신별 키로 복호화 시도
       try {
@@ -329,9 +333,7 @@ export class ConfigManager {
           ENCRYPTION_KEY,
           iv
         );
-        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-        decrypted += decipher.final('utf8');
-        return decrypted;
+        return decoder.decode(Buffer.concat([decipher.update(encrypted, 'hex'), decipher.final()]));
       } catch {
         // 새 키로 실패 시 레거시 키로 복호화 시도 (마이그레이션)
         const legacyDecipher = crypto.createDecipheriv(
@@ -339,8 +341,7 @@ export class ConfigManager {
           Buffer.from(LEGACY_ENCRYPTION_KEY),
           iv
         );
-        let decrypted = legacyDecipher.update(encrypted, 'hex', 'utf8');
-        decrypted += legacyDecipher.final('utf8');
+        const decrypted = decoder.decode(Buffer.concat([legacyDecipher.update(encrypted, 'hex'), legacyDecipher.final()]));
         this.needsEncryptionMigration = true;
         console.info('[config] 레거시 키로 복호화 성공 - 마이그레이션을 수행합니다.');
         return decrypted;

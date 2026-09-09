@@ -19,7 +19,7 @@ describe('download-page/utils', () => {
       status: statuses[index % statuses.length], progress: 0, downloadedBytes: 0,
       totalBytes: 0, speed: 0,
       get isDependency() { dependencyReads++; return index >= 20; },
-      parentId: index >= 20 ? `item-${index % 21}` : undefined,
+      parentId: index >= 20 ? `item-${index % 20}` : undefined,
     }));
     const expected = items.filter((item) => !item.isDependency).map((parent) => ({
       parent, dependencies: getPackageDependencies(items, parent.id),
@@ -32,7 +32,7 @@ describe('download-page/utils', () => {
 
     expect(actual).toEqual(expected);
     expect(actual[0].parent).toBe(items[0]);
-    expect(actual[0].dependencies[0]).toBe(items[21]);
+    expect(actual[0].dependencies[0]).toBe(items[20]);
     expect(reads).toBeLessThanOrEqual(items.length * 2);
     expect(groupDownloadItems([])).toEqual([]);
   });
