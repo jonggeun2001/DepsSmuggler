@@ -96,6 +96,54 @@ describe('os CLI commands', () => {
     );
   });
 
+  it.each(['1.5', '0.5', '.5', '.5e-999', '+.5e-999', '1abc', '9007199254740992', '1.0000000000000001'])(
+    '양의 정수가 아닌 동시성 입력은 backend 전에 실패한다: %j',
+    async (concurrency) => {
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => {
+          throw new Error('process.exit');
+        }) as never);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      try {
+        await expect(downloadCommand(['httpd'], {
+          distro: 'rocky-9',
+          arch: 'x86_64',
+          output: './os-packages',
+          format: 'both',
+          archiveFormat: 'zip',
+          deps: true,
+          scripts: true,
+          concurrency,
+        })).rejects.toThrow('process.exit');
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('양의 정수'));
+      } finally {
+        errorSpy.mockRestore();
+        exitSpy.mockRestore();
+      }
+
+      expect(downloadOSPackages).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['0', '-1', 'abc'])('legacy 동시성 입력은 설정 fallback을 유지한다: %j', async (concurrency) => {
+    await downloadCommand(['httpd'], {
+      distro: 'rocky-9',
+      arch: 'x86_64',
+      output: './os-packages',
+      format: 'both',
+      archiveFormat: 'zip',
+      deps: true,
+      scripts: true,
+      concurrency,
+    });
+
+    expect(downloadOSPackages).toHaveBeenCalledWith(expect.objectContaining({
+      concurrency: 5,
+    }));
+  });
+
   it('searchCommand는 설정된 OS 캐시 크기를 backend로 전달한다', async () => {
     searchOSPackages.mockResolvedValue([]);
 

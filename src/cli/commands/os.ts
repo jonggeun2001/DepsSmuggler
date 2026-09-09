@@ -7,6 +7,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import * as path from 'path';
 import * as readline from 'readline';
+import { parseConcurrency } from './concurrency';
 import {
   getDistributionById,
   getDistributionsByPackageManager,
@@ -268,13 +269,13 @@ export async function downloadCommand(
     process.exit(1);
   }
 
-  const config = getConfigManager().getConfig();
-  const cacheDirectory = path.join(config.cachePath, 'os-packages');
-  const concurrency = parseInt(options.concurrency, 10);
-
-  console.log(chalk.cyan(`\nOS 패키지 다운로드를 시작합니다... (${distro.name}, ${arch})\n`));
-
   try {
+    const concurrency = parseConcurrency(options.concurrency);
+    const config = getConfigManager().getConfig();
+    const cacheDirectory = path.join(config.cachePath, 'os-packages');
+
+    console.log(chalk.cyan(`\nOS 패키지 다운로드를 시작합니다... (${distro.name}, ${arch})\n`));
+
     const result = await downloadOSPackages({
       distribution: distro,
       architecture: arch,

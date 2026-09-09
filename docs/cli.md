@@ -94,6 +94,8 @@ depssmuggler download [옵션]
 
 `--target-os`는 CLI에서 선택한 OS 값을 pip·Conda·Maven 다운로드 핸들러의 대상 환경 옵션으로 전달합니다. 따라서 `linux`, `windows`, `macos`를 지정하면 해당 플랫폼에 맞는 아티팩트를 선택하며, 지원하지 않는 OS나 적용할 수 없는 패키지 타입은 다운로드 전에 오류로 종료합니다.
 
+`--concurrency`에는 `2`처럼 양의 정수를 지정합니다. `1.5`, `0.5`, `1abc`처럼 정수로 절삭되거나 일부만 해석되는 값과 안전한 정수 범위를 넘는 값은 의존성 조회와 출력 생성 전에 오류로 종료합니다. 일반 `download`와 `os download`에 동일하게 적용되며, 일반 다운로드 안내에는 실제 사용할 정수를 표시합니다. 기존 `0`, `-1`, `abc` 처리 방식은 유지합니다. OS 경로는 설정의 `concurrentDownloads`로 대체하고, 일반 경로는 기존 다운로드 처리에 전달합니다.
+
 Maven ZIP/TAR.GZ에는 선택된 각 아티팩트의 부속 POM과 다운로드에 성공한 `.sha1` 체크섬도 포함됩니다. `--no-deps`나 `--max-depth`로 의존성 탐색 범위를 줄여도 선택된 JAR 자체의 POM은 함께 전달됩니다. 파일은 `packages/` 아래 Maven 저장소 디렉터리 구조를 유지하며, 같은 POM을 여러 항목에서 참조해도 한 번만 포함합니다.
 
 Maven의 `-V latest`는 POM을 조회하기 전에 `maven-metadata.xml`의 `latest` 값으로 해석하며, 그 값이 없으면 `release`를 사용합니다. 해석된 실제 버전이 다운로드 경로·파일명과 manifest에 기록됩니다. `--no-deps`에서도 이 버전 조회는 수행하며 전이 라이브러리를 확장하지 않습니다. 사용 가능한 버전 정보가 없으면 해당 루트의 해결 실패로 처리합니다.
@@ -243,6 +245,7 @@ depssmuggler os download bash --distro ubuntu-22.04 --arch amd64 --format reposi
 - `--scripts`를 주면 의존성 순서 설치 스크립트와 로컬 저장소 설정 스크립트를 생성합니다. 버전 충돌이 있으면 자동 설치 스크립트 생성을 생략하고 경고합니다.
 - `--archive-format zip|tar.gz`로 압축 형식을 선택하며 기본값은 `zip`입니다. `--no-deps`는 의존성 해결을 끕니다.
 - `-d, --distro`는 필수입니다. `--arch` 기본값은 `x86_64`, `-o, --output`은 `./os-packages`, `--concurrency`는 `3`입니다.
+- `--concurrency 1.5` 같은 소수 입력은 다운로드 전에 오류로 종료합니다. 동시 다운로드 수의 입력 규칙과 기존 fallback은 일반 `download` 설명을 따릅니다.
 - OS 메타데이터 캐시는 `<cachePath>/os-packages` 아래 persistent JSON 파일로 관리됩니다. 기본 경로는 `~/.depssmuggler/cache/os-packages`이며 CLI 설정의 `cachePath`, `cacheEnabled`, `maxCacheSize`를 따릅니다. `cacheEnabled=false`이면 새 메타데이터를 캐시에 저장하지 않습니다. 최대 크기의 CLI 기본값은 10GiB이며, 저장할 때 추정 데이터 크기를 기준으로 LRU 정리를 수행합니다.
 - YUM의 메타데이터 로딩 실패는 다운로드에서도 원인을 포함한 오류로 전달됩니다. 같은 resolver에서 재시도할 때 실패 직전의 일부 패키지 목록을 완성된 목록으로 재사용하지 않으며, 정상 저장된 저장소별 디스크 캐시는 재사용할 수 있습니다.
 
