@@ -250,6 +250,7 @@ depssmuggler os download bash --distro ubuntu-22.04 --arch amd64 --format reposi
 - `-d, --distro`는 필수입니다. `--arch` 기본값은 `x86_64`, `-o, --output`은 `./os-packages`, `--concurrency`는 `3`입니다.
 - `--concurrency 1.5` 같은 소수 입력은 다운로드 전에 오류로 종료합니다. 동시 다운로드 수의 입력 규칙과 기존 fallback은 일반 `download` 설명을 따릅니다.
 - OS 메타데이터 캐시는 `<cachePath>/os-packages` 아래 persistent JSON 파일로 관리됩니다. 기본 경로는 `~/.depssmuggler/cache/os-packages`이며 CLI 설정의 `cachePath`, `cacheEnabled`, `maxCacheSize`를 따릅니다. `cacheEnabled=false`이면 새 메타데이터를 캐시에 저장하지 않습니다. 최대 크기의 CLI 기본값은 10GiB이며, 저장할 때 추정 데이터 크기를 기준으로 LRU 정리를 수행합니다.
+- 저장소 URL에 포트나 IPv6 주소가 있어도 저장한 OS 메타데이터 캐시는 다음 실행에서 재사용합니다. TTL과 용량 제한은 동일하게 적용됩니다.
 - YUM의 메타데이터 로딩 실패는 다운로드에서도 원인을 포함한 오류로 전달됩니다. 같은 resolver에서 재시도할 때 실패 직전의 일부 패키지 목록을 완성된 목록으로 재사용하지 않으며, 정상 저장된 저장소별 디스크 캐시는 재사용할 수 있습니다.
 
 ### `os cache`

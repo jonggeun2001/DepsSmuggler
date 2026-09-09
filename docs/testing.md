@@ -186,6 +186,8 @@ Control continuation과 필드 의미는 [Debian Policy](https://www.debian.org/
 
 대체 제공자 선택은 `so:`, `cmd:`, `pc:`, `/bin/sh` fixture로 검증하며, 같은 제공 패키지의 여러 버전은 기존 충돌로 남는지도 확인합니다. 기본 테스트에 포함되는 `src/cli/apk-cached-capability.integration.test.ts`는 격리된 실제 캐시 파일에 이전 형식의 결과를 저장하고, 별도 CLI 프로세스가 로컬 HTTP 서버의 APKINDEX를 다시 파싱하는지 검사합니다. 이어지는 다운로드 프로세스는 새 캐시를 재사용하면서 루트와 제공 APK를 모두 아카이브에 넣어야 합니다. 이 로컬 회귀의 APK 응답은 다운로드 경로 검사용 fixture이며, 실제 APK 내용은 아래 네트워크 테스트로 확인합니다.
 
+이 CLI 캐시 회귀는 실제 loopback 포트가 포함된 저장소 URL로 캐시 키를 만들고, 검색·다운로드의 두 프로세스를 통틀어 인덱스 요청이 한 번인지 확인합니다. `src/core/downloaders/os-shared/cache-manager.test.ts`는 별도 캐시 인스턴스로 다시 읽어 일반 URL·포트 URL·IPv6 URL의 값과 인코딩된 파일명이 유지되는지, 잘못된 키와 이전 파일명은 제거되는지 검증합니다.
+
 `src/core/downloaders/apk.integration.test.ts`는 현재 OS backend API로 실제 Alpine 3.20의 `zlib`와 제공 패키지를 내려받고 APK 내부 `.PKGINFO` 및 TAR.GZ의 파일 목록을 비교합니다. 기본 의존성 포함 경로와 `--no-deps`를 구분하며, 오래된 다운로더 API 호출과 조용한 조기 성공 처리를 사용하지 않습니다. 임시 캐시·출력을 정리하며 네이티브 `apk` 설치는 수행하지 않습니다.
 
 ```bash

@@ -26,41 +26,24 @@ require(path.join(projectRoot, 'node_modules/ts-node')).register({
   project: path.join(projectRoot, 'tsconfig.cli.json'),
 });
 
-// Keep the repository identity portless, like public Alpine repositories.
-// Only transport is redirected; real parsing, caching and downloads still run.
 const originalFetch = global.fetch;
-const loopback = new URL(process.env.DEPS_SMUGGLER_APK_REPO_URL);
+const repositoryUrl = process.env.DEPS_SMUGGLER_APK_REPO_URL;
+if (!repositoryUrl) {
+  throw new Error('Missing DEPS_SMUGGLER_APK_REPO_URL');
+}
+const repositoryOrigin = new URL(repositoryUrl).origin;
 global.fetch = (input, init) => {
   const url = new URL(input);
-  if (url.origin !== 'http://fixture-apk.invalid') {
+  if (url.origin !== repositoryOrigin) {
     throw new Error('Unexpected fixture request: ' + url.href);
   }
-  url.protocol = loopback.protocol;
-  url.host = loopback.host;
-  return originalFetch(url, init);
+  return originalFetch(input, init);
 };
 
 require(path.join(projectRoot, 'src/core/downloaders/os-shared/repos/index.ts'));
 const { setDistributionsRef } = require(
   path.join(projectRoot, 'src/core/downloaders/os-shared/repos/repository-utils.ts')
 );
-const { OsPackageCache } = require(
-  path.join(projectRoot, 'src/core/downloaders/os-shared/cache-manager.ts')
-);
-const originalCacheGet = OsPackageCache.prototype.get;
-OsPackageCache.prototype.get = async function(key) {
-  const value = await originalCacheGet.call(this, key);
-  const fs = require('node:fs');
-  const cacheFile = this.config.directory
-    ? path.join(this.config.directory, Buffer.from(key, 'utf8').toString('base64url') + '.json')
-    : null;
-  console.error('DEBUG_GET', key, this.config, cacheFile, cacheFile && fs.existsSync(cacheFile), this.config.directory && fs.readdirSync(this.config.directory), value && Object.keys(value));
-  return value;
-};
-if (process.env.DEPS_SMUGGLER_DEBUG_CACHE_FILE) {
-  const fs = require('node:fs');
-  console.error('DEBUG_CACHE', fs.readFileSync(process.env.DEPS_SMUGGLER_DEBUG_CACHE_FILE, 'utf8'));
-}
 setDistributionsRef([
   {
     id: 'fixture-apk',
@@ -71,7 +54,7 @@ setDistributionsRef([
     defaultRepos: [{
       id: 'fixture-apk-repo',
       name: 'Fixture APK Repository',
-      baseUrl: 'http://fixture-apk.invalid/fixture',
+      baseUrl: repositoryUrl,
       enabled: true,
       gpgCheck: false,
       isOfficial: false,
@@ -115,7 +98,6 @@ async function runChild(
   isolatedHome: string,
   repositoryUrl: string,
   args: string[],
-  cacheFile: string,
 ): Promise<ChildResult> {
   try {
     const result = await execFileAsync(process.execPath, [harnessPath], {
@@ -125,7 +107,6 @@ async function runChild(
         DEPS_SMUGGLER_PROJECT_ROOT: projectRoot,
         DEPS_SMUGGLER_APK_REPO_URL: repositoryUrl,
         DEPS_SMUGGLER_APK_ARGS: JSON.stringify(args),
-        DEPS_SMUGGLER_DEBUG_CACHE_FILE: cacheFile,
         DEPS_SMUGGLER_TEST_USER_DIR: isolatedHome,
         NODE_OPTIONS: `--require ${JSON.stringify(isolateHomeScript)}`,
       },
@@ -259,6 +240,7 @@ describe('APK cached capability CLI integration', () => {
     });
     server = fixtureServer;
     const port = await listen(fixtureServer);
+    const repositoryUrl = `http://127.0.0.1:${port}/fixture`;
     const isolatedHome = path.join(tempRoot, 'isolated user');
     const cacheRoot = path.join(tempRoot, 'cache');
     const outputDirectory = path.join(tempRoot, 'output archive');
@@ -266,7 +248,7 @@ describe('APK cached capability CLI integration', () => {
     const repository: Repository = {
       id: 'fixture-apk-repo',
       name: 'Fixture APK Repository',
-      baseUrl: 'http://fixture-apk.invalid/fixture',
+      baseUrl: repositoryUrl,
       enabled: true,
       gpgCheck: false,
       isOfficial: false,
@@ -292,13 +274,11 @@ describe('APK cached capability CLI integration', () => {
     });
 
     try {
-      const repositoryUrl = `http://127.0.0.1:${port}/fixture`;
       const search = await runChild(
         harnessPath,
         isolatedHome,
         repositoryUrl,
         ['os', 'search', 'zlib', '--distro', 'fixture-apk', '--arch', 'x86_64', '--limit', '3'],
-        path.join(cacheDirectory, cacheFilename),
       );
       const searchOutput = `${search.stdout}\n${search.stderr}`;
       expect(search.code, searchOutput).toBe(0);
@@ -356,7 +336,6 @@ describe('APK cached capability CLI integration', () => {
           '--concurrency',
           '1',
         ],
-        path.join(cacheDirectory, cacheFilename),
       );
       const downloadOutput = `${download.stdout}\n${download.stderr}`;
       expect(download.code, downloadOutput).toBe(0);

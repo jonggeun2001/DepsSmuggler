@@ -361,16 +361,22 @@ export class OsPackageCache {
    * base64url 캐시 키 구조 검증
    */
   private isValidCacheKey(key: string): boolean {
-    const parts = key.split(':');
-    if (parts.length !== 4) {
+    const firstSeparator = key.indexOf(':');
+    const lastSeparator = key.lastIndexOf(':');
+    const architectureSeparator = key.lastIndexOf(':', lastSeparator - 1);
+    if (firstSeparator <= 0 || architectureSeparator <= firstSeparator || lastSeparator <= architectureSeparator) {
       return false;
     }
 
+    const packageManager = key.slice(0, firstSeparator);
+    const repositoryToken = key.slice(firstSeparator + 1, architectureSeparator);
+    const architecture = key.slice(architectureSeparator + 1, lastSeparator);
+    const dataType = key.slice(lastSeparator + 1);
     return (
-      (parts[0] === 'yum' || parts[0] === 'apt' || parts[0] === 'apk') &&
-      parts[1].length > 0 &&
-      VALID_ARCHITECTURES.has(parts[2]) &&
-      VALID_DATA_TYPES.has(parts[3])
+      (packageManager === 'yum' || packageManager === 'apt' || packageManager === 'apk') &&
+      repositoryToken.length > 0 &&
+      VALID_ARCHITECTURES.has(architecture) &&
+      VALID_DATA_TYPES.has(dataType)
     );
   }
 
