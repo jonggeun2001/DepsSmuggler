@@ -116,6 +116,14 @@ describe('CLI concurrency validation integration', () => {
       ],
     },
     {
+      name: 'generic download',
+      value: '.5e-999',
+      args: (output: string, value: string) => [
+        'download', '--type', 'pip', '--package', 'colorama', '--pkg-version', '0.4.6',
+        '--no-deps', '--format', 'zip', '--output', output, '--concurrency', value,
+      ],
+    },
+    {
       name: 'OS download',
       value: '1.5',
       args: (output: string, value: string) => [
@@ -126,6 +134,14 @@ describe('CLI concurrency validation integration', () => {
     {
       name: 'OS download',
       value: '1.0000000000000001',
+      args: (output: string, value: string) => [
+        'os', 'download', 'zlib', '--distro', 'alpine-3.20', '--no-deps',
+        '--output', output, '--format', 'archive', '--archive-format', 'zip', '--concurrency', value,
+      ],
+    },
+    {
+      name: 'OS download',
+      value: '.5e-999',
       args: (output: string, value: string) => [
         'os', 'download', 'zlib', '--distro', 'alpine-3.20', '--no-deps',
         '--output', output, '--format', 'archive', '--archive-format', 'zip', '--concurrency', value,
