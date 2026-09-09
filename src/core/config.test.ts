@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import { getConfigManager, ConfigManager, Config } from './config';
 
 const testHome = vi.hoisted(() => ({ path: '' }));
+vi.mock('node-machine-id', () => ({ machineIdSync: () => 'config-test-machine-id' }));
 vi.mock('os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('os')>();
   return { ...actual, homedir: () => testHome.path };
@@ -49,8 +50,7 @@ describe('ConfigManager', () => {
       }
     });
 
-    it('SMTP 비밀번호 암호화/복호화 라운드트립', async () => {
-      const testPassword = 'test-smtp-password-123!@#';
+    it.each(['test-smtp-password-123!@#', '\uFEFF비밀번호\uFFFD🔐'])('SMTP 비밀번호 암호화/복호화 라운드트립 (%s)', async (testPassword) => {
 
       // 설정 저장 (비밀번호가 암호화됨)
       const testConfig: Config = {
@@ -328,6 +328,39 @@ describe('ConfigManager', () => {
   });
 
   describe('암호화 마이그레이션', () => {
+    it.each([-1, 5])('잘못된 머신 키가 CBC 패딩을 통과해도 레거시 비밀번호를 복원한다 (%s)', async (concurrentDownloads) => {
+      const manager = new ConfigManager();
+      const configPath = path.join(manager.getConfigDir(), 'settings.json');
+      // 이 벡터는 고정된 테스트 머신 키에서 패딩 검사는 통과하지만 UTF-8은 깨진다.
+      const encrypted = '0000000000000000000000000000000b:458405b2bbd8bf4b8a2424319b57f9e86c3432eb5b6145b44f809393c8cbe2b2';
+      await fs.outputJson(configPath, { concurrentDownloads, smtpPassword: encrypted });
+      const original = await fs.readFile(configPath, 'utf8');
+
+      expect((await manager.loadConfig()).smtpPassword).toBe('legacy-test-password');
+      if (concurrentDownloads < 0) {
+        expect(await fs.readFile(configPath, 'utf8')).toBe(original);
+        await manager.updateConfig({ concurrentDownloads: 7 });
+      } else {
+        expect((await fs.readJson(configPath)).smtpPassword).not.toBe(encrypted);
+      }
+      expect((await manager.loadConfig()).smtpPassword).toBe('legacy-test-password');
+    });
+
+    it.each(['machine', 'legacy'])('유효한 UTF-8 비밀번호를 복원할 수 없으면 저장된 원문을 보존한다 (%s 키)', async (keyType) => {
+      const manager = new ConfigManager();
+      const configPath = path.join(manager.getConfigDir(), 'settings.json');
+      const machineKey = crypto.createHash('sha256').update('config-test-machine-iddepssmuggler-salt').digest();
+      const key = keyType === 'machine' ? machineKey : Buffer.from('depssmuggler-secret-key-32bytes!');
+      const cipher = crypto.createCipheriv('aes-256-cbc', key, Buffer.alloc(16));
+      const ciphertext = Buffer.concat([cipher.update(Buffer.from([0xff, 0xfe])), cipher.final()]);
+      const encrypted = `${Buffer.alloc(16).toString('hex')}:${ciphertext.toString('hex')}`;
+      await fs.outputJson(configPath, { concurrentDownloads: 5, smtpPassword: encrypted });
+      const original = await fs.readFile(configPath, 'utf8');
+
+      expect((await manager.loadConfig()).smtpPassword).toBe(encrypted);
+      expect(await fs.readFile(configPath, 'utf8')).toBe(original);
+    });
+
     it.each([-1, 5])('레거시 비밀번호 로드는 잘못된 설정(%s)을 자동 저장하지 않고 정상 설정만 마이그레이션한다', async (concurrentDownloads) => {
       const manager = new ConfigManager();
       const configPath = path.join(manager.getConfigDir(), 'settings.json');
