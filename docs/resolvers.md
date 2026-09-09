@@ -872,6 +872,8 @@ interface NpmResolutionResult {
 }
 ```
 
+`root`는 직접 요청한 패키지이며 `flatList`에는 전이 패키지만 들어갑니다. `totalSize`와 `totalPackages`도 이 전이 목록을 기준으로 계산합니다. 공통 다운로드 목록에서는 [shared 해결기](./shared-dependency.md)가 해결된 직접 루트를 별도로 포함합니다.
+
 ### 의존성 호이스팅
 
 npm의 node_modules 호이스팅 알고리즘 구현:
