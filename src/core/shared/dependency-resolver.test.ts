@@ -387,12 +387,20 @@ describe('dependency-resolver', () => {
         return {
           resolveDependencies: vi.fn((name: string) =>
             Promise.resolve({
-              root: { name, version: '1.0.0' },
+              root: {
+                name,
+                version: '1.0.0',
+                dist: {
+                  tarball: `https://registry.example/${name}-1.0.0.tgz`,
+                  shasum: `${name}-sha`,
+                },
+                dependencies: [],
+              },
               flatList: [
                 {
-                  name,
+                  name: 'npm-child',
                   version: '1.0.0',
-                  hoistedPath: `node_modules/${name}`,
+                  hoistedPath: 'node_modules/npm-child',
                   size: 0,
                 },
               ],
@@ -403,15 +411,17 @@ describe('dependency-resolver', () => {
         } as any;
       });
 
-      await resolveAllDependencies([
+      const firstResult = await resolveAllDependencies([
         { id: 'pip', type: 'pip', name: 'pip-root', version: '1.0.0' },
         { id: 'conda', type: 'conda', name: 'conda-root', version: '1.0.0' },
         { id: 'maven', type: 'maven', name: 'maven-root', version: '1.0.0' },
         { id: 'npm', type: 'npm', name: 'npm-root', version: '1.0.0' },
       ]);
-      await resolveAllDependencies([
+      const secondResult = await resolveAllDependencies([
         { id: 'next-pip', type: 'pip', name: 'next-root', version: '1.0.0' },
       ]);
+      expect(firstResult.failedPackages).toEqual([]);
+      expect(secondResult.failedPackages).toEqual([]);
 
       expect(sessions).toHaveLength(8);
       expect(sessions[0]).toBeInstanceOf(ResolutionSession);
@@ -1021,16 +1031,24 @@ describe('dependency-resolver', () => {
 
     it('npm 패키지 의존성 해결 (특수 반환 형식)', async () => {
       const mockNpmResult = {
-        root: { name: 'express', version: '4.18.0' },
+        root: {
+          name: 'express',
+          version: '4.18.0',
+          dist: {
+            tarball: 'https://registry.example/express-4.18.0.tgz',
+            shasum: 'express-sha',
+            integrity: 'sha512-express',
+            unpackedSize: 100000,
+          },
+        },
         flatList: [
-          { name: 'express', version: '4.18.0', hoistedPath: 'node_modules/express', size: 100000 },
           { name: 'body-parser', version: '1.20.0', hoistedPath: 'node_modules/body-parser', size: 50000 },
           { name: 'debug', version: '4.3.0', hoistedPath: 'node_modules/debug', size: 10000 },
         ],
         conflicts: [
           { packageName: 'qs', requestedVersions: ['6.10.0', '6.11.0'] },
         ],
-        totalSize: 160000,
+        totalSize: 60000,
       };
 
       const mockResolver = {
@@ -1049,6 +1067,191 @@ describe('dependency-resolver', () => {
       expect(result.dependencyTrees).toHaveLength(1);
       expect(result.dependencyTrees[0].conflicts).toHaveLength(1);
       expect(result.dependencyTrees[0].conflicts[0].packageName).toBe('qs');
+      expect(result.dependencyTrees[0].flatList).toHaveLength(2);
+      expect(result.dependencyTrees[0].totalSize).toBe(60000);
+    });
+
+    it('npm root는 concrete artifact metadata와 요청 identity를 유지해 all/successful packages에 포함한다', async () => {
+      const mockNpmResult = {
+        root: {
+          name: 'express',
+          version: '4.18.0',
+          dist: {
+            tarball: 'https://registry.example/express-4.18.0.tgz',
+            shasum: 'express-sha',
+            integrity: 'sha512-express',
+            unpackedSize: 100000,
+          },
+          dependencies: [],
+        },
+        flatList: [
+          { name: 'body-parser', version: '1.20.0', hoistedPath: 'node_modules/body-parser', size: 50000 },
+        ],
+        conflicts: [],
+        totalSize: 50000,
+      };
+      const mockResolver = {
+        resolveDependencies: vi.fn().mockResolvedValue(mockNpmResult),
+      };
+      vi.mocked(getNpmResolver).mockReturnValue(mockResolver as any);
+
+      const request: DownloadPackage = {
+        id: 'request-express-latest',
+        type: 'npm',
+        name: 'express',
+        version: 'latest',
+        architecture: 'arm64',
+        metadata: { requestFlag: 'preserve-me' },
+      };
+
+      const result = await resolveAllDependencies([request]);
+      const root = result.allPackages.find((pkg) => pkg.name === 'express');
+      const successfulRoot = result.successfulPackages?.find((pkg) => pkg.name === 'express');
+
+      expect(root).toMatchObject({
+        id: request.id,
+        name: 'express',
+        version: '4.18.0',
+        architecture: 'arm64',
+        filename: 'express-4.18.0.tgz',
+        downloadUrl: 'https://registry.example/express-4.18.0.tgz',
+        size: 100000,
+        metadata: {
+          requestFlag: 'preserve-me',
+          downloadUrl: 'https://registry.example/express-4.18.0.tgz',
+          checksum: { sha1: 'express-sha', sha512: 'sha512-express' },
+        },
+      });
+      expect(successfulRoot).toEqual(root);
+      expect(result.allPackages.map((pkg) => pkg.name).sort()).toEqual(['body-parser', 'express']);
+      expect(result.dependencyTrees[0].flatList).toHaveLength(1);
+    });
+
+    it('전이 의존성이 뒤이어 직접 root로 해결되면 직접 요청 identity를 유지한다', async () => {
+      const mockResolver = {
+        resolveDependencies: vi.fn().mockImplementation(async (name: string) =>
+          name === 'root-a'
+            ? {
+                root: {
+                  name: 'root-a',
+                  version: '1.0.0',
+                  dist: {
+                    tarball: 'https://registry.example/root-a-1.0.0.tgz',
+                    shasum: 'root-a-sha',
+                  },
+                  dependencies: [],
+                },
+                flatList: [
+                  {
+                    name: 'shared-root',
+                    version: '2.0.0',
+                    hoistedPath: 'node_modules/shared-root',
+                    size: 20,
+                  },
+                ],
+                conflicts: [],
+                totalSize: 20,
+              }
+            : {
+                root: {
+                  name: 'shared-root',
+                  version: '2.0.0',
+                  dist: {
+                    tarball: 'https://registry.example/shared-root-2.0.0.tgz',
+                    shasum: 'shared-root-sha',
+                  },
+                  dependencies: [],
+                },
+                flatList: [],
+                conflicts: [],
+                totalSize: 0,
+              },
+        ),
+      };
+      vi.mocked(getNpmResolver).mockReturnValue(mockResolver as any);
+
+      const result = await resolveAllDependencies([
+        { id: 'request-a', type: 'npm', name: 'root-a', version: '1.0.0' },
+        { id: 'request-shared', type: 'npm', name: 'shared-root', version: 'latest' },
+      ]);
+
+      expect(result.allPackages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'request-a', name: 'root-a', version: '1.0.0' }),
+        expect.objectContaining({ id: 'request-shared', name: 'shared-root', version: '2.0.0' }),
+      ]));
+      expect(result.allPackages.filter((pkg) => pkg.name === 'shared-root')).toHaveLength(1);
+    });
+
+    it.each([
+      ['latest', '4.18.0'],
+      ['next', '4.18.0'],
+      ['^4.0.0', '4.18.0'],
+      ['4.18.0', '4.18.0'],
+    ])('npm selector %s도 concrete root %s를 반환한다', async (requestedVersion, resolvedVersion) => {
+      vi.mocked(getNpmResolver).mockReturnValue({
+        resolveDependencies: vi.fn().mockResolvedValue({
+          root: {
+            name: 'selector-package',
+            version: resolvedVersion,
+            dist: {
+              tarball: `https://registry.example/selector-package-${resolvedVersion}.tgz`,
+              shasum: 'selector-sha',
+            },
+            dependencies: [],
+          },
+          flatList: [],
+          conflicts: [],
+          totalSize: 0,
+        }),
+      } as any);
+
+      const result = await resolveAllDependencies([
+        {
+          id: `selector-${requestedVersion}`,
+          type: 'npm',
+          name: 'selector-package',
+          version: requestedVersion,
+        },
+      ]);
+
+      expect(result.allPackages).toHaveLength(1);
+      expect(result.allPackages[0]).toMatchObject({
+        id: `selector-${requestedVersion}`,
+        version: resolvedVersion,
+      });
+    });
+
+    it('npm leaf root는 flatList가 비어도 concrete root만 성공 목록에 포함한다', async () => {
+      vi.mocked(getNpmResolver).mockReturnValue({
+        resolveDependencies: vi.fn().mockResolvedValue({
+          root: {
+            name: 'leaf-package',
+            version: '2.1.0',
+            dist: {
+              tarball: 'https://registry.example/leaf-package-2.1.0.tgz',
+              shasum: 'leaf-sha',
+            },
+            dependencies: [],
+          },
+          flatList: [],
+          conflicts: [],
+          totalSize: 0,
+        }),
+      } as any);
+
+      const result = await resolveAllDependencies([
+        { id: 'leaf-request', type: 'npm', name: 'leaf-package', version: '^2.0.0' },
+      ]);
+
+      expect(result.allPackages).toHaveLength(1);
+      expect(result.successfulPackages).toHaveLength(1);
+      expect(result.allPackages[0]).toMatchObject({
+        id: 'leaf-request',
+        name: 'leaf-package',
+        version: '2.1.0',
+        downloadUrl: 'https://registry.example/leaf-package-2.1.0.tgz',
+      });
+      expect(result.dependencyTrees[0].flatList).toEqual([]);
     });
 
     it('의존성 해결 실패 시 failedPackages에 추가', async () => {

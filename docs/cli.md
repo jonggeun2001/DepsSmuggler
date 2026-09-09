@@ -100,6 +100,8 @@ Maven ZIP/TAR.GZ에는 선택된 각 아티팩트의 부속 POM과 다운로드�
 
 Maven의 `-V latest`는 POM을 조회하기 전에 `maven-metadata.xml`의 `latest` 값으로 해석하며, 그 값이 없으면 `release`를 사용합니다. 해석된 실제 버전이 다운로드 경로·파일명과 manifest에 기록됩니다. `--no-deps`에서도 이 버전 조회는 수행하며 전이 라이브러리를 확장하지 않습니다. 사용 가능한 버전 정보가 없으면 해당 루트의 해결 실패로 처리합니다.
 
+npm 의존성 포함 다운로드는 버전을 생략하거나 `latest`, dist-tag, 버전 범위를 지정해도 직접 요청한 패키지를 해결된 실제 버전으로 다운로드 목록에 유지합니다. 예를 들어 `is-odd@latest`는 해결된 `is-odd`와 전이 의존성 `is-number`를 모두 아카이브와 manifest에 넣습니다. 직접 패키지가 빠져 설치 스크립트를 생성할 수 없던 문제를 방지합니다.
+
 `pip`에서 `--python-version`을 지정하면 해당 버전의 `python_version` 환경 마커를 평가하고, `--target-os` 및 `--arch`와 호환되는 wheel 태그를 선택합니다. Python 버전은 `major.minor` 형식만 허용합니다. 따라서 `python_full_version`과 `implementation_version`처럼 patch가 필요한 marker는 값을 알 수 없는 조건으로 처리합니다. wheel은 대상 버전의 CPython 태그와 범용 `py3`/`py2.py3` 태그, 또는 대상보다 같거나 낮은 CPython 버전의 `abi3` 태그만 선택합니다. PyPI의 패키지·파일 `requires_python`과 Simple API 파일의 `requiresPython`도 PEP 440 specifier set으로 확인하므로, 대상 Python보다 높은 버전만 지원하는 wheel과 source distribution은 선택하지 않습니다. `latest`와 버전 범위는 PyPI 또는 Simple API에서 대상 Python과 호환되는 산출물이 있는 가장 높은 안정 버전을 선택하고, 철회(yanked) 릴리스는 wildcard가 없는 정확한 버전 고정 외에는 제외합니다. 프리릴리스는 버전 제약이 명시적으로 포함하거나 안정 후보가 없을 때만 선택합니다. 지원하지 않는 marker 문법이나 값이 없는 `platform_release`/`platform_version`은 의존성을 포함하지 않는 것으로 처리합니다.
 
 대상 환경 옵션은 다운로드 전에 검증됩니다.

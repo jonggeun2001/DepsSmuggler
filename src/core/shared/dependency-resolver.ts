@@ -643,9 +643,36 @@ export async function resolveAllDependencies(
         dependencyTrees.push(convertedResult);
 
         const resolvedRootKey = `npm:${npmResult.root.name}@${npmResult.root.version}`;
-        if (resolvedRootKey !== key) {
-          resolvedSet.delete(key);
-        }
+        const rootTarball = npmResult.root.dist.tarball;
+        const rootFilename = rootTarball.split('/').pop();
+        const resolvedRootInfo: PackageInfo = {
+          type: 'npm',
+          name: npmResult.root.name,
+          version: npmResult.root.version,
+          metadata: {
+            downloadUrl: rootTarball,
+            ...(rootFilename ? { filename: rootFilename } : {}),
+            ...(typeof npmResult.root.dist.unpackedSize === 'number'
+              ? { size: npmResult.root.dist.unpackedSize }
+              : {}),
+            checksum: {
+              ...(typeof npmResult.root.dist.shasum === 'string'
+                ? { sha1: npmResult.root.dist.shasum }
+                : {}),
+              ...(typeof npmResult.root.dist.integrity === 'string'
+                ? { sha512: npmResult.root.dist.integrity }
+                : {}),
+            },
+          },
+        };
+        const resolvedRoot = mergeResolvedPackage(
+          pkg,
+          toResolvedDownloadPackage(resolvedRootInfo, pkg),
+        );
+        resolvedSet.delete(key);
+        resolvedSet.delete(resolvedRootKey);
+        resolvedSet.set(resolvedRootKey, resolvedRoot);
+        successfulPackageSet.set(resolvedRootKey, resolvedRoot);
 
         // npm 의존성 목록 추가
         for (const depPkg of npmResult.flatList) {

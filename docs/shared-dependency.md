@@ -101,6 +101,8 @@ interface ResolvedPackageList {
 
 `successfulPackages`는 직접 루트별 해결 성공 시점의 결과를 합친 목록입니다. CLI의 기본 best-effort 모드는 후속 직접 루트가 실패해도 이 목록의 패키지와 의존성만 다운로드합니다. `--strict` 모드는 하나라도 실패하면 다운로드를 중단합니다.
 
+npm 전용 리졸버는 직접 루트를 `root`에, 전이 패키지만 `flatList`에 반환합니다. 공통 해결기는 둘을 합쳐 `allPackages`와 `successfulPackages`를 구성합니다. `latest`·dist-tag·버전 범위를 실제 버전으로 바꿀 때도 직접 루트를 유지하고, 요청 ID·아키텍처·추가 옵션과 메타데이터를 보존합니다. 해결된 루트의 다운로드 URL·파일명·크기·체크섬은 제공된 원격 정보로 보완합니다. 트리의 npm `flatList`와 의존성 개수는 계속 전이 패키지만 나타냅니다.
+
 ### DependencyResolverOptions
 
 ```typescript
