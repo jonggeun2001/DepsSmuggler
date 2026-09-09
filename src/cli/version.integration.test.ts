@@ -58,7 +58,7 @@ describe('CLI version entrypoints', () => {
     const env = {
       ...process.env,
       DEPS_SMUGGLER_TEST_USER_DIR: isolatedHome,
-      NODE_OPTIONS: `${existingNodeOptions}--require ${homeIsolationScript}`,
+      NODE_OPTIONS: `${existingNodeOptions}--require ${JSON.stringify(homeIsolationScript)}`,
     };
 
     expect(runSourceCliVersion('--version', env)).toBe(packageVersion);
