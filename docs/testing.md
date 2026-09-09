@@ -204,6 +204,12 @@ bash scripts/verify-worktree.sh \
   src/core/downloaders/os-shared/apk-repository-consumer.test.ts
 ```
 
+### CLI 동시 다운로드 수 입력 검증
+
+`src/cli/concurrency-validation.integration.test.ts`는 일반 `download`와 `os download`를 별도 CLI 프로세스로 실행해 `--concurrency 1.5`가 종료 코드 `1`과 양의 정수 안내로 거부되는지 확인합니다. HTTP·HTTPS 요청 횟수가 0이고 전달 출력이 생성되지 않아야 합니다. 자식 프로세스의 실행 실패·타임아웃·신호 종료는 정상적인 입력 오류로 취급하지 않습니다.
+
+두 명령의 단위 테스트는 소수·일부만 숫자인 값·안전한 정수 범위를 벗어난 값의 사전 거부와 정상 정수 전달을 검사합니다. `0`, `-1`, `abc`는 일반 경로의 기존 값 전달과 OS 경로의 설정 fallback을 유지하는지도 확인합니다.
+
 ### CLI 다운로드 실패 종료 코드 검증
 
 `src/cli/download-format.integration.test.ts`는 격리한 실제 CLI 프로세스에 `--format rar`를 전달해 종료 코드 `1`, 거부한 값과 지원 형식 안내, 출력 미생성을 확인합니다. CLI를 불러오기 전에 HTTP·HTTPS 요청을 차단하고 요청 횟수를 기록하므로 네트워크 호출 전에 입력 검증이 끝나는지도 검사합니다. `archive-packager.test.ts`는 두 공개 압축 메서드를 직접 호출해 잘못된 형식의 거부와 기존 ZIP·tar.gz 생성을 검증합니다.

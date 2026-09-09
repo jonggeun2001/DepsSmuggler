@@ -2,6 +2,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import cliProgress from 'cli-progress';
 import * as fs from 'fs-extra';
+import { parseConcurrency } from './concurrency';
 import {
   hasExplicitTargetEnvironment,
   validateDownloadEnvironmentOptions,
@@ -292,6 +293,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
 
   try {
     assertArchiveFormat(options.format);
+    const concurrency = parseConcurrency(options.concurrency);
     validateDownloadEnvironmentOptions(options);
     const maxDepth = parseMaxDepth(options.maxDepth ?? '5');
 
@@ -369,7 +371,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
 
     console.log(chalk.cyan(`\n출력 경로: ${outputPath}`));
     console.log(chalk.cyan(`출력 형식: ${options.format}`));
-    console.log(chalk.cyan(`동시 다운로드: ${options.concurrency}개\n`));
+    console.log(chalk.cyan(`동시 다운로드: ${concurrency}개\n`));
 
     // 다운로드 매니저 설정
     const downloadManager = new DownloadManager();
@@ -412,7 +414,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
     // 다운로드 시작
     const result = await downloadManager.startDownload({
       outputPath,
-      concurrency: parseInt(options.concurrency, 10),
+      concurrency,
       maxRetries: 3,
       pipTargetPlatform,
     });

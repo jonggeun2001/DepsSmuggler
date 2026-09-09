@@ -334,6 +334,51 @@ describe('downloadCommand', () => {
     exitSpy.mockRestore();
   });
 
+  it.each(['1.5', '0.5', '.5', '1abc', '9007199254740992'])(
+    '양의 정수가 아닌 동시성 입력은 부작용 전에 실패한다: %j',
+    async (concurrency) => {
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => {
+          throw new Error('process.exit');
+        }) as never);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      try {
+        await expect(downloadCommand(commandOptions({ concurrency }))).rejects.toThrow('process.exit');
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('양의 정수'));
+      } finally {
+        errorSpy.mockRestore();
+        exitSpy.mockRestore();
+      }
+
+      expect(resolveAllDependencies).not.toHaveBeenCalled();
+      expect(addToQueue).not.toHaveBeenCalled();
+      expect(ensureDir).not.toHaveBeenCalled();
+      expect(startDownload).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['2', '3'])('유효한 동시성 입력은 숫자로 downloader에 전달한다: %j', async (concurrency) => {
+    await downloadCommand(commandOptions({ concurrency }));
+
+    expect(startDownload).toHaveBeenCalledWith(expect.objectContaining({
+      concurrency: Number(concurrency),
+    }));
+  });
+
+  it.each([
+    ['0', 0],
+    ['-1', -1],
+    ['abc', Number.NaN],
+  ] as const)('generic legacy 동시성 입력은 기존 결과를 유지한다: %s', async (concurrency, expected) => {
+    await downloadCommand(commandOptions({ concurrency }));
+
+    expect(startDownload).toHaveBeenCalledWith(expect.objectContaining({
+      concurrency: expected,
+    }));
+  });
+
   it('명시한 pip 대상 환경을 resolver와 downloader에 전달한다', async () => {
     await downloadCommand(commandOptions({
       targetOS: 'linux',
