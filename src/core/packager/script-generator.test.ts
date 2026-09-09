@@ -127,6 +127,8 @@ describe('ScriptGenerator', () => {
         await fs.writeFile(path.join(extractionRoot, 'packages', 'unrelated-flat.jar'), 'must not be copied');
         await fs.ensureDir(path.join(extractionRoot, 'packages', 'pip'));
         await fs.writeFile(path.join(extractionRoot, 'packages', 'pip', 'requests.whl'), 'must not be copied');
+        await fs.ensureDir(path.join(targetDir, 'org/example/app/1.0'));
+        await fs.writeFile(path.join(targetDir, 'org/example/app/1.0/_remote.repositories'), 'app-1.0.jar>old-repository=\n');
 
         try {
           if (usePowerShell) {
@@ -143,12 +145,23 @@ describe('ScriptGenerator', () => {
             env: { ...process.env, MAVEN_REPO_LOCAL: targetDir },
             timeout: 20_000,
           });
+          await execFileAsync(command, commandArgs, {
+            cwd: extractionRoot,
+            env: { ...process.env, MAVEN_REPO_LOCAL: targetDir },
+            timeout: 20_000,
+          });
 
           for (const [relativePath, contents] of files) {
             await expect(fs.readFile(path.join(targetDir, relativePath), 'utf8')).resolves.toBe(contents);
           }
           await expect(fs.pathExists(path.join(targetDir, 'unrelated-flat.jar'))).resolves.toBe(false);
           await expect(fs.pathExists(path.join(targetDir, 'pip', 'requests.whl'))).resolves.toBe(false);
+          const remoteMarker = await fs.readFile(path.join(targetDir, 'org/example/app/1.0/_remote.repositories'), 'utf8');
+          expect(remoteMarker).toContain('app-1.0.jar>old-repository=');
+          expect(remoteMarker).toContain('app-1.0.jar>=');
+          expect(remoteMarker).toContain('app-1.0.pom>=');
+          expect(remoteMarker).toContain('app-1.0-linux-x86_64.jar>=');
+          expect(remoteMarker.match(/app-1\.0\.jar>=/g)).toHaveLength(1);
         } finally {
           await fs.remove(extractionRoot);
         }
@@ -293,6 +306,7 @@ describe('ScriptGenerator', () => {
       expect(content).toContain('Copy-MavenCoordinate');
       expect(content).toContain('$MavenLocalRepo');
       expect(content).not.toContain('install:install-file');
+      expect((await fs.readFile(outputPath)).subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
     });
 
     it('Docker 이미지 로드 명령을 포함해야 함', async () => {

@@ -210,6 +210,16 @@ export class ScriptGenerator {
       lines.push('        fi');
       lines.push('        mkdir -p "$target_path" || return 1');
       lines.push('        cp -a "$source_path/." "$target_path/" || return 1');
+      lines.push('        local remote_marker="$target_path/_remote.repositories"');
+      lines.push('        touch "$remote_marker" || return 1');
+      lines.push('        for artifact_path in "$target_path"/*; do');
+      lines.push('            [[ -f "$artifact_path" ]] || continue');
+      lines.push('            local artifact_name="$(basename "$artifact_path")"');
+      lines.push('            case "$artifact_name" in _remote.repositories|*.sha1|*.md5) continue ;; esac');
+      lines.push('            if ! grep -Fqx "${artifact_name}>=" "$remote_marker" 2>/dev/null; then');
+      lines.push('                printf "\\n%s\\n" "${artifact_name}>=" >> "$remote_marker" || return 1');
+      lines.push('            fi');
+      lines.push('        done');
       lines.push('    }');
       lines.push('');
       for (const coordinate of mavenCoordinates) {
@@ -474,6 +484,13 @@ export class ScriptGenerator {
       lines.push('        }');
       lines.push('        New-Item -ItemType Directory -Path $TargetPath -Force -ErrorAction Stop | Out-Null');
       lines.push('        Copy-Item -Path (Join-Path $SourcePath \'*\') -Destination $TargetPath -Recurse -Force -ErrorAction Stop');
+      lines.push('        $RemoteMarker = Join-Path $TargetPath \'_remote.repositories\'');
+      lines.push('        if (-not (Test-Path -LiteralPath $RemoteMarker -PathType Leaf)) { New-Item -ItemType File -Path $RemoteMarker -Force -ErrorAction Stop | Out-Null }');
+      lines.push('        $KnownEntries = @(Get-Content -LiteralPath $RemoteMarker -ErrorAction Stop)');
+      lines.push('        Get-ChildItem -LiteralPath $TargetPath -File -ErrorAction Stop | Where-Object { $_.Name -ne \'_remote.repositories\' -and $_.Name -notlike \'*.sha1\' -and $_.Name -notlike \'*.md5\' } | ForEach-Object {');
+      lines.push('            $Entry = "$($_.Name)>="');
+      lines.push('            if ($KnownEntries -notcontains $Entry) { [System.IO.File]::AppendAllText($RemoteMarker, "$Entry`r`n", (New-Object System.Text.UTF8Encoding($false))); $KnownEntries += $Entry }');
+      lines.push('        }');
       lines.push('    }');
       lines.push('');
       for (const coordinate of mavenCoordinates) {
@@ -555,7 +572,9 @@ export class ScriptGenerator {
     lines.push('Write-Info "모든 설치가 완료되었습니다!"');
     lines.push('Write-Info "====================================="');
 
-    const content = lines.join('\r\n'); // Windows 줄바꿈
+    // Windows PowerShell 5 interprets a BOM-less script using the system ANSI
+    // code page, which breaks the Korean comments and strings in this file.
+    const content = `\uFEFF${lines.join('\r\n')}`; // Windows 줄바꿈 + UTF-8 BOM
     await fs.ensureDir(path.dirname(outputPath));
     await fs.writeFile(outputPath, content, 'utf-8');
 
