@@ -152,4 +152,34 @@ describe('OsPackageCache', () => {
     expect(cacheManager.getStats().totalSize).toBeLessThanOrEqual(64);
     expect(cacheManager.getStats().entryCount).toBeLessThanOrEqual(2);
   });
+
+  it('persistent cache hit의 최근 접근 순서를 작은 용량으로 재오픈할 때 보존한다', async () => {
+    const repo = {
+      id: 'baseos',
+      name: 'BaseOS',
+      baseUrl: 'https://example.test/baseos',
+      enabled: true,
+      gpgCheck: false,
+      isOfficial: true,
+    };
+    const firstKey = OsPackageCache.createKey('yum', repo, 'x86_64', 'primary');
+    const secondKey = OsPackageCache.createKey('yum', repo, 'x86_64', 'packages');
+    const clock = vi.spyOn(Date, 'now');
+
+    try {
+      const writer = new OsPackageCache({ type: 'persistent', directory: tempDir, maxSize: 64 });
+      clock.mockReturnValue(1_000);
+      await writer.set(firstKey, { value: 'same' });
+      clock.mockReturnValue(2_000);
+      await writer.set(secondKey, { value: 'same' });
+      clock.mockReturnValue(3_000);
+      await expect(writer.get(firstKey)).resolves.toEqual({ value: 'same' });
+
+      const reader = new OsPackageCache({ type: 'persistent', directory: tempDir, maxSize: 32 });
+      await expect(reader.get(firstKey)).resolves.toEqual({ value: 'same' });
+      await expect(reader.get(secondKey)).resolves.toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+  });
 });

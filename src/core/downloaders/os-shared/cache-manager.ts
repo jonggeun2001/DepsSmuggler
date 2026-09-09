@@ -136,6 +136,9 @@ export class OsPackageCache {
 
       // LRU: 접근 시간 갱신
       entry.lastAccess = Date.now();
+      if (this.config.type === 'persistent') {
+        await this.writeToDisk(key, entry);
+      }
       this.stats.hits++;
       return entry.data as T;
     }
@@ -144,8 +147,10 @@ export class OsPackageCache {
     if (this.config.type === 'persistent') {
       const diskEntry = await this.readFromDisk(key);
       if (diskEntry && !this.isExpired(diskEntry)) {
+        diskEntry.lastAccess = Date.now();
         // 메모리 캐시에 추가
         this.memoryCache.set(key, diskEntry);
+        await this.writeToDisk(key, diskEntry);
         this.stats.hits++;
         return diskEntry.data as T;
       }
