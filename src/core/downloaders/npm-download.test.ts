@@ -58,6 +58,90 @@ describe('NpmDownloader downloadPackage 테스트', () => {
   });
 
   describe('downloadPackage', () => {
+    it('성공한 다운로드 후 resolve된 버전과 메타데이터를 원본 PackageInfo에 반영한다', async () => {
+      const mockGetPackageMetadata = vi.fn().mockResolvedValue({
+        name: 'test-pkg',
+        version: '3.0.1',
+        type: 'npm',
+        metadata: {
+          downloadUrl: 'https://registry.npmjs.org/test-pkg/-/test-pkg-3.0.1.tgz',
+          checksum: { sha1: 'resolved-sha1' },
+          description: 'resolved metadata',
+        },
+      });
+      (downloader as any).getPackageMetadata = mockGetPackageMetadata;
+
+      const mockStream = new EventEmitter();
+      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      mockAxiosDefault.mockResolvedValue({
+        data: mockStream,
+        headers: { 'content-length': '1000' },
+      });
+      const mockWriter = new EventEmitter();
+      (fs.createWriteStream as any).mockReturnValue(mockWriter);
+      (downloader as any).verifyShasum = vi.fn().mockResolvedValue(true);
+
+      const info = {
+        type: 'npm' as const,
+        name: 'test-pkg',
+        version: 'latest',
+        arch: 'x86_64' as const,
+        metadata: {
+          requestedVersion: 'latest',
+          checksum: { sha512: 'caller-sha512' },
+          callerFlag: true,
+        },
+      };
+      const downloadPromise = downloader.downloadPackage(info, '/tmp/test');
+
+      setTimeout(() => {
+        mockStream.emit('data', Buffer.from('test data'));
+        mockWriter.emit('finish');
+      }, 10);
+
+      await downloadPromise;
+
+      expect(info).toEqual({
+        type: 'npm',
+        name: 'test-pkg',
+        version: '3.0.1',
+        arch: 'x86_64',
+        metadata: {
+          requestedVersion: 'latest',
+          checksum: { sha1: 'resolved-sha1' },
+          callerFlag: true,
+          downloadUrl: 'https://registry.npmjs.org/test-pkg/-/test-pkg-3.0.1.tgz',
+          description: 'resolved metadata',
+        },
+      });
+    });
+
+    it('전송에 실패하면 원본 PackageInfo를 변경하지 않는다', async () => {
+      const mockGetPackageMetadata = vi.fn().mockResolvedValue({
+        name: 'test-pkg',
+        version: '3.0.1',
+        type: 'npm',
+        metadata: {
+          downloadUrl: 'https://registry.npmjs.org/test-pkg/-/test-pkg-3.0.1.tgz',
+        },
+      });
+      (downloader as any).getPackageMetadata = mockGetPackageMetadata;
+      (downloader as any).downloadArtifactFile = vi.fn().mockRejectedValue(new Error('transfer failed'));
+
+      const info = {
+        type: 'npm' as const,
+        name: 'test-pkg',
+        version: 'latest',
+        arch: 'x86_64' as const,
+        metadata: { requestedVersion: 'latest', callerFlag: true },
+      };
+      const before = structuredClone(info);
+
+      await expect(downloader.downloadPackage(info, '/tmp/test')).rejects.toThrow('transfer failed');
+
+      expect(info).toEqual(before);
+    });
+
     it('다운로드 성공 (체크섬 없음)', async () => {
       // getPackageMetadata 모킹
       const mockGetPackageMetadata = vi.fn().mockResolvedValue({
@@ -166,7 +250,13 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const mockVerifyIntegrity = vi.fn().mockResolvedValue(false);
       (downloader as any).verifyIntegrity = mockVerifyIntegrity;
 
-      const info = { type: 'npm' as const, name: 'test-pkg', version: '1.0.0' };
+      const info = {
+        type: 'npm' as const,
+        name: 'test-pkg',
+        version: 'latest',
+        metadata: { callerFlag: true },
+      };
+      const before = structuredClone(info);
       const downloadPromise = downloader.downloadPackage(info, '/tmp/test');
 
       setTimeout(() => {
@@ -175,6 +265,7 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       }, 10);
 
       await expect(downloadPromise).rejects.toThrow('무결성 검증 실패');
+      expect(info).toEqual(before);
     });
 
     it('sha1 체크섬 검증 성공', async () => {

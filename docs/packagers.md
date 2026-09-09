@@ -65,6 +65,8 @@ interface ArchivePackageManifest {
 archive 전용 canonical 정의는 `src/types/manifest/package-manifest.ts`의 `ArchivePackageManifest`에 두고, `archive-packager.ts`는 해당 타입을 재사용합니다.
 `src/types`의 공개 `PackageManifest`는 기존 packaging contract를 유지하는 compatibility surface입니다.
 
+manifest는 완료된 다운로드 항목의 `PackageInfo`를 기록합니다. npm의 `latest` 같은 버전 선택자는 다운로드 성공 시 실제 버전으로 갱신되므로, CLI `--no-deps` 아카이브에도 tarball과 일치하는 버전이 들어갑니다.
+
 ### 사용 예시
 ```typescript
 import { getArchivePackager } from './core/packager/archive-packager';

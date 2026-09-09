@@ -160,6 +160,12 @@ export class NpmDownloader extends BaseLanguageDownloader implements IDownloader
         onProgress
       );
 
+      info.version = packageInfo.version;
+      info.metadata = {
+        ...info.metadata,
+        ...packageInfo.metadata,
+      };
+
       logger.info('npm 패키지 다운로드 완료', {
         name: info.name,
         version: info.version,
