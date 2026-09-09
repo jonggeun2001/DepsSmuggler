@@ -176,7 +176,7 @@ bash scripts/verify-worktree.sh src/core/downloaders/apt-repo-metadata.test.ts
 DEPS_SMUGGLER_NATIVE_APT=1 bash scripts/verify-worktree.sh src/core/downloaders/apt-native-consumer.integration.test.ts
 ```
 
-Control continuation과 필드 의미는 [Debian Policy](https://www.debian.org/doc/debian-policy/ch-controlfields.html)를 기준으로 검사하며, 들여쓰기 문자 자체의 바이트 일치와 필드 값 보존을 구분합니다.
+Control continuation과 필드 의미는 [Debian Policy](https://www.debian.org/doc/debian-policy/ch-controlfields.html)를 기준으로 검사하며, 들여쓰기 문자 자체의 바이트 일치와 필드 값 보존을 구분합니다. 원본 Control 필드가 없는 API 입력도 [Debian 관계 연산자](https://www.debian.org/doc/debian-policy/ch-relationships.html)에 맞게 `<`·`>`를 `<<`·`>>`로 출력하고 `<=`·`>=`·`=`의 의미를 유지하는지 검사합니다.
 
 실제 Ubuntu CLI 검증에서는 의존성·제공·충돌·설치 크기와 파일 정보를 DEB control 및 실물과 비교합니다. `Description`은 수신한 `Packages`와도 비교합니다. 상위 저장소가 긴 설명을 Translation 파일로 분리한 경우 DEB 내부의 긴 설명과 index의 요약은 다를 수 있으므로, 이 차이를 패키저의 필드 손실로 판정하지 않습니다. 이 저장소 구성은 [apt-ftparchive의 LongDescription 옵션](https://manpages.debian.org/bookworm/apt-utils/apt-ftparchive.1.en.html)에 설명돼 있습니다.
 

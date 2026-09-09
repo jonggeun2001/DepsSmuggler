@@ -184,6 +184,13 @@ describe('OSRepoPackager', () => {
     fs.writeFileSync(downloadedFile, payload);
     const pkg = createAptPackage({
       aptControlFields: undefined,
+      dependencies: [
+        { name: 'strict-lower', operator: '<', version: '2.0' },
+        { name: 'lower-or-equal', operator: '<=', version: '2.1' },
+        { name: 'strict-higher', operator: '>', version: '3.0' },
+        { name: 'higher-or-equal', operator: '>=', version: '3.1' },
+        { name: 'exact', operator: '=', version: '4.0' },
+      ],
       provides: ['virtual-raw'],
       conflicts: ['old-package'],
       recommends: ['recommended-package'],
@@ -199,7 +206,9 @@ describe('OSRepoPackager', () => {
 
     const content = fs.readFileSync(path.join(repoPath, 'Packages'), 'utf8');
     expect(content).toContain('Installed-Size: 4');
-    expect(content).toContain('Depends: foo (>= 1.2), bar (<< 3.0)');
+    expect(content).toContain(
+      'Depends: strict-lower (<< 2.0), lower-or-equal (<= 2.1), strict-higher (>> 3.0), higher-or-equal (>= 3.1), exact (= 4.0)'
+    );
     expect(content).toContain('Provides: virtual-raw');
     expect(content).toContain('Conflicts: old-package');
     expect(content).toContain('Recommends: recommended-package');

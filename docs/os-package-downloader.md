@@ -626,7 +626,7 @@ class OSRepoPackager {
 
 APT는 수신한 `Packages`의 `aptControlFields`에서 의존성 조건과 대안, `Pre-Depends`, `Provides`, `Conflicts`, `Breaks`, `Replaces`, `Multi-Arch`, `Installed-Size` 등 Control 필드를 보존합니다. 여러 줄 값이 있으면 Debian continuation 문법으로 출력하므로 설명의 들여쓰기와 빈 문단 표기도 유지됩니다. 상위 저장소가 짧은 설명과 `Description-md5`만 제공하면 그 값을 유지하며, 별도 Translation 파일을 받거나 DEB의 긴 설명을 추출하지는 않습니다. `Packages.gz`에는 같은 `Packages` 내용을 압축합니다.
 
-`Package`·`Version`·`Architecture`는 선택한 패키지에서, `Filename`·`Size`·`SHA256`은 실제 복사한 파일에서 생성합니다. 상위 저장소의 경로나 오래된 체크섬을 그대로 전달하지 않으며, 필요한 로컬 파일이 없으면 저장소 생성에 실패합니다. API 호출자가 원본 필드를 제공하지 않으면 공통 패키지 정보로 생성하되 의존성 연산자와 제공·충돌 정보를 반영하고, 설치 크기는 `installedSize`가 있을 때 사용합니다. 원본 필드 보존은 전달 저장소의 정보 보존이며, 앱 resolver가 모든 Debian 의존성 표현을 해결한다는 뜻은 아닙니다.
+`Package`·`Version`·`Architecture`는 선택한 패키지에서, `Filename`·`Size`·`SHA256`은 실제 복사한 파일에서 생성합니다. 상위 저장소의 경로나 오래된 체크섬을 그대로 전달하지 않으며, 필요한 로컬 파일이 없으면 저장소 생성에 실패합니다. API 호출자가 원본 필드를 제공하지 않으면 공통 패키지 정보로 생성하되 의존성 연산자와 제공·충돌 정보를 반영하고, 설치 크기는 `installedSize`가 있을 때 사용합니다. 공통 연산자 `<`·`>`는 같은 경계 조건을 뜻하는 Debian 표기 `<<`·`>>`로 변환합니다. 원본 필드 보존은 전달 저장소의 정보 보존이며, 앱 resolver가 모든 Debian 의존성 표현을 해결한다는 뜻은 아닙니다.
 
 APK 인덱스는 별도 임시 디렉터리에서 아카이브를 완성한 뒤 최종 `APKINDEX.tar.gz`로 교체합니다. 아카이브 생성 중 오류가 발생하면 기존 인덱스를 유지하고 오류를 전달하며, 사용자가 미리 둔 평문 `APKINDEX`를 임시 파일로 사용하거나 삭제하지 않습니다. 생성한 gzip tar 구조는 실제 `ApkMetadataParser`로 검증합니다. 체크섬 인코딩·의존성 조건·provides·설치 크기 보존 문제는 [#97](https://github.com/jonggeun2001/DepsSmuggler/issues/97)에 남아 있으므로, tar 구조 검증을 네이티브 `apk update`·설치 성공으로 간주하지 않습니다.
 

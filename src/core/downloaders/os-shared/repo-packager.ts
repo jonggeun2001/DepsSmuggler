@@ -381,7 +381,11 @@ export class OSRepoPackager {
           .filter((dependency) => !dependency.isOptional)
           .map((dependency) => {
             if (!dependency.version) return dependency.name;
-            const operator = dependency.operator || '>=';
+            const operator = dependency.operator === '<'
+              ? '<<'
+              : dependency.operator === '>'
+                ? '>>'
+                : dependency.operator || '>=';
             return `${dependency.name} (${operator} ${dependency.version})`;
           })
           .join(', ');
