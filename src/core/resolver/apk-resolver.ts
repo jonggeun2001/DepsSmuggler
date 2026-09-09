@@ -142,11 +142,14 @@ export class ApkDependencyResolver extends BaseOSDependencyResolver {
     dep: PackageDependency
   ): Promise<OSPackageInfo[]> {
     const candidates: OSPackageInfo[] = [];
+    const isCapability = /^(so|cmd|pc):/.test(dep.name);
 
     // 1. 패키지 이름으로 검색
-    const byName = this.metadataCache.packages.get(dep.name);
-    if (byName) {
-      candidates.push(...byName);
+    if (!isCapability) {
+      const byName = this.metadataCache.packages.get(dep.name);
+      if (byName) {
+        candidates.push(...byName);
+      }
     }
     const candidateKeys = new Set(candidates.map((pkg) => this.getPackageKey(pkg)));
 
@@ -165,6 +168,29 @@ export class ApkDependencyResolver extends BaseOSDependencyResolver {
     // so:/cmd: 접두사도 위의 동일 provides 키 조회에 포함된다.
 
     return candidates;
+  }
+
+  /**
+   * capability 버전은 패키지 버전이 아니라 provides 항목의 버전으로 비교한다.
+   */
+  protected filterByVersion(
+    packages: OSPackageInfo[],
+    dep: PackageDependency
+  ): OSPackageInfo[] {
+    const requiredVersion = dep.version;
+    const operator = dep.operator;
+    if (!/^(so|cmd|pc):/.test(dep.name) || !requiredVersion || !operator) {
+      return super.filterByVersion(packages, dep);
+    }
+
+    return packages.filter((pkg) =>
+      (pkg.provides || []).some((provide) => {
+        const [providedName, providedVersion] = provide.split('=', 2);
+        return providedName === dep.name &&
+          providedVersion !== undefined && providedVersion.length > 0 &&
+          this.compareVersionWithOperator(providedVersion, operator, requiredVersion);
+      })
+    );
   }
 
   /**

@@ -162,6 +162,172 @@ describe('OS dependency resolvers', () => {
     expect(byCmd[0].architecture).toBe('x86_64');
   });
 
+  it('APK resolver는 parser capability metadata를 BFS 의존성 closure에 포함한다', async () => {
+    const root = {
+      ...createPackage('app', '1.0.0'),
+      dependencies: [
+        { name: 'so:libz.so.1', operator: '>=' as const, version: '1.3.0' },
+        { name: 'cmd:foo' },
+        { name: 'pc:bar', operator: '=' as const, version: '2.0' },
+      ],
+    };
+    const zlib = createPackage('zlib', '9.9.9', 'x86_64', ['so:libz.so.1=1.3.2']);
+    const busybox = createPackage('busybox', '1.0.0', 'x86_64', ['cmd:foo']);
+    const barProvider = createPackage('bar-dev', '3.0.0', 'x86_64', ['pc:bar=2.0']);
+    const wrongArchitecture = createPackage('wrong-zlib', '99.0.0', 'aarch64', ['so:libz.so.1=99.0.0']);
+    vi.spyOn(ApkMetadataParser.prototype, 'parseIndex').mockResolvedValue([
+      root,
+      zlib,
+      busybox,
+      barProvider,
+      wrongArchitecture,
+    ]);
+    const resolver = new ApkDependencyResolver({
+      ...createOptions(repo),
+      distribution: {
+        id: 'alpine-3.21',
+        name: 'Alpine Linux 3.21',
+        version: '3.21',
+        packageManager: 'apk',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+
+    const result = await resolver.resolveDependencies([root]);
+
+    expect(result.unresolved).toEqual([]);
+    expect(result.packages.map((pkg) => pkg.name)).toEqual(
+      expect.arrayContaining(['app', 'zlib', 'busybox', 'bar-dev'])
+    );
+    expect(result.packages.map((pkg) => pkg.name)).not.toContain('wrong-zlib');
+  });
+
+  it('APK resolver는 capability 버전을 패키지 버전과 구분하고 불일치를 unresolved로 남긴다', async () => {
+    const root = {
+      ...createPackage('app', '1.0.0'),
+      dependencies: [
+        { name: 'so:libz.so.1', operator: '>=' as const, version: '2.0.0' },
+      ],
+    };
+    const provider = createPackage('zlib', '9.9.9', 'x86_64', ['so:libz.so.1=1.3.2']);
+    vi.spyOn(ApkMetadataParser.prototype, 'parseIndex').mockResolvedValue([root, provider]);
+    const resolver = new ApkDependencyResolver({
+      ...createOptions(repo),
+      distribution: {
+        id: 'alpine-3.21',
+        name: 'Alpine Linux 3.21',
+        version: '3.21',
+        packageManager: 'apk',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+
+    const result = await resolver.resolveDependencies([root]);
+
+    expect(result.packages.map((pkg) => pkg.name)).toEqual(['app']);
+    expect(result.unresolved).toEqual([
+      expect.objectContaining({
+        name: 'so:libz.so.1',
+        operator: '>=',
+        version: '2.0.0',
+      }),
+    ]);
+  });
+
+  it.each([
+    ['=', '1.3.2'],
+    ['<', '2.0.0'],
+    ['<=', '1.3.2'],
+    ['>', '1.0.0'],
+    ['>=', '1.3.0'],
+  ] as const)('APK resolver는 capability 연산자 %s를 provides 버전에 적용한다', async (operator, requiredVersion) => {
+    const root = {
+      ...createPackage('app', '1.0.0'),
+      dependencies: [{ name: 'so:libz.so.1', operator, version: requiredVersion }],
+    };
+    const provider = createPackage('zlib', '9.9.9', 'x86_64', ['so:libz.so.1=1.3.2']);
+    vi.spyOn(ApkMetadataParser.prototype, 'parseIndex').mockResolvedValue([root, provider]);
+    const resolver = new ApkDependencyResolver({
+      ...createOptions(repo),
+      distribution: {
+        id: 'alpine-3.21',
+        name: 'Alpine Linux 3.21',
+        version: '3.21',
+        packageManager: 'apk',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+
+    const result = await resolver.resolveDependencies([root]);
+
+    expect(result.unresolved).toEqual([]);
+    expect(result.packages.map((pkg) => pkg.name)).toEqual(expect.arrayContaining(['app', 'zlib']));
+  });
+
+  it('APK resolver는 무버전·빈 버전·누락 capability를 unresolved로 남기고 정상 패키지 비교는 유지한다', async () => {
+    const root = {
+      ...createPackage('app', '1.0.0'),
+      dependencies: [
+        { name: 'so:unversioned', operator: '>=' as const, version: '1.0' },
+        { name: 'so:empty', operator: '>=' as const, version: '0' },
+        { name: 'so:missing' },
+        { name: 'so:multiple', operator: '=' as const, version: '2.0' },
+        { name: 'normal-package', operator: '>=' as const, version: '1.0' },
+      ],
+    };
+    const unversioned = createPackage('unversioned-provider', '9.9.9', 'x86_64', ['so:unversioned']);
+    const emptyVersion = createPackage('empty-provider', '9.9.9', 'x86_64', ['so:empty=']);
+    const lowerMultiple = createPackage('multiple-lower', '1.0.0', 'x86_64', ['so:multiple=1.0']);
+    const validMultiple = createPackage('multiple-valid', '0.1.0', 'x86_64', [
+      'so:multiple=1.0',
+      'so:multiple=2.0',
+    ]);
+    const normal = createPackage('normal-package', '2.0.0');
+    vi.spyOn(ApkMetadataParser.prototype, 'parseIndex').mockResolvedValue([
+      root,
+      unversioned,
+      emptyVersion,
+      lowerMultiple,
+      validMultiple,
+      normal,
+    ]);
+    const resolver = new ApkDependencyResolver({
+      ...createOptions(repo),
+      distribution: {
+        id: 'alpine-3.21',
+        name: 'Alpine Linux 3.21',
+        version: '3.21',
+        packageManager: 'apk',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+
+    const result = await resolver.resolveDependencies([root]);
+
+    expect(result.packages.map((pkg) => pkg.name)).toEqual(
+      expect.arrayContaining(['app', 'multiple-valid', 'normal-package'])
+    );
+    expect(result.packages.map((pkg) => pkg.name).sort()).toEqual([
+      'app',
+      'multiple-valid',
+      'normal-package',
+    ]);
+    expect(result.unresolved).toEqual([
+      expect.objectContaining({ name: 'so:unversioned', operator: '>=', version: '1.0' }),
+      expect.objectContaining({ name: 'so:empty', operator: '>=', version: '0' }),
+      expect.objectContaining({ name: 'so:missing' }),
+    ]);
+    expect(result.warnings).toContain('3 dependencies could not be resolved');
+  });
+
   it('YUM resolver는 primary 메타데이터가 없으면 명시적으로 실패한다', async () => {
     const parseRepomd = vi.spyOn(YumMetadataParser.prototype, 'parseRepomd').mockResolvedValue({
       revision: '1',

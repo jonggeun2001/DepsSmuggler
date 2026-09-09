@@ -363,6 +363,8 @@ ${baseUrl}/pool/${component}/${prefix}/${name}/${filename}.deb
 
 #### 메타데이터 파싱 (ApkMetadataParser)
 
+`D:`의 `so:`, `cmd:`, `pc:` 항목을 시스템에 이미 설치된 것으로 간주해 버리지 않고 의존성으로 보존합니다. Resolver는 호환 아키텍처의 `p:` provides에서 제공자를 찾아 전이 목록에 포함합니다. 버전 조건이 있으면 제공 APK 자체의 버전 대신 같은 capability의 제공 버전을 비교하며, 버전 없는 제공은 버전 조건을 충족한 것으로 간주하지 않습니다. 제공자가 없거나 버전이 맞지 않으면 기존 unresolved/warning 결과에 남깁니다.
+
 APK INDEX 형식:
 
 ```
@@ -381,6 +383,7 @@ D:pcre2 zlib
 - `S`: Size
 - `T`: Description
 - `C`: Checksum
+- `p`: Provides (버전이 있는 capability 포함)
 
 ---
 

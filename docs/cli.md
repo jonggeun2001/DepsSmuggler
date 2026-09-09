@@ -229,6 +229,7 @@ depssmuggler os download bash --distro ubuntu-22.04 --arch amd64 --format reposi
 ```
 
 - 배포판 ID와 아키텍처를 기준으로 OS resolver를 실행해 전이 의존성을 함께 계산합니다.
+- APK의 `so:`, `cmd:`, `pc:` 의존성도 저장소의 `provides` 항목과 매칭해 제공 패키지를 포함합니다. 버전 조건은 제공 기능의 버전으로 확인하며, 제공자를 찾지 못하거나 조건을 만족하지 못하면 해결되지 않은 의존성과 경고로 남깁니다. `--no-deps`에서는 이 탐색을 생략하고 요청한 패키지만 다운로드합니다.
 - `--format archive|repository|both`에 따라 아카이브, 로컬 저장소, 또는 둘 다 생성합니다.
 - `--scripts`를 주면 의존성 순서 설치 스크립트와 로컬 저장소 설정 스크립트를 생성합니다. 버전 충돌이 있으면 자동 설치 스크립트 생성을 생략하고 경고합니다.
 - `--archive-format zip|tar.gz`로 압축 형식을 선택하며 기본값은 `zip`입니다. `--no-deps`는 의존성 해결을 끕니다.

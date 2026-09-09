@@ -736,6 +736,10 @@ OS resolver는 `parseFromText()`나 공개 `clearCache()`를 제공하지 않습
 
 실제 클래스는 `ApkDependencyResolver`이며 `ApkResolver` alias와 `getApkResolver(options)` 팩토리를 제공합니다. 검색 외에 상속한 `resolveDependencies(packages)`를 사용합니다.
 
+`so:`, `cmd:`, `pc:` 의존성은 APKINDEX `p:` provides에서 후보를 얻습니다. 버전 조건은 일치하는 제공 항목의 버전과 비교하며 제공 APK의 패키지 버전은 대신 사용하지 않습니다. 버전 조건이 없으면 같은 이름의 제공 항목으로 충족할 수 있고, 버전 조건이 있으면 제공 버전이 필요합니다. 같은 패키지에 일치하는 제공 항목이 여러 개면 하나라도 조건을 만족할 때 선택합니다. 일반 패키지 의존성의 버전 비교는 기존 공통 구현을 사용합니다.
+
+제공자 누락은 `not_found`, 제공 버전 불일치는 `version_mismatch`로 기록하며 경고·unresolved 결과에 포함합니다. CLI의 `--no-deps`는 이 전이 탐색을 우회합니다.
+
 ### 개요
 - 목적: APK 패키지 의존성 해결 (Alpine Linux)
 - 위치: `src/core/resolver/apk-resolver.ts`
@@ -747,6 +751,7 @@ OS resolver는 `parseFromText()`나 공개 `clearCache()`를 제공하지 않습
 | `loadMetadata` (protected) | - | Promise<void> | APK 저장소 메타데이터 로드 (APKINDEX.tar.gz) |
 | `searchPackages` | query, matchType? | Promise<OSPackageSearchResult[]> | 패키지 검색 |
 | `findPackagesForDependency` (protected) | dependency | Promise<OSPackageInfo[]> | 의존성에 해당하는 패키지 찾기 |
+| `filterByVersion` (protected) | packages, dependency | OSPackageInfo[] | capability 제공 버전 또는 일반 패키지 버전으로 조건 확인 |
 
 ### 내부 메서드
 

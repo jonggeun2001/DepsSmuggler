@@ -105,7 +105,7 @@ describe('OS metadata parsers', () => {
     ]);
   });
 
-  it('APK parser는 인덱스 아카이브를 읽고 시스템 의존성을 제외한다', async () => {
+  it('APK parser는 인덱스 아카이브의 capability 의존성과 provides를 보존한다', async () => {
     const parser = new ApkMetadataParser(repo, 'x86_64');
     vi.spyOn(parser as never, 'extractApkIndex').mockResolvedValue(
       [
@@ -117,8 +117,8 @@ describe('OS metadata parsers', () => {
         'T:Busybox utilities',
         'L:GPL-2.0-only',
         'C:Q1YWJjZA==',
-        'D:so:libc.musl-x86_64.so.1 cmd:sh ssl-client>=1.0',
-        'p:cmd:sh so:libcrypto.so.3=3.0.0',
+        'D:so:libc.musl-x86_64.so.1=1.0 cmd:sh>=1.0 pc:bar=2.0 ssl-client>=1.0',
+        'p:cmd:sh=1.0 so:libcrypto.so.3=3.0.0 pc:bar=2.0',
       ].join('\n')
     );
     fetchMock.mockResolvedValue(new Response(gzipSync('placeholder')));
@@ -135,13 +135,16 @@ describe('OS metadata parsers', () => {
         location: 'x86_64/busybox-1.36.1-r0.apk',
         checksum: { type: 'sha1', value: 'YWJjZA==' },
         dependencies: [
+          { name: 'so:libc.musl-x86_64.so.1', operator: '=', version: '1.0' },
+          { name: 'cmd:sh', operator: '>=', version: '1.0' },
+          { name: 'pc:bar', operator: '=', version: '2.0' },
           expect.objectContaining({
             name: 'ssl-client',
             operator: '>=',
             version: '1.0',
           }),
         ],
-        provides: ['cmd:sh', 'so:libcrypto.so.3=3.0.0'],
+        provides: ['cmd:sh=1.0', 'so:libcrypto.so.3=3.0.0', 'pc:bar=2.0'],
       }),
     ]);
   });
