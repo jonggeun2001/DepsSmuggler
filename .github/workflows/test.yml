@@ -45,6 +45,12 @@ jobs:
           DEPS_SMUGGLER_NATIVE_APT: '1'
         run: bash scripts/verify-worktree.sh src/core/downloaders/apt-native-consumer.integration.test.ts
 
+      - name: Test generated Conda installer with native Conda
+        if: runner.os == 'Linux'
+        env:
+          DEPS_SMUGGLER_NATIVE_CONDA: '1'
+        run: bash scripts/verify-worktree.sh src/core/packager/conda-native-consumer.integration.test.ts
+
       - name: Build project
         run: npm run build
 

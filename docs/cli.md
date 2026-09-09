@@ -155,6 +155,9 @@ depssmuggler download -t maven -p org.lwjgl:lwjgl -V 3.3.6 \
 
 - 실제 파일 다운로드 항목이 하나라도 실패하면 실패 목록을 출력하고 종료 코드 `1`로 끝납니다. 이 경우 이번 실행의 아카이브와 설치 스크립트를 생성하지 않습니다. 성공한 다운로드의 종료 코드는 `0`이며, 다운로드 전 의존성 해결 단계의 기본 건너뛰기 정책과 `--strict`는 위 설명을 따릅니다.
 - 다운로드 성공 시 출력 디렉터리에 `packages-<timestamp>.zip` 또는 `.tar.gz`를 만든 뒤, 같은 디렉터리에 설치 스크립트를 생성합니다. 이 호출 순서에서는 별도로 생성한 설치 스크립트가 앞서 만든 아카이브에 포함되지 않습니다.
+- Conda는 압축을 풀어 생긴 `packages/`와 설치 스크립트를 같은 폴더에 두고 실행합니다. 설치된 Conda를 사용해 전달된 `.conda`·`.tar.bz2` 파일만 `--offline`으로 설치하며, pip 패키지는 별도 pip 분기로 처리합니다. 기본 대상은 스크립트 폴더의 `conda-env`이고 새 환경에 사용자 설정의 기본 패키지를 추가하지 않습니다. 기존 Conda 환경이면 재생성하지 않고 설치 명령을 실행하며, 같은 위치에 일반 파일·디렉터리가 있으면 오류로 종료합니다.
+- 기존 Python 환경에 설치하려면 스크립트 실행 전에 `DEPS_SMUGGLER_CONDA_PREFIX`에 해당 Conda 환경 경로를 지정합니다. 상대 경로는 스크립트 폴더를 기준으로 해석합니다. 예를 들어 Bash에서는 `DEPS_SMUGGLER_CONDA_PREFIX=/path/to/env bash install.sh`, PowerShell에서는 `$env:DEPS_SMUGGLER_CONDA_PREFIX = 'C:\path\to\env'; .\install.ps1`로 실행합니다. 설치 후 `conda activate <환경 경로>`로 사용할 수 있습니다.
+- Conda 설치 스크립트는 전달된 파일 집합을 그대로 설치하며 의존성·버전·아키텍처 호환성을 다시 해결하지 않습니다. `--no-deps`로 받은 `six` 같은 Python 패키지만으로는 새 환경에 Python 런타임이 생기지 않으므로 호환되는 기존 환경을 지정하거나 필요한 런타임과 의존성도 함께 전달해야 합니다. Conda 부재·파일 누락·설치 실패는 스크립트의 오류 종료로 이어지고 완료 메시지를 출력하지 않습니다.
 - Docker는 압축을 풀어 생긴 `packages/`와 설치 스크립트를 같은 폴더에 두고 실행합니다. Bash·PowerShell 모두 실제 이미지 파일명(예: `packages/busybox-1.36.tar`)을 `docker load -i`에 전달합니다. `amd64`·`arm64`와 ZIP·tar.gz 출력에서 같은 이름 규칙을 사용하며, 대상 환경에는 실행 중인 Docker가 필요합니다.
 - npm은 압축을 풀어 생긴 `packages/` 폴더와 설치 스크립트를 같은 폴더에 두고 실행합니다. Node.js와 npm이 설치된 환경에서 전달된 `.tgz`를 `npm install --offline`으로 설치하며, 결과는 스크립트 폴더의 `npm-project/node_modules`에 생깁니다. 이 전용 프로젝트에 설치용 `package.json`을 생성하며 상위 폴더의 사용자 manifest는 변경하지 않습니다.
 - npm 다운로드가 성공하면 아카이브의 `manifest.json`에는 실제로 받은 버전을 기록합니다. `--no-deps`에서 버전을 생략하거나 `latest`를 지정한 경우도 tarball 내부 `package.json`과 같은 버전을 표시합니다.

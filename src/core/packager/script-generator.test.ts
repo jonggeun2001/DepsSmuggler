@@ -383,7 +383,7 @@ describe('ScriptGenerator', () => {
       const outputPath = path.join(tempDir, 'install.sh');
       const packages: PackageInfo[] = [
         { name: 'requests', version: '2.28.0', type: 'pip' },
-        { name: 'numpy', version: '1.23.0', type: 'conda' },
+        { name: 'numpy', version: '1.23.0', type: 'conda', metadata: { filename: 'numpy-1.23.0-py312_0.conda' } },
         { name: 'org.springframework:spring-core', version: '5.3.0', type: 'maven', metadata: { groupId: 'org.springframework', artifactId: 'spring-core' } },
         { name: 'httpd', version: '2.4.0', type: 'yum' },
         { name: 'nginx', version: 'latest', type: 'docker' },
@@ -399,18 +399,58 @@ describe('ScriptGenerator', () => {
       expect(content).toContain('docker');
     });
 
-    it('conda 패키지도 pip으로 설치되어야 함', async () => {
+    it('Conda 패키지는 명시된 archive를 offline 설치해야 함', async () => {
       const outputPath = path.join(tempDir, 'install.sh');
       const packages: PackageInfo[] = [
-        { name: 'numpy', version: '1.23.0', type: 'conda' },
+        {
+          name: 'six',
+          version: '1.17.0',
+          type: 'conda',
+          metadata: { filename: 'six-1.17.0-py312h06a4308_0.tar.bz2' },
+        },
       ];
 
-      await generator.generateBashScript(packages, outputPath);
+      await generator.generateBashScript(packages, outputPath, { includeErrorHandling: false });
 
       const content = await fs.readFile(outputPath, 'utf-8');
-      // conda 패키지도 pip install로 처리됨
-      expect(content).toContain('pip install');
-      expect(content).toContain('numpy');
+      expect(content).toContain('command -v conda');
+      expect(content).toContain('conda create --offline --yes --no-default-packages');
+      expect(content).toContain('six-1.17.0-py312h06a4308_0.tar.bz2');
+      expect(content).toContain('DEPS_SMUGGLER_CONDA_PREFIX');
+      expect(content).toContain('install_conda_packages || exit 1');
+      expect(content).not.toContain('pip install');
+    });
+
+    it('Conda 매핑은 portable 경로를 dedupe하고 셸 특수문자를 보존해야 함', async () => {
+      const bashPath = path.join(tempDir, 'install.sh');
+      const powershellPath = path.join(tempDir, 'install.ps1');
+      const packages: PackageInfo[] = [
+        { name: 'six', version: '1.17.0', type: 'conda' },
+      ];
+      const relativePath = "nested dir/O'Reilly $six.conda";
+
+      await generator.generateBashScript(packages, bashPath, {
+        condaPackageFiles: [{ relativePath }, { relativePath }],
+      });
+      await generator.generatePowerShellScript(packages, powershellPath, {
+        condaPackageFiles: [{ relativePath }],
+      });
+
+      const bash = await fs.readFile(bashPath, 'utf-8');
+      const powershell = await fs.readFile(powershellPath, 'utf-8');
+      expect(bash).toContain("'nested dir/O'\\''Reilly $six.conda'");
+      expect(bash.match(/nested dir\/O'\\''Reilly \$six\.conda/g)).toHaveLength(1);
+      expect(powershell).toContain("'nested dir/O''Reilly $six.conda'");
+    });
+
+    it('Conda 매핑이 없으면 metadata filename을 요구하고 잘못된 경로를 거부해야 함', async () => {
+      const outputPath = path.join(tempDir, 'install.sh');
+      const packages: PackageInfo[] = [{ name: 'six', version: '1.17.0', type: 'conda' }];
+
+      await expect(generator.generateBashScript(packages, outputPath)).rejects.toThrow(/Conda.*filename|파일명/i);
+      await expect(generator.generateBashScript(packages, outputPath, {
+        condaPackageFiles: [{ relativePath: '../escape.conda' }],
+      })).rejects.toThrow(/경로|상대|portable/i);
     });
   });
 

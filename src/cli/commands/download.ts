@@ -13,7 +13,7 @@ import {
   getArchivePackager,
   ArchiveFormat,
 } from '../../core/packager/archive-packager';
-import { getScriptGenerator } from '../../core/packager/script-generator';
+import { getScriptGenerator, type ScriptOptions } from '../../core/packager/script-generator';
 import { DownloadPackage, resolveAllDependencies } from '../../core/shared';
 import { PackageInfo, PackageType, Architecture } from '../../types';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
@@ -86,6 +86,33 @@ function getPipTargetPlatform(
     arch,
     pythonVersion: options.pythonVersion,
   };
+}
+
+function getArchiveRelativePath(filePath: string, outputPath: string): string {
+  const archiveBasePath = path.resolve(outputPath);
+  const sourcePath = path.resolve(filePath);
+  const relativePath = path.relative(archiveBasePath, sourcePath);
+  const isContained =
+    relativePath.length > 0 &&
+    relativePath !== '..' &&
+    !relativePath.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relativePath);
+
+  return (isContained ? relativePath : path.basename(filePath)).split(path.sep).join('/');
+}
+
+function getCondaPackageFiles(
+  items: Array<{ package: PackageInfo; status: string; filePath?: string; filePaths?: string[] }>,
+  outputPath: string,
+): Array<{ relativePath: string }> {
+  const relativePaths = new Set<string>();
+  for (const item of items) {
+    if (item.status !== 'completed' || item.package.type !== 'conda' || !item.filePath) continue;
+    for (const filePath of item.filePaths ?? [item.filePath]) {
+      relativePaths.add(getArchiveRelativePath(filePath, outputPath));
+    }
+  }
+  return [...relativePaths].map(relativePath => ({ relativePath }));
 }
 
 function toDownloadPackage(pkg: PackageInfo): DownloadPackage {
@@ -425,14 +452,15 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       // 설치 스크립트 생성
       console.log(chalk.cyan('\n설치 스크립트 생성 중...'));
       const scriptGenerator = getScriptGenerator();
+      const scriptOptions: ScriptOptions = {};
       if (packages.some(pkg => pkg.type === 'npm')) {
-        await scriptGenerator.generateAllScripts(packages, outputPath, {
-          npmPackageFiles: files.map(filePath => ({ filePath, relativePath: path.basename(filePath) })),
-          npmRootPackages: prepared.npmRootPackages,
-        });
-      } else {
-        await scriptGenerator.generateAllScripts(packages, outputPath);
+        scriptOptions.npmPackageFiles = files.map(filePath => ({ filePath, relativePath: path.basename(filePath) }));
+        scriptOptions.npmRootPackages = prepared.npmRootPackages;
       }
+      if (packages.some(pkg => pkg.type === 'conda')) {
+        scriptOptions.condaPackageFiles = getCondaPackageFiles(result.items, outputPath);
+      }
+      await scriptGenerator.generateAllScripts(packages, outputPath, scriptOptions);
       console.log(chalk.green('✓ 설치 스크립트 생성 완료'));
     } else {
       console.log(chalk.yellow('⚠ 다운로드 완료 (일부 실패)'));
