@@ -235,7 +235,7 @@ export class ScriptGenerator {
       lines.push('        local remote_marker="$target_path/_remote.repositories"');
       lines.push('        local artifact_count=0');
       lines.push('        local artifact_path artifact_name');
-      lines.push('        for artifact_path in "$source_path"/*; do');
+      lines.push('        for artifact_path in "$source_path"/* "$source_path"/.[!.]* "$source_path"/..?*; do');
       lines.push('            [[ -f "$artifact_path" ]] || continue');
       lines.push('            artifact_name="${artifact_path##*/}"');
       lines.push('            [[ "$artifact_name" == "_remote.repositories" ]] && continue');

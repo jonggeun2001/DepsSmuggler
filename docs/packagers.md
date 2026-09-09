@@ -174,7 +174,7 @@ pip install --no-index @FindLinkArgs requests==2.31.0
 
 실제 파일은 헤더, 패키지 디렉터리와 실행 도구 확인, 로그 함수와 타입별 설치 함수를 포함합니다. Python은 하위 디렉터리마다 `--find-links`를 추가합니다. Maven은 패키지 메타데이터의 GAV 좌표로 canonical 저장소 경로를 선택해 `packages/<group>/<artifact>/<version>/`를 `MAVEN_REPO_LOCAL` 또는 기본 `~/.m2/repository`에 그대로 복사합니다. GUI 출력의 `packages/m2repo/` 구조도 지원하며, 같은 GAV 디렉터리의 원본 POM, parent/BOM POM, POM-only 항목, classifier와 checksum을 보존합니다. Bash와 PowerShell 모두 Maven 플러그인이나 네트워크를 호출하지 않고, 좌표 디렉터리가 없거나 복사에 실패하면 오류로 종료합니다. Bash는 pip/conda·Maven·YUM·Docker 블록을, PowerShell은 pip/conda·Maven·Docker 블록을 생성하며 YUM 설치 블록은 없습니다.
 
-Maven의 `_remote.repositories`는 대상 저장소의 기존 내용을 보존하며 복사한 아티팩트에만 `파일명>=` 로컬 설치 기록을 추가합니다. 체크섬과 대상에만 존재하는 파일은 등록하지 않고, 원본에 있는 추적 파일로 대상 기록을 덮어쓰지도 않습니다. 재실행해도 로컬 기록은 중복되지 않습니다. 기록 저장에 실패하거나 좌표 디렉터리에 아티팩트가 없으면 오류로 종료합니다. 생성된 PowerShell 파일은 Windows PowerShell 5의 한글 해석을 위해 UTF-8 BOM을 포함합니다.
+Maven의 `_remote.repositories`는 대상 저장소의 기존 내용을 보존하며 복사한 아티팩트에만 `파일명>=` 로컬 설치 기록을 추가합니다. `.demo`처럼 점으로 시작하는 아티팩트의 POM·JAR·체크섬도 복사합니다. 체크섬과 대상에만 존재하는 파일은 등록하지 않고, 원본에 있는 추적 파일로 대상 기록을 덮어쓰지도 않습니다. 재실행해도 로컬 기록은 중복되지 않습니다. 기록 저장에 실패하거나 좌표 디렉터리에 아티팩트가 없으면 오류로 종료합니다. 생성된 PowerShell 파일은 Windows PowerShell 5의 한글 해석을 위해 UTF-8 BOM을 포함합니다.
 
 `MAVEN_REPO_LOCAL` 상대 경로는 스크립트 폴더를 기준으로 해석합니다. PowerShell에서는 이를 파일시스템 절대 경로로 변환하여 파일 복사 cmdlet과 .NET 추적 기록 저장이 같은 위치를 사용하도록 합니다. Maven `settings.xml`의 사용자 지정 `localRepository`는 자동 조회하지 않으므로 이 환경 변수로 같은 위치를 지정합니다.
 

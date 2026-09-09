@@ -27,90 +27,135 @@ describe('Maven install script canonical layout integration', () => {
 
   it('Maven Bash/PowerShell execution preserves tracking edges and is idempotent', async () => {
     const generator = getScriptGenerator();
-    const packageInfo: PackageInfo = {
-      type: 'maven',
-      name: 'org.example:demo',
-      version: '1.0.0',
-      metadata: { groupId: 'org.example', artifactId: 'demo' },
-    };
-    const sourceFiles = new Map<string, Buffer | string>([
-      [MAIN_JAR, Buffer.from('source main jar\n', 'utf8')],
-      [MAIN_POM, '<project>source pom</project>\n'],
-      [`${MAIN_JAR}.sha1`, 'source jar checksum\n'],
-      [`${MAIN_POM}.sha1`, 'source pom checksum\n'],
-      [`${MAIN_JAR}.md5`, 'source jar md5\n'],
-      [`${MAIN_POM}.md5`, 'source pom md5\n'],
-      [REMOTE_MARKER, `${MAIN_JAR}>source-repository=\n${MAIN_POM}>source-repository=\n`],
-    ]);
+    const packageCases = [
+      {
+        packageInfo: {
+          type: 'maven' as const,
+          name: 'org.example:demo',
+          version: '1.0.0',
+          metadata: { groupId: 'org.example', artifactId: 'demo' },
+        },
+        artifactId: 'demo',
+        mainJar: MAIN_JAR,
+        mainPom: MAIN_POM,
+        classifierJar: CLASSIFIER_JAR,
+        sourceJar: 'source main jar\n',
+        sourcePom: '<project>source pom</project>\n',
+      },
+      {
+        packageInfo: {
+          type: 'maven' as const,
+          name: 'org.example:.demo',
+          version: '1.0.0',
+          metadata: { groupId: 'org.example', artifactId: '.demo' },
+        },
+        artifactId: '.demo',
+        mainJar: '.demo-1.0.0.jar',
+        mainPom: '.demo-1.0.0.pom',
+        classifierJar: '.demo-1.0.0-linux-x86_64.jar',
+        sourceJar: 'source leading-dot jar\n',
+        sourcePom: '<project>source leading-dot pom</project>\n',
+      },
+    ];
 
-    for (const sourceLayout of ['packages', path.join('packages', 'm2repo')]) {
-      const extractionRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-maven-script-'));
-      temporaryRoots.push(extractionRoot);
-      const sourceRoot = path.join(extractionRoot, sourceLayout);
-      const coordinatePath = path.join(sourceRoot, 'org', 'example', 'demo', '1.0.0');
-      const targetRoot = path.join(extractionRoot, 'target-local-repository');
-      const targetCoordinatePath = path.join(targetRoot, 'org', 'example', 'demo', '1.0.0');
-      const scriptPath = path.join(
-        extractionRoot,
-        process.platform === 'win32' ? 'install.ps1' : 'install.sh',
-      );
+    for (const packageCase of packageCases) {
+      const sourceFiles = new Map<string, Buffer | string>([
+        [packageCase.mainJar, Buffer.from(packageCase.sourceJar, 'utf8')],
+        [packageCase.mainPom, packageCase.sourcePom],
+        [`${packageCase.mainJar}.sha1`, 'source jar checksum\n'],
+        [`${packageCase.mainPom}.sha1`, 'source pom checksum\n'],
+        [`${packageCase.mainJar}.md5`, 'source jar md5\n'],
+        [`${packageCase.mainPom}.md5`, 'source pom md5\n'],
+        [REMOTE_MARKER, `${packageCase.mainJar}>source-repository=\n${packageCase.mainPom}>source-repository=\n`],
+      ]);
 
-      await fs.ensureDir(coordinatePath);
-      await fs.ensureDir(targetCoordinatePath);
-      for (const [filename, contents] of sourceFiles) {
-        await fs.writeFile(path.join(coordinatePath, filename), contents);
+      for (const sourceLayout of ['packages', path.join('packages', 'm2repo')]) {
+        const extractionRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-maven-script-'));
+        temporaryRoots.push(extractionRoot);
+        const sourceRoot = path.join(extractionRoot, sourceLayout);
+        const coordinatePath = path.join(sourceRoot, 'org', 'example', packageCase.artifactId, '1.0.0');
+        const targetRoot = path.join(extractionRoot, 'target-local-repository');
+        const targetCoordinatePath = path.join(targetRoot, 'org', 'example', packageCase.artifactId, '1.0.0');
+        const scriptPath = path.join(
+          extractionRoot,
+          process.platform === 'win32' ? 'install.ps1' : 'install.sh',
+        );
+
+        await fs.ensureDir(coordinatePath);
+        await fs.ensureDir(targetCoordinatePath);
+        for (const [filename, contents] of sourceFiles) {
+          await fs.writeFile(path.join(coordinatePath, filename), contents);
+        }
+        await fs.writeFile(path.join(targetCoordinatePath, packageCase.mainJar), 'stale target main jar\n');
+        await fs.writeFile(path.join(targetCoordinatePath, packageCase.classifierJar), 'destination-only classifier\n');
+        await fs.writeFile(
+          path.join(targetCoordinatePath, REMOTE_MARKER),
+          `${packageCase.mainJar}>target-repository=\n${packageCase.classifierJar}>target-repository=`,
+        );
+
+        if (process.platform === 'win32') {
+          await generator.generatePowerShellScript([packageCase.packageInfo], scriptPath);
+        } else {
+          await generator.generateBashScript([packageCase.packageInfo], scriptPath);
+        }
+
+        const command = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+        const commandArgs = process.platform === 'win32'
+          ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath]
+          : [scriptPath];
+        const environment = { ...process.env, MAVEN_REPO_LOCAL: targetRoot };
+
+        await execFileAsync(command, commandArgs, {
+          cwd: extractionRoot,
+          env: environment,
+          timeout: 45_000,
+        });
+
+        const firstMainJar = await fs.readFile(path.join(targetCoordinatePath, packageCase.mainJar));
+        const firstPom = await fs.readFile(path.join(targetCoordinatePath, packageCase.mainPom));
+        const firstChecksums = await Promise.all([
+          `${packageCase.mainJar}.sha1`,
+          `${packageCase.mainPom}.sha1`,
+          `${packageCase.mainJar}.md5`,
+          `${packageCase.mainPom}.md5`,
+        ].map(async (filename) => [
+          filename,
+          await fs.readFile(path.join(targetCoordinatePath, filename)),
+        ] as const));
+        const firstClassifier = await fs.readFile(path.join(targetCoordinatePath, packageCase.classifierJar));
+        const firstMarker = await fs.readFile(path.join(targetCoordinatePath, REMOTE_MARKER));
+        expect(firstMainJar).toEqual(Buffer.from(packageCase.sourceJar, 'utf8'));
+        expect(firstPom).toEqual(Buffer.from(packageCase.sourcePom, 'utf8'));
+        for (const [filename, contents] of firstChecksums) {
+          expect(contents).toEqual(await fs.readFile(path.join(coordinatePath, filename)));
+        }
+        expect(firstClassifier).toEqual(Buffer.from('destination-only classifier\n', 'utf8'));
+
+        const markerText = firstMarker.toString('utf8');
+        expect(firstMarker.subarray(0, 3)).not.toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+        expect(markerText).toContain(`${packageCase.mainJar}>target-repository=`);
+        expect(markerText).toContain(`${packageCase.classifierJar}>target-repository=`);
+        expect(markerText).not.toContain('source-repository');
+        expect(countMarkerLine(markerText, `${packageCase.mainJar}>=`)).toBe(1);
+        expect(countMarkerLine(markerText, `${packageCase.mainPom}>=`)).toBe(1);
+        expect(markerText).not.toContain(`${packageCase.classifierJar}>=`);
+        expect(markerText).not.toContain(`${packageCase.mainJar}.sha1>=`);
+        expect(markerText).not.toContain(`${packageCase.mainPom}.sha1>=`);
+
+        await execFileAsync(command, commandArgs, {
+          cwd: extractionRoot,
+          env: environment,
+          timeout: 45_000,
+        });
+
+        expect(await fs.readFile(path.join(targetCoordinatePath, packageCase.mainJar))).toEqual(firstMainJar);
+        expect(await fs.readFile(path.join(targetCoordinatePath, packageCase.mainPom))).toEqual(firstPom);
+        for (const [filename, contents] of firstChecksums) {
+          expect(await fs.readFile(path.join(targetCoordinatePath, filename))).toEqual(contents);
+        }
+        expect(await fs.readFile(path.join(targetCoordinatePath, packageCase.classifierJar))).toEqual(firstClassifier);
+        expect(await fs.readFile(path.join(targetCoordinatePath, REMOTE_MARKER))).toEqual(firstMarker);
       }
-      await fs.writeFile(path.join(targetCoordinatePath, MAIN_JAR), 'stale target main jar\n');
-      await fs.writeFile(path.join(targetCoordinatePath, CLASSIFIER_JAR), 'destination-only classifier\n');
-      await fs.writeFile(
-        path.join(targetCoordinatePath, REMOTE_MARKER),
-        `${MAIN_JAR}>target-repository=\n${CLASSIFIER_JAR}>target-repository=`,
-      );
-
-      if (process.platform === 'win32') {
-        await generator.generatePowerShellScript([packageInfo], scriptPath);
-      } else {
-        await generator.generateBashScript([packageInfo], scriptPath);
-      }
-
-      const command = process.platform === 'win32' ? 'powershell.exe' : 'bash';
-      const commandArgs = process.platform === 'win32'
-        ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath]
-        : [scriptPath];
-      const environment = { ...process.env, MAVEN_REPO_LOCAL: targetRoot };
-
-      await execFileAsync(command, commandArgs, {
-        cwd: extractionRoot,
-        env: environment,
-        timeout: 45_000,
-      });
-
-      const firstMainJar = await fs.readFile(path.join(targetCoordinatePath, MAIN_JAR));
-      const firstPom = await fs.readFile(path.join(targetCoordinatePath, MAIN_POM));
-      const firstMarker = await fs.readFile(path.join(targetCoordinatePath, REMOTE_MARKER));
-      expect(firstMainJar).toEqual(Buffer.from('source main jar\n', 'utf8'));
-      expect(firstPom).toEqual(Buffer.from('<project>source pom</project>\n', 'utf8'));
-
-      const markerText = firstMarker.toString('utf8');
-      expect(firstMarker.subarray(0, 3)).not.toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
-      expect(markerText).toContain(`${MAIN_JAR}>target-repository=`);
-      expect(markerText).toContain(`${CLASSIFIER_JAR}>target-repository=`);
-      expect(markerText).not.toContain('source-repository');
-      expect(countMarkerLine(markerText, `${MAIN_JAR}>=`)).toBe(1);
-      expect(countMarkerLine(markerText, `${MAIN_POM}>=`)).toBe(1);
-      expect(markerText).not.toContain(`${CLASSIFIER_JAR}>=`);
-      expect(markerText).not.toContain(`${MAIN_JAR}.sha1>=`);
-      expect(markerText).not.toContain(`${MAIN_POM}.sha1>=`);
-
-      await execFileAsync(command, commandArgs, {
-        cwd: extractionRoot,
-        env: environment,
-        timeout: 45_000,
-      });
-
-      expect(await fs.readFile(path.join(targetCoordinatePath, MAIN_JAR))).toEqual(firstMainJar);
-      expect(await fs.readFile(path.join(targetCoordinatePath, MAIN_POM))).toEqual(firstPom);
-      expect(await fs.readFile(path.join(targetCoordinatePath, REMOTE_MARKER))).toEqual(firstMarker);
     }
   }, 240_000);
 
