@@ -23,6 +23,16 @@ npm install -g .
 depssmuggler --help
 ```
 
+## 버전 확인
+
+`-v`와 `--version`은 실행 파일의 위치에서 상위 디렉터리를 검색해 버전 필드가 있는 패키지 `package.json`을 읽습니다. 따라서 소스 실행, 빌드 산출물 실행, npm으로 설치한 CLI가 배포 패키지 버전을 함께 표시합니다. Electron 빌드가 생성하는 `dist/package.json`에는 모듈 형식만 기록되므로, 버전 필드가 없으면 패키지 루트의 메타데이터를 계속 검색합니다.
+
+```bash
+npm run cli -- --version
+npm run cli -- -v
+node dist/src/cli/index.js --version
+```
+
 ## 명령 구조
 
 ```text
