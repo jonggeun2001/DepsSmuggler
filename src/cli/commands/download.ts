@@ -8,7 +8,11 @@ import {
   type CliDownloadEnvironmentOptions,
 } from './download-environment';
 import { DownloadManager, OverallProgress } from './download-runner';
-import { getArchivePackager, ArchiveFormat } from '../../core/packager/archive-packager';
+import {
+  assertArchiveFormat,
+  getArchivePackager,
+  ArchiveFormat,
+} from '../../core/packager/archive-packager';
 import { getScriptGenerator } from '../../core/packager/script-generator';
 import { DownloadPackage, resolveAllDependencies } from '../../core/shared';
 import { PackageInfo, PackageType, Architecture } from '../../types';
@@ -260,6 +264,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
   console.log(chalk.cyan('다운로드 준비 중...'));
 
   try {
+    assertArchiveFormat(options.format);
     validateDownloadEnvironmentOptions(options);
     const maxDepth = parseMaxDepth(options.maxDepth ?? '5');
 

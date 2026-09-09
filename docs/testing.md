@@ -177,6 +177,8 @@ bash scripts/verify-worktree.sh \
 
 ### CLI 다운로드 실패 종료 코드 검증
 
+`src/cli/download-format.integration.test.ts`는 격리한 실제 CLI 프로세스에 `--format rar`를 전달해 종료 코드 `1`, 거부한 값과 지원 형식 안내, 출력 미생성을 확인합니다. CLI를 불러오기 전에 HTTP·HTTPS 요청을 차단하고 요청 횟수를 기록하므로 네트워크 호출 전에 입력 검증이 끝나는지도 검사합니다. `archive-packager.test.ts`는 두 공개 압축 메서드를 직접 호출해 잘못된 형식의 거부와 기존 ZIP·tar.gz 생성을 검증합니다.
+
 `src/cli/download-failure-exit.integration.test.ts`는 별도 Node.js 프로세스에서 실제 CLI 엔트리포인트와 Commander 인자를 실행합니다. 부모 프로세스의 로컬 HTTP 서버가 404를 반환하고, 자식의 테스트 전용 설정이 실제 `MavenDownloader`의 저장소 주소만 이 서버로 연결합니다. 실제 다운로드 매니저가 실패 결과를 반환한 뒤 CLI가 종료 코드 `1`과 실패 원인을 남기고, 새 아카이브와 설치 스크립트를 생성하지 않는지 확인합니다. 설정·로그·출력은 임시 디렉터리로 격리하며 외부 레지스트리에 연결하지 않습니다.
 
 `src/cli/commands/download.test.ts`는 전체·일부 항목 실패 분기를 빠르게 검증합니다. 다운로드 전 의존성 해결의 기본 건너뛰기 정책은 별도 동작으로 유지합니다. 실제 레지스트리 검증에는 존재하지 않는 Maven classifier와 Docker 태그의 HTTP 404, 정상 패키지 다운로드의 종료 코드와 산출물을 함께 기록합니다.

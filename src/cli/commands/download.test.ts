@@ -60,11 +60,15 @@ vi.mock('./download-runner', () => ({
   }),
 }));
 
-vi.mock('../../core/packager/archive-packager', () => ({
-  getArchivePackager: vi.fn(() => ({
-    createArchive,
-  })),
-}));
+vi.mock('../../core/packager/archive-packager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../core/packager/archive-packager')>();
+  return {
+    ...actual,
+    getArchivePackager: vi.fn(() => ({
+      createArchive,
+    })),
+  };
+});
 
 vi.mock('../../core/packager/script-generator', () => ({
   getScriptGenerator: vi.fn(() => ({
@@ -137,6 +141,32 @@ describe('downloadCommand', () => {
       dependencyTrees: [],
       failedPackages: [],
     });
+  });
+
+  it('지원하지 않는 archive 형식은 resolver와 출력 부수 효과 전에 거부한다', async () => {
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => {
+        throw new Error('process.exit');
+      }) as never);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      await expect(downloadCommand(commandOptions({ format: 'rar' }))).rejects.toThrow('process.exit');
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('지원하지 않는 압축 형식입니다: rar. 지원 형식: zip, tar.gz'),
+      );
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      errorSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(resolveAllDependencies).not.toHaveBeenCalled();
+    expect(addToQueue).not.toHaveBeenCalled();
+    expect(ensureDir).not.toHaveBeenCalled();
+    expect(startDownload).not.toHaveBeenCalled();
+    expect(createArchive).not.toHaveBeenCalled();
   });
 
   it('완료된 Maven 항목의 모든 파일을 중복 없이 아카이브하고 실패 항목은 제외한다', async () => {
