@@ -27,7 +27,7 @@ interface ChildProcessFailure {
 const createTarball = async (
   packagesDirectory: string,
   stagingDirectory: string,
-  fixture: NpmFixture,
+  fixture: NpmFixture
 ): Promise<string> => {
   const packageDirectory = path.join(stagingDirectory, fixture.filename, 'package');
   await fs.ensureDir(packageDirectory);
@@ -39,15 +39,13 @@ const createTarball = async (
   }
 
   const archivePath = path.join(packagesDirectory, fixture.filename);
-  await tar.create({ cwd: path.dirname(packageDirectory), file: archivePath, gzip: true }, ['package']);
+  await tar.create({ cwd: path.dirname(packageDirectory), file: archivePath, gzip: true }, [
+    'package',
+  ]);
   return archivePath;
 };
 
-const makePackageInfo = (
-  name: string,
-  version: string,
-  filename: string,
-): PackageInfo => ({
+const makePackageInfo = (name: string, version: string, filename: string): PackageInfo => ({
   type: 'npm',
   name,
   version,
@@ -76,11 +74,15 @@ const createIsolatedEnvironment = async () => {
   ]);
   await fs.writeFile(userConfig, '');
   const manifestPath = path.join(bundleDirectory, 'package.json');
-  await fs.writeJson(manifestPath, {
-    name: 'offline-consumer',
-    version: '1.0.0',
-    private: true,
-  }, { spaces: 2 });
+  await fs.writeJson(
+    manifestPath,
+    {
+      name: 'offline-consumer',
+      version: '1.0.0',
+      private: true,
+    },
+    { spaces: 2 }
+  );
 
   const environment = {
     ...process.env,
@@ -114,14 +116,13 @@ const createIsolatedEnvironment = async () => {
   };
 };
 
-const getScriptCommand = (scriptPath: string): { command: string; args: string[] } => (
+const getScriptCommand = (scriptPath: string): { command: string; args: string[] } =>
   process.platform === 'win32'
     ? {
-      command: 'powershell.exe',
-      args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
-    }
-    : { command: 'bash', args: [scriptPath] }
-);
+        command: 'powershell.exe',
+        args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+      }
+    : { command: 'bash', args: [scriptPath] };
 
 describe('npm install script native integration', () => {
   const temporaryRoots: string[] = [];
@@ -146,7 +147,8 @@ describe('npm install script native integration', () => {
       },
       files: {
         'index.js': "module.exports = { root: '1.0.0', dependency: require('@fixture/dep') };\n",
-        'postinstall.js': "require('fs').writeFileSync('lifecycle-ran.txt', 'postinstall ran\\n');\n",
+        'postinstall.js':
+          "require('fs').writeFileSync('lifecycle-ran.txt', 'postinstall ran\\n');\n",
       },
     };
     const dependencyFixture: NpmFixture = {
@@ -161,18 +163,30 @@ describe('npm install script native integration', () => {
       },
     };
 
-    await createTarball(environment.packagesDirectory, path.join(environment.root, 'staging'), rootFixture);
-    await createTarball(environment.packagesDirectory, path.join(environment.root, 'staging'), dependencyFixture);
+    await createTarball(
+      environment.packagesDirectory,
+      path.join(environment.root, 'staging'),
+      rootFixture
+    );
+    await createTarball(
+      environment.packagesDirectory,
+      path.join(environment.root, 'staging'),
+      dependencyFixture
+    );
     expect(await fs.readdir(environment.cacheDirectory)).toHaveLength(0);
     const manifestBefore = await fs.readFile(environment.manifestPath);
-    const scriptPath = path.join(environment.bundleDirectory, process.platform === 'win32' ? 'install.ps1' : 'install.sh');
+    const scriptPath = path.join(
+      environment.bundleDirectory,
+      process.platform === 'win32' ? 'install.ps1' : 'install.sh'
+    );
     const generator = getScriptGenerator();
     const packages = [rootInfo, dependencyInfo];
+    const npmOptions = { npmRootPackages: [rootInfo] };
 
     if (process.platform === 'win32') {
-      await generator.generatePowerShellScript(packages, scriptPath);
+      await generator.generatePowerShellScript(packages, scriptPath, npmOptions);
     } else {
-      await generator.generateBashScript(packages, scriptPath);
+      await generator.generateBashScript(packages, scriptPath, npmOptions);
     }
     const { command, args } = getScriptCommand(scriptPath);
     await execFileAsync(command, args, {
@@ -188,12 +202,37 @@ describe('npm install script native integration', () => {
     expect(scriptText).toContain('--no-save');
     expect(scriptText).not.toContain('--ignore-scripts');
     expect(await fs.readFile(environment.manifestPath)).toEqual(manifestBefore);
-    expect(await fs.pathExists(path.join(environment.npmProjectDirectory, 'node_modules', 'offline-root', 'package.json'))).toBe(true);
-    expect(await fs.pathExists(path.join(environment.npmProjectDirectory, 'node_modules', '@fixture', 'dep', 'package.json'))).toBe(true);
+    expect(
+      await fs.pathExists(
+        path.join(environment.npmProjectDirectory, 'node_modules', 'offline-root', 'package.json')
+      )
+    ).toBe(true);
+    expect(
+      await fs.pathExists(
+        path.join(
+          environment.npmProjectDirectory,
+          'node_modules',
+          '@fixture',
+          'dep',
+          'package.json'
+        )
+      )
+    ).toBe(true);
     expect(await fs.pathExists(path.join(environment.bundleDirectory, 'node_modules'))).toBe(false);
-    expect(await fs.pathExists(path.join(environment.consumerDirectory, 'node_modules'))).toBe(false);
-    expect(await fs.readFile(path.join(environment.npmProjectDirectory, 'node_modules', 'offline-root', 'lifecycle-ran.txt'), 'utf8'))
-      .toBe('postinstall ran\n');
+    expect(await fs.pathExists(path.join(environment.consumerDirectory, 'node_modules'))).toBe(
+      false
+    );
+    expect(
+      await fs.readFile(
+        path.join(
+          environment.npmProjectDirectory,
+          'node_modules',
+          'offline-root',
+          'lifecycle-ran.txt'
+        ),
+        'utf8'
+      )
+    ).toBe('postinstall ran\n');
 
     const consumerCheck = await execFileAsync(
       process.execPath,
@@ -202,7 +241,7 @@ describe('npm install script native integration', () => {
         "const root = require(process.argv[1]); if (root.root !== '1.0.0' || root.dependency !== 'scoped dependency 1.0.0') process.exit(1);",
         path.join(environment.npmProjectDirectory, 'node_modules', 'offline-root'),
       ],
-      { cwd: environment.consumerDirectory, env: environment.environment, timeout: 45_000 },
+      { cwd: environment.consumerDirectory, env: environment.environment, timeout: 45_000 }
     );
     expect(consumerCheck.stderr).toBe('');
   }, 120_000);
@@ -230,11 +269,9 @@ describe('npm install script native integration', () => {
         files: { 'index.js': "module.exports = 'scoped dependency 1.0.0';\n" },
       };
       const stagingDirectory = path.join(environment.root, 'staging');
-      if (failureKind !== 'empty packages directory') {
-        await createTarball(environment.packagesDirectory, stagingDirectory, rootFixture);
-        if (failureKind !== 'missing dependency') {
-          await createTarball(environment.packagesDirectory, stagingDirectory, dependencyFixture);
-        }
+      await createTarball(environment.packagesDirectory, stagingDirectory, rootFixture);
+      if (failureKind !== 'missing dependency' && failureKind !== 'empty packages directory') {
+        await createTarball(environment.packagesDirectory, stagingDirectory, dependencyFixture);
       }
 
       const scriptPath = path.join(
@@ -266,6 +303,9 @@ describe('npm install script native integration', () => {
           failureKind === 'empty tarball' ? Buffer.alloc(0) : Buffer.from('not a tarball\n')
         );
       }
+      if (failureKind === 'empty packages directory') {
+        await fs.emptyDir(environment.packagesDirectory);
+      }
 
       const { command, args } = getScriptCommand(scriptPath);
       let failure: ChildProcessFailure | undefined;
@@ -296,6 +336,11 @@ describe('npm install script native integration', () => {
       const rootAInfo = makePackageInfo('offline-root-a', '1.0.0', 'offline-root-a-1.0.0.tgz');
       const rootBInfo = makePackageInfo('offline-root-b', '1.0.0', 'offline-root-b-1.0.0.tgz');
       const sharedV1Info = makePackageInfo('shared', '1.0.0', 'shared-1.0.0.tgz');
+      const sharedPrereleaseInfo = makePackageInfo(
+        'shared',
+        '1.1.0-beta.0',
+        'shared-1.1.0-beta.0.tgz'
+      );
       const sharedV2Info = makePackageInfo('shared', '2.0.0', 'shared-2.0.0.tgz');
       const fixtures: NpmFixture[] = [
         {
@@ -324,6 +369,11 @@ describe('npm install script native integration', () => {
           files: { 'index.js': "module.exports = 'shared-v1';\n" },
         },
         {
+          filename: 'shared-1.1.0-beta.0.tgz',
+          manifest: { name: 'shared', version: '1.1.0-beta.0', main: 'index.js' },
+          files: { 'index.js': "module.exports = 'shared-prerelease-v1';\n" },
+        },
+        {
           filename: 'shared-2.0.0.tgz',
           manifest: { name: 'shared', version: '2.0.0', main: 'index.js' },
           files: { 'index.js': "module.exports = 'shared-v2';\n" },
@@ -343,11 +393,11 @@ describe('npm install script native integration', () => {
         process.platform === 'win32' ? 'install.ps1' : 'install.sh'
       );
       const generator = getScriptGenerator();
-      const packages = [rootAInfo, rootBInfo, sharedV1Info, sharedV2Info];
+      const packages = [rootAInfo, rootBInfo, sharedV1Info, sharedPrereleaseInfo, sharedV2Info];
       const npmOptions =
         rootSelection === 'explicit resolved version'
           ? { npmRootPackages: [rootAInfo, rootBInfo, sharedV1Info] }
-          : {};
+          : { npmRootPackages: [rootAInfo, rootBInfo] };
       if (process.platform === 'win32') {
         await generator.generatePowerShellScript(packages, scriptPath, npmOptions);
       } else {
@@ -368,26 +418,224 @@ describe('npm install script native integration', () => {
       expect(await fs.pathExists(path.join(environment.consumerDirectory, 'node_modules'))).toBe(
         false
       );
-      const directSharedManifest = (await fs.readJson(
-        path.join(environment.npmProjectDirectory, 'node_modules', 'shared', 'package.json')
-      )) as { version?: unknown };
-      expect(directSharedManifest.version).toBe(
-        rootSelection === 'explicit resolved version' ? '1.0.0' : '2.0.0'
-      );
+      if (rootSelection === 'explicit resolved version') {
+        const directSharedManifest = (await fs.readJson(
+          path.join(environment.npmProjectDirectory, 'node_modules', 'shared', 'package.json')
+        )) as { version?: unknown };
+        expect(directSharedManifest.version).toBe('1.0.0');
+      }
       const consumerCheck = await execFileAsync(
         process.execPath,
         [
           '-e',
-          "const a = require(process.argv[1]); const b = require(process.argv[2]); if (a !== 'shared-v1' || b !== 'shared-v2') process.exit(1);",
+          'const a = require(process.argv[1]); const b = require(process.argv[2]); process.stdout.write(JSON.stringify({ a, b }));',
           path.join(environment.npmProjectDirectory, 'node_modules', 'offline-root-a'),
           path.join(environment.npmProjectDirectory, 'node_modules', 'offline-root-b'),
         ],
         { cwd: environment.consumerDirectory, env: environment.environment, timeout: 45_000 }
       );
       expect(consumerCheck.stderr).toBe('');
+      expect(JSON.parse(consumerCheck.stdout)).toEqual({ a: 'shared-v1', b: 'shared-v2' });
     },
     120_000
   );
+
+  it('keeps peer-dependent transitive packages under their respective delivered roots', async () => {
+    const environment = await createIsolatedEnvironment();
+    temporaryRoots.push(environment.root);
+    const rootAInfo = makePackageInfo('peer-root-a', '1.0.0', 'peer-root-a-1.0.0.tgz');
+    const rootBInfo = makePackageInfo('peer-root-b', '1.0.0', 'peer-root-b-1.0.0.tgz');
+    const pluginAInfo = makePackageInfo('peer-plugin-a', '1.0.0', 'peer-plugin-a-1.0.0.tgz');
+    const pluginBInfo = makePackageInfo('peer-plugin-b', '1.0.0', 'peer-plugin-b-1.0.0.tgz');
+    const sharedV1Info = makePackageInfo('shared', '1.0.0', 'shared-peer-1.0.0.tgz');
+    const sharedV2Info = makePackageInfo('shared', '2.0.0', 'shared-peer-2.0.0.tgz');
+    const fixtures: NpmFixture[] = [
+      {
+        filename: 'peer-root-a-1.0.0.tgz',
+        manifest: {
+          name: 'peer-root-a',
+          version: '1.0.0',
+          main: 'index.js',
+          dependencies: { 'peer-plugin-a': '1.0.0', shared: '^1.0.0' },
+        },
+        files: {
+          'index.js':
+            "module.exports = { plugin: require('peer-plugin-a'), shared: require('shared') };\n",
+        },
+      },
+      {
+        filename: 'peer-root-b-1.0.0.tgz',
+        manifest: {
+          name: 'peer-root-b',
+          version: '1.0.0',
+          main: 'index.js',
+          dependencies: { 'peer-plugin-b': '1.0.0', shared: '^2.0.0' },
+        },
+        files: {
+          'index.js':
+            "module.exports = { plugin: require('peer-plugin-b'), shared: require('shared') };\n",
+        },
+      },
+      {
+        filename: 'peer-plugin-a-1.0.0.tgz',
+        manifest: {
+          name: 'peer-plugin-a',
+          version: '1.0.0',
+          main: 'index.js',
+          peerDependencies: { shared: '^1.0.0' },
+        },
+        files: { 'index.js': "module.exports = require('shared');\n" },
+      },
+      {
+        filename: 'peer-plugin-b-1.0.0.tgz',
+        manifest: {
+          name: 'peer-plugin-b',
+          version: '1.0.0',
+          main: 'index.js',
+          peerDependencies: { shared: '^2.0.0' },
+        },
+        files: { 'index.js': "module.exports = require('shared');\n" },
+      },
+      {
+        filename: 'shared-peer-1.0.0.tgz',
+        manifest: { name: 'shared', version: '1.0.0', main: 'index.js' },
+        files: { 'index.js': "module.exports = 'shared-peer-v1';\n" },
+      },
+      {
+        filename: 'shared-peer-2.0.0.tgz',
+        manifest: { name: 'shared', version: '2.0.0', main: 'index.js' },
+        files: { 'index.js': "module.exports = 'shared-peer-v2';\n" },
+      },
+    ];
+    for (const fixture of fixtures) {
+      await createTarball(
+        environment.packagesDirectory,
+        path.join(environment.root, 'staging'),
+        fixture
+      );
+    }
+
+    const scriptPath = path.join(
+      environment.bundleDirectory,
+      process.platform === 'win32' ? 'install.ps1' : 'install.sh'
+    );
+    const generator = getScriptGenerator();
+    const packages = [rootAInfo, rootBInfo, pluginAInfo, pluginBInfo, sharedV1Info, sharedV2Info];
+    const npmOptions = { npmRootPackages: [rootAInfo, rootBInfo] };
+    if (process.platform === 'win32') {
+      await generator.generatePowerShellScript(packages, scriptPath, npmOptions);
+    } else {
+      await generator.generateBashScript(packages, scriptPath, npmOptions);
+    }
+
+    const { command, args } = getScriptCommand(scriptPath);
+    await execFileAsync(command, args, {
+      cwd: environment.consumerDirectory,
+      env: environment.environment,
+      timeout: 45_000,
+    });
+
+    const runtimeManifest = (await fs.readJson(
+      path.join(environment.npmProjectDirectory, 'package.json')
+    )) as { dependencies?: Record<string, string> };
+    expect(Object.keys(runtimeManifest.dependencies ?? {}).sort()).toEqual([
+      'peer-root-a',
+      'peer-root-b',
+    ]);
+
+    const consumerCheck = await execFileAsync(
+      process.execPath,
+      [
+        '-e',
+        [
+          'const a = require(process.argv[1]);',
+          'const b = require(process.argv[2]);',
+          'const actual = { a, b };',
+          'process.stdout.write(JSON.stringify(actual));',
+          "if (a.plugin !== 'shared-peer-v1' || a.shared !== 'shared-peer-v1' || b.plugin !== 'shared-peer-v2' || b.shared !== 'shared-peer-v2') process.exit(1);",
+        ].join(' '),
+        path.join(environment.npmProjectDirectory, 'node_modules', 'peer-root-a'),
+        path.join(environment.npmProjectDirectory, 'node_modules', 'peer-root-b'),
+      ],
+      { cwd: environment.consumerDirectory, env: environment.environment, timeout: 45_000 }
+    );
+    expect(JSON.parse(consumerCheck.stdout)).toEqual({
+      a: { plugin: 'shared-peer-v1', shared: 'shared-peer-v1' },
+      b: { plugin: 'shared-peer-v2', shared: 'shared-peer-v2' },
+    });
+  }, 120_000);
+
+  it('installs a bounded delayed require cycle without unbounded planning or loading', async () => {
+    const environment = await createIsolatedEnvironment();
+    temporaryRoots.push(environment.root);
+    const cycleAInfo = makePackageInfo('cycle-a', '1.0.0', 'cycle-a-1.0.0.tgz');
+    const cycleBInfo = makePackageInfo('cycle-b', '1.0.0', 'cycle-b-1.0.0.tgz');
+    await createTarball(environment.packagesDirectory, path.join(environment.root, 'staging'), {
+      filename: 'cycle-a-1.0.0.tgz',
+      manifest: {
+        name: 'cycle-a',
+        version: '1.0.0',
+        main: 'index.js',
+        dependencies: { 'cycle-b': '1.0.0' },
+      },
+      files: {
+        'index.js': [
+          "exports.describe = (depth) => depth > 0 ? { a: 'a', b: require('cycle-b').describe(depth - 1) } : { a: 'a' };",
+        ].join('\n'),
+      },
+    });
+    await createTarball(environment.packagesDirectory, path.join(environment.root, 'staging'), {
+      filename: 'cycle-b-1.0.0.tgz',
+      manifest: {
+        name: 'cycle-b',
+        version: '1.0.0',
+        main: 'index.js',
+        dependencies: { 'cycle-a': '1.0.0' },
+      },
+      files: {
+        'index.js': [
+          "exports.describe = (depth) => depth > 0 ? { b: 'b', a: require('cycle-a').describe(depth - 1) } : { b: 'b' };",
+        ].join('\n'),
+      },
+    });
+
+    const scriptPath = path.join(
+      environment.bundleDirectory,
+      process.platform === 'win32' ? 'install.ps1' : 'install.sh'
+    );
+    const generator = getScriptGenerator();
+    const packages = [cycleAInfo, cycleBInfo];
+    const npmOptions = { npmRootPackages: [cycleAInfo] };
+    if (process.platform === 'win32') {
+      await generator.generatePowerShellScript(packages, scriptPath, npmOptions);
+    } else {
+      await generator.generateBashScript(packages, scriptPath, npmOptions);
+    }
+
+    const { command, args } = getScriptCommand(scriptPath);
+    await execFileAsync(command, args, {
+      cwd: environment.consumerDirectory,
+      env: environment.environment,
+      timeout: 45_000,
+    });
+
+    const consumerCheck = await execFileAsync(
+      process.execPath,
+      [
+        '-e',
+        [
+          'const actual = require(process.argv[1]).describe(2);',
+          'process.stdout.write(JSON.stringify(actual));',
+        ].join(' '),
+        path.join(environment.npmProjectDirectory, 'node_modules', 'cycle-a'),
+      ],
+      { cwd: environment.consumerDirectory, env: environment.environment, timeout: 45_000 }
+    );
+    expect(JSON.parse(consumerCheck.stdout)).toEqual({
+      a: 'a',
+      b: { b: 'b', a: { a: 'a' } },
+    });
+  }, 120_000);
 
   it('refuses to overwrite an existing user-owned npm project without an ownership marker', async () => {
     const environment = await createIsolatedEnvironment();

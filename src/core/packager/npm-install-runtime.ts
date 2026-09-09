@@ -1,4 +1,4 @@
-import type { NpmInstallPlanEntry } from './npm-install-plan';
+import type { NpmInstallPlan } from './npm-install-plan';
 
 /**
  * Self-contained Node program embedded in both installers. The base64 payload
@@ -6,18 +6,17 @@ import type { NpmInstallPlanEntry } from './npm-install-plan';
  * Returns the physical npm prefix as base64 so native stdout also survives PS5.
  * npm local overrides require the prefix and file specs to use matching realpaths.
  */
-export function buildNpmProjectSetupScript(packages: NpmInstallPlanEntry[]): string {
-  const payload = Buffer.from(JSON.stringify(packages), 'utf8').toString('base64');
+export function buildNpmProjectSetupScript(plan: NpmInstallPlan): string {
+  const payload = Buffer.from(JSON.stringify(plan), 'utf8').toString('base64');
   const script = [
     "const fs = require('node:fs');",
     "const path = require('node:path');",
-    "const packages = JSON.parse(Buffer.from('" + payload + "', 'base64').toString('utf8'));",
+    "const plan = JSON.parse(Buffer.from('" + payload + "', 'base64').toString('utf8'));",
     'const scriptDir = fs.realpathSync(process.argv[2]);',
     'const packageDir = fs.realpathSync(path.resolve(scriptDir, process.argv[3]));',
-    "if (!packages.length) throw new Error('설치할 npm tarball이 없습니다.');",
-    'const dependencies = Object.create(null);',
-    'const overrides = Object.create(null);',
-    'for (const pkg of packages) {',
+    "if (!plan.packages.length || !plan.roots.length) throw new Error('설치할 npm tarball이 없습니다.');",
+    'const entries = new Map();',
+    'for (const pkg of plan.packages) {',
     '  const archive = fs.realpathSync(path.resolve(packageDir, pkg.relativePath));',
     '  const relative = path.relative(packageDir, archive);',
     "  if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {",
@@ -25,12 +24,22 @@ export function buildNpmProjectSetupScript(packages: NpmInstallPlanEntry[]): str
     '  }',
     "  if (!fs.statSync(archive).isFile()) throw new Error('npm tarball이 일반 파일이 아닙니다: ' + archive);",
     "  const spec = 'file:' + archive.replace(/\\\\/g, '/');",
-    '  if (!Object.hasOwn(dependencies, pkg.name)) {',
-    '    dependencies[pkg.name] = spec;',
-    "    overrides[pkg.name + '@' + pkg.version] = '$' + pkg.name;",
-    '  } else {',
-    "    overrides[pkg.name + '@' + pkg.version] = spec;",
-    '  }',
+    "  entries.set(pkg.name + '@' + pkg.version, { name: pkg.name, spec });",
+    '}',
+    'const dependencies = Object.create(null);',
+    'const overrides = Object.create(null);',
+    'for (const key of plan.roots) {',
+    '  const pkg = entries.get(key);',
+    '  dependencies[pkg.name] = pkg.spec;',
+    '}',
+    'const ruleObjects = [];',
+    'for (const rule of plan.rules) {',
+    '  const pkg = entries.get(rule.packageKey);',
+    '  const node = Object.create(null);',
+    "  node['.'] = rule.parent === null ? '$' + rule.name : pkg.spec;",
+    '  if (rule.parent === null) overrides[rule.name] = node;',
+    '  else ruleObjects[rule.parent][rule.name] = node;',
+    '  ruleObjects.push(node);',
     '}',
     "const target = path.join(scriptDir, 'npm-project');",
     "const manifestPath = path.join(target, 'package.json');",
