@@ -152,7 +152,7 @@ depssmuggler os cache clear
 | 업데이트 | 배포 앱에서 시작 후 확인하고 사용자가 다운로드·설치할 수 있습니다. 개발 환경은 모의 동작입니다. `autoUpdate`·`autoDownloadUpdate` 설정은 저장되지만 updater 동작을 제어하는 연결은 아직 없습니다. |
 | 브라우저 실행·E2E | 일부 조회·히스토리 폴백과 UI 검증용입니다. Playwright는 `window.electronAPI` mock/stub을 사용하므로 실제 Electron·외부 저장소·SMTP 통합 검증과 구분합니다. |
 | 저장소 인증·무결성 | 공개 저장소 사용을 대상으로 하며 사용자 자격 증명을 쓰는 프라이빗 저장소 인증 UI/CLI는 없습니다. 체크섬 처리는 downloader마다 다르고, OS의 실제 GPG 서명 검증은 미구현입니다. |
-| OS 로컬 저장소 | 관리자별 메타데이터 생성 코드가 있습니다. APK 인덱스 출력은 간소화 구현이므로 실제 Alpine 저장소 호환성은 [OS 문서](docs/os-package-downloader.md)의 제한을 확인해야 합니다. |
+| OS 로컬 저장소 | 관리자별 메타데이터를 생성하며 APK 인덱스는 `APKINDEX`를 담은 gzip tar 형식입니다. APK 메타데이터 필드 보존과 실제 Alpine 저장소 호환성의 남은 제한은 [OS 문서](docs/os-package-downloader.md)를 확인하세요. |
 
 이 범위는 기존 구현을 설명합니다. 상세 동작과 설계 기록의 구분은 [문서 상태](docs/documentation-status.md)에서 확인할 수 있습니다.
 

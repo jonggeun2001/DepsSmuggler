@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
+import * as tar from 'tar';
 import type { OSPackageInfo, OSPackageManager } from './types';
 import { getDownloadedFileKey, getPackageFilename } from './package-file-utils';
 import { OSScriptGenerator } from './script-generator';
@@ -403,12 +404,29 @@ export class OSRepoPackager {
     // APKINDEX 내용 생성
     const apkindexContent = this.generateApkIndexContent(packages);
 
-    // APKINDEX.tar.gz 생성 (간단한 형태)
-    // 실제로는 tar 아카이브지만, 여기서는 gzip된 인덱스만 생성
-    const apkindexGz = await gzip(Buffer.from(apkindexContent));
+    // Keep caller-owned repository files untouched until the completed archive is ready.
+    const stagingDir = fs.mkdtempSync(path.join(repoPath, '.depssmuggler-apkindex-'));
+    const stagedIndexPath = path.join(stagingDir, 'APKINDEX');
+    const stagedArchivePath = path.join(stagingDir, 'APKINDEX.tar.gz');
     const apkindexPath = path.join(repoPath, 'APKINDEX.tar.gz');
-    fs.writeFileSync(apkindexPath, apkindexGz);
-    metadataFiles.push(apkindexPath);
+
+    try {
+      fs.writeFileSync(stagedIndexPath, apkindexContent, 'utf8');
+      await tar.c(
+        {
+          cwd: stagingDir,
+          file: stagedArchivePath,
+          gzip: true,
+          noPax: true,
+          portable: true,
+        },
+        ['APKINDEX']
+      );
+      fs.renameSync(stagedArchivePath, apkindexPath);
+      metadataFiles.push(apkindexPath);
+    } finally {
+      fs.rmSync(stagingDir, { recursive: true, force: true });
+    }
 
     return metadataFiles;
   }

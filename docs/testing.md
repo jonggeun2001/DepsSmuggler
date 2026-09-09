@@ -145,6 +145,18 @@ INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/yum.i
 INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/apk.integration.test.ts
 ```
 
+### APK 저장소 인덱스 구조 검증
+
+`src/core/downloaders/os-shared/repo-packager.test.ts`는 생성한 `APKINDEX.tar.gz`가 인덱스 항목 하나를 담은 tar인지 확인하고, 아카이브 생성 실패 시 기존 파일 보존과 임시 디렉터리 정리를 검사합니다. `src/core/downloaders/os-shared/apk-repository-consumer.test.ts`는 생성한 아카이브를 로컬 HTTP 서버에서 제공해 실제 `ApkMetadataParser.parseIndex()`가 읽는지 검증합니다. 두 테스트는 기본 테스트에 포함되며 외부 저장소나 네이티브 Alpine 도구가 필요하지 않습니다.
+
+이 검사는 아카이브 구조와 앱 파서의 소비 경로를 다룹니다. 실제 Alpine 저장소 업데이트·검색 검증은 [#97의 메타데이터 필드 보존 문제](https://github.com/jonggeun2001/DepsSmuggler/issues/97)를 해결한 뒤 함께 수행해야 합니다.
+
+```bash
+bash scripts/verify-worktree.sh \
+  src/core/downloaders/os-shared/repo-packager.test.ts \
+  src/core/downloaders/os-shared/apk-repository-consumer.test.ts
+```
+
 ### CLI 다운로드 실패 종료 코드 검증
 
 `src/cli/download-failure-exit.integration.test.ts`는 별도 Node.js 프로세스에서 실제 CLI 엔트리포인트와 Commander 인자를 실행합니다. 부모 프로세스의 로컬 HTTP 서버가 404를 반환하고, 자식의 테스트 전용 설정이 실제 `MavenDownloader`의 저장소 주소만 이 서버로 연결합니다. 실제 다운로드 매니저가 실패 결과를 반환한 뒤 CLI가 종료 코드 `1`과 실패 원인을 남기고, 새 아카이브와 설치 스크립트를 생성하지 않는지 확인합니다. 설정·로그·출력은 임시 디렉터리로 격리하며 외부 레지스트리에 연결하지 않습니다.

@@ -609,9 +609,11 @@ class OSRepoPackager {
 |----|-----------------|-----------|
 | YUM | `repodata/repomd.xml`, `primary.xml.gz`, `filelists.xml.gz`, `other.xml.gz` | TypeScript XML 생성 + gzip |
 | APT | `Packages`, `Packages.gz`, `Release` | TypeScript Control 텍스트 생성 + gzip |
-| APK | `APKINDEX.tar.gz` | 인덱스 텍스트를 gzip으로 저장하는 간소화 구현 |
+| APK | `APKINDEX.tar.gz` | `APKINDEX` 항목 하나를 담은 gzip tar 아카이브를 Node `tar`로 생성 |
 
-현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. APK 출력은 파일 이름과 달리 tar 컨테이너 없이 gzip한 인덱스이므로 정식 Alpine 저장소와의 완전한 호환성을 보장하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다.
+현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다.
+
+APK 인덱스는 별도 임시 디렉터리에서 아카이브를 완성한 뒤 최종 `APKINDEX.tar.gz`로 교체합니다. 아카이브 생성 중 오류가 발생하면 기존 인덱스를 유지하고 오류를 전달하며, 사용자가 미리 둔 평문 `APKINDEX`를 임시 파일로 사용하거나 삭제하지 않습니다. 생성한 gzip tar 구조는 실제 `ApkMetadataParser`로 검증합니다. 체크섬 인코딩·의존성 조건·provides·설치 크기 보존 문제는 [#97](https://github.com/jonggeun2001/DepsSmuggler/issues/97)에 남아 있으므로, tar 구조 검증을 네이티브 `apk update`·설치 성공으로 간주하지 않습니다.
 
 ---
 
