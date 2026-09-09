@@ -117,6 +117,10 @@ bash scripts/verify-worktree.sh \
 
 이 fixture 검증은 실제 Maven Central의 현재 파일 존재 여부나 외부 Maven 실행의 오프라인 성공을 보장하지 않습니다. 외부 저장소 검증에는 아래 통합 테스트를 별도로 사용하고, 실행 명령·대상 좌표·파일 확인 결과를 해당 작업의 검증 기록에 남깁니다.
 
+### 빈 `--file` 입력 검증
+
+`src/cli/empty-package-file.integration.test.ts`는 빈 파일·공백만 있는 파일·주석만 있는 파일을 별도 Node.js 프로세스에서 실행합니다. 테스트 전용 user directory와 경로에 공백이 있는 출력 디렉터리를 사용하며, 입력 오류가 종료 코드 `1`을 반환하고 archive와 설치 스크립트를 만들지 않는지 확인합니다. 단위 테스트는 parser 결과가 비어 있을 때 resolver, 출력 디렉터리, 다운로드 큐, archive, script generator가 호출되지 않는 순서를 검증합니다.
+
 ### CLI 다운로드 실패 종료 코드 검증
 
 `src/cli/download-failure-exit.integration.test.ts`는 별도 Node.js 프로세스에서 실제 CLI 엔트리포인트와 Commander 인자를 실행합니다. 부모 프로세스의 로컬 HTTP 서버가 404를 반환하고, 자식의 테스트 전용 설정이 실제 `MavenDownloader`의 저장소 주소만 이 서버로 연결합니다. 실제 다운로드 매니저가 실패 결과를 반환한 뒤 CLI가 종료 코드 `1`과 실패 원인을 남기고, 새 아카이브와 설치 스크립트를 생성하지 않는지 확인합니다. 설정·로그·출력은 임시 디렉터리로 격리하며 외부 레지스트리에 연결하지 않습니다.
