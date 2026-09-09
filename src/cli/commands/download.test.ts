@@ -190,6 +190,53 @@ describe('downloadCommand', () => {
     );
   });
 
+  it.each([
+    ['partial failure', [
+      {
+        id: 'pip-completed-2.28.0',
+        package: { type: 'pip', name: 'requests', version: '2.28.0' },
+        status: 'completed',
+        progress: 100,
+        filePath: '/tmp/output/requests.whl',
+      },
+      {
+        id: 'pip-failed-2.28.0',
+        package: { type: 'pip', name: 'missing', version: '2.28.0' },
+        status: 'failed',
+        progress: 0,
+        error: '404 Not Found',
+      },
+    ]],
+    ['full failure', [
+      {
+        id: 'pip-failed-2.28.0',
+        package: { type: 'pip', name: 'missing', version: '2.28.0' },
+        status: 'failed',
+        progress: 0,
+        error: '404 Not Found',
+      },
+    ]],
+  ] as const)('%s sets a nonzero exit code without creating delivery files', async (_label, items) => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    startDownload.mockResolvedValueOnce({
+      success: false,
+      totalSize: 0,
+      duration: 100,
+      items,
+    });
+
+    try {
+      await downloadCommand(commandOptions());
+
+      expect(process.exitCode).toBe(1);
+      expect(createArchive).not.toHaveBeenCalled();
+      expect(generateAllScripts).not.toHaveBeenCalled();
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
   it('deps가 true면 의존성을 해결한 패키지 목록을 큐에 추가한다', async () => {
     await downloadCommand(commandOptions());
 

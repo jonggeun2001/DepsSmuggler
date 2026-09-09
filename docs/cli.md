@@ -150,6 +150,7 @@ depssmuggler download -t maven -p org.lwjgl:lwjgl -V 3.3.6 \
 
 ### 현재 동작
 
+- 실제 파일 다운로드 항목이 하나라도 실패하면 실패 목록을 출력하고 종료 코드 `1`로 끝납니다. 이 경우 이번 실행의 아카이브와 설치 스크립트를 생성하지 않습니다. 성공한 다운로드의 종료 코드는 `0`이며, 다운로드 전 의존성 해결 단계의 기본 건너뛰기 정책과 `--strict`는 위 설명을 따릅니다.
 - 다운로드 성공 시 출력 디렉터리에 `packages-<timestamp>.zip` 또는 `.tar.gz`를 만든 뒤, 같은 디렉터리에 설치 스크립트를 생성합니다. 이 호출 순서에서는 별도로 생성한 설치 스크립트가 앞서 만든 아카이브에 포함되지 않습니다.
 - Docker는 압축을 풀어 생긴 `packages/`와 설치 스크립트를 같은 폴더에 두고 실행합니다. Bash·PowerShell 모두 실제 이미지 파일명(예: `packages/busybox-1.36.tar`)을 `docker load -i`에 전달합니다. `amd64`·`arm64`와 ZIP·tar.gz 출력에서 같은 이름 규칙을 사용하며, 대상 환경에는 실행 중인 Docker가 필요합니다.
 - npm은 압축을 풀어 생긴 `packages/` 폴더와 설치 스크립트를 같은 폴더에 두고 실행합니다. Node.js와 npm이 설치된 환경에서 전달된 `.tgz`를 `npm install --offline`으로 설치하며, 결과는 스크립트 폴더의 `npm-project/node_modules`에 생깁니다. 이 전용 프로젝트에 설치용 `package.json`을 생성하며 상위 폴더의 사용자 manifest는 변경하지 않습니다.
@@ -285,7 +286,7 @@ depssmuggler cache list
 - OS 패키지 CLI는 `list-distros`, `search`, `download`, `cache`를 독립적으로 수행하며 Electron GUI에 의존하지 않습니다.
 - 일반 패키지 `search`는 `pip`, `conda`, `maven`, `npm`, `docker`에 연결되어 있지만, GUI 전용 위자드/시각화 흐름은 CLI에 없습니다.
 - `cache list`는 현재 캐시 루트가 디렉터리 위주라는 가정을 두고 있어, `cache-manifest.json` 같은 일반 파일이 섞인 경우 실패할 수 있습니다.
-- 일반 `download`에서 실제 파일 다운로드가 일부 실패하면 실패 목록을 출력하고 아카이브/설치 스크립트 생성을 건너뛰지만, 이 분기 자체는 종료 코드를 `1`로 바꾸지 않습니다. `cache size/clear/list`도 내부 조회·삭제 오류를 출력한 뒤 반환하는 경로가 있으므로, 자동화에서 종료 코드만으로 모든 파일 작업의 성공을 판정할 수는 없습니다.
+- `cache size/clear/list`는 내부 조회·삭제 오류를 출력한 뒤 반환하는 경로가 있으므로, 캐시 자동화에서 종료 코드만으로 모든 파일 작업의 성공을 판정할 수는 없습니다.
 - CLI에는 SMTP 발송, 전달용 자동 분할, GUI 히스토리 저장 명령이 없습니다. 해당 기능은 Electron 일반 다운로드 전달 파이프라인에서 사용합니다.
 
 ## 관련 문서
