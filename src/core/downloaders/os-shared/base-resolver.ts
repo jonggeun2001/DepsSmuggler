@@ -14,6 +14,7 @@ import type {
 } from './types';
 import type { OsPackageCache } from './cache-manager';
 import { OSDependencyTree } from './dependency-tree';
+import { getDownloadedFileKey } from './package-file-utils';
 import { isArchitectureCompatible } from './repositories';
 import logger from '../../../utils/logger';
 
@@ -72,7 +73,7 @@ export abstract class BaseOSDependencyResolver {
    * 패키지 키 생성
    */
   protected getPackageKey(pkg: OSPackageInfo): string {
-    return `${pkg.name}-${pkg.version}-${pkg.architecture}`;
+    return getDownloadedFileKey(pkg);
   }
 
   protected createAbortError(): Error {
@@ -379,7 +380,7 @@ export abstract class BaseOSDependencyResolver {
   protected getUniqueVersions(packages: OSPackageInfo[]): OSPackageInfo[] {
     const versionMap = new Map<string, OSPackageInfo>();
     for (const pkg of packages) {
-      const key = `${pkg.version}-${pkg.release || ''}`;
+      const key = JSON.stringify([pkg.version, pkg.release ?? '']);
       if (!versionMap.has(key)) {
         versionMap.set(key, pkg);
       }

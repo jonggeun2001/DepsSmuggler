@@ -21,7 +21,8 @@ class TestResolver extends BaseOSDependencyResolver {
   }
 
   protected override async fetchDependenciesFromMetadata(pkg: OSPackageInfo): Promise<PackageDependency[]> {
-    return this.dependenciesByKey.get(`${pkg.name}@${pkg.version}`)
+    return this.dependenciesByKey.get(`${pkg.name}@${pkg.version}@${pkg.release ?? ''}`)
+      ?? this.dependenciesByKey.get(`${pkg.name}@${pkg.version}`)
       ?? this.metadataResponses.get(pkg.name)
       ?? pkg.dependencies;
   }
@@ -178,6 +179,41 @@ describe('BaseOSDependencyResolver', () => {
     expect(result.conflicts.map((conflict) => conflict.package)).toEqual(
       expect.arrayContaining(['libfoo', 'libbase']),
     );
+  });
+
+  it('동일 버전의 서로 다른 RPM release도 각자의 자손과 cycle을 닫는다', async () => {
+    const resolver = createResolver();
+    const root = createPackage('root', '1.0.0', 'x86_64', [
+      { name: 'release-lib' },
+      { name: 'release-lib' },
+    ]);
+    const releaseOne = { ...createPackage('release-lib', '1.0.0'), release: '1.el9' };
+    const releaseTwo = { ...createPackage('release-lib', '1.0.0'), release: '2.el9' };
+    const childOne = createPackage('release-child-one', '1.0.0');
+    const childTwo = createPackage('release-child-two', '1.0.0');
+
+    resolver.dependenciesByKey.set('release-lib@1.0.0@1.el9', [{ name: 'release-child-one' }]);
+    resolver.dependenciesByKey.set('release-lib@1.0.0@2.el9', [{ name: 'release-child-two' }]);
+    resolver.dependenciesByKey.set('release-child-one@1.0.0', [{ name: 'release-lib' }]);
+    resolver.dependenciesByKey.set('release-child-two@1.0.0', [{ name: 'release-lib' }]);
+    resolver.candidates.set('release-lib', [releaseOne, releaseTwo]);
+    resolver.candidates.set('release-child-one', [childOne]);
+    resolver.candidates.set('release-child-two', [childTwo]);
+
+    const result = await resolver.resolveDependencies([root]);
+    const releasePackages = result.packages.filter((pkg) => pkg.name === 'release-lib');
+
+    expect(releasePackages.map((pkg) => pkg.release)).toEqual(['1.el9', '2.el9']);
+    expect(result.packages.map((pkg) => pkg.name)).toEqual(expect.arrayContaining([
+      'release-child-one',
+      'release-child-two',
+    ]));
+    expect(result.conflicts).toEqual([
+      expect.objectContaining({
+        package: 'release-lib',
+        versions: [releaseOne, releaseTwo],
+      }),
+    ]);
   });
 
   it('중복 edge와 cycle은 각 package key를 한 번만 처리한다', async () => {

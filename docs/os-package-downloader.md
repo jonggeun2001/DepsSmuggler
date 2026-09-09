@@ -402,7 +402,7 @@ D:pcre2 zlib
 > 기존 재귀적 의존성 해결에서 BFS 큐 기반으로 변경하여 순환 의존성을 안전하게 처리하고 깊은 의존성 트리에서도 call stack overflow가 발생하지 않습니다.
 
 1. **BFS 큐**로 의존성 그래프 구성 (순환 의존성 방지)
-2. **이름·버전·아키텍처 키**로 큐 중복과 이미 처리한 패키지의 재방문 차단
+2. **이름·버전·RPM release·아키텍처 키**로 큐 중복과 이미 처리한 패키지의 재방문 차단. 릴리스가 다른 후보는 각각 탐색합니다.
 3. **provides/virtual 패키지** 해결
 4. **버전 제약 조건** 확인
 5. **위상 정렬 (Topological Sort)**로 설치 순서 결정
@@ -440,6 +440,8 @@ class OSDependencyTree {
   toVisualizationData(): VisualizationData;     // 시각화용 데이터
 }
 ```
+
+노드 ID와 엣지의 source/target은 `getDownloadedFileKey(pkg)`와 같은 `[name, version, release 또는 빈 문자열, architecture]`의 JSON 문자열입니다. ID를 하이픈으로 분해하지 않고 연결용 식별자로 사용합니다. 같은 버전의 RPM도 release가 다르면 별도 노드와 충돌 후보로 유지됩니다.
 
 ---
 

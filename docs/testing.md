@@ -157,6 +157,8 @@ INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/yum.i
 
 `src/core/resolver/apt-alternative-closure.test.ts`는 로컬 HTTP 서버의 실제 `Packages.gz`를 APT 파서와 resolver로 읽습니다. 최선 후보 외 버전이 요구하는 정확한 하위 버전과 그 하위 의존성, 순환 참조, 미해결 항목을 검사합니다. 외부 저장소 검증은 Ubuntu의 `zlib1g` 묶음에서 각 DEB 내부 control의 요구 버전을 다운로드 목록과 비교하며, 생성한 저장소 `Packages`를 원본 요구 조건의 대용으로 사용하지 않습니다. 파일·제어 정보 검사는 네이티브 APT 설치 트랜잭션과 구분합니다.
 
+`src/core/resolver/yum-alternative-closure.test.ts`는 실제 YUM 메타데이터 fixture를 읽어 이름·버전·아키텍처가 같고 release만 다른 후보의 하위 의존성이 모두 남는지 확인합니다. 공통 resolver와 `dependency-tree.test.ts`에서도 릴리스별 탐색·노드·충돌 병합을 검사합니다.
+
 `src/core/downloaders/apt.integration.test.ts`는 현재 OS backend API로 Ubuntu 22.04 검색, 의존성 없는 단일 DEB 다운로드, 의존성을 포함한 아카이브·저장소 출력을 검사합니다. DEB 내부의 정확한 버전 요구와 전달된 파일을 비교하며, 저장소 버전은 테스트에 고정하지 않습니다. 외부 네트워크와 DEB control 압축을 읽을 수 있는 POSIX `ar`·`tar`가 필요하며, 명시 실행 시 필수 도구가 없으면 실패합니다. 임시 캐시·출력은 정리합니다.
 
 ```bash
