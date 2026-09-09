@@ -85,17 +85,17 @@ describe('OSDependencyTree', () => {
     expect(tree.getStats()).toMatchObject({ maxDepth: 3, totalPackages: 5, totalSize: 500 });
     expect(tree.toVisualizationData()).toEqual({
       nodes: [app, left, right, shared, base].map((node) => ({
-        id: `${node.name}-1.0-amd64`,
+        id: JSON.stringify([node.name, '1.0', '', 'amd64']),
         label: node.name,
         version: '1.0',
         size: 100,
       })),
       edges: [
-        { source: 'app-1.0-amd64', target: 'left-1.0-amd64', optional: false },
-        { source: 'app-1.0-amd64', target: 'right-1.0-amd64', optional: true },
-        { source: 'left-1.0-amd64', target: 'shared-1.0-amd64', optional: false },
-        { source: 'right-1.0-amd64', target: 'shared-1.0-amd64', optional: false },
-        { source: 'shared-1.0-amd64', target: 'base-1.0-amd64', optional: false },
+        { source: JSON.stringify(['app', '1.0', '', 'amd64']), target: JSON.stringify(['left', '1.0', '', 'amd64']), optional: false },
+        { source: JSON.stringify(['app', '1.0', '', 'amd64']), target: JSON.stringify(['right', '1.0', '', 'amd64']), optional: true },
+        { source: JSON.stringify(['left', '1.0', '', 'amd64']), target: JSON.stringify(['shared', '1.0', '', 'amd64']), optional: false },
+        { source: JSON.stringify(['right', '1.0', '', 'amd64']), target: JSON.stringify(['shared', '1.0', '', 'amd64']), optional: false },
+        { source: JSON.stringify(['shared', '1.0', '', 'amd64']), target: JSON.stringify(['base', '1.0', '', 'amd64']), optional: false },
       ],
     });
   });
@@ -176,5 +176,24 @@ describe('OSDependencyTree', () => {
       },
     ]);
     expect(tree.getStats().conflictCount).toBe(1);
+  });
+
+  it('keeps same version packages with different RPM releases in conflicts', () => {
+    const tree = new OSDependencyTree();
+    const releaseOne = pkg('lib', { release: '1.el9' });
+    const releaseTwo = pkg('lib', { release: '2.el9' });
+    const firstRequester = { package: pkg('app'), requiredVersion: '1.0' };
+    const nextRequester = { package: pkg('tool'), requiredVersion: '1.0' };
+
+    tree.addConflict('lib', [releaseOne], [firstRequester]);
+    tree.addConflict('lib', [releaseTwo], [nextRequester]);
+
+    expect(tree.getConflicts()).toEqual([
+      {
+        packageName: 'lib',
+        versions: [releaseOne, releaseTwo],
+        requestedBy: [firstRequester, nextRequester],
+      },
+    ]);
   });
 });

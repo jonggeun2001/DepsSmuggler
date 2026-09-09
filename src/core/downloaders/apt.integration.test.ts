@@ -1,272 +1,263 @@
 /**
- * APT/DEB 다운로더 통합 테스트
+ * Opt-in Ubuntu APT backend integration tests.
  *
- * 실제 APT 리포지토리 API를 호출하여 패키지 조회 및 다운로드 기능을 테스트합니다.
- *
- * 실행 방법:
+ * Run explicitly with:
  *   INTEGRATION_TEST=true npm test -- apt.integration.test.ts
- *
- * 테스트 케이스:
- *   - bash: 기본 패키지, 의존성 있음
- *   - curl: 네트워크 패키지, 의존성 5-6개
- *   - 존재하지 않는 패키지 처리
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { AptMetadataParser, AptDependencyResolver, AptDownloader } from './apt';
-import type { Repository, OSArchitecture } from './os-shared/types';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { execFile } from 'node:child_process';
+import * as fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { promisify } from 'node:util';
+import * as tar from 'tar';
+import { afterAll, describe, expect, it } from 'vitest';
+import { downloadOSPackages, searchOSPackages } from './os-shared/cli-backend';
+import { getDistributionById } from './os-shared/repositories';
 
+const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+const yauzl = require('yauzl') as {
+  open: (
+    filePath: string,
+    options: { lazyEntries: boolean },
+    callback: (
+      error: Error | null,
+      zipFile?: {
+        readEntry: () => void;
+        on: (event: string, listener: (...args: any[]) => void) => void;
+        openReadStream: (
+          entry: any,
+          callback: (error: Error | null, stream?: NodeJS.ReadableStream) => void
+        ) => void;
+        close: () => void;
+      }
+    ) => void
+  ) => void;
+};
 const INTEGRATION_TEST = process.env.INTEGRATION_TEST === 'true';
 const describeIntegration = INTEGRATION_TEST ? describe : describe.skip;
 
-describeIntegration('APT/DEB 통합 테스트', () => {
-  let parser: AptMetadataParser;
-  let resolver: AptDependencyResolver;
-  let downloader: AptDownloader;
-  let tempDir: string;
-
-  // Ubuntu 22.04 (Jammy) 테스트용 리포지토리
-  const testRepo: Repository = {
-    id: 'ubuntu-jammy-main',
-    name: 'Ubuntu 22.04 Main',
-    baseUrl: 'http://archive.ubuntu.com/ubuntu/dists/jammy',
-    enabled: true,
-    type: 'apt',
-  };
-
-  const testArchitecture: OSArchitecture = 'amd64';
-
-  beforeAll(() => {
-    parser = new AptMetadataParser(testRepo, 'main', testArchitecture);
-    resolver = new AptDependencyResolver({
-      repositories: [testRepo],
-      architecture: testArchitecture,
+async function readDebControl(debPath: string): Promise<string> {
+  if (process.platform === 'win32') {
+    throw new Error('DEB control inspection is unavailable on Windows');
+  }
+  const table = await execFileAsync('ar', ['t', debPath], { encoding: 'utf8' });
+  const controlMember = table.stdout
+    .split(/\r?\n/)
+    .find((entry) => entry.startsWith('control.tar'));
+  if (!controlMember) throw new Error(`control archive missing from ${debPath}`);
+  const control = await execFileAsync('ar', ['p', debPath, controlMember], { encoding: 'buffer' });
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-deb-control-'));
+  const controlPath = path.join(temporaryDirectory, controlMember);
+  try {
+    await fs.writeFile(controlPath, control.stdout);
+    const extracted = await execFileAsync('tar', ['-xO', '-f', controlPath, './control'], {
+      encoding: 'utf8',
     });
-    downloader = new AptDownloader({
-      repositories: [testRepo],
-      architecture: testArchitecture,
-    });
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apt-integration-test-'));
+    return extracted.stdout;
+  } finally {
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+function field(control: string, name: string): string | undefined {
+  return control.match(new RegExp(`^${name}: ([^\\n]+)`, 'm'))?.[1];
+}
+
+async function listTarGzEntries(archivePath: string): Promise<string[]> {
+  const entries: string[] = [];
+  await tar.t({
+    file: archivePath,
+    onentry: (entry) => {
+      entries.push(entry.path);
+      entry.resume();
+    },
   });
+  return entries;
+}
 
-  afterAll(() => {
-    if (tempDir && fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
-  describe('Release 파일 파싱', () => {
-    it('Release 정보 조회', async () => {
-      const release = await parser.parseRelease();
-
-      expect(release).toBeDefined();
-      expect(release.codename).toBe('jammy');
-      expect(release.architectures).toContain('amd64');
-    }, 60000);
-  });
-
-  describe('Packages.gz 파싱', () => {
-    it('패키지 목록 로드', async () => {
-      const packages = await parser.parsePackages();
-
-      expect(packages).toBeDefined();
-      expect(packages.length).toBeGreaterThan(0);
-    }, 120000);
-
-    it('패키지에 필수 정보 포함', async () => {
-      const packages = await parser.parsePackages();
-      const samplePkg = packages.find(p => p.name === 'bash');
-
-      expect(samplePkg).toBeDefined();
-      expect(samplePkg?.name).toBe('bash');
-      expect(samplePkg?.version).toBeDefined();
-      expect(samplePkg?.architecture).toBeDefined();
-      expect(samplePkg?.location).toBeDefined();
-    }, 120000);
-  });
-
-  describe('정상 케이스 - bash 패키지', () => {
-    it('bash 패키지 검색', async () => {
-      const results = await parser.searchPackages('bash', 'exact');
-
-      expect(results).toBeDefined();
-      expect(results.length).toBeGreaterThan(0);
-
-      const bash = results.find(r => r.name === 'bash');
-      expect(bash).toBeDefined();
-      expect(bash?.latest).toBeDefined();
-    }, 120000);
-
-    it('bash 버전 목록 조회', async () => {
-      const versions = await parser.getPackageVersions('bash');
-
-      expect(versions).toBeDefined();
-      expect(versions.length).toBeGreaterThan(0);
-    }, 120000);
-  });
-
-  describe('정상 케이스 - curl 패키지', () => {
-    it('curl 패키지 검색', async () => {
-      const results = await parser.searchPackages('curl', 'exact');
-
-      expect(results).toBeDefined();
-      expect(results.length).toBeGreaterThan(0);
-
-      const curl = results.find(r => r.name === 'curl');
-      expect(curl).toBeDefined();
-    }, 120000);
-
-    it('curl 버전 목록 조회', async () => {
-      const versions = await parser.getPackageVersions('curl');
-
-      expect(versions).toBeDefined();
-      expect(versions.length).toBeGreaterThan(0);
-    }, 120000);
-  });
-
-  describe('패키지 검색 유형', () => {
-    it('정확한 검색 (exact)', async () => {
-      const results = await parser.searchPackages('bash', 'exact');
-
-      expect(results).toBeDefined();
-      expect(results.length).toBeGreaterThan(0);
-      // 정확한 검색은 'bash'만 반환
-      const allExact = results.every(r => r.name === 'bash');
-      expect(allExact).toBe(true);
-    }, 120000);
-
-    it('부분 검색 (partial)', async () => {
-      const results = await parser.searchPackages('bash', 'partial');
-
-      expect(results).toBeDefined();
-      expect(results.length).toBeGreaterThan(0);
-      // 부분 검색은 bash를 포함하는 패키지 (bash, bash-completion 등)
-      const allPartial = results.every(r => r.name.includes('bash'));
-      expect(allPartial).toBe(true);
-    }, 120000);
-
-    it('와일드카드 검색 (wildcard)', async () => {
-      const results = await parser.searchPackages('bash*', 'wildcard');
-
-      expect(results).toBeDefined();
-      expect(results.length).toBeGreaterThan(0);
-      // 와일드카드 검색은 bash로 시작하는 패키지
-      const allWildcard = results.every(r => r.name.startsWith('bash'));
-      expect(allWildcard).toBe(true);
-    }, 120000);
-  });
-
-  describe('존재하지 않는 패키지 처리', () => {
-    it('존재하지 않는 패키지 검색 시 빈 배열 반환', async () => {
-      const results = await parser.searchPackages('nonexistent-apt-package-xyz-12345', 'exact');
-
-      expect(results).toBeDefined();
-      expect(results.length).toBe(0);
-    }, 120000);
-
-    it('존재하지 않는 패키지 버전 조회', async () => {
-      const versions = await parser.getPackageVersions('nonexistent-apt-package-xyz-12345');
-
-      expect(versions).toBeDefined();
-      expect(versions.length).toBe(0);
-    }, 120000);
-  });
-
-  describe('의존성 해결 (Resolver)', () => {
-    it('패키지 검색 via Resolver', async () => {
-      const results = await resolver.searchPackages('bash', 'exact');
-
-      expect(results).toBeDefined();
-      expect(results.length).toBeGreaterThan(0);
-    }, 180000);
-
-    it('패키지 의존성 해결', async () => {
-      // bash 검색
-      const searchResults = await resolver.searchPackages('bash', 'exact');
-      expect(searchResults.length).toBeGreaterThan(0);
-
-      const bashPkg = searchResults[0].latest;
-      expect(bashPkg).toBeDefined();
-
-      // 의존성 해결
-      const resolvedDeps = await resolver.resolveDependencies([bashPkg]);
-
-      expect(resolvedDeps).toBeDefined();
-      expect(resolvedDeps.length).toBeGreaterThan(0);
-
-      // bash는 의존성이 있어야 함 (libc6, libreadline8 등)
-      const depNames = resolvedDeps.map(d => d.name);
-      expect(depNames).toContain('bash'); // 패키지 자체도 포함
-    }, 180000);
-  });
-
-  describe('패키지 다운로드 (Downloader)', () => {
-    it('작은 패키지 다운로드', async () => {
-      const outputDir = path.join(tempDir, 'download-test');
-      fs.mkdirSync(outputDir, { recursive: true });
-
-      // 'hostname' 패키지는 매우 작음
-      const searchResults = await resolver.searchPackages('hostname', 'exact');
-
-      if (searchResults.length === 0 || !searchResults[0].latest) {
-        console.warn('hostname 패키지를 찾을 수 없습니다');
+async function readZipEntries(archivePath: string): Promise<Map<string, Buffer>> {
+  return new Promise((resolve, reject) => {
+    yauzl.open(archivePath, { lazyEntries: true }, (error, zipFile) => {
+      if (error || !zipFile) {
+        reject(error ?? new Error('ZIP archive could not be opened'));
         return;
       }
-
-      const pkg = searchResults[0].latest;
-
-      const filePath = await downloader.download(pkg, outputDir);
-
-      expect(filePath).toBeDefined();
-      expect(fs.existsSync(filePath)).toBe(true);
-
-      // .deb 파일
-      expect(filePath.endsWith('.deb')).toBe(true);
-    }, 180000);
-
-    it('다운로드 진행 콜백 호출', async () => {
-      const outputDir = path.join(tempDir, 'progress-test');
-      fs.mkdirSync(outputDir, { recursive: true });
-
-      const searchResults = await resolver.searchPackages('hostname', 'exact');
-
-      if (searchResults.length === 0 || !searchResults[0].latest) {
-        console.warn('hostname 패키지를 찾을 수 없습니다');
-        return;
-      }
-
-      const pkg = searchResults[0].latest;
-      let progressCalled = false;
-
-      const filePath = await downloader.download(pkg, outputDir, (progress) => {
-        progressCalled = true;
-        expect(progress.downloadedBytes).toBeGreaterThanOrEqual(0);
+      const entries = new Map<string, Buffer>();
+      zipFile.on('error', reject);
+      zipFile.on('end', () => resolve(entries));
+      zipFile.on('entry', (entry: { fileName: string }) => {
+        zipFile.openReadStream(entry, (streamError, stream) => {
+          if (streamError || !stream) {
+            reject(streamError ?? new Error(`ZIP entry could not be opened: ${entry.fileName}`));
+            zipFile.close();
+            return;
+          }
+          const chunks: Buffer[] = [];
+          stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+          stream.on('error', reject);
+          stream.on('end', () => {
+            entries.set(entry.fileName, Buffer.concat(chunks));
+            zipFile.readEntry();
+          });
+        });
       });
+      zipFile.readEntry();
+    });
+  });
+}
 
-      expect(filePath).toBeDefined();
-      expect(progressCalled).toBe(true);
-    }, 180000);
+const distribution = getDistributionById('ubuntu-22.04');
+
+describeIntegration('Ubuntu APT backend integration', () => {
+  let tempDirectory: string | undefined;
+
+  afterAll(async () => {
+    if (tempDirectory) await fs.rm(tempDirectory, { recursive: true, force: true });
   });
 
-  describe('버전 비교', () => {
-    it('패키지 버전이 정렬되어 있음', async () => {
-      const results = await parser.searchPackages('bash', 'exact');
+  it('searches zlib1g from Ubuntu 22.04 metadata', async () => {
+    if (!distribution) throw new Error('ubuntu-22.04 distribution is not configured');
+    tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-apt-integration-'));
 
-      if (results.length === 0) {
-        console.warn('bash 패키지를 찾을 수 없습니다');
-        return;
+    const results = await searchOSPackages({
+      distribution,
+      architecture: 'amd64',
+      query: 'zlib1g',
+      matchType: 'exact',
+      limit: 5,
+      cacheDirectory: path.join(tempDirectory, 'search-cache'),
+      cacheEnabled: true,
+    });
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((result) => result.name === 'zlib1g')).toBe(true);
+    expect(results[0].latest.architecture).toBe('amd64');
+    expect(results[0].latest.version).toBeTruthy();
+    expect(results[0].latest.location).toMatch(/\.deb$/);
+  }, 300_000);
+
+  it('downloads exactly zlib1g when dependency expansion is disabled', async () => {
+    if (!distribution) throw new Error('ubuntu-22.04 distribution is not configured');
+    if (!tempDirectory)
+      tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-apt-integration-'));
+    const outputPath = path.join(tempDirectory, 'no-deps');
+
+    const result = await downloadOSPackages({
+      distribution,
+      architecture: 'amd64',
+      packageNames: ['zlib1g'],
+      outputPath,
+      outputType: 'archive',
+      archiveFormat: 'zip',
+      resolveDependencies: false,
+      includeScripts: false,
+      concurrency: 1,
+      cacheDirectory: path.join(outputPath, 'cache'),
+      cacheEnabled: false,
+    });
+
+    expect(result.requestedPackages).toHaveLength(1);
+    expect(result.requestedPackages[0].name).toBe('zlib1g');
+    expect(result.packages).toHaveLength(1);
+    expect(result.packages[0].name).toBe('zlib1g');
+    expect(result.unresolved).toEqual([]);
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.artifacts[0].type).toBe('archive');
+    const archiveStat = await fs.stat(result.artifacts[0].path);
+    expect(archiveStat.isFile()).toBe(true);
+    const archiveEntries = await readZipEntries(result.artifacts[0].path);
+    const debEntries = [...archiveEntries.keys()].filter((entry) => entry.endsWith('.deb'));
+    expect(debEntries).toHaveLength(1);
+    const debBytes = archiveEntries.get(debEntries[0]);
+    if (!debBytes) throw new Error('ZIP DEB entry was empty');
+    const extractionDirectory = await fs.mkdtemp(path.join(tempDirectory, 'no-deps-control-'));
+    const debPath = path.join(extractionDirectory, path.basename(debEntries[0]));
+    await fs.writeFile(debPath, debBytes);
+    const control = await readDebControl(debPath);
+    expect(field(control, 'Package')).toBe('zlib1g');
+    expect(field(control, 'Version')).toBe(result.packages[0].version);
+    expect(field(control, 'Architecture')).toBe('amd64');
+  }, 300_000);
+
+  it('retains exact dependency closure and conflict alternatives in repository and tarball output', async () => {
+    if (!distribution) throw new Error('ubuntu-22.04 distribution is not configured');
+    if (!tempDirectory)
+      tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-apt-integration-'));
+    const outputPath = path.join(tempDirectory, 'with-deps');
+
+    const result = await downloadOSPackages({
+      distribution,
+      architecture: 'amd64',
+      packageNames: ['zlib1g'],
+      outputPath,
+      outputType: 'both',
+      archiveFormat: 'tar.gz',
+      resolveDependencies: true,
+      includeScripts: true,
+      concurrency: 2,
+      cacheDirectory: path.join(outputPath, 'cache'),
+      cacheEnabled: false,
+    });
+
+    expect(result.requestedPackages).toHaveLength(1);
+    expect(result.requestedPackages[0].name).toBe('zlib1g');
+    expect(result.unresolved).toEqual([]);
+    expect(result.conflicts.length).toBeGreaterThan(0);
+    expect(result.warnings.some((warning) => warning.includes('충돌'))).toBe(true);
+    expect(result.artifacts).toHaveLength(2);
+    const repositoryArtifact = result.artifacts.find((artifact) => artifact.type === 'repository');
+    const archiveArtifact = result.artifacts.find((artifact) => artifact.type === 'archive');
+    if (!repositoryArtifact || !archiveArtifact) {
+      throw new Error('APT backend did not produce both repository and archive artifacts');
+    }
+
+    const debFiles = (await fs.readdir(repositoryArtifact.path)).filter((filename) =>
+      filename.endsWith('.deb')
+    );
+    expect(debFiles.length).toBeGreaterThan(1);
+    const controls = await Promise.all(
+      debFiles.map(async (filename) => ({
+        filename,
+        text: await readDebControl(path.join(repositoryArtifact.path, filename)),
+      }))
+    );
+    expect(controls).toHaveLength(result.packages.length);
+    for (const controlEntry of controls) {
+      const matchingPackage = result.packages.find(
+        (pkg) =>
+          field(controlEntry.text, 'Package') === pkg.name &&
+          field(controlEntry.text, 'Version') === pkg.version &&
+          field(controlEntry.text, 'Architecture') === pkg.architecture
+      );
+      expect(matchingPackage, `missing result package for ${controlEntry.filename}`).toBeDefined();
+    }
+    const libgccAlternatives = controls.filter(
+      ({ text }) => field(text, 'Package') === 'libgcc-s1'
+    );
+    expect(libgccAlternatives.length).toBeGreaterThan(0);
+    for (const alternative of libgccAlternatives) {
+      const exactDependencyMatch = alternative.text.match(/gcc-12-base \(= ([^)]+)\)/);
+      if (!exactDependencyMatch) {
+        throw new Error(`missing exact gcc-12-base dependency in ${alternative.filename}`);
       }
+      const exactDependency = exactDependencyMatch[1];
+      const matchingBase = controls.find(
+        ({ text }) =>
+          field(text, 'Package') === 'gcc-12-base' && field(text, 'Version') === exactDependency
+      );
+      expect(matchingBase, `missing exact base for ${alternative.filename}`).toBeDefined();
+    }
 
-      const versions = results[0].versions;
-
-      // 최소 1개 버전 존재
-      expect(versions.length).toBeGreaterThan(0);
-
-      // latest가 첫 번째 버전
-      expect(results[0].latest).toBe(versions[0]);
-    }, 120000);
-  });
+    const archiveEntries = await listTarGzEntries(archiveArtifact.path);
+    const archiveDebNames = new Set(
+      archiveEntries.filter((entry) => entry.endsWith('.deb')).map((entry) => path.basename(entry))
+    );
+    expect(archiveDebNames).toEqual(new Set(debFiles));
+    expect(archiveEntries.some((entry) => entry.includes('zlib1g_'))).toBe(true);
+    await expect(fs.access(path.join(outputPath, 'install.sh'))).rejects.toThrow();
+    await expect(fs.access(path.join(outputPath, 'install.ps1'))).rejects.toThrow();
+  }, 300_000);
 });

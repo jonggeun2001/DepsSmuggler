@@ -402,12 +402,12 @@ D:pcre2 zlib
 > 기존 재귀적 의존성 해결에서 BFS 큐 기반으로 변경하여 순환 의존성을 안전하게 처리하고 깊은 의존성 트리에서도 call stack overflow가 발생하지 않습니다.
 
 1. **BFS 큐**로 의존성 그래프 구성 (순환 의존성 방지)
-2. **processing Set**으로 현재 처리 중인 패키지 추적
+2. **이름·버전·RPM release·아키텍처 키**로 큐 중복과 이미 처리한 패키지의 재방문 차단. 릴리스가 다른 후보는 각각 탐색합니다.
 3. **provides/virtual 패키지** 해결
 4. **버전 제약 조건** 확인
 5. **위상 정렬 (Topological Sort)**로 설치 순서 결정
-6. **충돌 감지**: 여러 호환 버전을 conflict에 기록하고 최신 후보를 그래프에 선택; CLI backend는 conflict 후보도 다운로드 목록에 병합
-7. **MAX_ITERATIONS (10000)** 제한으로 무한 루프 방지
+6. **충돌 감지**: 기존 후보 선택 정책이 유지한 여러 버전을 conflict에 기록합니다. 최선 후보를 부모의 의존성 엣지로 연결하고, 다운로드에 포함될 충돌 버전도 같은 큐에서 처리해 각 버전의 하위 의존성·추가 충돌·미해결 항목을 결과에 반영합니다.
+7. **MAX_ITERATIONS (10000)**: 단일 루트 탐색에서 새로 처리하는 고유 패키지 수를 제한합니다. 정확히 10,000개로 작업이 끝나면 정상 반환하고, 그 뒤에도 처리할 패키지가 남으면 오류로 종료합니다. 중복 엣지가 처리 횟수를 소모하거나 부분 결과가 성공으로 반환되지 않도록 합니다.
 
 버전·아키텍처 필터링 후 `selectCandidatesForDependency` 확장 지점을 거칩니다. 기본 구현은 후보를 그대로 유지하고, APK 구현은 서로 다른 제공 패키지 이름 중 하나를 선택한 뒤 그 패키지의 버전 충돌을 계산합니다.
 
@@ -440,6 +440,8 @@ class OSDependencyTree {
   toVisualizationData(): VisualizationData;     // 시각화용 데이터
 }
 ```
+
+노드 ID와 엣지의 source/target은 `getDownloadedFileKey(pkg)`와 같은 `[name, version, release 또는 빈 문자열, architecture]`의 JSON 문자열입니다. ID를 하이픈으로 분해하지 않고 연결용 식별자로 사용합니다. 같은 버전의 RPM도 release가 다르면 별도 노드와 충돌 후보로 유지됩니다.
 
 ---
 

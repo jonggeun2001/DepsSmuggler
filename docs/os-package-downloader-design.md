@@ -10,6 +10,7 @@
 | 공통 타입·CLI 실행 | `os-shared/types.ts`, `os-shared/cli-backend.ts`; `src/cli/commands/os.ts`에서 호출합니다. |
 | OS 프리셋·저장소 | `os-shared/repositories.ts`, `os-shared/repos/`, `os-shared/distribution-fetcher.ts`. 아래 고정 예시와 동적 조회 결과는 다를 수 있으며 `os list-distros`로 확인합니다. |
 | 메타데이터·의존성 해결 | 파서 클래스는 위 downloader 파일에 정의되며 resolver는 `src/core/shared/{yum,apt,apk}-metadata-parser.ts` 재내보내기로 참조합니다. 해결기는 [yum-resolver.ts](../src/core/resolver/yum-resolver.ts), [apt-resolver.ts](../src/core/resolver/apt-resolver.ts), [apk-resolver.ts](../src/core/resolver/apk-resolver.ts)와 `os-shared/base-resolver.ts`, `dependency-tree.ts`를 사용합니다. |
+| 충돌 버전과 탐색 한도 | 현재 공통 BFS는 최선 후보와 다운로드 대상으로 유지한 충돌 버전의 전이 의존성을 함께 탐색합니다. 큐·트리·충돌 병합은 이름·버전·RPM release·아키텍처의 JSON 튜플 키를 사용합니다. 단일 루트에서 고유 패키지 10,000개를 처리한 뒤 남은 작업이 있으면 오류를 반환합니다. 아래 초안의 키 문자열과 다르며 모든 후보를 무조건 부모 엣지로 연결하지는 않습니다. |
 | 캐시·출력·스크립트 | `os-shared/cache-manager.ts`, `archive-packager.ts`, `repo-packager.ts`, `script-generator.ts`. CLI는 archive/repository/both 출력과 zip/tar.gz 압축을 구분합니다. |
 | GPG 검증 | `os-shared/gpg-verifier.ts`는 체크섬 검증을 제공하지만 실제 RPM/DEB/APK GPG 서명 검증은 미구현입니다. CLI backend는 이 verifier를 주입하지 않습니다. 아래 GPG 설계는 완료 기능 목록이 아닙니다. |
 | UI 통합 | `pages/download-page/hooks/use-os-download-flow.ts`와 `electron/services/os-download-orchestrator.ts`로 연결됩니다. OS 항목의 관리자·배포판·아키텍처 문맥이 일치할 때 전용 흐름을 사용합니다. |
