@@ -96,7 +96,7 @@ describe('os CLI commands', () => {
     );
   });
 
-  it.each(['1.5', '0.5', '.5', '1abc', '9007199254740992'])(
+  it.each(['1.5', '0.5', '.5', '1abc', '9007199254740992', '1.0000000000000001'])(
     '양의 정수가 아닌 동시성 입력은 backend 전에 실패한다: %j',
     async (concurrency) => {
       const exitSpy = vi

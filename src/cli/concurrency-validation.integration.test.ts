@@ -101,19 +101,37 @@ describe('CLI concurrency validation integration', () => {
   it.each([
     {
       name: 'generic download',
-      args: (output: string) => [
+      value: '1.5',
+      args: (output: string, value: string) => [
         'download', '--type', 'pip', '--package', 'colorama', '--pkg-version', '0.4.6',
-        '--no-deps', '--format', 'zip', '--output', output, '--concurrency', '1.5',
+        '--no-deps', '--format', 'zip', '--output', output, '--concurrency', value,
+      ],
+    },
+    {
+      name: 'generic download',
+      value: '1.0000000000000001',
+      args: (output: string, value: string) => [
+        'download', '--type', 'pip', '--package', 'colorama', '--pkg-version', '0.4.6',
+        '--no-deps', '--format', 'zip', '--output', output, '--concurrency', value,
       ],
     },
     {
       name: 'OS download',
-      args: (output: string) => [
+      value: '1.5',
+      args: (output: string, value: string) => [
         'os', 'download', 'zlib', '--distro', 'alpine-3.20', '--no-deps',
-        '--output', output, '--format', 'archive', '--archive-format', 'zip', '--concurrency', '1.5',
+        '--output', output, '--format', 'archive', '--archive-format', 'zip', '--concurrency', value,
       ],
     },
-  ])('rejects fractional concurrency before $name resolver/backend or output', async ({ args }) => {
+    {
+      name: 'OS download',
+      value: '1.0000000000000001',
+      args: (output: string, value: string) => [
+        'os', 'download', 'zlib', '--distro', 'alpine-3.20', '--no-deps',
+        '--output', output, '--format', 'archive', '--archive-format', 'zip', '--concurrency', value,
+      ],
+    },
+  ])('rejects $value before $name resolver/backend or output', async ({ args, value }) => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-concurrency-'));
     const harnessPath = path.join(tempRoot, 'cli harness with spaces.cjs');
     const isolatedHome = path.join(tempRoot, 'isolated user directory');
@@ -121,13 +139,13 @@ describe('CLI concurrency validation integration', () => {
     const marker = path.join(tempRoot, 'request-count.txt');
     await fs.writeFile(harnessPath, childHarness);
 
-    const child = await runChild(harnessPath, isolatedHome, marker, args(output));
+    const child = await runChild(harnessPath, isolatedHome, marker, args(output, value));
     const outputText = `${child.stdout}\n${child.stderr}`;
     expect(Number.isInteger(child.status)).toBe(true);
     expect(child.status).toBe(1);
     expect(child.signal).toBeNull();
     expect(child.killed).toBe(false);
-    expect(outputText).toContain('1.5');
+    expect(outputText).toContain(value);
     expect(outputText).toContain('양의 정수');
     expect(await fs.readFile(marker, 'utf8')).toBe('0');
     expect(await fs.pathExists(output)).toBe(false);
