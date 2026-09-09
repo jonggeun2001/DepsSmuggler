@@ -177,6 +177,21 @@ export class ScriptGenerator {
       lines.push('');
     }
 
+    lines.push('# 설치 실패 집계');
+    lines.push('FAILED_PACKAGES=()');
+    lines.push('record_failure() { FAILED_PACKAGES+=("$1"); }');
+    lines.push('run_install_group() {');
+    lines.push('    local group_name="$1"');
+    lines.push('    shift');
+    lines.push('    local failures_before="${#FAILED_PACKAGES[@]}"');
+    lines.push('    if ! "$@"; then');
+    lines.push('        if [[ "${#FAILED_PACKAGES[@]}" -eq "$failures_before" ]]; then');
+    lines.push('            record_failure "$group_name"');
+    lines.push('        fi');
+    lines.push('    fi');
+    lines.push('}');
+    lines.push('');
+
     // 패키지 디렉토리 확인
     lines.push('# 패키지 디렉토리 확인');
     lines.push(`PACKAGE_DIR="${packageDir}"`);
@@ -211,21 +226,47 @@ export class ScriptGenerator {
       lines.push('        return 1');
       lines.push('    fi');
       lines.push('');
+      lines.push('    local pip_failed=0');
       lines.push('    PIP_FIND_LINK_ARGS=()');
-      lines.push('    while IFS= read -r -d \'\' directory; do');
-      lines.push('        PIP_FIND_LINK_ARGS+=(--find-links="$directory")');
-      lines.push('    done < <(find "$PACKAGE_DIR" -type d -print0)');
+      lines.push('    local pip_directories_file');
+      lines.push('    if ! pip_directories_file="$(mktemp)"; then');
+      lines.push('        log_error "pip 패키지 디렉터리 목록을 만들 수 없습니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('    if ! find "$PACKAGE_DIR" -type d -print0 > "$pip_directories_file"; then');
+      lines.push('        rm -f "$pip_directories_file"');
+      lines.push('        log_error "pip 패키지 디렉터리를 찾을 수 없습니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('    if ! {');
+      lines.push('        while IFS= read -r -d \'\' directory; do');
+      lines.push('            PIP_FIND_LINK_ARGS+=(--find-links="$directory")');
+      lines.push('        done < "$pip_directories_file"');
+      lines.push('    }; then');
+      lines.push('        rm -f "$pip_directories_file"');
+      lines.push('        log_error "pip 패키지 디렉터리 목록을 읽을 수 없습니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('    if ! rm -f "$pip_directories_file"; then');
+      lines.push('        log_error "pip 패키지 디렉터리 목록을 정리할 수 없습니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
       lines.push('');
 
       for (const pkg of pipPackages) {
         lines.push(`    # ${pkg.name} 설치`);
         lines.push(`    log_info "${pkg.name}==${pkg.version} 설치 중..."`);
-        lines.push(`    pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" ${pkg.name}==${pkg.version} || {`);
+        lines.push(`    if pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" ${pkg.name}==${pkg.version}; then`);
+        lines.push('        :');
+        lines.push('    else');
         lines.push(`        log_warn "${pkg.name} 설치 실패, 계속 진행합니다."`);
-        lines.push('    }');
+        lines.push(`        record_failure ${this.shellQuote(`${pkg.name}==${pkg.version}`)}`);
+        lines.push('        pip_failed=1');
+        lines.push('    fi');
         lines.push('');
       }
 
+      lines.push('    if [[ "$pip_failed" -ne 0 ]]; then return 1; fi');
       lines.push('    log_info "Python 패키지 설치 완료"');
       lines.push('}');
       lines.push('');
@@ -415,19 +456,25 @@ export class ScriptGenerator {
       lines.push('        SUDO=""');
       lines.push('    fi');
       lines.push('');
+      lines.push('    local yum_failed=0');
 
       for (const pkg of yumPackages) {
         const arch = pkg.arch || 'x86_64';
         lines.push(`    # ${pkg.name} 설치`);
         lines.push(`    log_info "${pkg.name}-${pkg.version} 설치 중..."`);
-        lines.push(`    $SUDO rpm -ivh "$PACKAGE_DIR/${pkg.name}-${pkg.version}.${arch}.rpm" 2>/dev/null || {`);
-        lines.push(`        $SUDO rpm -Uvh "$PACKAGE_DIR/${pkg.name}-${pkg.version}.${arch}.rpm" 2>/dev/null || {`);
-        lines.push(`            log_warn "${pkg.name} 설치 실패 또는 이미 설치됨"`);
-        lines.push('        }');
-        lines.push('    }');
+        lines.push(`    if $SUDO rpm -ivh "$PACKAGE_DIR/${pkg.name}-${pkg.version}.${arch}.rpm" 2>/dev/null; then`);
+        lines.push('        :');
+        lines.push(`    elif $SUDO rpm -Uvh "$PACKAGE_DIR/${pkg.name}-${pkg.version}.${arch}.rpm" 2>/dev/null; then`);
+        lines.push('        :');
+        lines.push('    else');
+        lines.push(`        log_warn "${pkg.name} 설치에 실패했습니다."`);
+        lines.push(`        record_failure ${this.shellQuote(`${pkg.name}==${pkg.version}`)}`);
+        lines.push('        yum_failed=1');
+        lines.push('    fi');
         lines.push('');
       }
 
+      lines.push('    if [[ "$yum_failed" -ne 0 ]]; then return 1; fi');
       lines.push('    log_info "YUM/RPM 패키지 설치 완료"');
       lines.push('}');
       lines.push('');
@@ -450,17 +497,23 @@ export class ScriptGenerator {
       lines.push('        return 1');
       lines.push('    fi');
       lines.push('');
+      lines.push('    local docker_failed=0');
 
       for (const pkg of dockerPackages) {
         const tarFileName = buildDockerArchiveFilename(pkg.name, pkg.version);
         lines.push(`    # ${pkg.name}:${pkg.version} 로드`);
         lines.push(`    log_info "${pkg.name}:${pkg.version} 로드 중..."`);
-        lines.push(`    docker load -i "$PACKAGE_DIR"/${this.shellQuote(tarFileName)} || {`);
+        lines.push(`    if docker load -i "$PACKAGE_DIR"/${this.shellQuote(tarFileName)}; then`);
+        lines.push('        :');
+        lines.push('    else');
         lines.push(`        log_warn "${pkg.name}:${pkg.version} 로드 실패"`);
-        lines.push('    }');
+        lines.push(`        record_failure ${this.shellQuote(`${pkg.name}:${pkg.version}`)}`);
+        lines.push('        docker_failed=1');
+        lines.push('    fi');
         lines.push('');
       }
 
+      lines.push('    if [[ "$docker_failed" -ne 0 ]]; then return 1; fi');
       lines.push('    log_info "Docker 이미지 로드 완료"');
       lines.push('}');
       lines.push('');
@@ -478,31 +531,45 @@ export class ScriptGenerator {
     lines.push('    echo ""');
     lines.push('');
 
+    const groupFailureLabel = (label: string, type: string): string => {
+      const group = packagesByType.get(type) || [];
+      const packagesSummary = group.map(pkg => `${pkg.name}@${pkg.version}`).join(', ');
+      return `${label} (${packagesSummary})`;
+    };
+
     if (packagesByType.has('pip')) {
-      lines.push('    install_python_packages');
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('Python 패키지', 'pip'))} install_python_packages`);
       lines.push('    echo ""');
     }
     if (packagesByType.has('conda')) {
-      lines.push('    install_conda_packages || exit 1');
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('Conda 패키지', 'conda'))} install_conda_packages`);
       lines.push('    echo ""');
     }
     if (packagesByType.has('maven')) {
-      lines.push('    install_maven_packages || exit 1');
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('Maven 패키지', 'maven'))} install_maven_packages`);
       lines.push('    echo ""');
     }
     if (packagesByType.has('npm')) {
-      lines.push('    install_npm_packages || exit 1');
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('npm 패키지', 'npm'))} install_npm_packages`);
       lines.push('    echo ""');
     }
     if (packagesByType.has('yum')) {
-      lines.push('    install_yum_packages');
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('YUM 패키지', 'yum'))} install_yum_packages`);
       lines.push('    echo ""');
     }
     if (packagesByType.has('docker')) {
-      lines.push('    load_docker_images');
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('Docker 이미지', 'docker'))} load_docker_images`);
       lines.push('    echo ""');
     }
 
+    lines.push('');
+    lines.push('    if [[ "${#FAILED_PACKAGES[@]}" -gt 0 ]]; then');
+    lines.push('        log_error "실패한 패키지:"');
+    lines.push('        for failed_package in "${FAILED_PACKAGES[@]}"; do');
+    lines.push('            log_error "  - $failed_package"');
+    lines.push('        done');
+    lines.push('        return 1');
+    lines.push('    fi');
     lines.push('');
     lines.push('    log_info "====================================="');
     lines.push('    log_info "모든 설치가 완료되었습니다!"');
@@ -559,6 +626,18 @@ export class ScriptGenerator {
       lines.push('');
     }
 
+    lines.push('$script:FailedPackages = @()');
+    lines.push('function Add-FailedPackage { param([string]$Message) $script:FailedPackages += $Message }');
+    lines.push('function Invoke-InstallGroup {');
+    lines.push('    param([string]$GroupName, [scriptblock]$Action)');
+    lines.push('    $failureCountBefore = $script:FailedPackages.Count');
+    lines.push('    try { & $Action } catch {');
+    lines.push('        Write-Err $_');
+    lines.push('        if ($script:FailedPackages.Count -eq $failureCountBefore) { Add-FailedPackage $GroupName }');
+    lines.push('    }');
+    lines.push('}');
+    lines.push('');
+
     // 로깅 함수
     lines.push('# 로깅 함수');
     lines.push('function Write-Info { param($Message) Write-Host "[INFO] $Message" -ForegroundColor Green }');
@@ -596,28 +675,39 @@ export class ScriptGenerator {
       lines.push('');
       lines.push('    # pip 설치 확인');
       lines.push('    if (-not (Get-Command pip -ErrorAction SilentlyContinue)) {');
-      lines.push('        Write-Err "pip가 설치되어 있지 않습니다."');
-      lines.push('        return');
+      lines.push('        throw "pip가 설치되어 있지 않습니다."');
       lines.push('    }');
       lines.push('');
+      lines.push('    $pipFailed = $false');
       lines.push('    $PipFindLinkArgs = @("--find-links=$PackageDir")');
-      lines.push('    $PipFindLinkArgs += @(');
-      lines.push('        Get-ChildItem -Path $PackageDir -Directory -Recurse |');
-      lines.push('            ForEach-Object { "--find-links=$($_.FullName)" }');
-      lines.push('    )');
+      lines.push('    try {');
+      lines.push('        $PipFindLinkArgs += @(Get-ChildItem -LiteralPath $PackageDir -Directory -Recurse -ErrorAction Stop |');
+      lines.push('            ForEach-Object { "--find-links=$($_.FullName)" })');
+      lines.push('    } catch {');
+      lines.push('        throw "pip 패키지 디렉터리를 찾을 수 없습니다: $_"');
+      lines.push('    }');
       lines.push('');
 
       for (const pkg of pipPackages) {
         lines.push(`    # ${pkg.name} 설치`);
         lines.push(`    Write-Info "${pkg.name}==${pkg.version} 설치 중..."`);
         lines.push('    try {');
-        lines.push(`        pip install --no-index @PipFindLinkArgs ${pkg.name}==${pkg.version}`);
+        lines.push(`        & pip install --no-index @PipFindLinkArgs ${pkg.name}==${pkg.version}`);
+        lines.push('        $pipExitCode = $LASTEXITCODE');
+        lines.push('        if ($pipExitCode -ne 0) {');
+        lines.push(`            Write-Warn "${pkg.name} 설치 실패, 계속 진행합니다."`);
+        lines.push(`            Add-FailedPackage ${this.powerShellQuote(`${pkg.name}==${pkg.version}`)}`);
+        lines.push('            $pipFailed = $true');
+        lines.push('        }');
         lines.push('    } catch {');
-        lines.push(`        Write-Warn "${pkg.name} 설치 실패, 계속 진행합니다."`);
+        lines.push('        Write-Err $_');
+        lines.push(`        Add-FailedPackage ${this.powerShellQuote(`${pkg.name}==${pkg.version}`)}`);
+        lines.push('        $pipFailed = $true');
         lines.push('    }');
         lines.push('');
       }
 
+      lines.push('    if ($pipFailed) { return }');
       lines.push('    Write-Info "Python 패키지 설치 완료"');
       lines.push('}');
       lines.push('');
@@ -780,10 +870,10 @@ export class ScriptGenerator {
       lines.push('');
       lines.push('    # Docker 설치 확인');
       lines.push('    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {');
-      lines.push('        Write-Err "Docker가 설치되어 있지 않습니다."');
-      lines.push('        return');
+      lines.push('        throw "Docker가 설치되어 있지 않습니다."');
       lines.push('    }');
       lines.push('');
+      lines.push('    $dockerFailed = $false');
 
       for (const pkg of dockerPackages) {
         const tarFileName = buildDockerArchiveFilename(pkg.name, pkg.version);
@@ -791,13 +881,22 @@ export class ScriptGenerator {
         lines.push(`    Write-Info "${pkg.name}:${pkg.version} 로드 중..."`);
         lines.push(`    $ImagePath = Join-Path -Path $PackageDir -ChildPath ${this.powerShellQuote(tarFileName)}`);
         lines.push('    try {');
-        lines.push('        docker load -i $ImagePath');
+        lines.push('        & docker load -i $ImagePath');
+        lines.push('        $dockerExitCode = $LASTEXITCODE');
+        lines.push('        if ($dockerExitCode -ne 0) {');
+        lines.push(`            Write-Warn "${pkg.name}:${pkg.version} 로드 실패"`);
+        lines.push(`            Add-FailedPackage ${this.powerShellQuote(`${pkg.name}:${pkg.version}`)}`);
+        lines.push('            $dockerFailed = $true');
+        lines.push('        }');
         lines.push('    } catch {');
-        lines.push(`        Write-Warn "${pkg.name}:${pkg.version} 로드 실패"`);
+        lines.push('        Write-Err $_');
+        lines.push(`        Add-FailedPackage ${this.powerShellQuote(`${pkg.name}:${pkg.version}`)}`);
+        lines.push('        $dockerFailed = $true');
         lines.push('    }');
         lines.push('');
       }
 
+      lines.push('    if ($dockerFailed) { return }');
       lines.push('    Write-Info "Docker 이미지 로드 완료"');
       lines.push('}');
       lines.push('');
@@ -814,27 +913,39 @@ export class ScriptGenerator {
     lines.push('Write-Host ""');
     lines.push('');
 
+    const groupFailureLabel = (label: string, type: string): string => {
+      const group = packagesByType.get(type) || [];
+      const packagesSummary = group.map(pkg => `${pkg.name}@${pkg.version}`).join(', ');
+      return `${label} (${packagesSummary})`;
+    };
+
     if (packagesByType.has('pip')) {
-      lines.push('Install-PythonPackages');
+      lines.push(`Invoke-InstallGroup ${this.powerShellQuote(groupFailureLabel('Python 패키지', 'pip'))} { Install-PythonPackages }`);
       lines.push('Write-Host ""');
     }
     if (packagesByType.has('conda')) {
-      lines.push('Install-CondaPackages');
+      lines.push(`Invoke-InstallGroup ${this.powerShellQuote(groupFailureLabel('Conda 패키지', 'conda'))} { Install-CondaPackages }`);
       lines.push('Write-Host ""');
     }
     if (packagesByType.has('maven')) {
-      lines.push('Install-MavenPackages');
+      lines.push(`Invoke-InstallGroup ${this.powerShellQuote(groupFailureLabel('Maven 패키지', 'maven'))} { Install-MavenPackages }`);
       lines.push('Write-Host ""');
     }
     if (packagesByType.has('npm')) {
-      lines.push('Install-NpmPackages');
+      lines.push(`Invoke-InstallGroup ${this.powerShellQuote(groupFailureLabel('npm 패키지', 'npm'))} { Install-NpmPackages }`);
       lines.push('Write-Host ""');
     }
     if (packagesByType.has('docker')) {
-      lines.push('Load-DockerImages');
+      lines.push(`Invoke-InstallGroup ${this.powerShellQuote(groupFailureLabel('Docker 이미지', 'docker'))} { Load-DockerImages }`);
       lines.push('Write-Host ""');
     }
 
+    lines.push('');
+    lines.push('if ($script:FailedPackages.Count -gt 0) {');
+    lines.push('    Write-Err "실패한 패키지:"');
+    lines.push('    foreach ($failedPackage in $script:FailedPackages) { Write-Err "  - $failedPackage" }');
+    lines.push('    exit 1');
+    lines.push('}');
     lines.push('');
     lines.push('Write-Info "====================================="');
     lines.push('Write-Info "모든 설치가 완료되었습니다!"');
