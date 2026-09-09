@@ -178,6 +178,8 @@ Maven의 `_remote.repositories`는 대상 저장소의 기존 내용을 보존�
 
 `MAVEN_REPO_LOCAL` 상대 경로는 스크립트 폴더를 기준으로 해석합니다. PowerShell에서는 이를 파일시스템 절대 경로로 변환하여 파일 복사 cmdlet과 .NET 추적 기록 저장이 같은 위치를 사용하도록 합니다. Maven `settings.xml`의 사용자 지정 `localRepository`는 자동 조회하지 않으므로 이 환경 변수로 같은 위치를 지정합니다.
 
+CLI와 GUI 저장소 구조는 GAV별 전체 원본 경로의 존재 여부로 구분합니다. `m2repo` 폴더의 존재만으로 판정하지 않으므로 `m2repo.example`처럼 해당 이름으로 시작하는 정상 그룹도 처리합니다.
+
 일반 `ScriptGenerator`에는 npm·APT·APK 전용 설치 블록이 없고, Conda 항목도 pip 설치 블록으로 묶입니다. `.conda` 파일을 설치하는 Conda 전용 스크립트로 간주하면 안 됩니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
 
 ### 사용 예시

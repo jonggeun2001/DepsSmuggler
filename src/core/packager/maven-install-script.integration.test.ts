@@ -181,6 +181,71 @@ describe('Maven install script canonical layout integration', () => {
     expect(await fs.pathExists(callerRepository)).toBe(false);
   }, 120_000);
 
+  it('Maven Bash/PowerShell execution disambiguates CLI and GUI m2repo layouts by GAV', async () => {
+    const generator = getScriptGenerator();
+    const packageInfo: PackageInfo = {
+      type: 'maven',
+      name: 'm2repo.example:demo',
+      version: '1.0.0',
+      metadata: { groupId: 'm2repo.example', artifactId: 'demo' },
+    };
+    const layoutCases = [
+      {
+        name: 'cli',
+        sourceCoordinateSuffix: path.join('packages', 'm2repo', 'example', 'demo', '1.0.0'),
+      },
+      {
+        name: 'gui',
+        sourceCoordinateSuffix: path.join('packages', 'm2repo', 'm2repo', 'example', 'demo', '1.0.0'),
+      },
+    ];
+    const jarFilename = 'demo-1.0.0.jar';
+    const pomFilename = 'demo-1.0.0.pom';
+
+    for (const layoutCase of layoutCases) {
+      const extractionRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), `depssmuggler-maven-layout-${layoutCase.name}-`),
+      );
+      temporaryRoots.push(extractionRoot);
+      const sourceCoordinatePath = path.join(extractionRoot, 'delivered-script', layoutCase.sourceCoordinateSuffix);
+      const targetRoot = path.join(extractionRoot, 'target-local-repository');
+      const targetCoordinatePath = path.join(targetRoot, 'm2repo', 'example', 'demo', '1.0.0');
+      const scriptPath = path.join(
+        extractionRoot,
+        'delivered-script',
+        process.platform === 'win32' ? 'install.ps1' : 'install.sh',
+      );
+
+      await fs.ensureDir(sourceCoordinatePath);
+      await fs.writeFile(path.join(sourceCoordinatePath, jarFilename), `${layoutCase.name} source jar\n`);
+      await fs.writeFile(path.join(sourceCoordinatePath, pomFilename), `<project>${layoutCase.name} source pom</project>\n`);
+
+      if (process.platform === 'win32') {
+        await generator.generatePowerShellScript([packageInfo], scriptPath);
+      } else {
+        await generator.generateBashScript([packageInfo], scriptPath);
+      }
+
+      const command = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+      const commandArgs = process.platform === 'win32'
+        ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath]
+        : [scriptPath];
+      await execFileAsync(command, commandArgs, {
+        cwd: extractionRoot,
+        env: { ...process.env, MAVEN_REPO_LOCAL: targetRoot },
+        timeout: 45_000,
+      });
+
+      const markerText = await fs.readFile(path.join(targetCoordinatePath, REMOTE_MARKER), 'utf8');
+      expect(await fs.readFile(path.join(targetCoordinatePath, jarFilename), 'utf8'))
+        .toBe(`${layoutCase.name} source jar\n`);
+      expect(await fs.readFile(path.join(targetCoordinatePath, pomFilename), 'utf8'))
+        .toBe(`<project>${layoutCase.name} source pom</project>\n`);
+      expect(countMarkerLine(markerText, `${jarFilename}>=`)).toBe(1);
+      expect(countMarkerLine(markerText, `${pomFilename}>=`)).toBe(1);
+    }
+  }, 120_000);
+
   const skipReadOnlyMarkerFailure = process.platform !== 'win32'
     && typeof process.getuid === 'function'
     && process.getuid() === 0;

@@ -123,6 +123,8 @@ bash scripts/verify-worktree.sh \
 
 스크립트 폴더 밖에서 상대 `MAVEN_REPO_LOCAL`을 지정하는 경우에도 아티팩트와 추적 기록이 같은 대상에 저장되는지 검사합니다. Windows PowerShell 프로세스의 시작 지연을 고려해 subprocess 제한과 여러 번 실행하는 테스트의 전체 제한을 별도로 둡니다.
 
+`m2repo.example` 그룹의 CLI·GUI 경로도 실제 스크립트로 검증하여 그룹 이름을 GUI 저장소 폴더로 오인하는 회귀를 방지합니다.
+
 ### Maven 다운로드 목록과 미리보기 검증
 
 모델 POM이 `flatList`에는 있지만 `root` 실행 의존성 그래프에는 없는 응답을 사용해 화면 표시를 검증합니다. 다음 회귀는 renderer 변환과 상태·DOM을 검사하며, 실제 resolver 조회나 파일 다운로드를 실행하지 않습니다.
