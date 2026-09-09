@@ -192,6 +192,8 @@ CLI는 `npmRootPackages`에 실제 직접 요청 목록과 해결된 버전을 �
 
 일반 `ScriptGenerator`에는 APT·APK 전용 설치 블록이 없고, Conda 항목도 pip 설치 블록으로 묶입니다. `.conda` 파일을 설치하는 Conda 전용 스크립트로 간주하면 안 됩니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
 
+Docker 설치 블록은 다운로더와 같은 `buildDockerArchiveFilename()`을 사용해 `packages/<repo>-<tag>.tar`를 로드합니다. namespace·registry 제거와 파일명 정규화도 동일하게 적용하므로 `busybox:1.36`은 `busybox-1.36.tar`를 참조합니다. Bash와 PowerShell 모두 파일명을 인용해 공백이 포함된 추출 경로에서도 하나의 `docker load -i` 인자로 전달합니다. 아키텍처나 ZIP·tar.gz 선택은 내부 이미지 tar 이름에 영향을 주지 않습니다.
+
 ### 사용 예시
 ```typescript
 import { getScriptGenerator } from './core/packager/script-generator';

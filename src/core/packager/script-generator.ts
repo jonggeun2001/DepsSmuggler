@@ -10,6 +10,7 @@ import { buildNpmProjectSetupScript } from './npm-install-runtime';
 import { PackageInfo } from '../../types';
 import logger from '../../utils/logger';
 import { stripLeadingDotSlash, toUnixPath, getWriteOptions } from '../shared/path-utils';
+import { buildDockerArchiveFilename } from '../downloaders/docker-utils';
 
 export interface ScriptOptions {
   includeHeader?: boolean;
@@ -357,10 +358,10 @@ export class ScriptGenerator {
       lines.push('');
 
       for (const pkg of dockerPackages) {
-        const imageName = pkg.name.replace(/\//g, '_');
+        const tarFileName = buildDockerArchiveFilename(pkg.name, pkg.version);
         lines.push(`    # ${pkg.name}:${pkg.version} 로드`);
         lines.push(`    log_info "${pkg.name}:${pkg.version} 로드 중..."`);
-        lines.push(`    docker load -i "$PACKAGE_DIR/${imageName}_${pkg.version}.tar" || {`);
+        lines.push(`    docker load -i "$PACKAGE_DIR"/${this.shellQuote(tarFileName)} || {`);
         lines.push(`        log_warn "${pkg.name}:${pkg.version} 로드 실패"`);
         lines.push('    }');
         lines.push('');
@@ -643,11 +644,10 @@ export class ScriptGenerator {
       lines.push('');
 
       for (const pkg of dockerPackages) {
-        const imageName = pkg.name.replace(/\//g, '_');
-        const tarFileName = `${imageName}_${pkg.version}.tar`;
+        const tarFileName = buildDockerArchiveFilename(pkg.name, pkg.version);
         lines.push(`    # ${pkg.name}:${pkg.version} 로드`);
         lines.push(`    Write-Info "${pkg.name}:${pkg.version} 로드 중..."`);
-        lines.push(`    $ImagePath = Join-Path -Path $PackageDir -ChildPath '${tarFileName}'`);
+        lines.push(`    $ImagePath = Join-Path -Path $PackageDir -ChildPath ${this.powerShellQuote(tarFileName)}`);
         lines.push('    try {');
         lines.push('        docker load -i $ImagePath');
         lines.push('    } catch {');

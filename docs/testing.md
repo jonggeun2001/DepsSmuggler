@@ -115,6 +115,21 @@ bash scripts/verify-worktree.sh \
 
 이 fixture 검증은 실제 Maven Central의 현재 파일 존재 여부나 외부 Maven 실행의 오프라인 성공을 보장하지 않습니다. 외부 저장소 검증에는 아래 통합 테스트를 별도로 사용하고, 실행 명령·대상 좌표·파일 확인 결과를 해당 작업의 검증 기록에 남깁니다.
 
+### Docker 설치 스크립트 파일명과 실제 로드 검증
+
+`src/core/downloaders/docker-download.test.ts`는 이미지 이름·태그 정규화와 아키텍처별 실제 반환 파일명을 확인합니다. `src/core/packager/docker-install-script.integration.test.ts`는 같은 파일명 fixture를 준비하고, 공백이 있는 폴더와 외부 작업 디렉터리에서 생성 스크립트를 실행합니다. macOS·Linux에서는 Bash, Windows에서는 PowerShell을 사용하며 Docker 기록용 대체 명령이 받은 `load -i` 인자와 실제 파일 경로를 검사합니다. 이 검증은 Docker 엔진의 이미지 로드를 대신하지 않습니다.
+
+경로 비교에는 Node.js의 `realpathSync.native()`를 사용합니다. Windows 임시 폴더의 8.3 짧은 이름(`RUNNER~1`)과 PowerShell이 전달하는 긴 이름이 같은 실제 파일을 가리키는 경우도 동일하게 판정합니다.
+
+Docker 엔진이 실행 중인 환경에서는 아래 명령으로 실제 로드 테스트를 실행합니다. 테스트가 만든 고유 태그의 로컬 이미지 tar를 생성 스크립트로 로드하고, Docker에서 이미지 ID를 확인한 뒤 해당 태그만 정리합니다. 외부 레지스트리 다운로드는 필요하지 않습니다. 명시적으로 활성화한 상태에서 Docker에 연결할 수 없으면 테스트가 실패하며, 기본 단위 테스트에서는 이 사례를 건너뜁니다. Ubuntu CI는 별도 단계에서 이 검증을 활성화합니다.
+
+```bash
+DEPS_SMUGGLER_NATIVE_DOCKER=1 bash scripts/verify-worktree.sh \
+  src/core/packager/docker-install-script.integration.test.ts -t 'native Docker'
+```
+
+실제 CLI 다운로드 검증은 `busybox:1.36`의 `--arch amd64 --format zip`과 `--arch arm64 --format tar.gz` 출력에서 `packages/busybox-1.36.tar`, tar 내부 manifest와 config 아키텍처, 원본 설치 스크립트의 참조 경로를 함께 확인합니다. Docker가 없는 환경의 파일·스크립트 검사와 엔진을 사용한 로드 결과는 구분해 기록합니다.
+
 ### npm 설치 스크립트 오프라인 검증
 
 `src/core/packager/npm-install-script.integration.test.ts`는 레지스트리에 연결하지 않고 로컬 tarball fixture로 생성 스크립트를 실제 실행합니다. macOS·Linux에서는 Bash, Windows에서는 `powershell.exe`와 해당 환경의 npm을 사용합니다. 빈 npm 캐시와 별도 설정·설치 경로를 사용하며, 공백이 포함된 경로와 scoped 전이 의존성을 설치한 뒤 Node.js에서 실제 모듈을 불러와 검사합니다. 같은 패키지의 1.x·2.x를 요구하는 두 루트가 각각 올바른 버전을 불러오는지, 명시적으로 선택한 직접 버전이 유지되는지도 검증합니다. 서로 다른 peer 버전을 요구하는 전이 플러그인과 순환 의존성도 실제 npm 설치 및 모듈 로딩으로 확인합니다. 설치 대상은 `npm-project/node_modules`이며 상위 사용자 manifest 보존과 기존 사용자 프로젝트 덮어쓰기 방지를 확인합니다. 패키지 파일 또는 필요한 의존성이 없거나 tarball이 손상된 경우에는 오류 종료와 성공 문구 부재를 확인합니다. macOS 임시 디렉터리의 `/var`→`/private/var` 경로 차이에서도 여러 버전을 설치할 수 있어야 합니다. Windows의 `NODE_OPTIONS` preload 경로는 `JSON.stringify`로 인코딩해 역슬래시가 손실되지 않도록 합니다.

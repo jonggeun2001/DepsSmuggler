@@ -5,8 +5,8 @@
  * ESM 환경에서 vi.hoisted() + vi.mock()을 사용하여 모듈 모킹
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // vi.hoisted()로 모킹 함수들을 먼저 정의
 const {
@@ -148,6 +148,36 @@ describe('DockerDownloader - Download Methods', () => {
   });
 
   describe('downloadImage', () => {
+    it.each([
+      ['x86_64', 'busybox-1.36.tar'],
+      ['arm64', 'busybox-1.36.tar'],
+    ] as const)('returns the downloader archive basename for busybox %s', async (arch, expectedBasename) => {
+      const result = await downloader.downloadImage(
+        'busybox',
+        '1.36',
+        arch,
+        tmpDir
+      );
+
+      expect(path.basename(result)).toBe(expectedBasename);
+    });
+
+    it.each([
+      ['library/busybox', '1.36', 'busybox-1.36.tar'],
+      ['ghcr.io/acme/web-app', 'release:v1', 'web-app-release_v1.tar'],
+    ] as const)('uses the same safe basename for %s:%s', async (repository, tag, expectedBasename) => {
+      const result = await downloader.downloadImage(
+        repository,
+        tag,
+        'x86_64',
+        tmpDir,
+        undefined,
+        repository.startsWith('ghcr.io') ? 'ghcr.io' : 'docker.io'
+      );
+
+      expect(path.basename(result)).toBe(expectedBasename);
+    });
+
     it('should download docker image successfully', async () => {
       const repository = 'library/nginx';
       const tag = 'latest';
