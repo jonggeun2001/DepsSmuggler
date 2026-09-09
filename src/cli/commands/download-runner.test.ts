@@ -763,6 +763,55 @@ describe('DownloadManager 단위 테스트', () => {
       });
     });
 
+    it('파일 목록을 반환하는 다운로더를 우선 사용하고 모든 경로를 item에 기록한다', async () => {
+      const primaryPath = '/test/output/demo-1.0.0.jar';
+      const companionPaths = [
+        primaryPath,
+        '/test/output/demo-1.0.0.jar.sha1',
+        '/test/output/demo-1.0.0.pom',
+        '/test/output/demo-1.0.0.pom.sha1',
+      ];
+      const downloadPackage = vi.fn().mockResolvedValue(primaryPath);
+      const downloadPackageFiles = vi.fn().mockResolvedValue(companionPaths);
+      const downloader = {
+        type: 'maven' as const,
+        downloadPackage,
+        downloadPackageFiles,
+      } as unknown as IDownloader;
+      asTestable(manager).downloaders.set('maven', downloader);
+      manager.addToQueue([
+        { type: 'maven' as const, name: 'com.example:demo', version: '1.0.0' },
+      ]);
+
+      const result = await manager.startDownload({ outputPath: '/test/output' });
+
+      expect(downloadPackageFiles).toHaveBeenCalledTimes(1);
+      expect(downloadPackage).not.toHaveBeenCalled();
+      expect(result.items[0].filePath).toBe(primaryPath);
+      expect((result.items[0] as DownloadManagerItem & { filePaths?: string[] }).filePaths)
+        .toEqual(companionPaths);
+    });
+
+    it('파일 목록 API가 없는 다운로더는 기존 단일 경로 API로 대체한다', async () => {
+      const primaryPath = '/test/output/requests.whl';
+      const downloadPackage = vi.fn().mockResolvedValue(primaryPath);
+      const downloader = {
+        type: 'pip' as const,
+        downloadPackage,
+      } as unknown as IDownloader;
+      asTestable(manager).downloaders.set('pip', downloader);
+      manager.addToQueue([
+        { type: 'pip' as const, name: 'requests', version: '2.28.0' },
+      ]);
+
+      const result = await manager.startDownload({ outputPath: '/test/output' });
+
+      expect(downloadPackage).toHaveBeenCalledTimes(1);
+      expect(result.items[0].filePath).toBe(primaryPath);
+      expect((result.items[0] as DownloadManagerItem & { filePaths?: string[] }).filePaths)
+        .toBeUndefined();
+    });
+
     it('allComplete 이벤트 발생', async () => {
       const listener = vi.fn();
       manager.on('allComplete', listener);

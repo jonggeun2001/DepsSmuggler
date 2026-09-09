@@ -228,6 +228,7 @@ if (expectedMd5) await downloader.verifyChecksum(filePath, expectedMd5, 'md5');
 | `getVersions` | packageName: string (groupId:artifactId) | Promise<string[]> | 아티팩트 버전 목록 조회 |
 | `getPackageMetadata` | name: string, version: string | Promise<PackageInfo> | 아티팩트 메타데이터 조회 |
 | `downloadPackage` | info: PackageInfo, destPath, onProgress?, _options? | Promise<string> | 아티팩트 다운로드 (jar, pom, 체크섬 포함) |
+| `downloadPackageFiles` | info: PackageInfo, destPath, onProgress?, _options? | Promise<string[]> | 이번 다운로드에서 저장한 전체 파일 경로 반환 (첫 항목은 주 아티팩트) |
 | `downloadArtifact` | groupId, artifactId, version, destPath, artifactType?, onProgress?, classifier? | Promise<string> | 특정 타입 아티팩트 다운로드 |
 | `downloadPom` | groupId, artifactId, version, destPath | Promise<string> | POM 파일 다운로드 |
 | `downloadSources` | groupId, artifactId, version, destPath | Promise<string> | 소스 JAR 다운로드 |
@@ -301,6 +302,8 @@ if (isPomOnly) {
 4. **POM 체크섬** (`.pom.sha1`) - POM 무결성 검증용
 
 POM 파일은 모든 아티팩트에서 필수입니다. 일반 JAR를 받은 뒤라도 부속 POM 다운로드가 실패하면 해당 패키지는 실패로 처리합니다. `.sha1` companion 파일은 선택 사항이므로 조회 실패 후 계속할 수 있습니다. `_options`의 OS/아키텍처는 현재 사용하지 않으며 네이티브 classifier는 metadata에서 명시해야 합니다.
+
+`downloadPackageFiles`는 실제 저장에 성공한 주 아티팩트, 부속 POM, 선택적 체크섬 경로를 한 번의 다운로드 결과로 반환합니다. 기존 `downloadPackage`는 같은 다운로드를 수행하고 첫 번째 경로만 반환하므로 기존 호출 계약을 유지합니다. CLI는 전체 경로를 압축기에 전달해 JAR만 포함되던 누락을 방지합니다. POM-only 항목이나 classifier가 있는 JAR에도 적용하며, 출력 디렉터리의 기존 파일을 검색해 결과에 추가하지 않습니다.
 
 의존성 해결에 필요한 Parent/BOM의 조회 실패는 resolver의 실패로 전달됩니다. 모델 조회가 성공했더라도 이후 실제 POM 파일 저장이 실패하면 다운로드를 성공으로 반환하지 않습니다.
 
@@ -958,9 +961,16 @@ interface IDownloader {
     destPath: string,
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string>;
+  downloadPackageFiles?(
+    info: PackageInfo,
+    destPath: string,
+    onProgress?: (progress: DownloadProgressEvent) => void
+  ): Promise<string[]>;
   verifyChecksum?(filePath: string, expected: string): Promise<boolean>;
 }
 ```
+
+`downloadPackageFiles`는 여러 파일을 생성하는 다운로더가 선택적으로 구현합니다. CLI 다운로드 매니저는 이 메서드가 있으면 전체 파일 목록을 사용하고, 없으면 기존 `downloadPackage`의 단일 파일 경로를 사용합니다. 두 메서드를 함께 호출해 중복 다운로드하지 않습니다.
 
 ---
 

@@ -431,6 +431,20 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
       targetArchitecture?: string;
     }
   ): Promise<string> {
+    const files = await this.downloadPackageFiles(info, destPath, onProgress, _options);
+    return files[0];
+  }
+
+  /** Download the primary artifact and its POM/checksums as one file set. */
+  async downloadPackageFiles(
+    info: PackageInfo,
+    destPath: string,
+    onProgress?: (progress: DownloadProgressEvent) => void,
+    _options?: {
+      targetOS?: string;
+      targetArchitecture?: string;
+    }
+  ): Promise<string[]> {
     const groupId = (info.metadata?.groupId as string) || info.name.split(':')[0];
     const artifactId = (info.metadata?.artifactId as string) || info.name.split(':')[1];
     const classifier = info.metadata?.classifier as string | undefined;
@@ -480,11 +494,11 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
       });
     }
 
-    let mainArtifactPath: string;
+    const files: string[] = [];
 
     // 1. 메인 아티팩트 다운로드 (POM-only가 아닌 경우)
     if (!isPomOnly) {
-      mainArtifactPath = await this.downloadArtifact(
+      const mainArtifactPath = await this.downloadArtifact(
         groupId,
         artifactId,
         info.version,
@@ -493,11 +507,13 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
         onProgress,
         classifier
       );
+      files.push(mainArtifactPath);
 
       // 메인 아티팩트 체크섬 파일 다운로드 (.sha1)
-      await this.downloadChecksumFile(groupId, artifactId, info.version, destPath, artifactType, classifier);
-    } else {
-      mainArtifactPath = ''; // POM 경로로 대체될 예정
+      const checksumPath = await this.downloadChecksumFile(
+        groupId, artifactId, info.version, destPath, artifactType, classifier
+      );
+      if (checksumPath) files.push(checksumPath);
     }
 
     // 2. pom 파일 다운로드 (모든 타입에 필요)
@@ -510,12 +526,12 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
         'pom',
         isPomOnly ? onProgress : undefined // POM-only인 경우에만 진행률 표시
       );
+      files.push(pomPath);
       // pom 체크섬 파일 다운로드 (.sha1)
-      await this.downloadChecksumFile(groupId, artifactId, info.version, destPath, 'pom');
-
-      if (isPomOnly) {
-        mainArtifactPath = pomPath;
-      }
+      const checksumPath = await this.downloadChecksumFile(
+        groupId, artifactId, info.version, destPath, 'pom'
+      );
+      if (checksumPath) files.push(checksumPath);
     } catch (error) {
       // JAR가 있어도 POM이 없으면 오프라인 Maven 저장소가 불완전하다.
       throw new Error(
@@ -532,7 +548,7 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
       isPomOnly,
     });
 
-    return mainArtifactPath;
+    return files;
   }
 
   /**
@@ -734,7 +750,7 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     destPath: string,
     artifactType: ArtifactType,
     classifier?: string
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const baseUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType, classifier);
     const baseFileName = this.buildFileName(artifactId, version, artifactType, classifier);
 
@@ -762,6 +778,7 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
       logger.debug('체크섬 파일 다운로드 완료', {
         file: checksumFileName,
       });
+      return checksumFilePath;
     } catch (error) {
       // 체크섬 파일이 없을 수 있으므로 경고만 로깅
       logger.debug('sha1 파일 다운로드 실패 (선택적)', {
