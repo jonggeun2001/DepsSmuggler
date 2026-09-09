@@ -181,7 +181,7 @@ export class MavenResolver implements IResolver {
     const rootCoordinate: MavenCoordinate = {
       groupId,
       artifactId,
-      version,
+      version: version === 'latest' ? await this.getLatestVersion(groupId, artifactId) : version,
       // 사용자가 UI에서 선택한 classifier 사용
       classifier: opts.classifier,
       type: opts.artifactType,
@@ -205,7 +205,7 @@ export class MavenResolver implements IResolver {
     try {
       logger.info('Maven 의존성 해결 시작', {
         package: packageName,
-        version,
+        version: rootCoordinate.version,
         algorithm: opts.algorithm,
       });
 
@@ -450,9 +450,14 @@ export class MavenResolver implements IResolver {
     try {
       const response = await this.axiosInstance.get<string>(url);
       const parsed = this.parser.parse(response.data);
-      return (
-        parsed.metadata?.versioning?.latest || parsed.metadata?.versioning?.release || ''
-      );
+      const version = [
+        parsed.metadata?.versioning?.latest,
+        parsed.metadata?.versioning?.release,
+      ].find((candidate) => typeof candidate === 'string' && candidate.trim());
+      if (!version) {
+        throw new Error('Maven 메타데이터에 latest 또는 release 버전이 없습니다.');
+      }
+      return version.trim();
     } catch {
       throw new Error(`버전 조회 실패: ${groupId}:${artifactId}`);
     }

@@ -96,6 +96,8 @@ depssmuggler download [옵션]
 
 Maven ZIP/TAR.GZ에는 선택된 각 아티팩트의 부속 POM과 다운로드에 성공한 `.sha1` 체크섬도 포함됩니다. `--no-deps`나 `--max-depth`로 의존성 탐색 범위를 줄여도 선택된 JAR 자체의 POM은 함께 전달됩니다. 파일은 `packages/` 아래 Maven 저장소 디렉터리 구조를 유지하며, 같은 POM을 여러 항목에서 참조해도 한 번만 포함합니다.
 
+Maven의 `-V latest`는 POM을 조회하기 전에 `maven-metadata.xml`의 `latest` 값으로 해석하며, 그 값이 없으면 `release`를 사용합니다. 해석된 실제 버전이 다운로드 경로·파일명과 manifest에 기록됩니다. `--no-deps`에서도 이 버전 조회는 수행하며 전이 라이브러리를 확장하지 않습니다. 사용 가능한 버전 정보가 없으면 해당 루트의 해결 실패로 처리합니다.
+
 `pip`에서 `--python-version`을 지정하면 해당 버전의 `python_version` 환경 마커를 평가하고, `--target-os` 및 `--arch`와 호환되는 wheel 태그를 선택합니다. Python 버전은 `major.minor` 형식만 허용합니다. 따라서 `python_full_version`과 `implementation_version`처럼 patch가 필요한 marker는 값을 알 수 없는 조건으로 처리합니다. wheel은 대상 버전의 CPython 태그와 범용 `py3`/`py2.py3` 태그, 또는 대상보다 같거나 낮은 CPython 버전의 `abi3` 태그만 선택합니다. PyPI의 패키지·파일 `requires_python`과 Simple API 파일의 `requiresPython`도 PEP 440 specifier set으로 확인하므로, 대상 Python보다 높은 버전만 지원하는 wheel과 source distribution은 선택하지 않습니다. `latest`와 버전 범위는 PyPI 또는 Simple API에서 대상 Python과 호환되는 산출물이 있는 가장 높은 안정 버전을 선택하고, 철회(yanked) 릴리스는 wildcard가 없는 정확한 버전 고정 외에는 제외합니다. 프리릴리스는 버전 제약이 명시적으로 포함하거나 안정 후보가 없을 때만 선택합니다. 지원하지 않는 marker 문법이나 값이 없는 `platform_release`/`platform_version`은 의존성을 포함하지 않는 것으로 처리합니다.
 
 대상 환경 옵션은 다운로드 전에 검증됩니다.
@@ -114,7 +116,7 @@ Maven ZIP/TAR.GZ에는 선택된 각 아티팩트의 부속 POM과 다운로드�
 - 깊이 경계 도달은 위 규칙에 따른 정상적인 bounded traversal이며 직접 루트 실패가 아닙니다. 반대로 호환되는 필수 의존성 버전을 찾지 못한 경우, 의존성 메타데이터 조회가 실패한 경우, 네트워크 오류가 발생한 경우처럼 실제 필수 의존성 해결 오류는 직접 루트 실패로 처리됩니다.
 - pip 하위 의존성은 버전 제약과 대상 환경에 호환되는 아티팩트를 함께 만족하는 최신 릴리스를 선택하며, 같은 패키지에 여러 경로로 요청된 기본/extra 컨텍스트는 합쳐서 평가합니다. Conda 하위 의존성은 버전뿐 아니라 build MatchSpec도 실제 파일 선택까지 유지하고, 같은 버전의 서로 다른 build가 필요하면 각 아티팩트를 모두 보존합니다.
 - Maven classifier 형식은 라이브러리마다 다르므로 OS와 아키텍처만으로 자동 생성하지 않습니다. Maven에 `--target-os` 또는 기본값이 아닌 `--arch`를 지정할 때는 실제 네이티브 아티팩트를 선택할 `--classifier`를 함께 지정해야 합니다.
-- pip·Conda의 `--no-deps`는 환경 옵션을 생략해도 깊이 0 resolver로 호환되는 루트 아티팩트를 선택·검증하며, 전이 의존성은 다운로드하지 않습니다. 기본값이 아닌 `--arch`를 비롯해 지정한 환경 옵션도 이 파일 선택에 반영됩니다. Maven은 classifier 등 대상 환경을 명시한 경우에만 깊이 0으로 루트를 해결합니다. 기본 환경의 Maven과 npm·Docker는 `--no-deps`에서 resolver를 생략합니다.
+- pip·Conda의 `--no-deps`는 환경 옵션을 생략해도 깊이 0 resolver로 호환되는 루트 아티팩트를 선택·검증하며, 전이 의존성은 다운로드하지 않습니다. 기본값이 아닌 `--arch`를 비롯해 지정한 환경 옵션도 이 파일 선택에 반영됩니다. Maven은 classifier 등 대상 환경을 명시하거나 요청 목록에 `latest`가 있으면 깊이 0으로 루트를 해결합니다. 명시적 버전만 지정한 기본 환경의 Maven과 npm·Docker는 `--no-deps`에서 resolver를 생략합니다.
 - pip은 PyPI JSON API와 Simple API 모두에서 호환 wheel을 우선하고, 없으면 `Requires-Python` 조건을 만족하는 source distribution(`.tar.gz`, `.zip`, `.tar.bz2`, `.tar.xz`)을 선택합니다. source distribution은 대상 환경에서 빌드하지 않고 그대로 반입합니다. 호환 wheel과 source distribution이 모두 없으면 다른 아키텍처 wheel로 바꾸지 않으며, 요청한 정확 버전·`latest`·범위 spec과 대상 Python/OS/아키텍처를 포함한 오류를 반환합니다.
 - Simple API의 source distribution은 `--no-deps`에서 artifact hash가 있으면 Core Metadata 없이도 반입할 수 있습니다. wheel과 의존성 확장 모드는 검증된 Core Metadata를 계속 요구합니다.
 
