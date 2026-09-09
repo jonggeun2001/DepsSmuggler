@@ -78,7 +78,7 @@ export class OSRepoPackager {
         metadataFiles = await this.createYumRepoMetadata(packages, repoPath);
         break;
       case 'apt':
-        metadataFiles = await this.createAptRepoMetadata(packages, repoPath);
+        metadataFiles = await this.createAptRepoMetadata(packages, repoPath, downloadedFiles);
         break;
       case 'apk':
         metadataFiles = await this.createApkRepoMetadata(packages, repoPath);
@@ -300,12 +300,13 @@ export class OSRepoPackager {
    */
   private async createAptRepoMetadata(
     packages: OSPackageInfo[],
-    repoPath: string
+    repoPath: string,
+    downloadedFiles: Map<string, string>
   ): Promise<string[]> {
     const metadataFiles: string[] = [];
 
     // Packages 파일 생성
-    const packagesContent = this.generateAptPackagesFile(packages);
+    const packagesContent = await this.generateAptPackagesFile(packages, repoPath, downloadedFiles);
     const packagesPath = path.join(repoPath, 'Packages');
     fs.writeFileSync(packagesPath, packagesContent);
     metadataFiles.push(packagesPath);
@@ -328,48 +329,109 @@ export class OSRepoPackager {
   /**
    * APT Packages 파일 생성
    */
-  private generateAptPackagesFile(packages: OSPackageInfo[]): string {
+  private async generateAptPackagesFile(
+    packages: OSPackageInfo[],
+    repoPath: string,
+    downloadedFiles: Map<string, string>
+  ): Promise<string> {
     const entries: string[] = [];
 
     for (const pkg of packages) {
+      const sourcePath = downloadedFiles.get(getDownloadedFileKey(pkg));
+      if (!sourcePath || !fs.existsSync(sourcePath)) {
+        throw new Error(`APT 패키지 ${pkg.name}의 다운로드 payload가 없습니다`);
+      }
+
+      const filename = path.basename(sourcePath);
+      const copiedPath = path.join(repoPath, filename);
+      if (!fs.existsSync(copiedPath) || !fs.statSync(copiedPath).isFile()) {
+        throw new Error(`APT 패키지 ${pkg.name}의 복사된 payload가 없습니다: ${filename}`);
+      }
+
+      const actualSize = fs.statSync(copiedPath).size;
+      const actualSha256 = await this.calculateSha256(copiedPath);
+      const fields = new Map<string, string>(Object.entries(pkg.aptControlFields || {}));
+
+      const removeFields = (...names: string[]) => {
+        for (const key of [...fields.keys()]) {
+          if (names.some((name) => key.toLowerCase() === name.toLowerCase())) {
+            fields.delete(key);
+          }
+        }
+      };
+      const setField = (name: string, value: string) => {
+        removeFields(name);
+        fields.set(name, value);
+      };
+      const hasField = (name: string): boolean =>
+        [...fields.keys()].some((key) => key.toLowerCase() === name.toLowerCase());
+
       const arch = pkg.architecture === 'x86_64' ? 'amd64' : pkg.architecture;
-      const filename = `${pkg.name}_${pkg.version}_${arch}.deb`;
+      setField('Package', pkg.name);
+      setField('Version', pkg.version);
+      setField('Architecture', arch);
+      if (!hasField('Maintainer')) {
+        setField('Maintainer', 'DepsSmuggler');
+      }
+      if (!hasField('Installed-Size') && pkg.installedSize !== undefined) {
+        setField('Installed-Size', String(Math.ceil(pkg.installedSize / 1024)));
+      }
+      if (!hasField('Depends') && pkg.dependencies.length > 0) {
+        const deps = pkg.dependencies
+          .filter((dependency) => !dependency.isOptional)
+          .map((dependency) => {
+            if (!dependency.version) return dependency.name;
+            const operator = dependency.operator || '>=';
+            return `${dependency.name} (${operator} ${dependency.version})`;
+          })
+          .join(', ');
+        if (deps) setField('Depends', deps);
+      }
+      if (!hasField('Provides') && pkg.provides?.length) {
+        setField('Provides', pkg.provides.join(', '));
+      }
+      if (!hasField('Conflicts') && pkg.conflicts?.length) {
+        setField('Conflicts', pkg.conflicts.join(', '));
+      }
+      if (!hasField('Recommends') && pkg.recommends?.length) {
+        setField('Recommends', pkg.recommends.join(', '));
+      }
+      if (!hasField('Suggests') && pkg.suggests?.length) {
+        setField('Suggests', pkg.suggests.join(', '));
+      }
+      if (!hasField('Description')) {
+        setField('Description', pkg.description || pkg.name);
+      }
+
+      setField('Filename', `./${filename}`);
+      setField('Size', String(actualSize));
+      removeFields('MD5sum', 'SHA1', 'SHA256', 'SHA512');
+      fields.set('SHA256', actualSha256);
 
       const lines: string[] = [];
-      lines.push(`Package: ${pkg.name}`);
-      lines.push(`Version: ${pkg.version}`);
-      lines.push(`Architecture: ${arch}`);
-      lines.push(`Maintainer: DepsSmuggler`);
-      lines.push(`Installed-Size: ${Math.ceil(pkg.size / 1024)}`);
-
-      if (pkg.dependencies.length > 0) {
-        const deps = pkg.dependencies
-          .filter((d) => !d.isOptional)
-          .map((d) => d.version ? `${d.name} (>= ${d.version})` : d.name)
-          .join(', ');
-        if (deps) {
-          lines.push(`Depends: ${deps}`);
+      for (const [name, value] of fields) {
+        const valueLines = value.split('\n');
+        lines.push(`${name}: ${valueLines[0]}`);
+        for (const continuation of valueLines.slice(1)) {
+          lines.push(` ${continuation || '.'}`);
         }
       }
-
-      lines.push(`Filename: ./${filename}`);
-      lines.push(`Size: ${pkg.size}`);
-
-      if (pkg.checksum) {
-        if (pkg.checksum.type === 'sha256') {
-          lines.push(`SHA256: ${pkg.checksum.value}`);
-        } else {
-          lines.push(`SHA256: ${pkg.checksum.value}`);
-        }
-      }
-
-      lines.push(`Description: ${pkg.description || pkg.name}`);
       lines.push('');
-
       entries.push(lines.join('\n'));
     }
 
     return entries.join('\n');
+  }
+
+  private async calculateSha256(filePath: string): Promise<string> {
+    const hash = crypto.createHash('sha256');
+    await new Promise<void>((resolve, reject) => {
+      const stream = fs.createReadStream(filePath);
+      stream.on('data', (chunk) => hash.update(chunk));
+      stream.on('end', () => resolve());
+      stream.on('error', reject);
+    });
+    return hash.digest('hex');
   }
 
   /**

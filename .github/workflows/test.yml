@@ -39,6 +39,12 @@ jobs:
           DEPS_SMUGGLER_NATIVE_DOCKER: '1'
         run: bash scripts/verify-worktree.sh src/core/packager/docker-install-script.integration.test.ts -t 'native Docker'
 
+      - name: Test generated APT metadata with native APT
+        if: runner.os == 'Linux'
+        env:
+          DEPS_SMUGGLER_NATIVE_APT: '1'
+        run: bash scripts/verify-worktree.sh src/core/downloaders/apt-native-consumer.integration.test.ts
+
       - name: Build project
         run: npm run build
 

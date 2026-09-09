@@ -148,6 +148,8 @@ export interface OSPackageInfo {
   suggests?: string[];
   /** 권장 의존성 */
   recommends?: string[];
+  /** APT 원본 control fields (JSON 직렬화 가능한 semantic record) */
+  aptControlFields?: Record<string, string>;
 }
 
 /**

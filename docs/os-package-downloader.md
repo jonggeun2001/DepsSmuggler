@@ -145,6 +145,7 @@ interface OSPackageInfo {
   obsoletes?: string[];
   suggests?: string[];           // DEB: Suggests
   recommends?: string[];         // DEB: Recommends
+  aptControlFields?: Record<string, string>; // APT 원본 Control 필드 (JSON 캐시 가능)
 }
 ```
 
@@ -475,6 +476,8 @@ class OsPackageCache {
 
 persistent 캐시 조회 시 최근 접근 시각을 JSON 파일에도 기록해 다음 실행의 LRU 정리에 반영합니다. 이 기록은 기존 캐시 파일을 다시 쓰며, TTL 기준인 최초 저장 시각은 갱신하지 않습니다. 접근 시각 저장에 실패해도 캐시에서 읽은 데이터는 반환하고 경고를 기록합니다.
 
+APT resolver는 원본 Control 필드를 함께 보존하는 `{ schemaVersion: 1, packages }` 값을 저장합니다. 이전 배열 캐시나 알 수 없는 스키마는 다시 파싱해 같은 키에 저장하고, 현재 스키마는 재사용합니다. 원본 필드는 JSON 객체이므로 persistent 캐시를 거쳐도 의존성 연산자·대안·여러 줄 설명이 유지됩니다.
+
 ### GPGVerifier
 
 - **위치**: `src/core/downloaders/os-shared/gpg-verifier.ts`
@@ -620,6 +623,10 @@ class OSRepoPackager {
 | APK | `APKINDEX.tar.gz` | `APKINDEX` 항목 하나를 담은 gzip tar 아카이브를 Node `tar`로 생성 |
 
 현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다.
+
+APT는 수신한 `Packages`의 `aptControlFields`에서 의존성 조건과 대안, `Pre-Depends`, `Provides`, `Conflicts`, `Breaks`, `Replaces`, `Multi-Arch`, `Installed-Size` 등 Control 필드를 보존합니다. 여러 줄 값이 있으면 Debian continuation 문법으로 출력하므로 설명의 들여쓰기와 빈 문단 표기도 유지됩니다. 상위 저장소가 짧은 설명과 `Description-md5`만 제공하면 그 값을 유지하며, 별도 Translation 파일을 받거나 DEB의 긴 설명을 추출하지는 않습니다. `Packages.gz`에는 같은 `Packages` 내용을 압축합니다.
+
+`Package`·`Version`·`Architecture`는 선택한 패키지에서, `Filename`·`Size`·`SHA256`은 실제 복사한 파일에서 생성합니다. 상위 저장소의 경로나 오래된 체크섬을 그대로 전달하지 않으며, 필요한 로컬 파일이 없으면 저장소 생성에 실패합니다. API 호출자가 원본 필드를 제공하지 않으면 공통 패키지 정보로 생성하되 의존성 연산자와 제공·충돌 정보를 반영하고, 설치 크기는 `installedSize`가 있을 때 사용합니다. 원본 필드 보존은 전달 저장소의 정보 보존이며, 앱 resolver가 모든 Debian 의존성 표현을 해결한다는 뜻은 아닙니다.
 
 APK 인덱스는 별도 임시 디렉터리에서 아카이브를 완성한 뒤 최종 `APKINDEX.tar.gz`로 교체합니다. 아카이브 생성 중 오류가 발생하면 기존 인덱스를 유지하고 오류를 전달하며, 사용자가 미리 둔 평문 `APKINDEX`를 임시 파일로 사용하거나 삭제하지 않습니다. 생성한 gzip tar 구조는 실제 `ApkMetadataParser`로 검증합니다. 체크섬 인코딩·의존성 조건·provides·설치 크기 보존 문제는 [#97](https://github.com/jonggeun2001/DepsSmuggler/issues/97)에 남아 있으므로, tar 구조 검증을 네이티브 `apk update`·설치 성공으로 간주하지 않습니다.
 

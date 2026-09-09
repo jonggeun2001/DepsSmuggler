@@ -251,6 +251,11 @@ export class AptMetadataParser {
     const conflicts = this.parseDebDepends(fields.get('Conflicts'));
     const provides = fields.get('Provides')?.split(',').map((p) => p.trim()) || [];
 
+    const aptControlFields: Record<string, string> = {};
+    for (const [key, value] of fields) {
+      aptControlFields[key] = value;
+    }
+
     return {
       name,
       version,
@@ -268,6 +273,7 @@ export class AptMetadataParser {
       conflicts: conflicts.length > 0 ? undefined : undefined,
       suggests: suggests.length > 0 ? suggests.map((d) => d.name) : undefined,
       recommends: recommends.length > 0 ? recommends.map((d) => d.name) : undefined,
+      aptControlFields,
     };
   }
 
