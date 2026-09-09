@@ -138,6 +138,58 @@ describe('downloadCommand', () => {
     });
   });
 
+  it('완료된 Maven 항목의 모든 파일을 중복 없이 아카이브하고 실패 항목은 제외한다', async () => {
+    const jarPath = '/tmp/output/com/example/demo/1.0.0/demo-1.0.0.jar';
+    const pomPath = '/tmp/output/com/example/demo/1.0.0/demo-1.0.0.pom';
+    const pomChecksumPath = `${pomPath}.sha1`;
+    const staleFailedPath = '/tmp/output/stale/old-artifact.pom';
+
+    startDownload.mockResolvedValueOnce({
+      success: true,
+      totalSize: 1024,
+      duration: 1000,
+      items: [
+        {
+          id: 'maven-demo-1.0.0',
+          package: {
+            type: 'maven',
+            name: 'com.example:demo',
+            version: '1.0.0',
+          },
+          status: 'completed',
+          progress: 100,
+          filePath: jarPath,
+          filePaths: [jarPath, pomPath, pomPath, pomChecksumPath],
+        },
+        {
+          id: 'maven-failed-1.0.0',
+          package: {
+            type: 'maven',
+            name: 'com.example:failed',
+            version: '1.0.0',
+          },
+          status: 'failed',
+          progress: 0,
+          filePath: staleFailedPath,
+          filePaths: [staleFailedPath],
+        },
+      ],
+    });
+
+    await downloadCommand(commandOptions({
+      type: 'maven',
+      package: 'com.example:demo',
+      pkgVersion: '1.0.0',
+    }));
+
+    expect(createArchive).toHaveBeenCalledWith(
+      [jarPath, pomPath, pomChecksumPath],
+      expect.any(String),
+      expect.any(Array),
+      expect.objectContaining({ format: 'zip' }),
+    );
+  });
+
   it('deps가 true면 의존성을 해결한 패키지 목록을 큐에 추가한다', async () => {
     await downloadCommand(commandOptions());
 

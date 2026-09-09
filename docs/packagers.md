@@ -82,6 +82,8 @@ const result = await packager.createArchiveFromDirectory(
 
 GUI 다운로드 경로에서는 `electron/download-handlers.ts`가 `createArchiveFromDirectory(...)`를 사용합니다. 그래서 `outputDir` 아래에 만들어 둔 `packages/`, `install.sh`, `install.ps1` 같은 파일이 그대로 아카이브에 포함되고, 최종 완료 이벤트는 실제 `.zip` 또는 `.tar.gz` 파일 경로를 반환합니다.
 
+CLI는 완료된 다운로드 항목이 반환한 파일 목록으로 `createArchive(...)`를 호출합니다. Maven 항목은 주 아티팩트와 부속 POM, 저장에 성공한 체크섬을 모두 포함하며 중복 경로는 제거합니다. 출력 디렉터리를 통째로 검색하지 않으므로 이전 압축물이나 다른 파일은 추가하지 않습니다. ZIP과 TAR.GZ 모두 동일한 목록과 Maven 상대 경로를 사용합니다.
+
 `getArchiveInfo()`는 확장자로 형식을 판별하고 파일 크기를 조회합니다. `fileCount`는 항상 0이며, `verifyArchive()`는 압축 해제나 내부 CRC 검사를 수행하지 않습니다. `onProgress`는 입력 파일 크기를 조사하는 준비 단계의 진행률이며 압축 스트림의 진행률이 아닙니다.
 
 현재 구현은 다운로드 산출물을 별도 staging 디렉터리로 한 번 더 복사하지 않고, 원본 디렉터리/파일 엔트리를 아카이브 스트림에 직접 추가한 뒤 `manifest.json`, `README.txt`만 추가 entry로 주입합니다.

@@ -385,10 +385,11 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       console.log(chalk.gray(`  소요 시간: ${formatDuration(result.duration)}`));
 
       // 패키징 처리
-      const files = result.items
-        .flatMap((item) => (
-          item.status === 'completed' && item.filePath ? [item.filePath] : []
-        ));
+      const files = [...new Set(result.items.flatMap((item) => (
+        item.status === 'completed' && item.filePath
+          ? item.filePaths ?? [item.filePath]
+          : []
+      )))];
 
       // 압축 파일 생성
       console.log(chalk.cyan('\n압축 파일 생성 중...'));

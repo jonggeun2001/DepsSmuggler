@@ -16,6 +16,12 @@ export interface IDownloader {
     destPath: string,
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string>;
+  /** All files saved by one download, with the primary artifact first. */
+  downloadPackageFiles?(
+    info: PackageInfo,
+    destPath: string,
+    onProgress?: (progress: DownloadProgressEvent) => void
+  ): Promise<string[]>;
   verifyChecksum?(filePath: string, expected: string): Promise<boolean>;
 }
 
