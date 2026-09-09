@@ -184,6 +184,45 @@ export class ScriptGenerator {
       lines.push('');
     }
 
+    // npm 패키지 설치
+    if (packagesByType.has('npm')) {
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('# npm 패키지 오프라인 설치');
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('');
+      lines.push('install_npm_packages() {');
+      lines.push('    log_info "npm 패키지 설치 중..."');
+      lines.push('    if ! command -v npm &> /dev/null; then');
+      lines.push('        log_error "Node.js와 npm이 설치되어 있어야 합니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('');
+      lines.push('    local npm_archive_list archive_path');
+      lines.push('    local npm_archives=()');
+      lines.push('    npm_archive_list="$(mktemp)" || return 1');
+      lines.push('    if ! find "$SCRIPT_DIR/$PACKAGE_DIR" -type f -name \'*.tgz\' -print0 > "$npm_archive_list"; then');
+      lines.push('        rm -f "$npm_archive_list"');
+      lines.push('        log_error "npm 패키지 파일 탐색에 실패했습니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('    while IFS= read -r -d \'\' archive_path; do');
+      lines.push('        npm_archives+=("$archive_path")');
+      lines.push('    done < "$npm_archive_list"');
+      lines.push('    rm -f "$npm_archive_list" || return 1');
+      lines.push('    if [[ "${#npm_archives[@]}" -eq 0 ]]; then');
+      lines.push('        log_error "설치할 npm .tgz 파일을 찾을 수 없습니다: $PACKAGE_DIR"');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('');
+      lines.push('    npm install --offline --no-audit --no-fund --no-save --package-lock=false --global=false --prefix "$SCRIPT_DIR" -- "${npm_archives[@]}" || {');
+      lines.push('        log_error "npm 패키지 설치에 실패했습니다."');
+      lines.push('        return 1');
+      lines.push('    }');
+      lines.push('    log_info "npm 패키지 설치 완료: $SCRIPT_DIR/node_modules"');
+      lines.push('}');
+      lines.push('');
+    }
+
     // Maven 패키지 설치
     if (packagesByType.has('maven')) {
       const mavenCoordinates = this.getMavenCoordinates(packagesByType.get('maven') || []);
@@ -357,6 +396,10 @@ export class ScriptGenerator {
       lines.push('    install_maven_packages || exit 1');
       lines.push('    echo ""');
     }
+    if (packagesByType.has('npm')) {
+      lines.push('    install_npm_packages || exit 1');
+      lines.push('    echo ""');
+    }
     if (packagesByType.has('yum')) {
       lines.push('    install_yum_packages');
       lines.push('    echo ""');
@@ -489,6 +532,28 @@ export class ScriptGenerator {
       lines.push('');
     }
 
+    // npm 패키지 설치
+    if (packagesByType.has('npm')) {
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('# npm 패키지 오프라인 설치');
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('');
+      lines.push('function Install-NpmPackages {');
+      lines.push('    Write-Info "npm 패키지 설치 중..."');
+      lines.push('    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {');
+      lines.push('        throw "Node.js와 npm이 설치되어 있어야 합니다."');
+      lines.push('    }');
+      lines.push('    $NpmArchives = @(Get-ChildItem -LiteralPath $PackageDir -Recurse -File -Filter \'*.tgz\' -Force -ErrorAction Stop | ForEach-Object { $_.FullName })');
+      lines.push('    if ($NpmArchives.Count -eq 0) {');
+      lines.push('        throw "설치할 npm .tgz 파일을 찾을 수 없습니다: $PackageDir"');
+      lines.push('    }');
+      lines.push('    & npm install --offline --no-audit --no-fund --no-save --package-lock=false --global=false --prefix "$ScriptDir" -- @NpmArchives');
+      lines.push('    if ($LASTEXITCODE -ne 0) { throw "npm 패키지 설치에 실패했습니다: 종료 코드 $LASTEXITCODE" }');
+      lines.push('    Write-Info "npm 패키지 설치 완료: $ScriptDir/node_modules"');
+      lines.push('}');
+      lines.push('');
+    }
+
     // Maven 패키지 설치
     if (packagesByType.has('maven')) {
       const mavenCoordinates = this.getMavenCoordinates(packagesByType.get('maven') || []);
@@ -615,6 +680,10 @@ export class ScriptGenerator {
     }
     if (packagesByType.has('maven')) {
       lines.push('Install-MavenPackages');
+      lines.push('Write-Host ""');
+    }
+    if (packagesByType.has('npm')) {
+      lines.push('Install-NpmPackages');
       lines.push('Write-Host ""');
     }
     if (packagesByType.has('docker')) {

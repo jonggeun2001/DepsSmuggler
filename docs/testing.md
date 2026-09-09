@@ -115,6 +115,10 @@ bash scripts/verify-worktree.sh \
 
 이 fixture 검증은 실제 Maven Central의 현재 파일 존재 여부나 외부 Maven 실행의 오프라인 성공을 보장하지 않습니다. 외부 저장소 검증에는 아래 통합 테스트를 별도로 사용하고, 실행 명령·대상 좌표·파일 확인 결과를 해당 작업의 검증 기록에 남깁니다.
 
+### npm 설치 스크립트 오프라인 검증
+
+`src/core/packager/npm-install-script.integration.test.ts`는 레지스트리에 연결하지 않고 로컬 tarball fixture로 생성 스크립트를 실제 실행합니다. macOS·Linux에서는 Bash, Windows에서는 `powershell.exe`와 해당 환경의 npm을 사용합니다. 빈 npm 캐시와 별도 설정·설치 경로를 사용하며, 공백이 포함된 경로와 scoped 전이 의존성을 설치한 뒤 Node.js에서 실제 모듈을 불러와 검사합니다. 패키지 파일 또는 필요한 의존성이 없거나 tarball이 손상된 경우에는 오류 종료와 성공 문구 부재를 확인합니다.
+
 ### Maven 설치 스크립트 canonical 저장소 검증
 
 `src/core/packager/script-generator.test.ts`의 canonical tree 회귀는 Maven 없이도 실행할 수 있습니다. 공백이 포함된 임시 추출 경로에서 실제 Bash subprocess(Windows에서는 native PowerShell)를 생성·실행하고, CLI `packages/<m2path>`와 GUI `packages/m2repo/<m2path>`의 JAR-only·companion POM·parent/BOM POM-only·classifier·checksum을 `MAVEN_REPO_LOCAL`에 경로·바이트 그대로 복사하는지 검사합니다. pip 파일과 flat 파일은 대상 저장소에 복사되지 않습니다. Maven native offline consumer 검증과 macOS에서 PowerShell이 없는 경우는 별도 환경 제한으로 기록합니다.

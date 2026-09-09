@@ -172,7 +172,7 @@ Get-ChildItem -Path $PackageDir -Directory -Recurse | ForEach-Object {
 pip install --no-index @FindLinkArgs requests==2.31.0
 ```
 
-실제 파일은 헤더, 패키지 디렉터리와 실행 도구 확인, 로그 함수와 타입별 설치 함수를 포함합니다. Python은 하위 디렉터리마다 `--find-links`를 추가합니다. Maven은 패키지 메타데이터의 GAV 좌표로 canonical 저장소 경로를 선택해 `packages/<group>/<artifact>/<version>/`를 `MAVEN_REPO_LOCAL` 또는 기본 `~/.m2/repository`에 그대로 복사합니다. GUI 출력의 `packages/m2repo/` 구조도 지원하며, 같은 GAV 디렉터리의 원본 POM, parent/BOM POM, POM-only 항목, classifier와 checksum을 보존합니다. Bash와 PowerShell 모두 Maven 플러그인이나 네트워크를 호출하지 않고, 좌표 디렉터리가 없거나 복사에 실패하면 오류로 종료합니다. Bash는 pip/conda·Maven·YUM·Docker 블록을, PowerShell은 pip/conda·Maven·Docker 블록을 생성하며 YUM 설치 블록은 없습니다.
+실제 파일은 헤더, 패키지 디렉터리와 실행 도구 확인, 로그 함수와 타입별 설치 함수를 포함합니다. Python은 하위 디렉터리마다 `--find-links`를 추가합니다. Maven은 패키지 메타데이터의 GAV 좌표로 canonical 저장소 경로를 선택해 `packages/<group>/<artifact>/<version>/`를 `MAVEN_REPO_LOCAL` 또는 기본 `~/.m2/repository`에 그대로 복사합니다. GUI 출력의 `packages/m2repo/` 구조도 지원하며, 같은 GAV 디렉터리의 원본 POM, parent/BOM POM, POM-only 항목, classifier와 checksum을 보존합니다. Bash와 PowerShell 모두 Maven 플러그인이나 네트워크를 호출하지 않고, 좌표 디렉터리가 없거나 복사에 실패하면 오류로 종료합니다. Bash는 pip/conda·npm·Maven·YUM·Docker 블록을, PowerShell은 pip/conda·npm·Maven·Docker 블록을 생성하며 YUM 설치 블록은 없습니다.
 
 Maven의 `_remote.repositories`는 대상 저장소의 기존 내용을 보존하며 복사한 아티팩트에만 `파일명>=` 로컬 설치 기록을 추가합니다. `.demo`처럼 점으로 시작하는 아티팩트의 POM·JAR·체크섬도 복사합니다. 체크섬과 대상에만 존재하는 파일은 등록하지 않고, 원본에 있는 추적 파일로 대상 기록을 덮어쓰지도 않습니다. 재실행해도 로컬 기록은 중복되지 않습니다. 기록 저장에 실패하거나 좌표 디렉터리에 아티팩트가 없으면 오류로 종료합니다. 생성된 PowerShell 파일은 Windows PowerShell 5의 한글 해석을 위해 UTF-8 BOM을 포함합니다.
 
@@ -180,7 +180,9 @@ Maven의 `_remote.repositories`는 대상 저장소의 기존 내용을 보존�
 
 CLI와 GUI 저장소 구조는 전체 GAV 목록이 하나의 원본 저장소 루트에 모두 존재하는지로 구분합니다. `example`과 `m2repo.example` 그룹이 함께 있어도 같은 원본 구조에서 각각의 파일을 선택합니다. 두 구조가 모두 조건을 만족하거나 어느 구조에도 전체 목록이 없으면 복사 전에 오류로 종료합니다.
 
-일반 `ScriptGenerator`에는 npm·APT·APK 전용 설치 블록이 없고, Conda 항목도 pip 설치 블록으로 묶입니다. `.conda` 파일을 설치하는 Conda 전용 스크립트로 간주하면 안 됩니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
+npm은 Bash와 PowerShell 모두 `packageDir` 아래의 `.tgz` 파일을 재귀 탐색해 한 번의 `npm install --offline` 호출에 함께 전달합니다. 설치 대상은 스크립트 폴더의 `node_modules`이며 명시적인 로컬 `--prefix`를 사용합니다. `package.json`과 lockfile은 저장하지 않습니다. 파일 이름에서 패키지 이름을 추측하지 않으므로 scoped 패키지와 공백이 포함된 경로도 처리합니다. Node.js와 npm이 필요하며, npm 부재·빈 파일 목록·의존성 누락·설치 명령 실패는 스크립트의 오류 종료로 이어집니다. npm의 일반 설치 lifecycle은 유지합니다.
+
+일반 `ScriptGenerator`에는 APT·APK 전용 설치 블록이 없고, Conda 항목도 pip 설치 블록으로 묶입니다. `.conda` 파일을 설치하는 Conda 전용 스크립트로 간주하면 안 됩니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
 
 ### 사용 예시
 ```typescript
