@@ -162,33 +162,72 @@ describe('OS dependency resolvers', () => {
     expect(byCmd[0].architecture).toBe('x86_64');
   });
 
-  it('YUM resolver는 primary 메타데이터가 없는 저장소를 건너뛰고 라이브러리 provides를 찾는다', async () => {
-    const parseRepomd = vi
-      .spyOn(YumMetadataParser.prototype, 'parseRepomd')
-      .mockResolvedValueOnce({
-        revision: '1',
-        primary: null,
-        filelists: null,
-        other: null,
-      })
-      .mockResolvedValueOnce({
-        revision: '2',
-        primary: {
-          location: 'repodata/primary.xml.gz',
-          checksum: { type: 'sha256', value: 'deadbeef' },
-        },
-        filelists: null,
-        other: null,
-      });
-    const parsePrimary = vi.spyOn(YumMetadataParser.prototype, 'parsePrimary').mockResolvedValue([
+  it('YUM resolver는 primary 메타데이터가 없으면 명시적으로 실패한다', async () => {
+    const parseRepomd = vi.spyOn(YumMetadataParser.prototype, 'parseRepomd').mockResolvedValue({
+      revision: '1',
+      primary: null,
+      filelists: null,
+      other: null,
+    });
+    const parsePrimary = vi.spyOn(YumMetadataParser.prototype, 'parsePrimary');
+    const resolver = new YumDependencyResolver({
+      ...createOptions(repo),
+      repositories: [{ ...repo, id: 'empty', name: 'Empty Repo' }],
+      distribution: {
+        id: 'rocky-9',
+        name: 'Rocky Linux 9',
+        version: '9',
+        packageManager: 'yum',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+    const testResolver = accessResolverForTest(resolver);
+
+    await expect(testResolver.loadMetadata()).rejects.toThrow(/primary.*Empty Repo|primary metadata/i);
+
+    expect(parseRepomd).toHaveBeenCalledOnce();
+    expect(parsePrimary).not.toHaveBeenCalled();
+  });
+
+  it('YUM resolver는 저장소 AbortError identity를 보존한다', async () => {
+    const abortError = new Error('metadata load cancelled');
+    abortError.name = 'AbortError';
+    vi.spyOn(YumMetadataParser.prototype, 'parseRepomd').mockRejectedValue(abortError);
+    const resolver = new YumDependencyResolver({
+      ...createOptions(repo),
+      repositories: [{ ...repo, id: 'cancelled', name: 'Cancelled Repo' }],
+      distribution: {
+        id: 'rocky-9',
+        name: 'Rocky Linux 9',
+        version: '9',
+        packageManager: 'yum',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+    const testResolver = accessResolverForTest(resolver);
+
+    await expect(testResolver.loadMetadata()).rejects.toBe(abortError);
+  });
+
+  it('YUM resolver는 모든 저장소 성공 후 provides를 게시한다', async () => {
+    vi.spyOn(YumMetadataParser.prototype, 'parseRepomd').mockResolvedValue({
+      revision: '2',
+      primary: {
+        location: 'repodata/primary.xml.gz',
+        checksum: { type: 'sha256', value: 'deadbeef' },
+      },
+      filelists: null,
+      other: null,
+    });
+    vi.spyOn(YumMetadataParser.prototype, 'parsePrimary').mockResolvedValue([
       createPackage('openssl-libs', '3.0.0', 'x86_64', ['libcrypto.so.3()(64bit)']),
     ]);
     const resolver = new YumDependencyResolver({
       ...createOptions(repo),
-      repositories: [
-        { ...repo, id: 'empty', name: 'Empty Repo' },
-        { ...repo, id: 'full', name: 'Full Repo' },
-      ],
       distribution: {
         id: 'rocky-9',
         name: 'Rocky Linux 9',
@@ -206,9 +245,112 @@ describe('OS dependency resolvers', () => {
       name: 'libcrypto.so.3()(64bit)',
     });
 
-    expect(parseRepomd).toHaveBeenCalledTimes(2);
-    expect(parsePrimary).toHaveBeenCalledTimes(1);
     expect(byLibrary).toHaveLength(1);
     expect(byLibrary[0].name).toBe('openssl-libs');
+  });
+
+  it('YUM resolver는 실패한 저장소의 부분 상태를 게시하지 않고 같은 resolver 재시도를 허용한다', async () => {
+    const firstRepo = { ...repo, id: 'first', name: 'First Repo' };
+    const secondRepo = { ...repo, id: 'second', name: 'Second Repo' };
+    let repomdCalls = 0;
+    let primaryCalls = 0;
+    const parseRepomd = vi.spyOn(YumMetadataParser.prototype, 'parseRepomd').mockImplementation(async () => {
+      repomdCalls += 1;
+      if (repomdCalls === 2) {
+        throw new Error('second repository malformed');
+      }
+      return {
+        revision: String(repomdCalls),
+        primary: {
+          location: 'repodata/primary.xml.gz',
+          checksum: { type: 'sha256', value: 'deadbeef' },
+        },
+        filelists: null,
+        other: null,
+      };
+    });
+    const parsePrimary = vi.spyOn(YumMetadataParser.prototype, 'parsePrimary').mockImplementation(async () => {
+      primaryCalls += 1;
+      return [
+        createPackage(primaryCalls <= 2 ? 'first-repo-package' : 'second-repo-package', '1.0.0', 'x86_64', [
+          primaryCalls <= 2 ? 'first-capability' : 'second-capability',
+        ]),
+      ];
+    });
+    const resolver = new YumDependencyResolver({
+      ...createOptions(repo),
+      repositories: [firstRepo, secondRepo],
+      distribution: {
+        id: 'rocky-9',
+        name: 'Rocky Linux 9',
+        version: '9',
+        packageManager: 'yum',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+    const testResolver = accessResolverForTest(resolver);
+    const internals = resolver as unknown as {
+      allPackages: OSPackageInfo[];
+      providesMap: Map<string, OSPackageInfo[]>;
+      metadataCache: { packages: Map<string, OSPackageInfo[]>; provides: Map<string, OSPackageInfo[]> };
+    };
+
+    await expect(testResolver.loadMetadata()).rejects.toThrow(/second repository malformed/);
+    expect(internals.allPackages).toHaveLength(0);
+    expect(internals.metadataCache.packages.size).toBe(0);
+    expect(internals.metadataCache.provides.size).toBe(0);
+    expect(internals.providesMap.size).toBe(0);
+
+    await testResolver.loadMetadata();
+
+    expect(parseRepomd).toHaveBeenCalledTimes(4);
+    expect(parsePrimary).toHaveBeenCalledTimes(3);
+    expect(internals.allPackages.map((pkg) => pkg.name)).toEqual([
+      'first-repo-package',
+      'second-repo-package',
+    ]);
+    expect(internals.metadataCache.packages.get('first-repo-package')).toHaveLength(1);
+    expect(internals.metadataCache.packages.get('second-repo-package')).toHaveLength(1);
+    expect(internals.providesMap.get('first-capability')).toHaveLength(1);
+    expect(internals.providesMap.get('second-capability')).toHaveLength(1);
+  });
+
+  it('YUM resolver는 disabled 저장소를 로드하지 않는다', async () => {
+    const parseRepomd = vi.spyOn(YumMetadataParser.prototype, 'parseRepomd').mockResolvedValue({
+      revision: '1',
+      primary: {
+        location: 'repodata/primary.xml.gz',
+        checksum: { type: 'sha256', value: 'deadbeef' },
+      },
+      filelists: null,
+      other: null,
+    });
+    vi.spyOn(YumMetadataParser.prototype, 'parsePrimary').mockResolvedValue([
+      createPackage('enabled-package', '1.0.0'),
+    ]);
+    const resolver = new YumDependencyResolver({
+      ...createOptions(repo),
+      repositories: [
+        { ...repo, id: 'enabled', name: 'Enabled Repo', enabled: true },
+        { ...repo, id: 'disabled', name: 'Disabled Repo', enabled: false },
+      ],
+      distribution: {
+        id: 'rocky-9',
+        name: 'Rocky Linux 9',
+        version: '9',
+        packageManager: 'yum',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+    const testResolver = accessResolverForTest(resolver);
+
+    await testResolver.loadMetadata();
+
+    expect(parseRepomd).toHaveBeenCalledOnce();
+    expect(await testResolver.findPackagesForDependency({ name: 'enabled-package' })).toHaveLength(1);
   });
 });

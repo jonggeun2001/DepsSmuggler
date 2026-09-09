@@ -14,7 +14,6 @@ import type { OSPackageInfo, PackageDependency, OSPackageSearchResult } from '..
  * YUM 의존성 해결기
  */
 export class YumDependencyResolver extends BaseOSDependencyResolver {
-  private parsers: Map<string, YumMetadataParser> = new Map();
   private allPackages: OSPackageInfo[] = [];
   private providesMap: Map<string, OSPackageInfo[]> = new Map();
 
@@ -31,6 +30,9 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
     }
 
     const activeRepos = this.options.repositories.filter((r) => r.enabled);
+    const loadedPackages: OSPackageInfo[] = [];
+    const packageIndex = new Map<string, OSPackageInfo[]>();
+    const providesIndex = new Map<string, OSPackageInfo[]>();
 
     for (const repo of activeRepos) {
       this.throwIfAborted();
@@ -40,7 +42,6 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
           this.options.architecture,
           this.options.abortSignal
         );
-        this.parsers.set(repo.id, parser);
         const cacheKey = OsPackageCache.createKey(
           'yum',
           repo,
@@ -52,8 +53,7 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
         if (!packages) {
           const repomd = await parser.parseRepomd();
           if (!repomd.primary) {
-            console.warn(`No primary metadata found for ${repo.name}`);
-            continue;
+            throw new Error(`No primary metadata found for ${repo.name}`);
           }
 
           packages = await parser.parsePrimary(repomd.primary.location);
@@ -65,17 +65,16 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
           isArchitectureCompatible(pkg.architecture, this.options.architecture)
         );
 
-        this.allPackages.push(...compatiblePackages);
-
         // provides 맵 구축
         for (const pkg of compatiblePackages) {
+          loadedPackages.push(pkg);
           // 패키지 이름으로 등록
-          this.addToPackageCache(pkg.name, pkg);
+          this.addToPackageCache(pkg.name, pkg, packageIndex);
 
           // provides 등록
           if (pkg.provides) {
             for (const provide of pkg.provides) {
-              this.addToProvidesCache(provide, pkg);
+              this.addToProvidesCache(provide, pkg, providesIndex);
             }
           }
         }
@@ -89,36 +88,51 @@ export class YumDependencyResolver extends BaseOSDependencyResolver {
         if ((error as { name?: string })?.name === 'AbortError') {
           throw error;
         }
-        console.error(`Failed to load metadata from ${repo.name}:`, error);
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to load metadata from ${repo.name} (${repo.id}): ${message}`);
       }
     }
+
+    this.throwIfAborted();
+    // 모든 저장소가 성공한 경우에만 완성된 목록과 인덱스를 반영합니다.
+    this.allPackages = loadedPackages;
+    this.metadataCache.packages = packageIndex;
+    this.providesMap = providesIndex;
   }
 
   /**
    * 패키지 캐시에 추가
    */
-  private addToPackageCache(name: string, pkg: OSPackageInfo): void {
-    const existing = this.metadataCache.packages.get(name) || [];
+  private addToPackageCache(
+    name: string,
+    pkg: OSPackageInfo,
+    packageIndex: Map<string, OSPackageInfo[]>
+  ): void {
+    const existing = packageIndex.get(name) || [];
     existing.push(pkg);
-    this.metadataCache.packages.set(name, existing);
+    packageIndex.set(name, existing);
   }
 
   /**
    * provides 캐시에 추가
    */
-  private addToProvidesCache(provide: string, pkg: OSPackageInfo): void {
+  private addToProvidesCache(
+    provide: string,
+    pkg: OSPackageInfo,
+    providesIndex: Map<string, OSPackageInfo[]>
+  ): void {
     // 버전 제거 (예: "libfoo.so.1()(64bit)" -> "libfoo.so.1")
     const baseName = provide.split('(')[0];
 
-    const existing = this.providesMap.get(baseName) || [];
+    const existing = providesIndex.get(baseName) || [];
     existing.push(pkg);
-    this.providesMap.set(baseName, existing);
+    providesIndex.set(baseName, existing);
 
     // 전체 이름으로도 등록
     if (provide !== baseName) {
-      const fullExisting = this.providesMap.get(provide) || [];
+      const fullExisting = providesIndex.get(provide) || [];
       fullExisting.push(pkg);
-      this.providesMap.set(provide, fullExisting);
+      providesIndex.set(provide, fullExisting);
     }
   }
 
