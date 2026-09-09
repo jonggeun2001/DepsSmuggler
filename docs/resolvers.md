@@ -578,6 +578,8 @@ maven-queue-processor.ts
 
 루트와 선택된 전이 의존성의 POM을 해석하는 데 필요한 Parent POM 및 import BOM도 다운로드 결과의 `flatList`에 포함합니다. 부모의 부모, BOM의 부모, 중첩 import BOM을 따라가며 `groupId:artifactId:version` 전체 좌표로 중복을 제거하고 `metadata.type: 'pom'`을 지정합니다. 같은 부모가 여러 경로에서 필요하면 한 번만 포함하고, 같은 GA라도 버전이 다르면 각각 유지합니다.
 
+`root`의 실행 의존성 그래프와 `flatList`의 다운로드 대상 목록은 같지 않을 수 있습니다. 모델 POM은 `flatList`에만 추가되므로 다운로드 UI는 `root.dependencies`만 다시 펼쳐 전체 파일 목록을 만들지 않습니다. renderer는 루트별 `flatList`로 다운로드 그룹을 연결하고, 장바구니 미리보기는 그래프 밖의 POM을 별도 목록으로 보여줍니다. 이 표시를 위해 모델 POM을 실행 의존성 간선으로 추가하지 않습니다.
+
 실제 라이브러리 의존성은 `<dependencies>`와 기존 scope·optional·최대 깊이 설정에 따라 선택합니다. `<dependencyManagement>`는 버전 관리 정보이며, 그 안의 사용하지 않는 라이브러리를 전부 펼치지 않습니다. `type=pom`, `scope=import`인 BOM 자체와 모델 해석에 필요한 부모 POM을 모으는 과정은 이 라이브러리 선택과 별개입니다. `dependencies`가 없는 BOM 루트도 자신의 POM과 필요한 모델 POM만 포함합니다.
 
 전이 패키지의 부모/BOM 관리 맵은 루트의 관리 값을 기준으로 패키지별로 분리합니다. 버전이 생략된 의존성을 해결할 때 루트의 관리 버전은 유지하고, 한 형제 패키지의 미사용 관리 항목이 다른 형제의 부모/BOM 버전 선택을 오염시키지 않습니다. 필요한 모델 POM의 수집과 중복 제거는 요청 전체에서 공유합니다.

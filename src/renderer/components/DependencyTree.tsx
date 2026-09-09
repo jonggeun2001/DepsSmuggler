@@ -1,6 +1,3 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
-import Tree, { RawNodeDatum, CustomNodeElementProps } from 'react-d3-tree';
-import { Card, Typography, Tag, Space, Button, Tooltip, Modal, Descriptions, Empty } from 'antd';
 import {
   ZoomInOutlined,
   ZoomOutOutlined,
@@ -9,7 +6,11 @@ import {
   NodeIndexOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
+import { Card, Typography, Tag, Space, Button, Tooltip, Modal, Descriptions, Empty, Collapse } from 'antd';
 import { toPng, toSvg } from 'html-to-image';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
+import Tree, { RawNodeDatum, CustomNodeElementProps } from 'react-d3-tree';
+import { flattenDependencyTree, getPackageArtifactKey } from '../../core/shared/dependency-tree-utils';
 import { DependencyNode, DependencyResolutionResult, PackageType } from '../../types';
 
 const { Text } = Typography;
@@ -63,7 +64,7 @@ const DependencyTree: React.FC<DependencyTreeProps> = ({ data, onNodeClick, styl
   const convertToTreeData = useCallback((rootNode: DependencyNode): TreeNodeDatum => {
     // 노드 키 생성 함수
     const getNodeKey = (node: DependencyNode) =>
-      `${node.package.name}@${node.package.version}`;
+      getPackageArtifactKey(node.package);
 
     // 모든 노드를 TreeNodeDatum으로 변환하여 Map에 저장
     const nodeMap = new Map<string, TreeNodeDatum>();
@@ -137,11 +138,23 @@ const DependencyTree: React.FC<DependencyTreeProps> = ({ data, onNodeClick, styl
     return convertToTreeData(data.root);
   }, [data, convertToTreeData]);
 
+  const additionalPoms = useMemo(() => {
+    if (!data) return [];
+    const representedArtifacts = new Set(flattenDependencyTree(data.root).map(getPackageArtifactKey));
+    return data.flatList.filter((pkg) => {
+      if (pkg.type !== 'maven' || pkg.metadata?.type !== 'pom') return false;
+      const key = getPackageArtifactKey(pkg);
+      if (representedArtifacts.has(key)) return false;
+      representedArtifacts.add(key);
+      return true;
+    });
+  }, [data]);
+
   // 노드 클릭 핸들러
-  const handleNodeClick = useCallback((nodeData: TreeNodeDatum) => {
-    setSelectedNode(nodeData.originalNode);
+  const handleNodeClick = useCallback((node: DependencyNode) => {
+    setSelectedNode(node);
     setDetailModalOpen(true);
-    onNodeClick?.(nodeData.originalNode);
+    onNodeClick?.(node);
   }, [onNodeClick]);
 
   // 줌 컨트롤
@@ -190,7 +203,7 @@ const DependencyTree: React.FC<DependencyTreeProps> = ({ data, onNodeClick, styl
     const isOptional = datum.attributes?.optional;
 
     return (
-      <g onClick={() => handleNodeClick(datum)} style={{ cursor: 'pointer' }}>
+      <g onClick={() => handleNodeClick(datum.originalNode)} style={{ cursor: 'pointer' }}>
         <rect
           width={140}
           height={50}
@@ -327,6 +340,49 @@ const DependencyTree: React.FC<DependencyTreeProps> = ({ data, onNodeClick, styl
         />
       </div>
 
+      {additionalPoms.length > 0 && (
+        <Collapse
+          size="small"
+          style={{ margin: 16 }}
+          items={[{
+            key: 'additional-poms',
+            label: `함께 다운로드할 POM (${additionalPoms.length}개)`,
+            children: (
+              <>
+                <Text type="secondary">부모·BOM POM 파일도 함께 다운로드됩니다.</Text>
+                <ul
+                  aria-label="함께 다운로드할 POM 목록"
+                  style={{ listStyle: 'none', margin: '12px 0 0', padding: 0, maxHeight: 260, overflowY: 'auto' }}
+                >
+                  {additionalPoms.map((pkg) => {
+                    const filename = typeof pkg.metadata?.filename === 'string'
+                      ? pkg.metadata.filename
+                      : `${pkg.name.split(':')[1]}-${pkg.version}.pom`;
+                    return (
+                      <li key={getPackageArtifactKey(pkg)} style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
+                        <Button
+                          type="link"
+                          aria-label={`${filename} 상세 보기`}
+                          onClick={() => handleNodeClick({ package: pkg, dependencies: [] })}
+                          style={{ padding: 0, height: 'auto', whiteSpace: 'normal', textAlign: 'left', overflowWrap: 'anywhere' }}
+                        >
+                          {filename}
+                        </Button>
+                        <div><Text type="secondary">{pkg.name}</Text></div>
+                        <Space size={8}>
+                          <Tag>POM</Tag>
+                          <Text>{pkg.version}</Text>
+                        </Space>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ),
+          }]}
+        />
+      )}
+
       {/* 노드 상세 정보 모달 */}
       <Modal
         title={
@@ -353,6 +409,18 @@ const DependencyTree: React.FC<DependencyTreeProps> = ({ data, onNodeClick, styl
                 {selectedNode.package.type.toUpperCase()}
               </Tag>
             </Descriptions.Item>
+            {selectedNode.package.type === 'maven' && (
+              <Descriptions.Item label="파일 형식">
+                <Tag>{(typeof selectedNode.package.metadata?.type === 'string'
+                  ? selectedNode.package.metadata.type
+                  : 'jar').toUpperCase()}</Tag>
+              </Descriptions.Item>
+            )}
+            {typeof selectedNode.package.metadata?.filename === 'string' && (
+              <Descriptions.Item label="파일명">
+                <Text style={{ overflowWrap: 'anywhere' }}>{selectedNode.package.metadata.filename}</Text>
+              </Descriptions.Item>
+            )}
             {selectedNode.package.arch && (
               <Descriptions.Item label="아키텍처">
                 {selectedNode.package.arch}

@@ -144,7 +144,7 @@
 - SMTP 테스트 버튼은 `testSmtpConnection` IPC가 있으면 실제 연결 테스트를 실행하고, 브라우저 개발 환경에서는 시뮬레이션, IPC가 빠진 Electron 빌드에서는 경고와 비활성화 상태를 노출합니다.
 - 히스토리 store는 renderer data client를 통해 `window.electronAPI.history.*`와 동기화됩니다. `load/add/delete/clear`가 모두 있으면 파일이 기준이며, 이 API 세트가 없거나 일부 빠진 환경에서는 `depssmuggler-history` localStorage로 대체합니다. 추가/삭제/전체 삭제는 영속화 성공 뒤 store를 갱신하고, 실패하면 이전 메모리 목록을 유지합니다.
 - 다운로드 화면 오케스트레이션은 `use-download-page-controller.test.tsx`에서 jsdom + mocked `window.electronAPI` 조합으로 시작/일시정지/재개/취소/완료/오류 시나리오를 회귀 고정합니다.
-- 다운로드 표의 의존성 그룹은 목록 변경 시 부모 ID로 한 번 인덱싱하고 재사용합니다. 행마다 전체 목록을 검색하던 비용을 `O(원본 수 × 전체 항목 수)`에서 `O(전체 항목 수)`로 줄이며, 기존 순서와 상태 집계는 유지합니다. `download-page/utils.test.ts`가 결과 동등성과 조회 횟수를 검증합니다.
+- 다운로드 표의 의존성 그룹은 목록 변경 시 부모 ID로 한 번 인덱싱하고 재사용합니다. 행마다 전체 목록을 검색하던 비용을 `O(원본 수 × 전체 항목 수)`에서 `O(전체 항목 수)`로 줄입니다. 원본 그룹에 연결되지 않은 항목도 독립 행으로 표시하여 전체 다운로드 목록에서 사라지지 않게 합니다. `download-page/utils.test.ts`가 그룹 결과와 조회 횟수를 검증합니다.
 
 ## 사용자 흐름
 
@@ -159,6 +159,10 @@
 `CartPage`에서 `pom.xml` 파일을 가져오거나 텍스트로 붙여넣을 때는 `<type>pom</type>` 같은 Maven artifact type을 장바구니 metadata로 유지합니다. Maven 장바구니의 중복 판정도 이 artifact type을 포함하므로 같은 GAV라도 기본 JAR과 POM은 각각 보관하고, 같은 type만 중복으로 처리합니다. 이 metadata는 일반 다운로드 IPC를 거쳐 `MavenDownloader`에 전달되므로 POM 전용 의존성은 `.pom` 아티팩트와 체크섬으로 다운로드되고, 최상위 복사본도 `.pom` 확장자를 사용합니다.
 
 Maven 입력의 `dependencyManagement`에 있는 BOM 선언도 가져옵니다. 장바구니 의존성 트리 미리보기와 실제 의존성 포함 다운로드 모두 선택한 type을 resolver에 전달하며, 원격 packaging보다 명시한 type을 우선합니다.
+
+Maven 해결 결과의 `root`는 실행 의존성 그래프이고, `flatList`에는 그 그래프에 없는 부모 POM과 import BOM도 포함될 수 있습니다. 장바구니 미리보기의 `함께 다운로드할 POM` 목록을 펼치면 그래프 밖 모델의 좌표·버전·파일 상세를 확인할 수 있습니다. 그래프에 이미 있는 POM은 이 목록에 중복 표시하지 않으며, 같은 GAV의 JAR와 POM, 서로 다른 classifier를 구분합니다.
+
+다운로드 화면은 수동 의존성 확인(`handleResolveDependencies`)과 다운로드 시작 후 해결 이벤트(`onDepsResolved`)에서 `download-page/resolved-items.ts`의 공통 변환을 사용합니다. 각 루트의 `flatList`를 기준으로 원본 다운로드 항목의 실제 ID에 그룹을 연결하므로, `root.dependencies`에 없는 부모/BOM POM도 의존성 그룹에 표시됩니다. 원본 항목 판정과 그룹 연결은 Maven artifact type과 classifier를 구분하며, 그룹에 연결하지 못한 행도 표에서 유지합니다.
 
 의존성 포함 다운로드에서는 선택된 Maven 패키지의 부모 POM과 import BOM도 자동으로 수집하여 POM 파일로 전달합니다. 부모/BOM의 `dependencyManagement`에 있는 사용하지 않는 라이브러리는 추가하지 않습니다. 일반 JAR와 부속 POM은 `packages/m2repo/`에 저장되고, 최상위 `packages/`에는 각 항목의 주 아티팩트만 복사합니다. 부모/BOM은 `.pom` 자체가 주 아티팩트이므로 최상위에도 복사됩니다. 필요한 Parent/BOM 조회 실패나 순환 참조는 의존성 해결 오류로 처리합니다. 실제 파일 다운로드에서 일반 JAR의 부속 POM을 저장하지 못한 경우도 해당 패키지를 실패로 표시합니다.
 
