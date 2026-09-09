@@ -52,7 +52,7 @@ const makePackageInfo = (name: string, version: string, filename: string): Packa
   metadata: { filename },
 });
 
-const createIsolatedEnvironment = async () => {
+const createIsolatedEnvironment = async (withBundleManifest = true) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler npm fixture with spaces-'));
   const bundleDirectory = path.join(root, 'bundle with spaces');
   const packagesDirectory = path.join(bundleDirectory, 'packages');
@@ -74,15 +74,17 @@ const createIsolatedEnvironment = async () => {
   ]);
   await fs.writeFile(userConfig, '');
   const manifestPath = path.join(bundleDirectory, 'package.json');
-  await fs.writeJson(
-    manifestPath,
-    {
-      name: 'offline-consumer',
-      version: '1.0.0',
-      private: true,
-    },
-    { spaces: 2 }
-  );
+  if (withBundleManifest) {
+    await fs.writeJson(
+      manifestPath,
+      {
+        name: 'offline-consumer',
+        version: '1.0.0',
+        private: true,
+      },
+      { spaces: 2 }
+    );
+  }
 
   const environment = {
     ...process.env,
@@ -131,8 +133,11 @@ describe('npm install script native integration', () => {
     await Promise.all(temporaryRoots.splice(0).map((root) => fs.remove(root)));
   });
 
-  it('installs all delivered npm tarballs offline from an independent cwd and runs lifecycle scripts', async () => {
-    const environment = await createIsolatedEnvironment();
+  it.each([
+    ['with a pre-existing bundle manifest', true],
+    ['without a bundle manifest', false],
+  ] as const)('installs all delivered npm tarballs offline from an independent cwd and runs lifecycle scripts %s', async (_label, withBundleManifest) => {
+    const environment = await createIsolatedEnvironment(withBundleManifest);
     temporaryRoots.push(environment.root);
     const rootInfo = makePackageInfo('offline-root', '1.0.0', 'offline-root-1.0.0.tgz');
     const dependencyInfo = makePackageInfo('@fixture/dep', '1.0.0', 'dep-1.0.0.tgz');
@@ -174,7 +179,9 @@ describe('npm install script native integration', () => {
       dependencyFixture
     );
     expect(await fs.readdir(environment.cacheDirectory)).toHaveLength(0);
-    const manifestBefore = await fs.readFile(environment.manifestPath);
+    const manifestBefore = withBundleManifest
+      ? await fs.readFile(environment.manifestPath)
+      : undefined;
     const scriptPath = path.join(
       environment.bundleDirectory,
       process.platform === 'win32' ? 'install.ps1' : 'install.sh'
@@ -201,7 +208,23 @@ describe('npm install script native integration', () => {
     expect(scriptText).toContain('--update-notifier=false');
     expect(scriptText).toContain('--no-save');
     expect(scriptText).not.toContain('--ignore-scripts');
-    expect(await fs.readFile(environment.manifestPath)).toEqual(manifestBefore);
+    if (manifestBefore) {
+      expect(await fs.readFile(environment.manifestPath)).toEqual(manifestBefore);
+    } else {
+      expect(await fs.pathExists(environment.manifestPath)).toBe(false);
+    }
+    const runtimeManifest = (await fs.readJson(
+      path.join(environment.npmProjectDirectory, 'package.json')
+    )) as { name?: string; depssmugglerOfflineBundle?: number };
+    expect(runtimeManifest).toMatchObject({
+      name: 'depssmuggler-offline-bundle',
+      depssmugglerOfflineBundle: 1,
+    });
+    expect(
+      await fs.pathExists(
+        path.join(environment.npmProjectDirectory, 'node_modules', 'offline-consumer')
+      )
+    ).toBe(false);
     expect(
       await fs.pathExists(
         path.join(environment.npmProjectDirectory, 'node_modules', 'offline-root', 'package.json')

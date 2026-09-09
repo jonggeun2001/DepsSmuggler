@@ -778,8 +778,13 @@ export class ScriptGenerator {
       lines.push('    $NpmProjectEncoded = $NpmSetupScript | & node - "$ScriptDir" "$PackageDir"');
       lines.push('    if ($LASTEXITCODE -ne 0) { throw "npm 설치 프로젝트 준비에 실패했습니다." }');
       lines.push('    $NpmProject = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($NpmProjectEncoded))');
-      lines.push('    & npm install --offline --no-audit --no-fund --update-notifier=false --no-save --package-lock=false --global=false --prefix "$NpmProject"');
-      lines.push('    if ($LASTEXITCODE -ne 0) { throw "npm 패키지 설치에 실패했습니다: 종료 코드 $LASTEXITCODE" }');
+      lines.push('    Push-Location -LiteralPath $NpmProject -ErrorAction Stop');
+      lines.push('    try {');
+      lines.push('        & npm install --offline --no-audit --no-fund --update-notifier=false --no-save --package-lock=false --global=false');
+      lines.push('        if ($LASTEXITCODE -ne 0) { throw "npm 패키지 설치에 실패했습니다: 종료 코드 $LASTEXITCODE" }');
+      lines.push('    } finally {');
+      lines.push('        Pop-Location');
+      lines.push('    }');
       lines.push('    Write-Info "npm 패키지 설치 완료: $NpmProject/node_modules"');
       lines.push('}');
       lines.push('');
