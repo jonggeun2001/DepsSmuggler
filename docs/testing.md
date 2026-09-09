@@ -151,6 +151,18 @@ bash scripts/verify-worktree.sh \
 INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/yum.integration.test.ts
 ```
 
+### OS 충돌 버전의 전이 의존성 검증
+
+`src/core/downloaders/os-shared/base-resolver.test.ts`는 다운로드에 포함되는 충돌 버전의 하위 의존성과 추가 충돌을 탐색하는지 검증합니다. 순환 참조·중복 엣지에서도 패키지를 한 번만 처리하며, 고유 패키지 10,000개로 완료하는 경우와 한도를 넘겨 오류를 반환하는 경우를 구분합니다.
+
+`src/core/resolver/apt-alternative-closure.test.ts`는 로컬 HTTP 서버의 실제 `Packages.gz`를 APT 파서와 resolver로 읽습니다. 최선 후보 외 버전이 요구하는 정확한 하위 버전과 그 하위 의존성, 순환 참조, 미해결 항목을 검사합니다. 외부 저장소 검증은 Ubuntu의 `zlib1g` 묶음에서 각 DEB 내부 control의 요구 버전을 다운로드 목록과 비교하며, 생성한 저장소 `Packages`를 원본 요구 조건의 대용으로 사용하지 않습니다. 파일·제어 정보 검사는 네이티브 APT 설치 트랜잭션과 구분합니다.
+
+`src/core/downloaders/apt.integration.test.ts`는 현재 OS backend API로 Ubuntu 22.04 검색, 의존성 없는 단일 DEB 다운로드, 의존성을 포함한 아카이브·저장소 출력을 검사합니다. DEB 내부의 정확한 버전 요구와 전달된 파일을 비교하며, 저장소 버전은 테스트에 고정하지 않습니다. 외부 네트워크와 DEB control 압축을 읽을 수 있는 POSIX `ar`·`tar`가 필요하며, 명시 실행 시 필수 도구가 없으면 실패합니다. 임시 캐시·출력은 정리합니다.
+
+```bash
+INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/apt.integration.test.ts
+```
+
 ### APK capability 의존성 검증
 
 `src/core/downloaders/os-metadata-parsers.test.ts`는 APKINDEX의 `so:`, `cmd:`, `pc:` 의존성과 provides를 보존하는지 확인합니다. `src/core/resolver/os-resolvers.test.ts`는 제공 APK의 패키지 버전과 capability 버전을 다르게 둔 fixture로 버전 조건·아키텍처·전이 목록·미해결 경고를 검증합니다. 일반 패키지 조건과 `--no-deps`의 루트 전용 다운로드도 기존 backend 회귀에서 확인합니다.
