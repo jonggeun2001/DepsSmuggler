@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import { createHash } from 'crypto';
+import { realpathSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -105,7 +106,7 @@ describe('Docker install scripts use downloader archive names', () => {
       expect(bashContent).toContain(expectedBasename);
       expect(powershellContent).toContain(`'${expectedBasename}'`);
 
-      const expectedArtifact = await fs.realpath(path.join(fixture.packagesDir, expectedBasename));
+      const expectedArtifact = realpathSync.native(path.join(fixture.packagesDir, expectedBasename));
       const command = process.platform === 'win32' ? 'powershell.exe' : 'bash';
       const commandArgs = process.platform === 'win32'
         ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', fixture.powershellPath]
@@ -116,7 +117,7 @@ describe('Docker install scripts use downloader archive names', () => {
       if (!recorded) throw new Error('Docker recording shim did not capture argv');
       expect(recorded.args).toHaveLength(3);
       expect(recorded.args.slice(0, 2)).toEqual(['load', '-i']);
-      expect(await fs.realpath(path.resolve(recorded.cwd, recorded.args[2]))).toBe(expectedArtifact);
+      expect(realpathSync.native(path.resolve(recorded.cwd, recorded.args[2]))).toBe(expectedArtifact);
 
     },
     90_000,

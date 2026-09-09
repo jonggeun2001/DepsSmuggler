@@ -119,6 +119,8 @@ bash scripts/verify-worktree.sh \
 
 `src/core/downloaders/docker-download.test.ts`는 이미지 이름·태그 정규화와 아키텍처별 실제 반환 파일명을 확인합니다. `src/core/packager/docker-install-script.integration.test.ts`는 같은 파일명 fixture를 준비하고, 공백이 있는 폴더와 외부 작업 디렉터리에서 생성 스크립트를 실행합니다. macOS·Linux에서는 Bash, Windows에서는 PowerShell을 사용하며 Docker 기록용 대체 명령이 받은 `load -i` 인자와 실제 파일 경로를 검사합니다. 이 검증은 Docker 엔진의 이미지 로드를 대신하지 않습니다.
 
+경로 비교에는 Node.js의 `realpathSync.native()`를 사용합니다. Windows 임시 폴더의 8.3 짧은 이름(`RUNNER~1`)과 PowerShell이 전달하는 긴 이름이 같은 실제 파일을 가리키는 경우도 동일하게 판정합니다.
+
 Docker 엔진이 실행 중인 환경에서는 아래 명령으로 실제 로드 테스트를 실행합니다. 테스트가 만든 고유 태그의 로컬 이미지 tar를 생성 스크립트로 로드하고, Docker에서 이미지 ID를 확인한 뒤 해당 태그만 정리합니다. 외부 레지스트리 다운로드는 필요하지 않습니다. 명시적으로 활성화한 상태에서 Docker에 연결할 수 없으면 테스트가 실패하며, 기본 단위 테스트에서는 이 사례를 건너뜁니다. Ubuntu CI는 별도 단계에서 이 검증을 활성화합니다.
 
 ```bash
