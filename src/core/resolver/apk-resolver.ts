@@ -10,7 +10,7 @@ import { isArchitectureCompatible } from '../downloaders/os-shared/repositories'
 import { ApkMetadataParser } from '../shared/apk-metadata-parser';
 import type { OSPackageInfo, PackageDependency, OSPackageSearchResult } from '../downloaders/os-shared/types';
 
-const APK_INDEX_CACHE_SCHEMA_VERSION = 1;
+const APK_INDEX_CACHE_SCHEMA_VERSION = 2;
 
 interface ApkIndexCacheEnvelope {
   schemaVersion: typeof APK_INDEX_CACHE_SCHEMA_VERSION;
@@ -223,8 +223,21 @@ export class ApkDependencyResolver extends BaseOSDependencyResolver {
     }
 
     const envelope = cached as Partial<ApkIndexCacheEnvelope>;
-    return envelope.schemaVersion === APK_INDEX_CACHE_SCHEMA_VERSION &&
-      Array.isArray(envelope.packages)
+    if (envelope.schemaVersion !== APK_INDEX_CACHE_SCHEMA_VERSION || !Array.isArray(envelope.packages)) {
+      return null;
+    }
+    return envelope.packages.every((pkg) => {
+      if (
+        !pkg ||
+        typeof pkg !== 'object' ||
+        !pkg.apkIndexFields ||
+        typeof pkg.apkIndexFields !== 'object' ||
+        Array.isArray(pkg.apkIndexFields)
+      ) {
+        return false;
+      }
+      return Object.values(pkg.apkIndexFields).every((value) => typeof value === 'string');
+    })
       ? envelope.packages
       : null;
   }

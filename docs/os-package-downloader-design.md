@@ -13,6 +13,7 @@
 | 충돌 버전과 탐색 한도 | 현재 공통 BFS는 최선 후보와 다운로드 대상으로 유지한 충돌 버전의 전이 의존성을 함께 탐색합니다. 큐·트리·충돌 병합은 이름·버전·RPM release·아키텍처의 JSON 튜플 키를 사용합니다. 단일 루트에서 고유 패키지 10,000개를 처리한 뒤 남은 작업이 있으면 오류를 반환합니다. 아래 초안의 키 문자열과 다르며 모든 후보를 무조건 부모 엣지로 연결하지는 않습니다. |
 | 캐시·출력·스크립트 | `os-shared/cache-manager.ts`, `archive-packager.ts`, `repo-packager.ts`, `script-generator.ts`. CLI는 archive/repository/both 출력과 zip/tar.gz 압축을 구분합니다. |
 | APT Control 필드 보존 | `OSPackageInfo.aptControlFields`와 APT 스키마 1 캐시에 원본 필드를 유지합니다. 저장소 생성 시 의존성·제공·충돌 조건과 여러 줄 설명은 보존하고, 로컬 파일 경로·크기·SHA256은 실제 복사 파일로 생성합니다. |
+| APKINDEX 필드 보존 | `OSPackageInfo.apkIndexFields`와 APK 스키마 2 캐시에 원본 필드를 유지합니다. 저장소의 체크섬·의존성 조건·provides·설치 크기는 원본을 보존하고, `S`는 실제 전달 APK 파일 크기를 사용합니다. 유효한 체크섬이나 설치 크기가 없으면 저장소 생성에 실패합니다. |
 | GPG 검증 | `os-shared/gpg-verifier.ts`는 체크섬 검증을 제공하지만 실제 RPM/DEB/APK GPG 서명 검증은 미구현입니다. CLI backend는 이 verifier를 주입하지 않습니다. 아래 GPG 설계는 완료 기능 목록이 아닙니다. |
 | UI 통합 | `pages/download-page/hooks/use-os-download-flow.ts`와 `electron/services/os-download-orchestrator.ts`로 연결됩니다. OS 항목의 관리자·배포판·아키텍처 문맥이 일치할 때 전용 흐름을 사용합니다. |
 | Phase 1–4 | yum/apt/apk 다운로드와 GUI 연결, 단위 테스트 및 브라우저 E2E가 구현되어 있습니다. 아래 “다음 단계”는 당시 순서를 남긴 기록입니다. |

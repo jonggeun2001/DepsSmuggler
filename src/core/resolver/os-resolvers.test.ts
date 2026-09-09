@@ -385,7 +385,10 @@ describe('OS dependency resolvers', () => {
   it('APK resolver는 legacy 배열 캐시를 재파싱하고 새 envelope 캐시를 재사용한다', async () => {
     const cachedLegacy = [createPackage('cached-provider', '1.0.0')];
     const parsedPackages = [
-      createPackage('parsed-provider', '1.0.0', 'x86_64', ['so:libparsed.so.1=1.0.0']),
+      {
+        ...createPackage('parsed-provider', '1.0.0', 'x86_64', ['so:libparsed.so.1=1.0.0']),
+        apkIndexFields: { P: 'parsed-provider', V: '1.0.0', A: 'x86_64', S: '1', I: '1', C: 'Q1AQEBAQEBAQEBAQEBAQEBAQEBAQE=' },
+      },
     ];
     const cacheGet = vi.fn().mockResolvedValueOnce(cachedLegacy);
     const cacheSet = vi.fn().mockResolvedValue(undefined);
@@ -410,14 +413,52 @@ describe('OS dependency resolvers', () => {
     expect(parseIndex).toHaveBeenCalledOnce();
     expect(cacheSet).toHaveBeenCalledWith(
       expect.any(String),
-      { schemaVersion: 1, packages: parsedPackages }
+      { schemaVersion: 2, packages: parsedPackages }
     );
     const writtenEnvelope = cacheSet.mock.calls[0][1];
-    cacheGet.mockResolvedValueOnce(writtenEnvelope);
+    cacheGet.mockResolvedValueOnce(JSON.parse(JSON.stringify(writtenEnvelope)));
 
     await accessResolverForTest(createApkResolver()).loadMetadata();
 
     expect(parseIndex).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['schema 1', { schemaVersion: 1, packages: [createPackage('legacy-provider', '1.0.0')] }],
+    ['unknown schema', { schemaVersion: 3, packages: [createPackage('legacy-provider', '1.0.0')] }],
+    ['schema 2 without raw fields', { schemaVersion: 2, packages: [createPackage('legacy-provider', '1.0.0')] }],
+    ['schema 2 with raw fields array', { schemaVersion: 2, packages: [{ ...createPackage('legacy-provider', '1.0.0'), apkIndexFields: [] as unknown as Record<string, string> }] }],
+    ['malformed envelope', { schemaVersion: 2, packages: {} }],
+  ])('APK resolver는 %s 캐시를 miss로 처리한다', async (_label, cachedValue) => {
+    const parsedPackages = [{
+      ...createPackage('reparsed-provider', '2.0.0', 'x86_64', ['so:libparsed.so.1=2.0.0']),
+      apkIndexFields: { P: 'reparsed-provider', V: '2.0.0', A: 'x86_64', S: '1', I: '1', C: 'Q1AQEBAQEBAQEBAQEBAQEBAQEBAQE=' },
+    }];
+    const cacheGet = vi.fn().mockResolvedValue(cachedValue);
+    const cacheSet = vi.fn().mockResolvedValue(undefined);
+    const parseIndex = vi.spyOn(ApkMetadataParser.prototype, 'parseIndex')
+      .mockResolvedValue(parsedPackages);
+    const resolver = new ApkDependencyResolver({
+      ...createOptions(repo),
+      cacheManager: { get: cacheGet, set: cacheSet } as never,
+      distribution: {
+        id: 'alpine-3.21',
+        name: 'Alpine Linux 3.21',
+        version: '3.21',
+        packageManager: 'apk',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+    });
+
+    await accessResolverForTest(resolver).loadMetadata();
+
+    expect(parseIndex).toHaveBeenCalledOnce();
+    expect(cacheSet).toHaveBeenCalledWith(
+      expect.any(String),
+      { schemaVersion: 2, packages: parsedPackages }
+    );
   });
 
   it('APK resolver는 capability 버전을 패키지 버전과 구분하고 불일치를 unresolved로 남긴다', async () => {

@@ -73,6 +73,7 @@ function createApkPackage(): OSPackageInfo {
     version: '1.3.2-r0',
     architecture: 'x86_64',
     size: 1024,
+    installedSize: 2048,
     checksum: {
       type: 'sha1',
       value: Buffer.alloc(20, 1).toString('base64'),
@@ -285,6 +286,178 @@ describe('OSRepoPackager', () => {
     expect(members.get('APKINDEX')).toContain('A:x86_64');
     expect(members.get('APKINDEX')).toContain('D:so:libc.musl-x86_64.so.1');
     expect(fs.existsSync(path.join(repoPath, 'APKINDEX'))).toBe(false);
+  });
+
+  it('APK 메타데이터는 원본 C/D/p/I와 실제 복사 파일 크기를 보존한다', async () => {
+    const packager = new OSRepoPackager();
+    const pkg = {
+      ...createApkPackage(),
+      apkIndexFields: {
+        P: 'zlib',
+        V: '1.3.2-r0',
+        A: 'x86_64',
+        S: '1024',
+        I: '114688',
+        T: 'A compression/decompression Library',
+        C: 'Q1AQEBAQEBAQEBAQEBAQEBAQEBAQE=',
+        D: 'so:libc.musl-x86_64.so.1>=1.2 compat~1.0 !conflict>=1.0',
+        p: 'so:libz.so.1=1.3.2',
+        i: 'so:libc.musl-x86_64.so.1',
+        k: '50',
+      },
+    };
+    const payload = Buffer.from('actual apk bytes');
+    const downloadedFile = path.join(tempDir, 'zlib-1.3.2-r0.apk');
+    const repoPath = path.join(tempDir, 'repo-raw');
+    fs.writeFileSync(downloadedFile, payload);
+
+    const roundTripped = JSON.parse(JSON.stringify(pkg)) as typeof pkg;
+    await packager.createLocalRepo(
+      [roundTripped],
+      new Map([[getDownloadedFileKey(roundTripped), downloadedFile]]),
+      { packageManager: 'apk', outputPath: repoPath, repoName: 'alpine-main', includeSetupScript: false }
+    );
+
+    const members = await readTarMembers(path.join(repoPath, 'APKINDEX.tar.gz'));
+    expect(members.get('APKINDEX')).toContain('S:16');
+    expect(members.get('APKINDEX')).toContain('I:114688');
+    expect(members.get('APKINDEX')).toContain('C:Q1AQEBAQEBAQEBAQEBAQEBAQEBAQE=');
+    expect(members.get('APKINDEX')).toContain('D:so:libc.musl-x86_64.so.1>=1.2 compat~1.0 !conflict>=1.0');
+    expect(members.get('APKINDEX')).toContain('p:so:libz.so.1=1.3.2');
+    expect(members.get('APKINDEX')).toContain('i:so:libc.musl-x86_64.so.1');
+    expect(members.get('APKINDEX')).toContain('k:50');
+  });
+
+  it.each([
+    ['version만 있으면 제약 없이 이름만 기록한다', { name: 'foo', version: '1.0' }, 'foo'],
+    ['operator만 있으면 제약 없이 이름만 기록한다', { name: 'foo', operator: '>=' }, 'foo'],
+    ['operator와 version이 없으면 이름만 기록한다', { name: 'foo' }, 'foo'],
+    ['operator와 version이 함께 있으면 >= 제약을 기록한다', { name: 'foo', operator: '>=', version: '1.0' }, 'foo>=1.0'],
+    ['operator와 version이 함께 있으면 = 제약을 기록한다', { name: 'foo', operator: '=', version: '1.0' }, 'foo=1.0'],
+  ])('APK fallback dependency는 %s', async (_caseName, dependency, expected) => {
+    const packager = new OSRepoPackager();
+    const pkg = {
+      ...createApkPackage(),
+      dependencies: [dependency],
+      apkIndexFields: undefined,
+    };
+    const downloadedFile = path.join(tempDir, `dependency-${expected.replaceAll(/[^a-z0-9]+/gi, '-')}.apk`);
+    const repoPath = path.join(tempDir, `repo-dependency-${expected.replaceAll(/[^a-z0-9]+/gi, '-')}`);
+    fs.writeFileSync(downloadedFile, 'dependency payload');
+
+    await packager.createLocalRepo(
+      [pkg],
+      new Map([[getDownloadedFileKey(pkg), downloadedFile]]),
+      { packageManager: 'apk', outputPath: repoPath, repoName: 'alpine-main', includeSetupScript: false }
+    );
+
+    const members = await readTarMembers(path.join(repoPath, 'APKINDEX.tar.gz'));
+    const dependencyLine = members.get('APKINDEX')?.split('\n').find((line) => line.startsWith('D:'));
+    expect(dependencyLine).toBe(`D:${expected}`);
+  });
+
+  it('APK 메타데이터는 원본 X1 체크섬 wire 형식을 보존한다', async () => {
+    const packager = new OSRepoPackager();
+    const pkg = {
+      ...createApkPackage(),
+      apkIndexFields: { C: 'X10202020202020202020202020202020202020202', I: '2048' },
+    };
+    const downloadedFile = path.join(tempDir, 'x1.apk');
+    const repoPath = path.join(tempDir, 'repo-x1');
+    fs.writeFileSync(downloadedFile, 'x1 payload');
+
+    await packager.createLocalRepo(
+      [pkg],
+      new Map([[getDownloadedFileKey(pkg), downloadedFile]]),
+      { packageManager: 'apk', outputPath: repoPath, repoName: 'alpine-main', includeSetupScript: false }
+    );
+
+    const members = await readTarMembers(path.join(repoPath, 'APKINDEX.tar.gz'));
+    expect(members.get('APKINDEX')).toContain('C:X10202020202020202020202020202020202020202');
+  });
+
+  it.each([
+    ['SHA-1 base64', { type: 'sha1' as const, value: Buffer.alloc(20, 2).toString('base64') }, `Q1${Buffer.alloc(20, 2).toString('base64')}`],
+    ['SHA-1 hex', { type: 'sha1' as const, value: '0202020202020202020202020202020202020202' }, `Q1${Buffer.alloc(20, 2).toString('base64')}`],
+    ['MD5 hex', { type: 'md5' as const, value: '02020202020202020202020202020202' }, '02020202020202020202020202020202'],
+  ])('APK 메타데이터는 %s 체크섬 fallback을 올바른 wire 형식으로 기록한다', async (_label, checksum, expectedWire) => {
+    const packager = new OSRepoPackager();
+    const pkg = { ...createApkPackage(), checksum, apkIndexFields: undefined };
+    const downloadedFile = path.join(tempDir, `fallback-${_label}.apk`);
+    const repoPath = path.join(tempDir, `repo-${_label}`);
+    fs.writeFileSync(downloadedFile, 'fallback payload');
+
+    await packager.createLocalRepo(
+      [pkg],
+      new Map([[getDownloadedFileKey(pkg), downloadedFile]]),
+      { packageManager: 'apk', outputPath: repoPath, repoName: 'alpine-main', includeSetupScript: false }
+    );
+
+    const members = await readTarMembers(path.join(repoPath, 'APKINDEX.tar.gz'));
+    expect(members.get('APKINDEX')).toContain(`C:${expectedWire}`);
+  });
+
+  it('APK 메타데이터는 설치 크기나 체크섬이 없으면 명시적으로 실패한다', async () => {
+    const packager = new OSRepoPackager();
+    const downloadedFile = path.join(tempDir, 'missing-metadata.apk');
+    fs.writeFileSync(downloadedFile, 'apk');
+    const base = createApkPackage();
+
+    await expect(packager.createLocalRepo(
+      [{ ...base, installedSize: undefined }],
+      new Map([[getDownloadedFileKey(base), downloadedFile]]),
+      { packageManager: 'apk', outputPath: path.join(tempDir, 'repo-missing-size'), repoName: 'alpine-main', includeSetupScript: false }
+    )).rejects.toThrow(/설치 크기/);
+
+    await expect(packager.createLocalRepo(
+      [{ ...base, installedSize: undefined, apkIndexFields: { I: 'unknown', C: 'Q1AQEBAQEBAQEBAQEBAQEBAQEBAQE=' } }],
+      new Map([[getDownloadedFileKey(base), downloadedFile]]),
+      { packageManager: 'apk', outputPath: path.join(tempDir, 'repo-unknown-size'), repoName: 'alpine-main', includeSetupScript: false }
+    )).rejects.toThrow(/설치 크기/);
+
+    await expect(packager.createLocalRepo(
+      [{ ...base, installedSize: undefined, apkIndexFields: { I: '0', C: 'Q1AQEBAQEBAQEBAQEBAQEBAQEBAQE=' } }],
+      new Map([[getDownloadedFileKey(base), downloadedFile]]),
+      { packageManager: 'apk', outputPath: path.join(tempDir, 'repo-zero-size'), repoName: 'alpine-main', includeSetupScript: false }
+    )).resolves.toBeDefined();
+
+    await expect(packager.createLocalRepo(
+      [{ ...base, apkIndexFields: { C: 'sha256:not-a-v2-checksum' } }],
+      new Map([[getDownloadedFileKey(base), downloadedFile]]),
+      { packageManager: 'apk', outputPath: path.join(tempDir, 'repo-missing-checksum'), repoName: 'alpine-main', includeSetupScript: false }
+    )).rejects.toThrow(/체크섬/);
+
+    await expect(packager.createLocalRepo(
+      [{ ...base, apkIndexFields: { C: 'X1not-hex' } }],
+      new Map([[getDownloadedFileKey(base), downloadedFile]]),
+      { packageManager: 'apk', outputPath: path.join(tempDir, 'repo-invalid-x1'), repoName: 'alpine-main', includeSetupScript: false }
+    )).rejects.toThrow(/체크섬/);
+
+    await expect(packager.createLocalRepo(
+      [{ ...base, apkIndexFields: { C: 'Q1not-base64' } }],
+      new Map([[getDownloadedFileKey(base), downloadedFile]]),
+      { packageManager: 'apk', outputPath: path.join(tempDir, 'repo-invalid-q1'), repoName: 'alpine-main', includeSetupScript: false }
+    )).rejects.toThrow(/체크섬/);
+
+    await expect(packager.createLocalRepo(
+      [{ ...base, installedSize: 2048, checksum: { type: 'sha256', value: 'a'.repeat(64) } }],
+      new Map([[getDownloadedFileKey(base), downloadedFile]]),
+      { packageManager: 'apk', outputPath: path.join(tempDir, 'repo-missing-sha1'), repoName: 'alpine-main', includeSetupScript: false }
+    )).rejects.toThrow(/체크섬/);
+  });
+
+  it('APK 메타데이터는 다운로드 원본이 없으면 기존 파일이 있어도 실패한다', async () => {
+    const packager = new OSRepoPackager();
+    const pkg = createApkPackage();
+    const repoPath = path.join(tempDir, 'repo-missing-source');
+    fs.mkdirSync(repoPath, { recursive: true });
+    fs.writeFileSync(path.join(repoPath, 'zlib-1.3.2-r0.apk'), 'stale destination');
+
+    await expect(packager.createLocalRepo(
+      [pkg],
+      new Map(),
+      { packageManager: 'apk', outputPath: repoPath, repoName: 'alpine-main', includeSetupScript: false }
+    )).rejects.toThrow(/APK.*파일|다운로드/);
   });
 
   it('APK tar 생성 실패는 기존 plain/index archive를 보존하고 staging을 정리한다', async () => {

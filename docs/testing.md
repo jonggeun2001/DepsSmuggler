@@ -196,12 +196,19 @@ INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/apk.i
 
 `src/core/downloaders/os-shared/repo-packager.test.ts`는 생성한 `APKINDEX.tar.gz`가 인덱스 항목 하나를 담은 tar인지 확인하고, 아카이브 생성 실패 시 기존 파일 보존과 임시 디렉터리 정리를 검사합니다. `src/core/downloaders/os-shared/apk-repository-consumer.test.ts`는 생성한 아카이브를 로컬 HTTP 서버에서 제공해 실제 `ApkMetadataParser.parseIndex()`가 읽는지 검증합니다. 두 테스트는 기본 테스트에 포함되며 외부 저장소나 네이티브 Alpine 도구가 필요하지 않습니다.
 
-이 검사는 아카이브 구조와 앱 파서의 소비 경로를 다룹니다. 실제 Alpine 저장소 업데이트·검색 검증은 [#97의 메타데이터 필드 보존 문제](https://github.com/jonggeun2001/DepsSmuggler/issues/97)를 해결한 뒤 함께 수행해야 합니다.
+메타데이터 회귀는 원본 체크섬·의존성 조건·provides·설치 크기의 JSON 저장·복원과 출력 보존, 실제 APK 파일 크기, 원본 없는 API 입력의 체크섬 변환 및 누락 메타데이터 오류를 확인합니다. 이전 APK 파싱 캐시를 다시 조회하고 스키마 2 결과를 재사용하는지도 검증합니다.
+
+`src/core/downloaders/apk-native-consumer.integration.test.ts`는 실제 CLI로 Alpine 3.20 `zlib`를 의존성 포함 다운로드하여 서로 다른 체크섬의 APK가 최소 두 개 있는 저장소를 생성합니다. 네트워크가 없는 Alpine 컨테이너 안에서 loopback HTTP 서버로 이를 제공하고, 빈 전용 데이터베이스와 전용 저장소 목록으로 `apk update` 및 모든 생성 패키지의 정확한 이름·버전 검색을 검사합니다. 저장소 파일은 읽기 전용으로 연결하고 실행 전후 해시를 비교합니다. 패키지 설치나 저장소 설정 스크립트 실행은 이 검증에 포함되지 않습니다.
+
+네이티브 검사는 기본 테스트에서는 skip이며 Ubuntu CI에서 별도로 실행합니다. 온라인 준비 단계에서 Alpine 3.20에 HTTP 서버용 `busybox-extras`를 포함한 임시 이미지를 만든 뒤, 저장소 소비 단계는 네트워크를 끄고 실행합니다. 명시적으로 활성화한 실행은 Linux·Docker·이미지 준비에 실패하면 오류로 종료합니다. 임시 이미지와 테스트 파일은 정리하며 호스트에 `apk`를 설치하지 않습니다.
 
 ```bash
 bash scripts/verify-worktree.sh \
   src/core/downloaders/os-shared/repo-packager.test.ts \
   src/core/downloaders/os-shared/apk-repository-consumer.test.ts
+
+DEPS_SMUGGLER_NATIVE_APK=1 bash scripts/verify-worktree.sh \
+  src/core/downloaders/apk-native-consumer.integration.test.ts
 ```
 
 ### CLI 동시 다운로드 수 입력 검증

@@ -146,6 +146,7 @@ interface OSPackageInfo {
   suggests?: string[];           // DEB: Suggests
   recommends?: string[];         // DEB: Recommends
   aptControlFields?: Record<string, string>; // APT 원본 Control 필드 (JSON 캐시 가능)
+  apkIndexFields?: Record<string, string>;   // APK 원본 인덱스 필드 (JSON 캐시 가능)
 }
 ```
 
@@ -366,7 +367,7 @@ ${baseUrl}/pool/${component}/${prefix}/${name}/${filename}.deb
 
 `D:`의 `so:`, `cmd:`, `pc:` 항목을 시스템에 이미 설치된 것으로 간주해 버리지 않고 의존성으로 보존합니다. Resolver는 호환 아키텍처의 `p:` provides에서 제공자를 찾아 전이 목록에 포함합니다. 버전 조건이 있으면 제공 APK 자체의 버전 대신 같은 capability의 제공 버전을 비교하며, 버전 없는 제공은 버전 조건을 충족한 것으로 간주하지 않습니다. 제공자가 없거나 버전이 맞지 않으면 기존 unresolved/warning 결과에 남깁니다.
 
-서로 다른 APK가 같은 capability나 `/bin/sh` 같은 경로를 제공하면 기존 최선 후보 선택 규칙으로 하나의 제공 패키지 이름을 선택하며, 이를 같은 패키지의 여러 버전과 구분합니다. APKINDEX 파싱 결과 캐시에는 스키마 버전을 저장하므로 capability를 누락한 이전 캐시는 다시 파싱하고 이후 요청부터 새 결과를 재사용합니다.
+서로 다른 APK가 같은 capability나 `/bin/sh` 같은 경로를 제공하면 기존 최선 후보 선택 규칙으로 하나의 제공 패키지 이름을 선택하며, 이를 같은 패키지의 여러 버전과 구분합니다. APKINDEX 파싱 결과는 `apkIndexFields`에 원본 필드도 유지합니다. 스키마 2 캐시가 아닌 이전 결과는 다시 파싱하고 이후 요청부터 원본 필드를 포함한 새 결과를 재사용합니다.
 
 APK INDEX 형식:
 
@@ -628,7 +629,11 @@ APT는 수신한 `Packages`의 `aptControlFields`에서 의존성 조건과 대�
 
 `Package`·`Version`·`Architecture`는 선택한 패키지에서, `Filename`·`Size`·`SHA256`은 실제 복사한 파일에서 생성합니다. 상위 저장소의 경로나 오래된 체크섬을 그대로 전달하지 않으며, 필요한 로컬 파일이 없으면 저장소 생성에 실패합니다. API 호출자가 원본 필드를 제공하지 않으면 공통 패키지 정보로 생성하되 의존성 연산자와 제공·충돌 정보를 반영하고, 설치 크기는 `installedSize`가 있을 때 사용합니다. 공통 연산자 `<`·`>`는 같은 경계 조건을 뜻하는 Debian 표기 `<<`·`>>`로 변환합니다. 원본 필드 보존은 전달 저장소의 정보 보존이며, 앱 resolver가 모든 Debian 의존성 표현을 해결한다는 뜻은 아닙니다.
 
-APK 인덱스는 별도 임시 디렉터리에서 아카이브를 완성한 뒤 최종 `APKINDEX.tar.gz`로 교체합니다. 아카이브 생성 중 오류가 발생하면 기존 인덱스를 유지하고 오류를 전달하며, 사용자가 미리 둔 평문 `APKINDEX`를 임시 파일로 사용하거나 삭제하지 않습니다. 생성한 gzip tar 구조는 실제 `ApkMetadataParser`로 검증합니다. 체크섬 인코딩·의존성 조건·provides·설치 크기 보존 문제는 [#97](https://github.com/jonggeun2001/DepsSmuggler/issues/97)에 남아 있으므로, tar 구조 검증을 네이티브 `apk update`·설치 성공으로 간주하지 않습니다.
+APK는 `apkIndexFields`의 의존성 조건(`D`), 버전이 있는 provides(`p`), 패키지 식별 체크섬(`C`), 설치 크기(`I`)와 나머지 원본 메타데이터를 보존합니다. `P`·`V`·`A`는 선택한 패키지 정보로, `S`는 실제 복사한 APK 파일 크기로 생성합니다. APK 전체 파일의 SHA256으로 패키지 식별 체크섬을 대체하지 않습니다.
+
+원본 필드가 없는 API 입력은 공통 의존성 연산자·버전과 provides를 사용합니다. 의존성에 연산자와 버전이 모두 있을 때만 조건을 붙이며, 하나라도 없으면 패키지 이름만 기록합니다. SHA1 Base64는 `Q1` 접두사를 붙이고 SHA1 40자리 hex는 Base64로 변환하며, 유효한 원본 `Q1`·`X1` 또는 MD5 표기도 지원합니다. 설치 크기는 유효한 원본 `I` 또는 `installedSize`를 사용하며 명시된 0도 보존합니다. 필요한 로컬 파일, 지원하는 체크섬, 알려진 설치 크기가 없으면 오류로 종료합니다. 알 수 없는 설치 크기를 APK 파일 크기나 0으로 대신하지 않습니다.
+
+APK 인덱스는 별도 임시 디렉터리에서 아카이브를 완성한 뒤 최종 `APKINDEX.tar.gz`로 교체합니다. 아카이브 생성 중 오류가 발생하면 기존 인덱스를 유지하고 오류를 전달하며, 사용자가 미리 둔 평문 `APKINDEX`를 임시 파일로 사용하거나 삭제하지 않습니다. [테스트](testing.md#apk-저장소-인덱스-구조-검증)는 앱 파서의 소비와 별도 Alpine 컨테이너의 `apk update`·정확한 패키지 검색을 구분합니다. 네이티브 검증 범위에 패키지 설치나 저장소 설정 스크립트 실행은 포함되지 않습니다.
 
 ---
 

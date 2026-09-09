@@ -308,10 +308,29 @@ describe('APK cached capability CLI integration', () => {
       const afterSearchCache = await fs.readJson(path.join(cacheDirectory, cacheFilename));
       expect(afterSearchCache, searchOutput).toMatchObject({
         data: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           packages: expect.any(Array),
         },
       });
+      expect(afterSearchCache.data.packages).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          name: 'zlib',
+          apkIndexFields: expect.objectContaining({
+            C: 'Q1AAAAAAAAAAAAAAAAAAAAAA=',
+            D: 'so:libc.musl-x86_64.so.1',
+            I: '11',
+            p: 'so:libz.so.1=1.3.2',
+          }),
+        }),
+        expect.objectContaining({
+          name: 'musl',
+          apkIndexFields: expect.objectContaining({
+            C: 'Q1BBBBBBBBBBBBBBBBBBBBBB=',
+            I: '11',
+            p: 'so:libc.musl-x86_64.so.1=1.2.5',
+          }),
+        }),
+      ]));
       expect(
         requests.filter((requestPath) => requestPath.endsWith('/APKINDEX.tar.gz')),
         JSON.stringify(requests),
