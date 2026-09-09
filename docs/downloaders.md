@@ -529,6 +529,8 @@ YUM XML 파서는 표준 엔티티 디코딩을 유지하며 전체 치환 횟�
 | `parseDebControlFields(content)` (private) | Debian Control 형식 파싱 |
 | `parseDebDepends(depends)` (private) | Depends 필드 파싱 |
 
+파서는 기존 resolver용 정보와 함께 JSON 객체 `aptControlFields`에 수신한 `Packages`의 Control 값을 보존합니다. APT 저장소를 다시 생성할 때 정확한 의존성 연산자·대안, `Pre-Depends`, `Provides`, 충돌·대체 조건, `Multi-Arch`, 설치 크기와 수신한 설명을 이 값에서 가져옵니다. 상위 저장소가 설명 요약만 제공하면 요약을 유지하며 긴 설명을 별도로 가져오지는 않습니다. 다운로드 파일명·크기·SHA256은 로컬 파일 기준으로 다시 계산합니다. APT resolver의 스키마 1 캐시는 원본 필드를 유지하며, 이전 배열 캐시는 다시 파싱합니다.
+
 ### 지원 배포판
 
 - Ubuntu 20.04 LTS (Focal)

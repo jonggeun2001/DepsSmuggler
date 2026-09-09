@@ -307,6 +307,81 @@ describe('OS dependency resolvers', () => {
     );
   });
 
+  it('APT resolver는 legacy 캐시를 재파싱하고 JSON round-trip한 v1 envelope를 재사용한다', async () => {
+    const cachedLegacy = [createPackage('legacy-apt', '1.0.0')];
+    const parsedPackages = [{
+      ...createPackage('parsed-apt', '1.0.0'),
+      aptControlFields: { Depends: 'foo (>= 1.0) | bar', Description: 'summary\ncontinuation' },
+    }];
+    const cacheGet = vi.fn().mockResolvedValueOnce(cachedLegacy);
+    const cacheSet = vi.fn().mockResolvedValue(undefined);
+    const parsePackages = vi.spyOn(AptMetadataParser.prototype, 'parsePackages')
+      .mockResolvedValue(parsedPackages);
+    const createAptResolver = () => new AptDependencyResolver({
+      ...createOptions(repo),
+      cacheManager: { get: cacheGet, set: cacheSet } as never,
+      distribution: {
+        id: 'ubuntu-22.04',
+        name: 'Ubuntu 22.04',
+        version: '22.04',
+        packageManager: 'apt',
+        architectures: ['amd64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+      architecture: 'amd64',
+    });
+
+    await accessResolverForTest(createAptResolver()).loadMetadata();
+
+    expect(parsePackages).toHaveBeenCalledOnce();
+    expect(cacheSet).toHaveBeenCalledTimes(1);
+    expect(cacheSet).toHaveBeenCalledWith(
+      expect.any(String),
+      { schemaVersion: 1, packages: parsedPackages }
+    );
+    const persistedEnvelope = JSON.parse(JSON.stringify(cacheSet.mock.calls[0][1]));
+    cacheGet.mockResolvedValueOnce(persistedEnvelope);
+
+    const cacheHitResults = await createAptResolver().searchPackages('parsed-apt', 'exact');
+
+    expect(parsePackages).toHaveBeenCalledOnce();
+    expect(cacheHitResults[0].latest.aptControlFields).toEqual(parsedPackages[0].aptControlFields);
+  });
+
+  it.each([
+    ['unknown schema', { schemaVersion: 2, packages: [createPackage('legacy-apt', '1.0.0')] }],
+    ['malformed packages', { schemaVersion: 1, packages: {} }],
+  ])('APT resolver는 %s 캐시를 miss로 처리한다', async (_label, cachedValue) => {
+    const parsedPackages = [createPackage('reparsed-apt', '1.0.0')];
+    const cacheGet = vi.fn().mockResolvedValue(cachedValue);
+    const cacheSet = vi.fn().mockResolvedValue(undefined);
+    const parsePackages = vi.spyOn(AptMetadataParser.prototype, 'parsePackages')
+      .mockResolvedValue(parsedPackages);
+    const resolver = new AptDependencyResolver({
+      ...createOptions(repo),
+      cacheManager: { get: cacheGet, set: cacheSet } as never,
+      distribution: {
+        id: 'ubuntu-22.04',
+        name: 'Ubuntu 22.04',
+        version: '22.04',
+        packageManager: 'apt',
+        architectures: ['amd64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
+      architecture: 'amd64',
+    });
+
+    await accessResolverForTest(resolver).loadMetadata();
+
+    expect(parsePackages).toHaveBeenCalledOnce();
+    expect(cacheSet).toHaveBeenCalledWith(
+      expect.any(String),
+      { schemaVersion: 1, packages: parsedPackages }
+    );
+  });
+
   it('APK resolver는 legacy 배열 캐시를 재파싱하고 새 envelope 캐시를 재사용한다', async () => {
     const cachedLegacy = [createPackage('cached-provider', '1.0.0')];
     const parsedPackages = [

@@ -165,6 +165,21 @@ INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/yum.i
 INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/apt.integration.test.ts
 ```
 
+### APT 저장소 Control 필드 검증
+
+`src/core/downloaders/apt-repo-metadata.test.ts`는 로컬 HTTP의 `Packages.gz`를 실제 파서로 읽고 저장소를 생성해 `Packages`와 `Packages.gz`의 필드를 비교합니다. 정확한 의존성 연산자와 대안, `Pre-Depends`, 제공·충돌·대체 조건, `Multi-Arch`, 설치 크기, 여러 줄 설명을 검사합니다. 로컬 파일명·크기·SHA256은 실제 파일과 비교하며 상위 저장소의 오래된 경로·체크섬이 남지 않아야 합니다. 공통 parser·resolver 테스트는 이전 캐시의 재파싱과 현재 스키마의 JSON 왕복·재사용도 검사합니다.
+
+Linux 전용 `src/core/downloaders/apt-native-consumer.integration.test.ts`는 임시 DEB와 생성한 저장소를 네이티브 `apt-get update`·`apt-cache show`로 읽습니다. `APT_CONFIG`, 설정 파일, sources, state/status, cache, logs를 임시 경로로 격리하고 이 저장소만 조회합니다. 기본 테스트에서는 건너뛰며, `DEPS_SMUGGLER_NATIVE_APT=1`로 명시 실행하면 Linux 및 `apt-get`·`apt-cache`·`dpkg-deb`가 필요합니다. 필수 환경이 없으면 실패합니다. Ubuntu CI에서 이 검사를 별도로 실행하며, 패키지 설치 트랜잭션은 수행하지 않습니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/downloaders/apt-repo-metadata.test.ts
+DEPS_SMUGGLER_NATIVE_APT=1 bash scripts/verify-worktree.sh src/core/downloaders/apt-native-consumer.integration.test.ts
+```
+
+Control continuation과 필드 의미는 [Debian Policy](https://www.debian.org/doc/debian-policy/ch-controlfields.html)를 기준으로 검사하며, 들여쓰기 문자 자체의 바이트 일치와 필드 값 보존을 구분합니다. 원본 Control 필드가 없는 API 입력도 [Debian 관계 연산자](https://www.debian.org/doc/debian-policy/ch-relationships.html)에 맞게 `<`·`>`를 `<<`·`>>`로 출력하고 `<=`·`>=`·`=`의 의미를 유지하는지 검사합니다.
+
+실제 Ubuntu CLI 검증에서는 의존성·제공·충돌·설치 크기와 파일 정보를 DEB control 및 실물과 비교합니다. `Description`은 수신한 `Packages`와도 비교합니다. 상위 저장소가 긴 설명을 Translation 파일로 분리한 경우 DEB 내부의 긴 설명과 index의 요약은 다를 수 있으므로, 이 차이를 패키저의 필드 손실로 판정하지 않습니다. 이 저장소 구성은 [apt-ftparchive의 LongDescription 옵션](https://manpages.debian.org/bookworm/apt-utils/apt-ftparchive.1.en.html)에 설명돼 있습니다.
+
 ### APK capability 의존성 검증
 
 `src/core/downloaders/os-metadata-parsers.test.ts`는 APKINDEX의 `so:`, `cmd:`, `pc:` 의존성과 provides를 보존하는지 확인합니다. `src/core/resolver/os-resolvers.test.ts`는 제공 APK의 패키지 버전과 capability 버전을 다르게 둔 fixture로 버전 조건·아키텍처·전이 목록·미해결 경고를 검증합니다. 일반 패키지 조건과 `--no-deps`의 루트 전용 다운로드도 기존 backend 회귀에서 확인합니다.

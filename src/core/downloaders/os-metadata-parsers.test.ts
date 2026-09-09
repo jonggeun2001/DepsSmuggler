@@ -105,6 +105,55 @@ describe('OS metadata parsers', () => {
     ]);
   });
 
+  it('APT parser는 원본 control fields와 multiline 의미를 JSON-safe record로 보존한다', async () => {
+    const parser = new AptMetadataParser(
+      { ...repo, baseUrl: 'https://archive.ubuntu.test/ubuntu/dists/jammy/main' },
+      'main',
+      'amd64'
+    );
+    const packagesContent = [
+      'Package: raw-package',
+      'Version: 1.0-1',
+      'Architecture: amd64',
+      'Size: 1234',
+      'Installed-Size: 42',
+      'Filename: pool/main/r/raw-package_1.0-1_amd64.deb',
+      'MD5sum: stale-md5',
+      'SHA1: stale-sha1',
+      'SHA256: original-sha256',
+      'SHA512: stale-sha512',
+      'Depends: foo (>= 1.2) | bar',
+      'Pre-Depends: init-system (>= 1.0)',
+      'Provides: virtual-raw (= 1.0), plain-virtual',
+      'Conflicts: old-package (<< 2.0)',
+      'Breaks: broken-package',
+      'Replaces: replaced-package',
+      'Multi-Arch: same',
+      'Description: Raw summary',
+      ' continuation line',
+      ' .',
+      ' final line',
+    ].join('\n');
+    fetchMock.mockResolvedValue(
+      new Response(gzipSync(packagesContent), { status: 200 })
+    );
+
+    const packages = await parser.parsePackages();
+    const packageInfo = packages[0];
+
+    expect(packageInfo.aptControlFields).toEqual(expect.objectContaining({
+      Depends: 'foo (>= 1.2) | bar',
+      'Pre-Depends': 'init-system (>= 1.0)',
+      Provides: 'virtual-raw (= 1.0), plain-virtual',
+      Conflicts: 'old-package (<< 2.0)',
+      Breaks: 'broken-package',
+      Replaces: 'replaced-package',
+      'Multi-Arch': 'same',
+      Description: 'Raw summary\ncontinuation line\n.\nfinal line',
+    }));
+    expect(packageInfo.aptControlFields).not.toBeInstanceOf(Map);
+  });
+
   it('APK parser는 인덱스 아카이브의 capability 의존성과 provides를 보존한다', async () => {
     const parser = new ApkMetadataParser(repo, 'x86_64');
     vi.spyOn(parser as never, 'extractApkIndex').mockResolvedValue(
