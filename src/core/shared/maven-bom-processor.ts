@@ -1,75 +1,121 @@
-/**
- * Maven BOM (Bill of Materials) 및 Parent POM 처리기
- *
- * MavenResolver에서 분리된 BOM/Parent 처리 로직
- * dependencyManagement 섹션의 버전 관리 및 BOM import 처리
- */
-
+/** Maven parent/BOM model processing and required POM collection. */
 import { PomProject, PomDependency, MavenCoordinate } from './maven-types';
 import { resolveProperty } from './maven-pom-utils';
-import logger from '../../utils/logger';
 
-/** POM 조회 함수 타입 */
 export type FetchPomFunction = (coordinate: MavenCoordinate) => Promise<PomProject>;
 
+/** Required model failures must not produce an apparently complete offline bundle. */
+export class MavenPomResolutionError extends Error {
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+    this.name = 'MavenPomResolutionError';
+  }
+}
+
+type Properties = Record<string, string>;
+interface ModelFrame {
+  pom: PomProject;
+  coordinate?: MavenCoordinate;
+  properties: Properties;
+  includeManagement: boolean;
+  phase: 'parent' | 'management' | 'imports' | 'done';
+  imports: PomDependency[];
+  importIndex: number;
+  parentResult?: Properties;
+  isParent: boolean;
+  isImport: boolean;
+}
+
 /**
- * Maven BOM 및 Parent POM 처리 클래스
- *
- * dependencyManagement의 버전 정보를 수집하고 관리
- * Parent POM 체인을 따라가며 프로퍼티 상속 처리
+ * Traverses parent and import edges separately from ordinary dependencies.
+ * The explicit stack tracks ancestry, so shared models are not mistaken for cycles.
  */
 export class MavenBomProcessor {
-  /** 의존성 버전 관리 맵 (groupId:artifactId -> version) */
   private dependencyManagement: Map<string, string>;
+  private readonly requiredPoms = new Map<string, MavenCoordinate>();
+  private readonly models = new Map<string, Promise<PomProject>>();
+  private readonly completedImports = new Set<string>();
+  private readonly modelReferences = new Map<string, Set<string>>();
 
-  /** POM 조회 함수 (외부 주입) */
-  private fetchPom: FetchPomFunction;
-
-  constructor(fetchPom: FetchPomFunction, dependencyManagement?: Map<string, string>) {
-    this.fetchPom = fetchPom;
+  constructor(private fetchPom: FetchPomFunction, dependencyManagement?: Map<string, string>) {
     this.dependencyManagement = dependencyManagement || new Map();
   }
 
-  /**
-   * dependencyManagement 맵 반환
-   */
   getDependencyManagement(): Map<string, string> {
     return this.dependencyManagement;
   }
 
-  /**
-   * dependencyManagement 맵 설정
-   */
   setDependencyManagement(dm: Map<string, string>): void {
     this.dependencyManagement = dm;
+    this.completedImports.clear();
   }
 
-  /**
-   * dependencyManagement 초기화
-   */
+  /** Return fresh coordinates; callers cannot mutate the collection. */
+  getRequiredPoms(): MavenCoordinate[] {
+    return Array.from(this.requiredPoms.values(), (coordinate) => ({ ...coordinate }));
+  }
+
   clearDependencyManagement(): void {
     this.dependencyManagement.clear();
+    this.requiredPoms.clear();
+    this.models.clear();
+    this.completedImports.clear();
+    this.modelReferences.clear();
   }
 
   /**
-   * Parent POM 체인을 처리하여 프로퍼티 상속
-   *
-   * @param pom - 현재 POM
-   * @param coordinate - 현재 POM의 좌표
-   * @param inheritedProperties - 상속받은 프로퍼티
-   * @returns 병합된 프로퍼티
+   * Resolve one model against root management without leaking its declarations
+   * into siblings. Callers process models sequentially; raw POMs and the required
+   * output collection remain shared for the complete resolution request.
    */
+  async processModel(
+    pom: PomProject,
+    coordinate: MavenCoordinate,
+    rootManagement: Map<string, string>
+  ): Promise<{ properties: Properties; dependencyManagement: Map<string, string> }> {
+    const previousManagement = this.dependencyManagement;
+    this.setDependencyManagement(new Map(rootManagement));
+    try {
+      const properties = await this.processParentPom(pom, coordinate);
+      await this.processDependencyManagement(pom, properties);
+      return { properties, dependencyManagement: this.dependencyManagement };
+    } finally {
+      this.setDependencyManagement(previousManagement);
+    }
+  }
+
   async processParentPom(
     pom: PomProject,
     coordinate: MavenCoordinate,
-    inheritedProperties?: Record<string, string>
-  ): Promise<Record<string, string>> {
-    // 현재 POM의 properties와 상속받은 properties 병합
-    // 자식의 properties가 부모보다 우선 (오버라이드)
-    const mergedProperties: Record<string, string> = {
-      ...inheritedProperties,
-      ...pom.properties,
-      // 프로젝트 좌표 정보 추가
+    inheritedProperties?: Properties
+  ): Promise<Properties> {
+    return this.walkModels(this.frame(pom, coordinate, inheritedProperties, false));
+  }
+
+  async processDependencyManagement(pom: PomProject, properties?: Properties): Promise<void> {
+    // Parent inheritance has already been processed by processParentPom. Keeping
+    // this root on the active path still detects a BOM that imports its owner.
+    const coordinate = this.inferCoordinate(pom, properties);
+    const frame = this.frame(pom, coordinate, properties, true);
+    frame.properties = properties || frame.properties;
+    frame.phase = 'management';
+    await this.walkModels(frame);
+  }
+
+  async importBom(dep: PomDependency, properties?: Properties): Promise<void> {
+    const coordinate = this.requiredCoordinate(dep, properties, 'BOM');
+    if (this.completedImports.has(this.key(coordinate))) return;
+    const pom = await this.loadRequiredPom(coordinate);
+    await this.walkModels(this.frame(pom, coordinate, undefined, true, false, true));
+  }
+
+  private key(coordinate: MavenCoordinate): string {
+    return `${coordinate.groupId}:${coordinate.artifactId}:${coordinate.version}`;
+  }
+
+  private projectProperties(coordinate?: MavenCoordinate): Properties {
+    if (!coordinate) return {};
+    return {
       'project.version': coordinate.version,
       'project.groupId': coordinate.groupId,
       'project.artifactId': coordinate.artifactId,
@@ -77,133 +123,180 @@ export class MavenBomProcessor {
       groupId: coordinate.groupId,
       artifactId: coordinate.artifactId,
     };
+  }
 
-    if (!pom.parent) return mergedProperties;
+  private frame(
+    pom: PomProject,
+    coordinate: MavenCoordinate | undefined,
+    inheritedProperties: Properties | undefined,
+    includeManagement: boolean,
+    isParent = false,
+    isImport = false
+  ): ModelFrame {
+    return {
+      pom,
+      coordinate,
+      properties: { ...inheritedProperties, ...pom.properties, ...this.projectProperties(coordinate) },
+      includeManagement,
+      phase: 'parent',
+      imports: [],
+      importIndex: 0,
+      isParent,
+      isImport,
+    };
+  }
 
-    const parentGroupId = pom.parent.groupId || coordinate.groupId;
-    const parentArtifactId = pom.parent.artifactId;
-    const parentVersion = resolveProperty(pom.parent.version || '', mergedProperties);
+  private inferCoordinate(pom: PomProject, properties?: Properties): MavenCoordinate | undefined {
+    const groupId = properties?.['project.groupId'] || pom.groupId || pom.parent?.groupId;
+    const artifactId = properties?.['project.artifactId'] || pom.artifactId;
+    const version = properties?.['project.version'] || pom.version || pom.parent?.version;
+    return groupId && artifactId && version ? { groupId, artifactId, version } : undefined;
+  }
 
-    if (!parentArtifactId || !parentVersion) return mergedProperties;
+  private requiredCoordinate(
+    reference: { groupId?: string; artifactId?: string; version?: string },
+    properties: Properties | undefined,
+    kind: string
+  ): MavenCoordinate {
+    const groupId = resolveProperty(reference.groupId || '', properties).trim();
+    const artifactId = resolveProperty(reference.artifactId || '', properties).trim();
+    const version = resolveProperty(reference.version || '', properties).trim();
+    if ([groupId, artifactId, version].some((value) => !value || value.includes('${'))) {
+      throw new MavenPomResolutionError(`필수 ${kind} POM 좌표를 해결할 수 없습니다: ${groupId}:${artifactId}:${version}`);
+    }
+    return { groupId, artifactId, version, type: 'pom' };
+  }
 
+  private async loadRequiredPom(coordinate: MavenCoordinate): Promise<PomProject> {
+    const key = this.key(coordinate);
+    let pending = this.models.get(key);
+    if (!pending) {
+      pending = Promise.resolve().then(() => this.fetchPom(coordinate));
+      this.models.set(key, pending);
+    }
     try {
-      const parentCoordinate: MavenCoordinate = {
-        groupId: parentGroupId,
-        artifactId: parentArtifactId,
-        version: parentVersion,
-      };
-
-      const parentPom = await this.fetchPom(parentCoordinate);
-
-      // Parent의 parent도 재귀적으로 처리하고 properties 체인 받아오기
-      const parentProperties = await this.processParentPom(
-        parentPom,
-        parentCoordinate,
-        mergedProperties
-      );
-
-      // 최종 properties: 부모 체인의 properties + 현재 POM의 properties
-      const finalProperties: Record<string, string> = {
-        ...parentProperties,
-        ...pom.properties,
-        'project.version': coordinate.version,
-        'project.groupId': coordinate.groupId,
-        'project.artifactId': coordinate.artifactId,
-        version: coordinate.version,
-        groupId: coordinate.groupId,
-        artifactId: coordinate.artifactId,
-      };
-
-      // Parent의 dependencyManagement 상속 (부모의 properties로 해결)
-      await this.processDependencyManagement(parentPom, parentProperties);
-
-      return finalProperties;
-    } catch {
-      logger.debug('Parent POM 로드 실패 (계속 진행)', {
-        parent: `${parentGroupId}:${parentArtifactId}:${parentVersion}`,
-      });
-      return mergedProperties;
+      const pom = await pending;
+      if (!pom || typeof pom !== 'object' || Array.isArray(pom)) {
+        throw new Error('유효한 POM 프로젝트가 없습니다');
+      }
+      this.requiredPoms.set(key, { ...coordinate, type: 'pom' });
+      return pom;
+    } catch (error) {
+      this.models.delete(key);
+      if (error instanceof MavenPomResolutionError) throw error;
+      throw new MavenPomResolutionError(`필수 POM을 가져오지 못했습니다: ${key}`, error);
     }
   }
 
-  /**
-   * dependencyManagement 섹션 처리
-   *
-   * BOM import와 일반 의존성 버전 등록
-   *
-   * @param pom - POM 프로젝트
-   * @param properties - 프로퍼티 맵
+  /** A completed import may be reused unless it can lead back to this ancestry.
+   * Parent evaluation can depend on the current child properties, so observed
+   * edges are conservative: a possible intersection triggers normal traversal,
+   * rather than declaring a cycle from cached data alone.
    */
-  async processDependencyManagement(
-    pom: PomProject,
-    properties?: Record<string, string>
-  ): Promise<void> {
-    const managed = pom.dependencyManagement?.dependencies?.dependency;
-    if (!managed) return;
+  private mayReachAncestor(key: string, active: Set<string>): boolean {
+    const pending = [key];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (active.has(current)) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      for (const reference of this.modelReferences.get(current) || []) {
+        pending.push(reference);
+      }
+    }
+    return false;
+  }
 
-    const deps = Array.isArray(managed) ? managed : [managed];
+  private async walkModels(root: ModelFrame): Promise<Properties> {
+    const stack = [root];
+    const active = new Set<string>();
+    if (root.coordinate) active.add(this.key(root.coordinate));
 
-    // BOM import를 먼저 수집하고 병렬로 처리
-    const bomImports: { dep: PomDependency; properties?: Record<string, string> }[] = [];
+    const pushReference = async (
+      coordinate: MavenCoordinate,
+      inheritedProperties?: Properties,
+      isParent = false
+    ): Promise<void> => {
+      const key = this.key(coordinate);
+      const owner = stack[stack.length - 1].coordinate;
+      if (owner) {
+        const ownerKey = this.key(owner);
+        const references = this.modelReferences.get(ownerKey) || new Set<string>();
+        references.add(key);
+        this.modelReferences.set(ownerKey, references);
+      }
+      if (active.has(key)) {
+        const path = stack.flatMap((frame) => frame.coordinate ? [this.key(frame.coordinate)] : []);
+        throw new MavenPomResolutionError(`필수 POM 순환 참조: ${[...path, key].join(' → ')}`);
+      }
+      // Only fully processed imports have an importer-independent context.
+      // Parent frames are always re-evaluated with the current child's properties.
+      if (!isParent && this.completedImports.has(key) && !this.mayReachAncestor(key, active)) return;
+      const pom = await this.loadRequiredPom(coordinate);
+      active.add(key);
+      stack.push(this.frame(pom, coordinate, inheritedProperties, true, isParent, !isParent));
+    };
 
-    for (const dep of deps) {
-      // BOM import 수집
-      if (dep.scope === 'import' && dep.type === 'pom') {
-        bomImports.push({ dep, properties });
-      } else {
-        // 일반 의존성 버전 등록
-        const version = resolveProperty(dep.version || '', properties);
-        if (version) {
-          const key = `${dep.groupId}:${dep.artifactId}`;
-          // 먼저 정의된 것이 우선 (Nearest Definition)
-          if (!this.dependencyManagement.has(key)) {
-            this.dependencyManagement.set(key, version);
+    while (stack.length > 0) {
+      const current = stack[stack.length - 1];
+      if (current.phase === 'parent') {
+        current.phase = 'management';
+        if (current.pom.parent) {
+          const parent = this.requiredCoordinate({
+            ...current.pom.parent,
+            groupId: current.pom.parent.groupId || current.coordinate?.groupId,
+          }, current.properties, 'parent');
+          await pushReference(parent, current.properties, true);
+          continue;
+        }
+      }
+
+      if (current.phase === 'management') {
+        if (current.parentResult) {
+          current.properties = {
+            ...current.parentResult,
+            ...current.pom.properties,
+            ...this.projectProperties(current.coordinate),
+          };
+        }
+        current.phase = 'imports';
+        if (current.includeManagement) {
+          const managed = current.pom.dependencyManagement?.dependencies?.dependency;
+          for (const dep of managed ? (Array.isArray(managed) ? managed : [managed]) : []) {
+            if (dep.scope === 'import' && dep.type === 'pom') {
+              current.imports.push(dep);
+            } else {
+              const version = resolveProperty(dep.version || '', current.properties);
+              const key = `${dep.groupId}:${dep.artifactId}`;
+              // Preserve first registration; BOMs are visited in declaration order.
+              if (version && !this.dependencyManagement.has(key)) {
+                this.dependencyManagement.set(key, version);
+              }
+            }
           }
         }
       }
+
+      if (current.phase === 'imports') {
+        const next = current.imports[current.importIndex++];
+        if (next) {
+          await pushReference(this.requiredCoordinate(next, current.properties, 'BOM'));
+          continue;
+        }
+        current.phase = 'done';
+      }
+
+      stack.pop();
+      if (current.coordinate) {
+        const key = this.key(current.coordinate);
+        active.delete(key);
+        if (current.isImport) this.completedImports.add(key);
+      }
+      if (current.isParent && stack.length > 0) {
+        stack[stack.length - 1].parentResult = current.properties;
+      }
     }
-
-    // BOM import를 병렬로 처리 (모두 완료될 때까지 대기)
-    if (bomImports.length > 0) {
-      await Promise.all(
-        bomImports.map(async ({ dep, properties }) => {
-          try {
-            await this.importBom(dep, properties);
-          } catch (err) {
-            logger.debug('BOM import 실패', { dep: `${dep.groupId}:${dep.artifactId}`, err });
-          }
-        })
-      );
-    }
-  }
-
-  /**
-   * BOM POM import 처리
-   *
-   * @param dep - BOM 의존성
-   * @param properties - 프로퍼티 맵
-   */
-  async importBom(dep: PomDependency, properties?: Record<string, string>): Promise<void> {
-    const version = resolveProperty(dep.version || '', properties);
-    if (!version) return;
-
-    try {
-      const bomCoordinate: MavenCoordinate = {
-        groupId: dep.groupId,
-        artifactId: dep.artifactId,
-        version,
-      };
-
-      const bomPom = await this.fetchPom(bomCoordinate);
-
-      // BOM의 parent POM 체인을 처리하여 properties 상속받기
-      // 예: spring-boot-dependencies의 ${jakarta.el-api.version} 같은 프로퍼티가 parent에서 정의됨
-      const bomProperties = await this.processParentPom(bomPom, bomCoordinate);
-
-      // 상속받은 properties로 dependencyManagement 처리
-      await this.processDependencyManagement(bomPom, bomProperties);
-    } catch {
-      logger.debug('BOM import 실패', { bom: `${dep.groupId}:${dep.artifactId}:${version}` });
-    }
+    return root.properties;
   }
 }

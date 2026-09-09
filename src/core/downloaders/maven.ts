@@ -517,16 +517,10 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
         mainArtifactPath = pomPath;
       }
     } catch (error) {
-      // POM-only 패키지인데 POM도 실패하면 에러
-      if (isPomOnly) {
-        throw new Error(`POM-only 패키지이나 POM 다운로드 실패: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      logger.warn('pom 다운로드 실패 (계속 진행)', {
-        groupId,
-        artifactId,
-        version: info.version,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      // JAR가 있어도 POM이 없으면 오프라인 Maven 저장소가 불완전하다.
+      throw new Error(
+        `필수 POM 다운로드 실패 (${groupId}:${artifactId}:${info.version}): ${error instanceof Error ? error.message : String(error)}`
+      );
     }
 
     logger.info('Maven 패키지 다운로드 완료', {

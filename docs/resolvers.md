@@ -576,11 +576,11 @@ maven-queue-processor.ts
 
 ### BOM/Parent POM 지원
 
-`dependencies` 섹션이 없는 Parent POM이나 BOM(Bill of Materials) 타입의 POM을 처리할 수 있습니다:
+루트와 선택된 전이 의존성의 POM을 해석하는 데 필요한 Parent POM 및 import BOM도 다운로드 결과의 `flatList`에 포함합니다. 부모의 부모, BOM의 부모, 중첩 import BOM을 따라가며 `groupId:artifactId:version` 전체 좌표로 중복을 제거하고 `metadata.type: 'pom'`을 지정합니다. 같은 부모가 여러 경로에서 필요하면 한 번만 포함하고, 같은 GA라도 버전이 다르면 각각 유지합니다.
 
-1. **dependencies가 없는 루트 패키지**: `dependencyManagement`에서 의존성 목록 추출
-2. **import scope BOM 제외**: BOM import 자체는 의존성에서 제외
-3. **상속된 dependencyManagement**: parent로부터 상속받은 버전 관리 정보 활용
+실제 라이브러리 의존성은 `<dependencies>`와 기존 scope·optional·최대 깊이 설정에 따라 선택합니다. `<dependencyManagement>`는 버전 관리 정보이며, 그 안의 사용하지 않는 라이브러리를 전부 펼치지 않습니다. `type=pom`, `scope=import`인 BOM 자체와 모델 해석에 필요한 부모 POM을 모으는 과정은 이 라이브러리 선택과 별개입니다. `dependencies`가 없는 BOM 루트도 자신의 POM과 필요한 모델 POM만 포함합니다.
+
+전이 패키지의 부모/BOM 관리 맵은 루트의 관리 값을 기준으로 패키지별로 분리합니다. 버전이 생략된 의존성을 해결할 때 루트의 관리 버전은 유지하고, 한 형제 패키지의 미사용 관리 항목이 다른 형제의 부모/BOM 버전 선택을 오염시키지 않습니다. 필요한 모델 POM의 수집과 중복 제거는 요청 전체에서 공유합니다.
 
 ```typescript
 // Parent POM 예시 (dependencies 없음)
@@ -588,8 +588,13 @@ const result = await resolver.resolveDependencies(
   'org.springframework.boot:spring-boot-dependencies',
   '3.2.0'
 );
-// → dependencyManagement의 모든 의존성이 해결됨
+// → BOM 자체와 필요한 부모/import BOM의 POM을 포함
+// → dependencyManagement의 사용하지 않는 라이브러리는 다운로드하지 않음
 ```
+
+Parent/BOM 탐색과 다운로드 목록으로의 그래프 평탄화는 반복 방식으로 처리합니다. 깊은 체인에서 재귀 호출 스택이 증가하지 않으며, Parent/BOM의 순환 참조는 오류로 보고합니다. 필요한 Parent/BOM을 읽을 수 없거나 좌표를 해결하지 못하면 해당 루트의 의존성 해결을 실패로 처리하여 불완전한 결과를 성공으로 반환하지 않습니다.
+
+예를 들어 `org.apache.flink:flink-streaming-java:1.20.5`에서 `flink-core → flink-core-api → flink-metrics-core`를 선택하면, 마지막 패키지의 부모인 `org.apache.flink:flink-metrics:1.20.5`도 POM 다운로드 항목에 포함합니다. 이 부모는 실행 코드가 있는 JAR 의존성으로 바뀌지 않으며 기존 compile/runtime 의존성 다운로드도 유지됩니다.
 
 ### Packaging 타입 처리
 

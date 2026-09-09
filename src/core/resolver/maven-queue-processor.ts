@@ -70,7 +70,11 @@ export interface QueueProcessorDependencies {
   };
   /** BOM 프로세서 */
   bomProcessor: {
-    processParentPom: (pom: PomProject, coordinate: MavenCoordinate) => Promise<Record<string, string>>;
+    processModel: (
+      pom: PomProject,
+      coordinate: MavenCoordinate,
+      rootManagement: Map<string, string>
+    ) => Promise<{ properties: Record<string, string>; dependencyManagement: Map<string, string> }>;
   };
 }
 
@@ -238,11 +242,9 @@ export class MavenQueueProcessor {
     try {
       pom = await this.deps.fetchPomWithCache(coordinate);
     } catch (error) {
-      logger.warn('POM 로드 실패', {
-        coordinate: coordinateToString(coordinate),
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return;
+      throw new Error(
+        `필수 POM 조회 실패: ${coordinateToString(coordinate)} - ${error instanceof Error ? error.message : String(error)}`
+      );
     }
 
     // dependency에 명시한 type을 우선하고, packaging으로 보완하면 파일명도 갱신한다.
@@ -254,8 +256,9 @@ export class MavenQueueProcessor {
       };
     }
 
-    // properties 체인 구축
-    const childProperties = await this.deps.bomProcessor.processParentPom(pom, coordinate);
+    // 루트 관리 버전을 유지하면서 이 POM의 관리 버전을 형제에게 누출하지 않는다.
+    const { properties: childProperties, dependencyManagement: childManagement } =
+      await this.deps.bomProcessor.processModel(pom, coordinate, ctx.dependencyManagement);
 
     // 하위 의존성 처리
     const dependencies = extractDependencies(pom, coordinate);
@@ -270,7 +273,7 @@ export class MavenQueueProcessor {
       const depCoordinate = resolveDependencyCoordinate(
         dep,
         childProperties,
-        ctx.dependencyManagement
+        childManagement
       );
       if (!depCoordinate) continue;
 
@@ -292,7 +295,7 @@ export class MavenQueueProcessor {
         scope: transitedScope,
         originalScope: depOriginalScope,
         exclusions: mergedExclusions,
-        managedVersion: !!ctx.dependencyManagement.get(coordinateToKey(depCoordinate)),
+        managedVersion: !!childManagement.get(coordinateToKey(depCoordinate)),
       });
     }
 

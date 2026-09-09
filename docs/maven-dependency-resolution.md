@@ -7,6 +7,7 @@
 - `MavenResolver`는 BF 탐색을 `MavenQueueProcessor`와 조합하고, `MavenBomProcessor`, `DependencyResolutionSkipper` 및 Maven 공용 캐시를 사용합니다. Maven JVM 라이브러리를 직접 실행하지 않습니다.
 - 루트의 명시적 `metadata.type`은 `artifactType`으로 전달되며 원격 POM packaging이 이를 덮어쓰지 않습니다. 아티팩트 키는 type을 포함합니다. classifier는 사용자가 선택하며 OS/아키텍처만으로 자동 생성하지 않습니다.
 - `dependencyManagement`와 BOM은 버전 관리에 사용하고, 그 목록 전체를 실제 다운로드 의존성으로 펼치지 않습니다. `MavenQueueProcessor`가 `src/core/shared/maven-pom-utils.ts`의 `extractDependencies()`를 호출합니다.
+- 선택된 패키지의 모델 해석에 필요한 Parent POM과 import BOM은 전체 GAV로 중복 제거하여 `metadata.type: 'pom'`인 다운로드 항목으로 포함합니다. Parent/BOM 탐색과 그래프 평탄화는 반복 처리하며, 필수 모델의 누락이나 순환 참조는 해당 루트의 해결 실패로 보고합니다.
 - `MavenDownloader.downloadPackage()`는 `metadata.packaging` → `metadata.type` → POM의 `<packaging>` → `jar` 순서로 파일 타입을 정합니다. 메인 아티팩트와 POM, 사용 가능한 `.sha1` 파일을 내려받습니다. source/javadoc은 classifier 또는 type으로 선택하며 자동으로 모두 포함하지 않습니다.
 - 9절의 구현 권장사항과 10.4절의 축약 코드는 설계 설명입니다. 예시의 모든 타입·체크섬 알고리즘이 호출 옵션으로 노출되는 것은 아닙니다. 12–13절은 현재 구현의 크기 조회·POM 처리·요청 재사용을 설명합니다.
 
@@ -903,7 +904,26 @@ export function extractDependencies(
 - 이를 모두 의존성으로 처리하면 불필요한 다운로드 및 메모리 문제 발생
 - `dependencyManagement`는 버전 해결용으로만 사용
 
-### 12.3 POM-only 패키지의 packaging 타입 조회
+### 12.3 오프라인 출력에 필요한 Parent POM과 import BOM
+
+Parent POM이나 import BOM을 읽어 버전을 해결했더라도, 조회 캐시에만 저장하면 전달할 출력물에는 포함되지 않습니다. 예를 들어 `org.apache.flink:flink-streaming-java:1.20.5`의 `flink-core → flink-core-api → flink-metrics-core` 경로를 해결할 때 `flink-metrics-core`의 부모인 `org.apache.flink:flink-metrics:1.20.5`가 필요합니다. 이전에는 이 부모를 읽고도 다운로드 목록에 추가하지 않아, JAR와 각 JAR 자신의 POM을 복사한 폐쇄망 환경에서 부모 POM이 누락될 수 있었습니다.
+
+현재 resolver는 다음과 같이 모델 POM을 다운로드 목록에 포함합니다.
+
+1. 루트와 선택된 전이 의존성에서 부모 체인 및 import BOM을 수집합니다. BOM의 부모와 중첩 import도 따라갑니다.
+2. 모델 POM은 `groupId:artifactId:version` 전체 좌표로 중복 제거합니다. 같은 GA의 서로 다른 버전은 각각 보존합니다.
+3. 수집한 모델을 `metadata.type: 'pom'`으로 `flatList`에 추가합니다. 같은 GAV의 JAR 항목도 필요하면 별개로 유지합니다.
+4. 실제 라이브러리는 `<dependencies>`와 기존 scope·optional·최대 깊이 설정에 따라 선택합니다. 사용하지 않는 `dependencyManagement` 라이브러리를 실행 의존성 그래프에 추가하지 않습니다.
+
+전이 패키지별 관리 버전은 루트 관리 맵을 복사한 문맥에서 해결합니다. 루트가 지정한 관리 버전을 유지하면서, 형제 패키지 A의 미사용 관리 버전이 패키지 B의 부모/BOM이 정한 버전에 섞이지 않도록 합니다. 모델 POM 파일 수집은 이 관리 문맥과 별도로 요청 전체에 유지합니다.
+
+Parent/BOM 탐색과 그래프 평탄화는 명시적인 작업 목록을 사용하는 반복 방식입니다. 깊은 체인으로 호출 스택이 넘치지 않으며 Parent/BOM의 순환 참조를 오류로 보고합니다. 필요한 모델을 가져오지 못하거나 좌표를 해결하지 못한 경우도 해당 루트의 해결 실패로 처리합니다. 이미 가져온 일부 모델만으로 성공 결과를 반환하지 않습니다. 모델 조회 이후의 실제 POM 파일 다운로드도 필수이며, 일반 JAR의 부속 POM 저장이 실패해도 그 패키지 다운로드는 실패합니다. SHA1 파일은 선택 사항입니다.
+
+Electron 출력의 `packages/m2repo/`에는 Maven 저장소 구조를 유지합니다. 각 일반 JAR의 부속 POM은 그 저장소 경로에 저장되고, 별도 모델 항목으로 수집한 부모/BOM은 `.pom`이 주 아티팩트이므로 최상위 `packages/`에도 `.pom` 복사본이 생성됩니다. 최상위 폴더만 보고 모든 JAR의 부속 POM이 없다고 판단하지 않아야 합니다. 자세한 경로는 [Downloaders](downloaders.md)의 Maven 출력 설명을 참고하세요.
+
+회귀 검증은 Parent/BOM의 깊은 체인·순환·중복·조회 실패와 실제 라이브러리 의존성 보존을 확인하고, HTTP 응답 fixture를 거쳐 실제 다운로더가 기록한 POM/JAR 파일을 검사합니다. 외부 Maven Central 검증은 이 fixture 검증과 구분합니다. 실행 진입점과 테스트 파일은 [테스트 문서](testing.md)의 Maven 모델 POM 검증 절에 정리합니다.
+
+### 12.4 POM-only 패키지의 packaging 타입 조회
 
 Search API는 BOM 같은 POM-only 패키지의 `packaging` 정보를 제대로 반환하지 않습니다. 따라서 POM 파일을 직접 조회하여 패키징 타입을 확인합니다.
 

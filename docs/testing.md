@@ -91,6 +91,28 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 
 커버리지는 `npm run test:coverage`로 확인합니다. 현재 커버리지 집계 대상은 `src/core/**/*.ts`이며 테스트 파일과 index barrel은 제외합니다. 따라서 CLI, Electron, 렌더러, E2E 테스트의 검증 범위와 구분해야 합니다. text 보고서는 콘솔에, JSON/HTML 보고서는 `coverage/`에 생성되며 커버리지 최소 비율은 설정되어 있지 않습니다. 외부 레지스트리 실제 연동 및 OS별 파일시스템 동작 전체를 mock 테스트가 보장하지는 않습니다.
 
+### Maven 모델 POM 검증
+
+Parent POM과 import BOM이 조회 캐시에만 남아 오프라인 출력에서 누락되는 문제는 다음 기본 회귀 세트로 검증합니다. `INTEGRATION_TEST` 설정 없이 실행하며 외부 Maven Central에 접속하지 않습니다.
+
+| 테스트 | 검증 범위 |
+|--------|-----------|
+| `src/core/shared/maven-bom-processor.test.ts` | 전체 GAV로 모델 POM 중복 제거, 깊은 부모/BOM 체인, Parent/BOM/혼합 순환, 공유 BOM 그래프의 반복 처리 제한, 문맥별 부모 속성 상속과 import 순서, 필수 모델 누락·미해결 좌표, 호출 간 상태 초기화 |
+| `src/core/resolver/maven-model-resolution.test.ts` | 전이 패키지의 BOM 버전 적용과 모델 POM 포함, 형제 간 관리 버전 격리와 루트 관리 우선순위, 같은 부모의 여러 버전, 깊이 경계의 부모 수집, POM 조회 실패, 깊은 그래프 평탄화 및 순환·공유 노드 종료, 같은 GAV의 JAR/POM 구분 |
+| `src/core/shared/maven-parent-pom-download.test.ts` | Flink 전이 체인 fixture의 부모/BOM POM 및 compile/runtime JAR·부속 POM·SHA1 실제 파일, 미사용 관리 항목 631개와 optional/test 제외, JAR/POM 동시 보존, 필수 부모 404 및 모델 조회 후 POM 파일 저장 실패 |
+
+다운로드 회귀는 Axios adapter의 HTTP 응답만 XML/JAR/SHA1 fixture로 대체합니다. `resolveAllDependencies()`부터 실제 resolver·POM 파싱·캐시·`MavenDownloader`와 임시 디렉터리 파일 쓰기를 실행합니다. Electron 라우터의 같은 GAV 직렬화와 최상위 복사본은 기존 `electron/services/download-package-router.test.ts`에서 별도로 검증합니다.
+
+```bash
+bash scripts/verify-worktree.sh \
+  src/core/shared/maven-bom-processor.test.ts \
+  src/core/resolver/maven-model-resolution.test.ts \
+  src/core/shared/maven-parent-pom-download.test.ts \
+  electron/services/download-package-router.test.ts
+```
+
+이 fixture 검증은 실제 Maven Central의 현재 파일 존재 여부나 외부 Maven 실행의 오프라인 성공을 보장하지 않습니다. 외부 저장소 검증에는 아래 통합 테스트를 별도로 사용하고, 실행 명령·대상 좌표·파일 확인 결과를 해당 작업의 검증 기록에 남깁니다.
+
 ### 2. 통합 테스트
 
 - 파일명 관례: `*.integration.test.ts`

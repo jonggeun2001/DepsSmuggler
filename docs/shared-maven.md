@@ -317,6 +317,12 @@ POM 파일 파싱 및 속성 해석 유틸리티:
 
 `MavenBomProcessor(fetchPom, dependencyManagement?)`는 Parent POM의 속성·관리 버전을 상속하고 BOM import를 처리합니다. `processParentPom(pom, coordinate, inheritedProperties?)`는 병합된 속성을 반환하며, `processDependencyManagement(pom, properties?)`와 `importBom(dep, properties?)`는 관리 맵을 갱신하고 `Promise<void>`를 반환합니다. 맵은 `getDependencyManagement()`, `setDependencyManagement()`, `clearDependencyManagement()`로 관리합니다.
 
+전이 패키지의 모델 해석에는 `processModel(pom, coordinate, rootManagement)`를 사용합니다. 루트 관리 맵을 복사한 문맥에서 해당 POM의 부모와 import BOM을 적용하고 `{ properties, dependencyManagement }`를 반환한 뒤 기존 관리 맵을 복원합니다. 관리 버전은 루트 값을 우선하며, 형제 패키지의 사용하지 않는 관리 항목이 다른 패키지의 의존성 버전을 바꾸지 않습니다. 이 메서드는 resolver의 순차 큐에서 호출합니다. 모델 POM 조회 캐시와 다운로드 좌표 수집은 요청 전체에서 공유하지만, 완료 import 상태는 관리 문맥이 바뀔 때 초기화합니다.
+
+모델 해석 중 필요한 Parent POM과 import BOM의 좌표도 수집합니다. 부모 체인, BOM의 부모 및 중첩 import를 포함하고, `groupId:artifactId:version` 전체 좌표로 중복을 제거합니다. `getRequiredPoms(): MavenCoordinate[]`는 `type: 'pom'`이고 classifier가 없는 좌표의 복사본을 반환합니다. resolver는 이 수집 결과를 `metadata.type: 'pom'`인 다운로드 항목으로 추가하므로, POM이 조회 캐시에만 남고 전달 파일에서 누락되지 않습니다. 관리 맵의 일반 라이브러리 항목을 다운로드 의존성으로 확장하는 것은 아닙니다.
+
+탐색은 재귀 호출 대신 반복 처리하며 현재 탐색 경로의 Parent/BOM 순환을 감지합니다. 여러 경로가 같은 모델 POM을 참조하는 정상적인 공유 구조는 순환으로 처리하지 않습니다. 필요한 모델의 조회 실패, 해결할 수 없는 좌표, 순환 참조는 `MavenPomResolutionError`로 호출자에게 전달합니다. BOM import는 선언 순서대로 처리하여 먼저 등록된 관리 버전을 유지합니다. 처리 완료된 import는 재사용하되 활성 조상으로 이어질 수 있으면 다시 탐색하고, 부모의 속성은 자식 문맥별로 재평가합니다. `clearDependencyManagement()`는 관리 맵, 수집된 모델 좌표, 처리기 내부 모델 조회 캐시, 완료 import 및 참조 그래프를 함께 초기화합니다. 원시 POM 공용 캐시의 재사용과 해당 resolver 호출의 다운로드 항목 수집은 별개입니다.
+
 ```typescript
 import { MavenBomProcessor } from './maven-bom-processor';
 import { fetchPom } from './maven-cache';

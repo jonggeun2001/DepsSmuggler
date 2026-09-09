@@ -42,6 +42,7 @@ import {
   resolveProperty,
 } from '../shared/maven-pom-utils';
 import { MavenBomProcessor } from '../shared/maven-bom-processor';
+import { getPackageArtifactKey } from '../shared/dependency-tree-utils';
 import { MAVEN_CONSTANTS } from '../constants/maven';
 import { isNativeArtifact } from '../shared/maven-utils';
 import type { ResolutionSession } from '../shared/internal/resolution-session';
@@ -150,7 +151,8 @@ export class MavenResolver implements IResolver {
         getCoordinateManager: () => this.skipper.getCoordinateManager(),
       },
       bomProcessor: {
-        processParentPom: (pom, coord) => this.bomProcessor.processParentPom(pom, coord),
+        processModel: (pom, coord, rootManagement) =>
+          this.bomProcessor.processModel(pom, coord, rootManagement),
       },
     };
     this.queueProcessor = new MavenQueueProcessor(deps);
@@ -208,7 +210,7 @@ export class MavenResolver implements IResolver {
       });
 
       const root = await this.resolveBF(rootCoordinate, opts);
-      const flatList = this.flattenDependencies(root);
+      const flatList = this.includeRequiredPoms(this.flattenDependencies(root));
 
       // 패키지 크기 조회 (병렬 HEAD 요청)
       const flatListWithSizes = await this.fetchPackageSizes(flatList);
@@ -493,27 +495,34 @@ export class MavenResolver implements IResolver {
    */
   private flattenDependencies(node: DependencyNode): PackageInfo[] {
     const result: Map<string, PackageInfo> = new Map();
+    const visited = new Set<DependencyNode>();
+    const pending: DependencyNode[] = [node];
 
-    const traverse = (n: DependencyNode, path: string[]) => {
-      const key = `${n.package.name}@${n.package.version}`;
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
 
-      // 순환 참조 방지
-      if (path.includes(key)) {
-        return;
+      const key = getPackageArtifactKey(current.package);
+      if (!result.has(key)) result.set(key, current.package);
+
+      // DFS 순서를 유지하면서 호출 스택과 공유 하위 그래프의 중복 순회를 피한다.
+      for (let i = current.dependencies.length - 1; i >= 0; i--) {
+        pending.push(current.dependencies[i]);
       }
-
-      if (!result.has(key)) {
-        result.set(key, n.package);
-      }
-
-      const newPath = [...path, key];
-      for (const child of n.dependencies) {
-        traverse(child, newPath);
-      }
-    };
-
-    traverse(node, []);
+    }
     return Array.from(result.values());
+  }
+
+  /** 해석에 사용한 모델 POM도 오프라인 저장소에 반입한다. 관리 라이브러리는 확장하지 않는다. */
+  private includeRequiredPoms(packages: PackageInfo[]): PackageInfo[] {
+    const artifacts = new Map(packages.map(pkg => [getPackageArtifactKey(pkg), pkg]));
+    for (const coordinate of this.bomProcessor.getRequiredPoms()) {
+      const pomPackage = this.createDependencyNode({ ...coordinate, type: 'pom' }, 'compile').package;
+      const key = getPackageArtifactKey(pomPackage);
+      if (!artifacts.has(key)) artifacts.set(key, pomPackage);
+    }
+    return Array.from(artifacts.values());
   }
 
   /**
