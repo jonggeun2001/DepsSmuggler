@@ -1,5 +1,7 @@
 import { Architecture } from '../../types';
 import { calculateFileChecksum } from '../shared/integrity/checksum';
+import { sanitizeDockerTag } from '../shared/filename-utils';
+import { sanitizePath } from '../shared/path-utils';
 
 /**
  * Docker 플랫폼 정보 인터페이스
@@ -141,6 +143,12 @@ export function parseImageName(name: string): [string, string] {
   }
   // library 이미지 (예: nginx, ubuntu)
   return ['library', imageName];
+}
+
+/** 다운로드와 설치 스크립트가 공유하는 Docker 이미지 tar 파일명. */
+export function buildDockerArchiveFilename(repository: string, tag: string): string {
+  const [, repo] = parseImageName(repository);
+  return `${sanitizePath(repo)}-${sanitizeDockerTag(tag)}.tar`;
 }
 
 /**

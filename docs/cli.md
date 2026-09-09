@@ -151,6 +151,7 @@ depssmuggler download -t maven -p org.lwjgl:lwjgl -V 3.3.6 \
 ### 현재 동작
 
 - 다운로드 성공 시 출력 디렉터리에 `packages-<timestamp>.zip` 또는 `.tar.gz`를 만든 뒤, 같은 디렉터리에 설치 스크립트를 생성합니다. 이 호출 순서에서는 별도로 생성한 설치 스크립트가 앞서 만든 아카이브에 포함되지 않습니다.
+- Docker는 압축을 풀어 생긴 `packages/`와 설치 스크립트를 같은 폴더에 두고 실행합니다. Bash·PowerShell 모두 실제 이미지 파일명(예: `packages/busybox-1.36.tar`)을 `docker load -i`에 전달합니다. `amd64`·`arm64`와 ZIP·tar.gz 출력에서 같은 이름 규칙을 사용하며, 대상 환경에는 실행 중인 Docker가 필요합니다.
 - npm은 압축을 풀어 생긴 `packages/` 폴더와 설치 스크립트를 같은 폴더에 두고 실행합니다. Node.js와 npm이 설치된 환경에서 전달된 `.tgz`를 `npm install --offline`으로 설치하며, 결과는 스크립트 폴더의 `npm-project/node_modules`에 생깁니다. 이 전용 프로젝트에 설치용 `package.json`을 생성하며 상위 폴더의 사용자 manifest는 변경하지 않습니다.
 - npm 설치 스크립트는 tarball 내부 이름·버전과 전달 경로를 기록합니다. 직접 요청한 패키지만 최상위 의존성으로 등록하고, 선택한 버전과 전이 의존성의 여러 버전을 필요한 하위 경로에 설치합니다. scoped 패키지도 지원합니다. 같은 이름의 서로 다른 버전을 직접 루트로 함께 지정하면 모호한 설치 결과를 만들지 않고 스크립트 생성에 실패합니다. 기존 `npm-project`에 사용자 프로젝트가 있으면 다른 폴더에 압축을 풀어 실행해야 합니다.
 - `--no-deps` 출력에 필요한 npm 의존성이 빠져 있으면 오프라인 설치가 실패할 수 있으며, 이 경우 스크립트도 오류로 종료합니다. 설치 대상 환경의 Node.js·OS·아키텍처에 맞는 패키지를 전달해야 하며, npm의 일반 설치 lifecycle은 그대로 실행됩니다.

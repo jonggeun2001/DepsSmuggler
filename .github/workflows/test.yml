@@ -33,6 +33,12 @@ jobs:
       - name: Run unit tests
         run: npm test
 
+      - name: Test generated installer with native Docker
+        if: runner.os == 'Linux'
+        env:
+          DEPS_SMUGGLER_NATIVE_DOCKER: '1'
+        run: bash scripts/verify-worktree.sh src/core/packager/docker-install-script.integration.test.ts -t 'native Docker'
+
       - name: Build project
         run: npm run build
 
