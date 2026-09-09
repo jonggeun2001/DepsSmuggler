@@ -269,6 +269,9 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
     if (options.file) {
       // 파일에서 패키지 목록 읽기
       packages = await parsePackageFile(options.file, options.type);
+      if (packages.length === 0) {
+        throw new Error('--file에 다운로드할 패키지가 없습니다.');
+      }
       console.log(chalk.green(`${packages.length}개 패키지를 파일에서 로드했습니다`));
     } else if (options.package) {
       // 단일 패키지

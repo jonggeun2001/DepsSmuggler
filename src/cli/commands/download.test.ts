@@ -1173,4 +1173,35 @@ describe('downloadCommand', () => {
       }),
     ]);
   });
+
+  it.each([
+    ['빈 파일', ''],
+    ['공백만 있는 파일', '\n \n\t'],
+    ['주석만 있는 파일', '# comment only\n\n  # another comment\n'],
+  ])('%s는 resolver와 출력 부수 효과 전에 입력 오류로 거부한다', async (_name, content) => {
+    readFile.mockResolvedValueOnce(content);
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => {
+        throw new Error('process.exit');
+      }) as never);
+
+    try {
+      await expect(downloadCommand(commandOptions({
+        file: 'empty-packages.txt',
+        package: undefined,
+        deps: false,
+      }))).rejects.toThrow('process.exit');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(resolveAllDependencies).not.toHaveBeenCalled();
+      expect(ensureDir).not.toHaveBeenCalled();
+      expect(addToQueue).not.toHaveBeenCalled();
+      expect(startDownload).not.toHaveBeenCalled();
+      expect(createArchive).not.toHaveBeenCalled();
+      expect(generateAllScripts).not.toHaveBeenCalled();
+    } finally {
+      exitSpy.mockRestore();
+    }
+  });
+
 });

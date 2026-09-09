@@ -148,7 +148,7 @@ depssmuggler download -t maven -p org.lwjgl:lwjgl -V 3.3.6 \
   --target-os linux --arch x86_64 --classifier natives-linux
 ```
 
-참고: `--file`은 현재 XML `pom.xml`이나 `package.json`을 직접 파싱하지 않고, 줄 단위 텍스트 입력만 처리합니다. Maven은 각 줄에 `groupId:artifactId[:version]` 형식으로 적어야 합니다. pip은 패키지명과 버전 제약을 읽지만 extras, 환경 마커, requirements 옵션을 완전하게 파싱하는 입력기는 아닙니다. 그 외 타입의 `name@version` 파서는 단순 `@` 분리이므로 npm scoped 패키지는 `-p @scope/name -V <version>`으로 지정합니다. 빈 줄과 `#`로 시작하는 주석 줄은 제외합니다.
+참고: `--file`은 현재 XML `pom.xml`이나 `package.json`을 직접 파싱하지 않고, 줄 단위 텍스트 입력만 처리합니다. Maven은 각 줄에 `groupId:artifactId[:version]` 형식으로 적어야 합니다. pip은 패키지명과 버전 제약을 읽지만 extras, 환경 마커, requirements 옵션을 완전하게 파싱하는 입력기는 아닙니다. 그 외 타입의 `name@version` 파서는 단순 `@` 분리이므로 npm scoped 패키지는 `-p @scope/name -V <version>`으로 지정합니다. 빈 줄과 `#`로 시작하는 주석 줄은 제외합니다. 파일에서 유효한 패키지가 하나도 남지 않으면 입력 오류로 종료하며 archive나 설치 스크립트를 만들지 않습니다.
 
 ### 현재 동작
 
