@@ -29,6 +29,7 @@ interface DownloadCommandOptions extends CliDownloadEnvironmentOptions {
 
 interface PreparedPackagesResult {
   packages: PackageInfo[];
+  npmRootPackages?: PackageInfo[];
   dependencyResolutionApplied: boolean;
   warning?: string;
 }
@@ -166,6 +167,7 @@ async function preparePackagesForDownload(
   if (!options.deps && !shouldResolveTargetedRoots) {
     return {
       packages,
+      npmRootPackages: packages.filter(pkg => pkg.type === 'npm'),
       dependencyResolutionApplied: false,
     };
   }
@@ -193,6 +195,9 @@ async function preparePackagesForDownload(
       ? { maxDepth: 0, resolveRootArtifactsOnly: true }
       : {}),
   });
+  const npmRootPackages = (resolved.dependencyTrees ?? [])
+    .map(tree => tree.root.package)
+    .filter(pkg => pkg.type === 'npm');
 
   if (resolved.failedPackages.length > 0) {
     const failedList = resolved.failedPackages
@@ -222,6 +227,7 @@ async function preparePackagesForDownload(
 
     return {
       packages: resolvedPackages.map(toPackageInfo),
+      npmRootPackages,
       dependencyResolutionApplied: true,
       warning: `의존성 해결에 실패한 직접 패키지 ${skippedRoots.length}개를 건너뜁니다: ${failedList}`,
     };
@@ -235,6 +241,7 @@ async function preparePackagesForDownload(
             (pkg) => requestedPackageIds.has(pkg.id),
           )
     ).map(toPackageInfo),
+    npmRootPackages,
     dependencyResolutionApplied: true,
   };
 }
@@ -409,7 +416,14 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       // 설치 스크립트 생성
       console.log(chalk.cyan('\n설치 스크립트 생성 중...'));
       const scriptGenerator = getScriptGenerator();
-      await scriptGenerator.generateAllScripts(packages, outputPath);
+      if (packages.some(pkg => pkg.type === 'npm')) {
+        await scriptGenerator.generateAllScripts(packages, outputPath, {
+          npmPackageFiles: files.map(filePath => ({ filePath, relativePath: path.basename(filePath) })),
+          npmRootPackages: prepared.npmRootPackages,
+        });
+      } else {
+        await scriptGenerator.generateAllScripts(packages, outputPath);
+      }
       console.log(chalk.green('✓ 설치 스크립트 생성 완료'));
     } else {
       console.log(chalk.yellow('⚠ 다운로드 완료 (일부 실패)'));

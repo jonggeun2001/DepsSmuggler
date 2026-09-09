@@ -135,6 +135,8 @@ interface ScriptOptions {
   includeHeader?: boolean;        // 기본 true
   includeErrorHandling?: boolean; // 기본 true
   packageDir?: string;            // 기본 './packages'
+  npmPackageFiles?: { filePath: string; relativePath: string }[];
+  npmRootPackages?: PackageInfo[]; // 직접 요청한 npm 패키지의 해결된 버전
 }
 
 interface GeneratedScript {
@@ -180,7 +182,11 @@ Maven의 `_remote.repositories`는 대상 저장소의 기존 내용을 보존�
 
 CLI와 GUI 저장소 구조는 전체 GAV 목록이 하나의 원본 저장소 루트에 모두 존재하는지로 구분합니다. `example`과 `m2repo.example` 그룹이 함께 있어도 같은 원본 구조에서 각각의 파일을 선택합니다. 두 구조가 모두 조건을 만족하거나 어느 구조에도 전체 목록이 없으면 복사 전에 오류로 종료합니다.
 
-npm은 Bash와 PowerShell 모두 `packageDir` 아래의 `.tgz` 파일을 재귀 탐색해 한 번의 `npm install --offline` 호출에 함께 전달합니다. 설치 대상은 스크립트 폴더의 `node_modules`이며 명시적인 로컬 `--prefix`를 사용합니다. `package.json`과 lockfile은 저장하지 않습니다. 파일 이름에서 패키지 이름을 추측하지 않으므로 scoped 패키지와 공백이 포함된 경로도 처리합니다. Node.js와 npm이 필요하며, npm 부재·빈 파일 목록·의존성 누락·설치 명령 실패는 스크립트의 오류 종료로 이어집니다. npm의 일반 설치 lifecycle은 유지합니다.
+npm은 스크립트 생성 시 원본 `.tgz`의 `package.json`에서 이름·버전을 읽어 파일 경로와 함께 Bash·PowerShell 안에 기록합니다. CLI는 `npmPackageFiles`에 실제 다운로드 경로와 아카이브 `packages/` 안의 상대 경로를 전달합니다. 이 옵션이 없으면 생성 시점의 `packageDir` 아래에서 `.tgz`를 탐색하므로 패키지 파일이 먼저 준비되어 있어야 합니다. 원본 tarball은 수정하거나 추출하지 않습니다. scoped 패키지와 공백이 포함된 경로를 지원합니다.
+
+실행 시 포함된 Node.js 코드가 스크립트 폴더의 `npm-project/package.json`에 실제 파일시스템 경로로 정규화한 로컬 `file:` 의존성과 버전별 `overrides`를 작성합니다. 동일한 실제 경로를 `--prefix`에도 사용해 한 번의 `npm install --offline`을 실행해 `npm-project/node_modules`에 설치합니다. 같은 패키지의 서로 다른 전이 버전은 필요한 하위 경로에서 사용할 수 있습니다. `npmRootPackages`의 직접 버전이 최상위에 우선 배치되며, 해당 정보가 없으면 이름별 가장 높은 버전을 선택합니다. 동일 이름의 서로 다른 직접 버전 요청은 스크립트 생성 오류입니다.
+
+상위 폴더의 사용자 `package.json`은 변경하지 않습니다. `npm-project`는 비어 있거나 이 스크립트가 생성한 프로젝트여야 하며, 소유 표시가 없는 기존 프로젝트나 심볼릭 링크 대상은 오류로 처리합니다. 설치용 manifest는 유지하지만 프로젝트 루트의 lockfile은 생성하지 않으며 npm 자체 업데이트 확인도 끕니다. Node.js와 npm이 필요하며, 도구 부재·빈 파일 목록·의존성 누락·손상된 tarball·설치 명령 실패는 오류 종료로 이어집니다. npm의 일반 설치 lifecycle은 유지합니다. 이 스크립트는 의존성을 전달된 파일에 연결하며, OS·아키텍처 간 네이티브 패키지 변환이나 설치 lifecycle의 외부 다운로드 대체는 수행하지 않습니다.
 
 일반 `ScriptGenerator`에는 APT·APK 전용 설치 블록이 없고, Conda 항목도 pip 설치 블록으로 묶입니다. `.conda` 파일을 설치하는 Conda 전용 스크립트로 간주하면 안 됩니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
 

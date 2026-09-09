@@ -5,6 +5,8 @@
 
 import * as path from 'path';
 import * as fs from 'fs-extra';
+import { createNpmInstallPlan, NpmPackageFile } from './npm-install-plan';
+import { buildNpmProjectSetupScript } from './npm-install-runtime';
 import { PackageInfo } from '../../types';
 import logger from '../../utils/logger';
 import { stripLeadingDotSlash, toUnixPath, getWriteOptions } from '../shared/path-utils';
@@ -13,6 +15,8 @@ export interface ScriptOptions {
   includeHeader?: boolean;
   includeErrorHandling?: boolean;
   packageDir?: string; // 패키지 디렉토리 경로 (기본: ./packages)
+  npmPackageFiles?: NpmPackageFile[]; // 다운로드 원본과 압축물 packages/ 내부 상대 경로
+  npmRootPackages?: PackageInfo[]; // 직접 요청한 npm 패키지의 해결된 버전
 }
 
 export interface GeneratedScript {
@@ -186,39 +190,30 @@ export class ScriptGenerator {
 
     // npm 패키지 설치
     if (packagesByType.has('npm')) {
+      const npmPlan = await createNpmInstallPlan(packages, outputPath, packageDir, options.npmPackageFiles, options.npmRootPackages);
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('# npm 패키지 오프라인 설치');
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('');
       lines.push('install_npm_packages() {');
       lines.push('    log_info "npm 패키지 설치 중..."');
-      lines.push('    if ! command -v npm &> /dev/null; then');
+      lines.push('    if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then');
       lines.push('        log_error "Node.js와 npm이 설치되어 있어야 합니다."');
       lines.push('        return 1');
       lines.push('    fi');
       lines.push('');
-      lines.push('    local npm_archive_list archive_path');
-      lines.push('    local npm_archives=()');
-      lines.push('    npm_archive_list="$(mktemp)" || return 1');
-      lines.push('    if ! find "$SCRIPT_DIR/$PACKAGE_DIR" -type f -name \'*.tgz\' -print0 > "$npm_archive_list"; then');
-      lines.push('        rm -f "$npm_archive_list"');
-      lines.push('        log_error "npm 패키지 파일 탐색에 실패했습니다."');
-      lines.push('        return 1');
-      lines.push('    fi');
-      lines.push('    while IFS= read -r -d \'\' archive_path; do');
-      lines.push('        npm_archives+=("$archive_path")');
-      lines.push('    done < "$npm_archive_list"');
-      lines.push('    rm -f "$npm_archive_list" || return 1');
-      lines.push('    if [[ "${#npm_archives[@]}" -eq 0 ]]; then');
-      lines.push('        log_error "설치할 npm .tgz 파일을 찾을 수 없습니다: $PACKAGE_DIR"');
-      lines.push('        return 1');
-      lines.push('    fi');
+      lines.push('    local npm_project_encoded npm_project');
+      lines.push('    npm_project_encoded="$(node - "$SCRIPT_DIR" "$PACKAGE_DIR" <<\'DEPS_SMUGGLER_NPM\'');
+      lines.push(buildNpmProjectSetupScript(npmPlan));
+      lines.push('DEPS_SMUGGLER_NPM');
+      lines.push('    )" || return 1');
+      lines.push('    npm_project="$(node -e \'process.stdout.write(Buffer.from(process.argv[1], "base64").toString("utf8"))\' "$npm_project_encoded")" || return 1');
       lines.push('');
-      lines.push('    npm install --offline --no-audit --no-fund --no-save --package-lock=false --global=false --prefix "$SCRIPT_DIR" -- "${npm_archives[@]}" || {');
+      lines.push('    npm install --offline --no-audit --no-fund --update-notifier=false --no-save --package-lock=false --global=false --prefix "$npm_project" || {');
       lines.push('        log_error "npm 패키지 설치에 실패했습니다."');
       lines.push('        return 1');
       lines.push('    }');
-      lines.push('    log_info "npm 패키지 설치 완료: $SCRIPT_DIR/node_modules"');
+      lines.push('    log_info "npm 패키지 설치 완료: $npm_project/node_modules"');
       lines.push('}');
       lines.push('');
     }
@@ -534,22 +529,25 @@ export class ScriptGenerator {
 
     // npm 패키지 설치
     if (packagesByType.has('npm')) {
+      const npmPlan = await createNpmInstallPlan(packages, outputPath, packageDir, options.npmPackageFiles, options.npmRootPackages);
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('# npm 패키지 오프라인 설치');
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('');
       lines.push('function Install-NpmPackages {');
       lines.push('    Write-Info "npm 패키지 설치 중..."');
-      lines.push('    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {');
+      lines.push('    if (-not (Get-Command node -ErrorAction SilentlyContinue) -or -not (Get-Command npm -ErrorAction SilentlyContinue)) {');
       lines.push('        throw "Node.js와 npm이 설치되어 있어야 합니다."');
       lines.push('    }');
-      lines.push('    $NpmArchives = @(Get-ChildItem -LiteralPath $PackageDir -Recurse -File -Filter \'*.tgz\' -Force -ErrorAction Stop | ForEach-Object { $_.FullName })');
-      lines.push('    if ($NpmArchives.Count -eq 0) {');
-      lines.push('        throw "설치할 npm .tgz 파일을 찾을 수 없습니다: $PackageDir"');
-      lines.push('    }');
-      lines.push('    & npm install --offline --no-audit --no-fund --no-save --package-lock=false --global=false --prefix "$ScriptDir" -- @NpmArchives');
+      lines.push('    $NpmSetupScript = @\'');
+      lines.push(buildNpmProjectSetupScript(npmPlan));
+      lines.push('\'@');
+      lines.push('    $NpmProjectEncoded = $NpmSetupScript | & node - "$ScriptDir" "$PackageDir"');
+      lines.push('    if ($LASTEXITCODE -ne 0) { throw "npm 설치 프로젝트 준비에 실패했습니다." }');
+      lines.push('    $NpmProject = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($NpmProjectEncoded))');
+      lines.push('    & npm install --offline --no-audit --no-fund --update-notifier=false --no-save --package-lock=false --global=false --prefix "$NpmProject"');
       lines.push('    if ($LASTEXITCODE -ne 0) { throw "npm 패키지 설치에 실패했습니다: 종료 코드 $LASTEXITCODE" }');
-      lines.push('    Write-Info "npm 패키지 설치 완료: $ScriptDir/node_modules"');
+      lines.push('    Write-Info "npm 패키지 설치 완료: $NpmProject/node_modules"');
       lines.push('}');
       lines.push('');
     }

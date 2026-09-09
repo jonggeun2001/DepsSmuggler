@@ -151,7 +151,9 @@ depssmuggler download -t maven -p org.lwjgl:lwjgl -V 3.3.6 \
 ### 현재 동작
 
 - 다운로드 성공 시 출력 디렉터리에 `packages-<timestamp>.zip` 또는 `.tar.gz`를 만든 뒤, 같은 디렉터리에 설치 스크립트를 생성합니다. 이 호출 순서에서는 별도로 생성한 설치 스크립트가 앞서 만든 아카이브에 포함되지 않습니다.
-- npm은 압축을 풀어 생긴 `packages/` 폴더와 설치 스크립트를 같은 폴더에 두고 실행합니다. Node.js와 npm이 설치된 환경에서 전달된 모든 `.tgz`를 함께 `npm install --offline`에 넘겨 스크립트 폴더의 `node_modules`에 설치합니다. scoped 패키지도 tarball 내부 이름을 사용합니다. `--no-deps` 출력에 필요한 의존성이 빠져 있으면 오프라인 설치가 실패할 수 있으며, 이 경우 스크립트도 오류로 종료합니다.
+- npm은 압축을 풀어 생긴 `packages/` 폴더와 설치 스크립트를 같은 폴더에 두고 실행합니다. Node.js와 npm이 설치된 환경에서 전달된 `.tgz`를 `npm install --offline`으로 설치하며, 결과는 스크립트 폴더의 `npm-project/node_modules`에 생깁니다. 이 전용 프로젝트에 설치용 `package.json`을 생성하며 상위 폴더의 사용자 manifest는 변경하지 않습니다.
+- npm 설치 스크립트는 tarball 내부 이름·버전과 전달 경로를 기록합니다. 직접 선택한 버전을 유지하면서 서로 다른 전이 의존성 버전은 필요한 하위 경로에 설치합니다. scoped 패키지도 지원합니다. 같은 이름의 서로 다른 버전을 직접 루트로 함께 지정하면 모호한 설치 결과를 만들지 않고 스크립트 생성에 실패합니다. 기존 `npm-project`에 사용자 프로젝트가 있으면 다른 폴더에 압축을 풀어 실행해야 합니다.
+- `--no-deps` 출력에 필요한 npm 의존성이 빠져 있으면 오프라인 설치가 실패할 수 있으며, 이 경우 스크립트도 오류로 종료합니다. 설치 대상 환경의 Node.js·OS·아키텍처에 맞는 패키지를 전달해야 하며, npm의 일반 설치 lifecycle은 그대로 실행됩니다.
 - Maven 설치 스크립트는 아카이브의 `packages/` canonical 저장소 경로를 GAV별로 `MAVEN_REPO_LOCAL`에 복사합니다. 기본 대상은 `~/.m2/repository`이며, GUI 출력의 `packages/m2repo/`도 지원합니다. 원본 POM·parent/BOM·POM-only·classifier·checksum은 같은 GAV 디렉터리에서 함께 보존되며 Maven 플러그인이나 네트워크 호출은 필요하지 않습니다.
 - Maven의 기존 `_remote.repositories` 기록은 보존하고, 이번에 복사한 아티팩트에만 로컬 설치 기록을 추가합니다. 파일 복사나 기록 저장에 실패하면 설치 스크립트도 오류로 종료합니다. PowerShell 스크립트는 Windows PowerShell 5에서도 한글을 읽을 수 있도록 UTF-8 BOM으로 저장합니다.
 - `MAVEN_REPO_LOCAL`을 상대 경로로 지정하면 설치 스크립트가 있는 폴더를 기준으로 사용합니다. 사용자 Maven 설정에서 별도의 `localRepository`를 사용하는 경우 이 변수에도 같은 위치를 지정합니다.
