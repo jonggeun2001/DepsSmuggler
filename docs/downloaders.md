@@ -281,6 +281,8 @@ type ArtifactType =
 
 BOM(Bill of Materials)이나 Parent POM처럼 실행 코드가 없는 패키지는 POM 파일만 다운로드:
 
+의존성 포함 다운로드에서는 resolver가 선택된 패키지의 Parent POM과 import BOM도 `metadata.type: 'pom'` 항목으로 전달합니다. 사용자가 직접 고른 POM과 같은 POM-only 다운로드 경로를 사용하며, 해당 부모/BOM 이름의 JAR를 요청하지 않습니다. `dependencyManagement`에 나열된 사용하지 않는 라이브러리까지 다운로드하는 것은 아닙니다.
+
 ```typescript
 // packaging이 'pom'이면 JAR 다운로드 스킵
 const isPomOnly = artifactType === 'pom';
@@ -298,7 +300,9 @@ if (isPomOnly) {
 3. **POM 파일** (`.pom`) - 프로젝트 메타데이터 및 의존성 정보
 4. **POM 체크섬** (`.pom.sha1`) - POM 무결성 검증용
 
-POM과 checksum companion 조회 실패는 경고 후 계속할 수 있으므로 네 파일이 항상 존재하는 것은 아닙니다. `_options`의 OS/아키텍처는 현재 사용하지 않으며 네이티브 classifier는 metadata에서 명시해야 합니다.
+POM 파일은 모든 아티팩트에서 필수입니다. 일반 JAR를 받은 뒤라도 부속 POM 다운로드가 실패하면 해당 패키지는 실패로 처리합니다. `.sha1` companion 파일은 선택 사항이므로 조회 실패 후 계속할 수 있습니다. `_options`의 OS/아키텍처는 현재 사용하지 않으며 네이티브 classifier는 metadata에서 명시해야 합니다.
+
+의존성 해결에 필요한 Parent/BOM의 조회 실패는 resolver의 실패로 전달됩니다. 모델 조회가 성공했더라도 이후 실제 POM 파일 저장이 실패하면 다운로드를 성공으로 반환하지 않습니다.
 
 ### .m2 저장소 구조 지원
 
@@ -317,6 +321,13 @@ destPath/
 ```
 
 이 구조는 Maven의 로컬 저장소 (`~/.m2/repository`)와 동일하여, 폐쇄망 환경에서 직접 로컬 저장소로 복사하여 사용할 수 있습니다.
+
+Electron 다운로드 라우터는 위 `destPath`로 `packages/m2repo/`를 사용하고, 각 다운로드 항목의 주 아티팩트만 `packages/` 최상위에 복사합니다. 따라서 일반 JAR의 부속 POM은 `packages/m2repo/`에서 찾고, 별도 항목으로 수집된 Parent/BOM의 POM은 두 위치에서 찾을 수 있습니다. 예를 들어 Flink 1.20.5의 `flink-metrics` 부모 POM은 다음 경로에 저장됩니다.
+
+```text
+packages/m2repo/org/apache/flink/flink-metrics/1.20.5/flink-metrics-1.20.5.pom
+packages/flink-metrics-1.20.5.pom
+```
 
 ### 검색 결과 필드
 

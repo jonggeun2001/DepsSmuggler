@@ -49,6 +49,7 @@ test-results/
 
 # Development tool configs
 .agent/
+/.agents/release-tag-manager/
 .claude/
 CLAUDE.md
 AGENTS.md
