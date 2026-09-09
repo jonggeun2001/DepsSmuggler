@@ -218,6 +218,16 @@ bash scripts/verify-worktree.sh \
   src/cli/commands/download.test.ts
 ```
 
+### 생성 설치 스크립트의 실패 집계 검증
+
+`src/core/packager/script-aggregation.integration.test.ts`는 생성 스크립트를 실제 Bash 또는 Windows PowerShell 프로세스로 실행합니다. 기록용 실행 파일이 앞의 pip 패키지 두 개를 실패시키고 세 번째를 성공시키며, 세 항목 모두 시도됐는지와 최종 실패 목록·종료 코드·성공 배너 부재를 검사합니다. 오류 처리 옵션을 끈 경우, 여러 패키지 관리자에 걸친 실패, 도구 부재와 디렉터리 탐색 실패도 같은 계약으로 검증합니다. 모든 항목이 성공하는 대조군에서는 종료 코드 `0`과 완료 메시지를 확인합니다. 기록용 명령은 호스트에 패키지를 설치하지 않습니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/packager/script-aggregation.integration.test.ts
+```
+
+실제 CLI 검증에서는 `requests==2.32.3`, `httpx==0.27.0`, `colorama==0.4.6`을 `--no-deps`로 내려받은 뒤 새 Python 가상 환경에서 원본 설치 스크립트를 실행합니다. `--python-version`은 실행할 Python 버전과 일치시킵니다(예: Python 3.9 환경에서는 `--python-version 3.9`). 앞의 두 패키지는 누락 의존성으로 실패하고 colorama는 import가 가능해야 합니다. 스크립트는 두 실패를 요약하고 non-zero로 끝나야 하며, 의존성을 포함한 requests 대조군은 설치·import·`pip check`를 모두 통과해야 합니다.
+
 ### Docker 설치 스크립트 파일명과 실제 로드 검증
 
 `src/core/downloaders/docker-download.test.ts`는 이미지 이름·태그 정규화와 아키텍처별 실제 반환 파일명을 확인합니다. `src/core/packager/docker-install-script.integration.test.ts`는 같은 파일명 fixture를 준비하고, 공백이 있는 폴더와 외부 작업 디렉터리에서 생성 스크립트를 실행합니다. macOS·Linux에서는 Bash, Windows에서는 PowerShell을 사용하며 Docker 기록용 대체 명령이 받은 `load -i` 인자와 실제 파일 경로를 검사합니다. 이 검증은 Docker 엔진의 이미지 로드를 대신하지 않습니다.

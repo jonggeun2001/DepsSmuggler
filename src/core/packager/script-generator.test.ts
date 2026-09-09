@@ -289,7 +289,7 @@ describe('ScriptGenerator', () => {
       const content = await fs.readFile(outputPath, 'utf-8');
       expect(content).toContain('pip install');
       expect(content).toContain(
-        'Get-ChildItem -Path $PackageDir -Directory -Recurse',
+        'Get-ChildItem -LiteralPath $PackageDir -Directory -Recurse -ErrorAction Stop',
       );
       expect(content).toContain('@PipFindLinkArgs');
     });
@@ -417,7 +417,7 @@ describe('ScriptGenerator', () => {
       expect(content).toContain('conda create --offline --yes --no-default-packages');
       expect(content).toContain('six-1.17.0-py312h06a4308_0.tar.bz2');
       expect(content).toContain('DEPS_SMUGGLER_CONDA_PREFIX');
-      expect(content).toContain('install_conda_packages || exit 1');
+      expect(content).toContain('run_install_group');
       expect(content).not.toContain('pip install');
     });
 

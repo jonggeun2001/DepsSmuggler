@@ -153,31 +153,36 @@ interface GeneratedScript {
 
 ### 생성되는 스크립트
 
+공통 `ScriptGenerator`의 Bash·PowerShell 출력은 설치 실패를 누적해 최종 목록과 종료 코드로 보고합니다. pip·Docker와 Bash의 YUM은 개별 실패 항목의 이름·버전을 기록합니다. Conda·Maven·npm처럼 묶음으로 실행되는 작업이 실패하면 해당 그룹과 대상 패키지 목록을 기록하고 이후 그룹을 시도합니다. 실패한 그룹의 완료 문구와 전체 성공 배너는 출력하지 않으며, 마지막에 실패가 있으면 종료 코드 `1`, 없으면 `0`을 반환합니다. `includeErrorHandling: false`여도 이 계약은 유지됩니다.
+
 **Bash (install.sh)의 Python 설치 부분 (핵심 흐름)**
 ```bash
-#!/bin/bash
-set -e
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-PACKAGE_DIR="./packages"
-PIP_FIND_LINK_ARGS=()
-while IFS= read -r -d '' directory; do
-  PIP_FIND_LINK_ARGS+=(--find-links="$directory")
-done < <(find "$PACKAGE_DIR" -type d -print0)
-pip install --no-index "${PIP_FIND_LINK_ARGS[@]}" requests==2.31.0
+# PIP_FIND_LINK_ARGS에는 탐색에 성공한 패키지 폴더들이 들어갑니다.
+if pip install --no-index "${PIP_FIND_LINK_ARGS[@]}" requests==2.31.0; then
+  :
+else
+  record_failure 'requests==2.31.0'
+  pip_failed=1
+fi
 ```
 
 **PowerShell (install.ps1)의 Python 설치 부분 (핵심 흐름)**
 ```powershell
-$ErrorActionPreference = "Stop"
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PackageDir = Join-Path $ScriptDir "packages"
-$FindLinkArgs = @("--find-links=$PackageDir")
-Get-ChildItem -Path $PackageDir -Directory -Recurse | ForEach-Object {
-    $FindLinkArgs += "--find-links=$($_.FullName)"
+# $PipFindLinkArgs는 Get-ChildItem -ErrorAction Stop으로 준비합니다.
+try {
+    & pip install --no-index @PipFindLinkArgs requests==2.31.0
+    $pipExitCode = $LASTEXITCODE
+    if ($pipExitCode -ne 0) {
+        Add-FailedPackage 'requests==2.31.0'
+        $pipFailed = $true
+    }
+} catch {
+    Add-FailedPackage 'requests==2.31.0'
+    $pipFailed = $true
 }
-pip install --no-index @FindLinkArgs requests==2.31.0
 ```
+
+위 예시는 타입별 설치 함수 내부의 일부입니다. 실제 Bash 출력은 `find -print0`의 결과를 임시 파일로 받아 명령·읽기 오류를 검사한 뒤 경로 배열을 만듭니다. 공백이나 개행이 있는 하위 폴더도 하나의 `--find-links` 인자로 유지합니다. PowerShell은 디렉터리 탐색 오류와 native 명령의 종료 코드를 확인합니다. 개별 명령에서 모은 실패는 모든 설치 그룹을 시도한 뒤 한 번 요약합니다.
 
 실제 파일은 헤더, 패키지 디렉터리와 실행 도구 확인, 로그 함수와 타입별 설치 함수를 포함합니다. pip은 하위 디렉터리마다 `--find-links`를 추가합니다. Maven은 패키지 메타데이터의 GAV 좌표로 canonical 저장소 경로를 선택해 `packages/<group>/<artifact>/<version>/`를 `MAVEN_REPO_LOCAL` 또는 기본 `~/.m2/repository`에 그대로 복사합니다. GUI 출력의 `packages/m2repo/` 구조도 지원하며, 같은 GAV 디렉터리의 원본 POM, parent/BOM POM, POM-only 항목, classifier와 checksum을 보존합니다. Bash와 PowerShell 모두 Maven 플러그인이나 네트워크를 호출하지 않고, 좌표 디렉터리가 없거나 복사에 실패하면 오류로 종료합니다. Bash는 pip·Conda·npm·Maven·YUM·Docker 블록을, PowerShell은 pip·Conda·npm·Maven·Docker 블록을 생성하며 YUM 설치 블록은 없습니다.
 
