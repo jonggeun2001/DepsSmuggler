@@ -328,6 +328,34 @@ describe('OSRepoPackager', () => {
     expect(members.get('APKINDEX')).toContain('k:50');
   });
 
+  it.each([
+    ['version만 있으면 제약 없이 이름만 기록한다', { name: 'foo', version: '1.0' }, 'foo'],
+    ['operator만 있으면 제약 없이 이름만 기록한다', { name: 'foo', operator: '>=' }, 'foo'],
+    ['operator와 version이 없으면 이름만 기록한다', { name: 'foo' }, 'foo'],
+    ['operator와 version이 함께 있으면 >= 제약을 기록한다', { name: 'foo', operator: '>=', version: '1.0' }, 'foo>=1.0'],
+    ['operator와 version이 함께 있으면 = 제약을 기록한다', { name: 'foo', operator: '=', version: '1.0' }, 'foo=1.0'],
+  ])('APK fallback dependency는 %s', async (_caseName, dependency, expected) => {
+    const packager = new OSRepoPackager();
+    const pkg = {
+      ...createApkPackage(),
+      dependencies: [dependency],
+      apkIndexFields: undefined,
+    };
+    const downloadedFile = path.join(tempDir, `dependency-${expected.replaceAll(/[^a-z0-9]+/gi, '-')}.apk`);
+    const repoPath = path.join(tempDir, `repo-dependency-${expected.replaceAll(/[^a-z0-9]+/gi, '-')}`);
+    fs.writeFileSync(downloadedFile, 'dependency payload');
+
+    await packager.createLocalRepo(
+      [pkg],
+      new Map([[getDownloadedFileKey(pkg), downloadedFile]]),
+      { packageManager: 'apk', outputPath: repoPath, repoName: 'alpine-main', includeSetupScript: false }
+    );
+
+    const members = await readTarMembers(path.join(repoPath, 'APKINDEX.tar.gz'));
+    const dependencyLine = members.get('APKINDEX')?.split('\n').find((line) => line.startsWith('D:'));
+    expect(dependencyLine).toBe(`D:${expected}`);
+  });
+
   it('APK 메타데이터는 원본 X1 체크섬 wire 형식을 보존한다', async () => {
     const packager = new OSRepoPackager();
     const pkg = {

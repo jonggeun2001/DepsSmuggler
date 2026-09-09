@@ -584,7 +584,7 @@ export class OSRepoPackager {
       } else if (pkg.dependencies.length > 0) {
         const deps = pkg.dependencies
           .filter((d) => !d.isOptional)
-          .map((d) => `${d.name}${d.operator || ''}${d.version || ''}`)
+          .map((d) => (d.operator && d.version ? `${d.name}${d.operator}${d.version}` : d.name))
           .join(' ');
         if (deps) {
           lines.push(`D:${deps}`);

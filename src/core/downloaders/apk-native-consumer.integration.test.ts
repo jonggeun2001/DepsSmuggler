@@ -127,10 +127,27 @@ async function requireDocker(): Promise<void> {
   }
 }
 
+async function buildHttpdImage(contextDirectory: string, imageTag: string): Promise<void> {
+  await fs.promises.writeFile(
+    path.join(contextDirectory, 'Dockerfile'),
+    'FROM alpine:3.20\nRUN apk add --no-cache busybox-extras \\\n && /bin/busybox-extras --list | grep -Fx httpd\n'
+  );
+  await execFile('docker', ['build', '--pull=false', '--tag', imageTag, contextDirectory], {
+    timeout: 300_000,
+    maxBuffer: 2 * 1024 * 1024,
+  });
+}
+
 nativeSuite('native APK repository consumer', () => {
   const tempDirectories: string[] = [];
+  const temporaryImages: string[] = [];
 
   afterEach(async () => {
+    for (const imageTag of temporaryImages.splice(0)) {
+      await execFile('docker', ['image', 'rm', '--force', imageTag], {
+        timeout: 30_000,
+      }).catch(() => undefined);
+    }
     for (const directory of tempDirectories.splice(0)) {
       await fs.promises.rm(directory, { recursive: true, force: true });
     }
@@ -142,6 +159,11 @@ nativeSuite('native APK repository consumer', () => {
       path.join(os.tmpdir(), 'depssmuggler-native-apk-')
     );
     tempDirectories.push(tempDirectory);
+    const imageTag = `depssmuggler-native-apk-httpd-${process.pid}-${Date.now()}`.toLowerCase();
+    temporaryImages.push(imageTag);
+    const imageContext = path.join(tempDirectory, 'image-context');
+    await fs.promises.mkdir(imageContext, { recursive: true });
+    await buildHttpdImage(imageContext, imageTag);
     const userDirectory = path.join(tempDirectory, 'user');
     const repositoryDirectory = path.join(tempDirectory, 'repository with spaces');
     await fs.promises.mkdir(userDirectory, { recursive: true });
@@ -179,7 +201,7 @@ nativeSuite('native APK repository consumer', () => {
       'mkdir -p /serve /tmp/apk-root',
       'ln -s /repo /serve/x86_64',
       "printf '%s\\n' 'http://127.0.0.1:8080' >/tmp/repositories",
-      'busybox httpd -f -p 127.0.0.1:8080 -h /serve >/tmp/httpd.log 2>&1 &',
+      '/bin/busybox-extras httpd -f -p 127.0.0.1:8080 -h /serve >/tmp/httpd.log 2>&1 &',
       'httpd_pid=$!',
       "trap 'kill $httpd_pid 2>/dev/null || true' EXIT",
       'sleep 1',
@@ -205,7 +227,7 @@ nativeSuite('native APK repository consumer', () => {
         'none',
         '-v',
         `${repositoryDirectory}:/repo:ro`,
-        'alpine:3.20',
+        imageTag,
         'sh',
         '-eu',
         '-c',

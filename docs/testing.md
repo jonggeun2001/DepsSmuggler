@@ -200,7 +200,7 @@ INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/apk.i
 
 `src/core/downloaders/apk-native-consumer.integration.test.ts`는 실제 CLI로 Alpine 3.20 `zlib`를 의존성 포함 다운로드하여 서로 다른 체크섬의 APK가 최소 두 개 있는 저장소를 생성합니다. 네트워크가 없는 Alpine 컨테이너 안에서 loopback HTTP 서버로 이를 제공하고, 빈 전용 데이터베이스와 전용 저장소 목록으로 `apk update` 및 모든 생성 패키지의 정확한 이름·버전 검색을 검사합니다. 저장소 파일은 읽기 전용으로 연결하고 실행 전후 해시를 비교합니다. 패키지 설치나 저장소 설정 스크립트 실행은 이 검증에 포함되지 않습니다.
 
-네이티브 검사는 기본 테스트에서는 skip이며 Ubuntu CI에서 별도로 실행합니다. 명시적으로 활성화한 실행은 Linux·Docker·Alpine 이미지 준비에 실패하면 오류로 종료합니다. 호스트에 `apk`를 설치하지 않습니다.
+네이티브 검사는 기본 테스트에서는 skip이며 Ubuntu CI에서 별도로 실행합니다. 온라인 준비 단계에서 Alpine 3.20에 HTTP 서버용 `busybox-extras`를 포함한 임시 이미지를 만든 뒤, 저장소 소비 단계는 네트워크를 끄고 실행합니다. 명시적으로 활성화한 실행은 Linux·Docker·이미지 준비에 실패하면 오류로 종료합니다. 임시 이미지와 테스트 파일은 정리하며 호스트에 `apk`를 설치하지 않습니다.
 
 ```bash
 bash scripts/verify-worktree.sh \
