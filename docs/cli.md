@@ -293,14 +293,13 @@ depssmuggler cache list
 
 - `size`: 캐시 디렉터리 용량 출력
 - `clear`: 캐시 삭제, `--force` 없으면 확인 프롬프트 표시
-- `list`: 캐시 루트 엔트리를 표로 출력하고, 엔트리가 디렉터리이며 `manifest.json`이 있으면 메타데이터를 채웁니다.
+- `list`: 캐시 루트의 디렉터리 항목을 표로 출력하고, `manifest.json`이 있으면 메타데이터를 채웁니다. 일반 파일과 심볼릭 링크는 목록과 패키지 개수에서 제외합니다. 디렉터리가 없으면 캐시된 패키지가 없다고 안내합니다.
 
 ## 현재 한계
 
 - CLI는 GUI보다 지원 범위가 좁습니다.
 - OS 패키지 CLI는 `list-distros`, `search`, `download`, `cache`를 독립적으로 수행하며 Electron GUI에 의존하지 않습니다.
 - 일반 패키지 `search`는 `pip`, `conda`, `maven`, `npm`, `docker`에 연결되어 있지만, GUI 전용 위자드/시각화 흐름은 CLI에 없습니다.
-- `cache list`는 현재 캐시 루트가 디렉터리 위주라는 가정을 두고 있어, `cache-manifest.json` 같은 일반 파일이 섞인 경우 실패할 수 있습니다.
 - `cache size/clear/list`는 내부 조회·삭제 오류를 출력한 뒤 반환하는 경로가 있으므로, 캐시 자동화에서 종료 코드만으로 모든 파일 작업의 성공을 판정할 수는 없습니다.
 - CLI에는 SMTP 발송, 전달용 자동 분할, GUI 히스토리 저장 명령이 없습니다. 해당 기능은 Electron 일반 다운로드 전달 파이프라인에서 사용합니다.
 
