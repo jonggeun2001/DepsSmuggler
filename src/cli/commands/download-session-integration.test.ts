@@ -55,9 +55,13 @@ vi.mock('./download-runner', () => ({
   }),
 }));
 
-vi.mock('../../core/packager/archive-packager', () => ({
-  getArchivePackager: vi.fn(() => ({ createArchive })),
-}));
+vi.mock('../../core/packager/archive-packager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../core/packager/archive-packager')>();
+  return {
+    ...actual,
+    getArchivePackager: vi.fn(() => ({ createArchive })),
+  };
+});
 
 vi.mock('../../core/packager/script-generator', () => ({
   getScriptGenerator: vi.fn(() => ({ generateAllScripts })),

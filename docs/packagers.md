@@ -21,6 +21,8 @@
 | `getArchiveInfo` | archivePath: string | Promise<{ format, size, fileCount }> | 압축 파일 정보 조회 |
 | `verifyArchive` | archivePath: string | Promise<boolean> | 파일 존재 및 크기 > 0 확인 |
 
+`createArchive()`와 `createArchiveFromDirectory()`는 런타임에도 `options.format`이 `zip` 또는 `tar.gz`인지 검사합니다. 지원하지 않는 값은 입력 파일 조사와 출력 경로 생성 전에 오류로 거부합니다. 공개 함수 `assertArchiveFormat(value)`를 CLI의 사전 검증에서도 재사용하며, 알 수 없는 값을 tar.gz로 대체하지 않습니다.
+
 ### 내부 메서드
 
 | 메서드 | 설명 |
