@@ -23,6 +23,10 @@ const fileStat = (size: number, directory = false) => ({
   isDirectory: () => directory,
   mtime: new Date('2026-01-01T00:00:00Z'),
 });
+const dirent = (name: string, directory: boolean) => ({
+  name,
+  isDirectory: () => directory,
+});
 const output = () => vi.mocked(console.log).mock.calls.flat().join('\n');
 const errors = () => vi.mocked(console.error).mock.calls.flat().join('\n');
 
@@ -133,7 +137,11 @@ describe('CLI 캐시 명령', () => {
 
   it('매니페스트가 있는 항목과 손상된 항목을 함께 표시한다', async () => {
     vi.mocked(fs.readdir).mockImplementation(
-      async (dir) => (String(dir) === 'test-cache' ? ['valid', 'broken'] : []) as never
+      async (dir) => (
+        String(dir) === 'test-cache'
+          ? [dirent('valid', true), dirent('broken', true)]
+          : []
+      ) as never
     );
     vi.mocked(fs.stat).mockResolvedValue(fileStat(0, true) as never);
     vi.mocked(fs.readJson).mockImplementation(async (target) => {
@@ -150,7 +158,11 @@ describe('CLI 캐시 명령', () => {
 
   it('빈 매니페스트의 이름과 버전은 대체값을 표시한다', async () => {
     vi.mocked(fs.readdir).mockImplementation(
-      async (dir) => (String(dir) === 'test-cache' ? ['unnamed-cache'] : []) as never
+      async (dir) => (
+        String(dir) === 'test-cache'
+          ? [dirent('unnamed-cache', true)]
+          : []
+      ) as never
     );
     vi.mocked(fs.readJson).mockResolvedValue({});
     vi.mocked(fs.stat).mockResolvedValue(fileStat(0, true) as never);
@@ -158,6 +170,47 @@ describe('CLI 캐시 명령', () => {
     expect(output()).toContain('unnamed-cache');
     expect(output()).toContain('0 B');
     expect(output()).toContain('총 1개 패키지');
+  });
+
+  it('root regular file과 symlink를 건너뛰고 유효한 디렉터리만 표시한다', async () => {
+    vi.mocked(fs.readdir).mockImplementation(
+      async (dir) => {
+        if (String(dir) === 'test-cache') {
+          return [
+            dirent('valid', true),
+            dirent('loose-cache-entry.json', false),
+            dirent('linked-cache', false),
+          ] as never;
+        }
+        return [] as never;
+      }
+    );
+    vi.mocked(fs.readJson).mockResolvedValue({ name: 'requests', version: '2.32.0', type: 'pip' });
+    vi.mocked(fs.stat).mockResolvedValue(fileStat(0, true) as never);
+
+    await cacheList();
+
+    expect(output()).toContain('requests');
+    expect(output()).toContain('총 1개 패키지');
+    expect(output()).not.toContain('loose-cache-entry.json');
+    expect(output()).not.toContain('linked-cache');
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it('root에 파일과 symlink만 있으면 캐시 없음으로 안내한다', async () => {
+    vi.mocked(fs.readdir).mockImplementation(
+      async (dir) => (
+        String(dir) === 'test-cache'
+          ? [dirent('cache-manifest.json', false), dirent('linked-cache', false)]
+          : []
+      ) as never
+    );
+
+    await cacheList();
+
+    expect(output()).toContain('캐시된 패키지가 없습니다');
+    expect(fs.readJson).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it('목록 읽기 권한이 없으면 오류만 표시한다', async () => {

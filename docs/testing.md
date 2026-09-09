@@ -95,6 +95,8 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 
 ### CLI 캐시 설정 검증
 
+`src/cli/cache-commands.integration.test.ts`는 실제 파일·디렉터리가 섞인 캐시에서 별도 CLI 프로세스로 `cache list`를 실행합니다. 정상 디렉터리의 패키지 정보와 개수가 표시되고 일반 파일은 목록에서 제외되는지 확인합니다. `commands/cache.test.ts`는 심볼릭 링크 제외, 디렉터리가 없는 경우, manifest 유무에 따른 표시를 검증합니다.
+
 `src/cli/cache-settings.integration.test.ts`는 격리한 사용자 디렉터리와 별도 CLI 프로세스로 설정 저장·조회가 연결되는지 확인합니다. 로컬 HTTP APK 저장소를 이용해 캐시 비활성화 시 재요청과 파일 미생성, 활성화 시 저장·재사용, 설정한 크기 한도에 따른 캐시 저장 생략도 검사합니다. 잘못된 입력의 종료 코드와 설정 파일 보존은 실제 CLI 경계에서 확인합니다.
 
 `src/core/config.test.ts`는 저장 키와 이전 별칭의 우선순위, 비동기 API와의 호환성, 불리언·양의 안전 정수 검증을 담당합니다. OS backend 테스트는 옵션 전달을 확인하고, `cache-manager.test.ts`는 실제 임시 디렉터리에서 LRU와 한도 초과 항목의 저장 생략을 검증합니다. 저장 순서와 조회 순서를 다르게 만든 뒤 작은 용량으로 다시 열어도 최근 조회한 항목이 남는지 확인합니다. 이 테스트에는 native apt/yum/apk 실행 파일이 필요하지 않습니다.

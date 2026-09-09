@@ -73,7 +73,10 @@ export async function cacheList(): Promise<void> {
       return;
     }
 
-    const dirs = await fs.readdir(cachePath);
+    const entries = await fs.readdir(cachePath, { withFileTypes: true });
+    const dirs = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
     if (dirs.length === 0) {
       console.log(chalk.yellow('캐시된 패키지가 없습니다'));
       return;
