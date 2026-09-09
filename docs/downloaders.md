@@ -626,6 +626,7 @@ const versions = results[0]?.versions ?? [];
 - 위치: `src/core/downloaders/npm.ts`
 - 버전 스펙 해석과 packument 조회는 `src/core/shared/npm-version-resolver.ts`를 재사용한다.
 - tarball 저장과 진행률 이벤트 생성은 `BaseLanguageDownloader`가 담당하고, `NpmDownloader`는 packument 해석과 integrity/sha1 검증 기준을 제공한다.
+- `downloadPackage()`는 파일 저장과 제공된 무결성 검증이 성공한 뒤 전달받은 `PackageInfo`의 `version`을 실제 선택한 버전으로 갱신하고 조회한 메타데이터를 병합한다. 기존 객체·이름·타입·아키텍처와 별도 호출자 메타데이터는 유지하며, 다운로드 URL과 체크섬은 실제 받은 패키지 기준으로 반영한다. 다운로드나 무결성 검증에 실패하면 입력 정보는 갱신하지 않는다.
 
 ### 클래스 구조
 

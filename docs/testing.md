@@ -206,6 +206,8 @@ DEPS_SMUGGLER_NATIVE_DOCKER=1 bash scripts/verify-worktree.sh \
 
 ### npm 설치 스크립트 오프라인 검증
 
+`src/cli/npm-manifest.integration.test.ts`는 로컬 레지스트리와 실제 tarball을 제공하고 별도 CLI 프로세스에서 `--no-deps` 다운로드를 실행합니다. `latest`와 고정 버전 요청 모두 ZIP의 manifest 버전이 tarball 내부 `package/package.json`의 버전과 일치하는지 확인합니다. 이 검증은 npm 설치를 실행하지 않습니다. npm 다운로더 단위 테스트는 성공 후 버전·메타데이터 갱신과 기존 입력 정보 보존, 실패 시 입력 미변경을 검증합니다.
+
 `src/core/packager/npm-install-script.integration.test.ts`는 레지스트리에 연결하지 않고 로컬 tarball fixture로 생성 스크립트를 실제 실행합니다. macOS·Linux에서는 Bash, Windows에서는 `powershell.exe`와 해당 환경의 npm을 사용합니다. 빈 npm 캐시와 별도 설정·설치 경로를 사용하며, 공백이 포함된 경로와 scoped 전이 의존성을 설치한 뒤 Node.js에서 실제 모듈을 불러와 검사합니다. 같은 패키지의 1.x·2.x를 요구하는 두 루트가 각각 올바른 버전을 불러오는지, 명시적으로 선택한 직접 버전이 유지되는지도 검증합니다. 서로 다른 peer 버전을 요구하는 전이 플러그인과 순환 의존성도 실제 npm 설치 및 모듈 로딩으로 확인합니다. 설치 대상은 `npm-project/node_modules`이며 상위 사용자 manifest 보존과 기존 사용자 프로젝트 덮어쓰기 방지를 확인합니다. 패키지 파일 또는 필요한 의존성이 없거나 tarball이 손상된 경우에는 오류 종료와 성공 문구 부재를 확인합니다. macOS 임시 디렉터리의 `/var`→`/private/var` 경로 차이에서도 여러 버전을 설치할 수 있어야 합니다. Windows의 `NODE_OPTIONS` preload 경로는 `JSON.stringify`로 인코딩해 역슬래시가 손실되지 않도록 합니다.
 
 ### Maven 설치 스크립트 canonical 저장소 검증
