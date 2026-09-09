@@ -51,7 +51,10 @@ program
   .option('--concurrency <num>', '동시 다운로드 수', '3')
   .action(async (options) => {
     const { downloadCommand } = await import('./commands/download');
-    await downloadCommand(options);
+    // Commander camel-cases `--target-os` to `targetOs`; keep the command
+    // handler's existing `targetOS` contract at this CLI boundary.
+    const { targetOs, ...downloadOptions } = options;
+    await downloadCommand({ ...downloadOptions, targetOS: targetOs });
   });
 
 // config 명령어
