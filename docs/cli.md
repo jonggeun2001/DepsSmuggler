@@ -151,6 +151,7 @@ depssmuggler download -t maven -p org.lwjgl:lwjgl -V 3.3.6 \
 ### 현재 동작
 
 - 다운로드 성공 시 출력 디렉터리에 `packages-<timestamp>.zip` 또는 `.tar.gz`를 만든 뒤, 같은 디렉터리에 설치 스크립트를 생성합니다. 이 호출 순서에서는 별도로 생성한 설치 스크립트가 앞서 만든 아카이브에 포함되지 않습니다.
+- Maven 설치 스크립트는 아카이브의 `packages/` canonical 저장소 경로를 GAV별로 `MAVEN_REPO_LOCAL`에 복사합니다. 기본 대상은 `~/.m2/repository`이며, GUI 출력의 `packages/m2repo/`도 지원합니다. 원본 POM·parent/BOM·POM-only·classifier·checksum은 같은 GAV 디렉터리에서 함께 보존되며 Maven 플러그인이나 네트워크 호출은 필요하지 않습니다.
 - 출력 형식은 현재 `zip` 또는 `tar.gz`만 지원합니다.
 - OS 패키지(`yum`, `apt`, `apk`)는 이 명령이 아니라 `os` 네임스페이스를 사용해야 합니다.
 

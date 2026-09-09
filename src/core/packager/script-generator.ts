@@ -3,8 +3,8 @@
  * Bash 및 PowerShell 설치 스크립트를 자동으로 생성
  */
 
-import * as fs from 'fs-extra';
 import * as path from 'path';
+import * as fs from 'fs-extra';
 import { PackageInfo } from '../../types';
 import logger from '../../utils/logger';
 import { stripLeadingDotSlash, toUnixPath, getWriteOptions } from '../shared/path-utils';
@@ -21,10 +21,59 @@ export interface GeneratedScript {
   type: 'bash' | 'powershell';
 }
 
+interface MavenCoordinate {
+  groupPath: string;
+  artifactId: string;
+  version: string;
+}
+
 /**
  * 설치 스크립트 생성기 클래스
  */
 export class ScriptGenerator {
+  private getMavenCoordinates(packages: PackageInfo[]): MavenCoordinate[] {
+    const coordinates = new Map<string, MavenCoordinate>();
+
+    for (const pkg of packages) {
+      if (pkg.type !== 'maven') continue;
+
+      const metadata = pkg.metadata as Record<string, unknown> | undefined;
+      const nameParts = pkg.name.split(':');
+      const groupId = typeof metadata?.groupId === 'string'
+        ? metadata.groupId
+        : nameParts[0];
+      const artifactId = typeof metadata?.artifactId === 'string'
+        ? metadata.artifactId
+        : nameParts[1];
+
+      // The Maven downloader always carries these coordinates. Refuse unsafe
+      // path segments so generated scripts cannot escape the repository root.
+      if (!groupId || !artifactId || !pkg.version ||
+          groupId.split('.').some(segment => !/^[A-Za-z0-9_-]+$/.test(segment)) ||
+          !/^[A-Za-z0-9_.+-]+$/.test(artifactId) || artifactId === '.' || artifactId === '..' ||
+          !/^[A-Za-z0-9_.+-]+$/.test(pkg.version) || pkg.version === '.' || pkg.version === '..') {
+        throw new Error(`Maven 패키지 좌표가 유효하지 않습니다: ${pkg.name}:${pkg.version}`);
+      }
+
+      const coordinate = {
+        groupPath: groupId.split('.').join('/'),
+        artifactId,
+        version: pkg.version,
+      };
+      coordinates.set(`${coordinate.groupPath}/${artifactId}/${pkg.version}`, coordinate);
+    }
+
+    return [...coordinates.values()];
+  }
+
+  private shellQuote(value: string): string {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+  }
+
+  private powerShellQuote(value: string): string {
+    return `'${value.replace(/'/g, "''")}'`;
+  }
+
   /**
    * Bash 설치 스크립트 생성 (Linux/macOS용)
    */
@@ -137,6 +186,7 @@ export class ScriptGenerator {
 
     // Maven 패키지 설치
     if (packagesByType.has('maven')) {
+      const mavenCoordinates = this.getMavenCoordinates(packagesByType.get('maven') || []);
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('# Maven 패키지 설치');
       lines.push('#-------------------------------------------------------------------------------');
@@ -144,21 +194,32 @@ export class ScriptGenerator {
       lines.push('install_maven_packages() {');
       lines.push('    log_info "Maven 패키지 설치 중..."');
       lines.push('');
-      lines.push('    # Maven 설치 확인');
-      lines.push('    if ! command -v mvn &> /dev/null; then');
-      lines.push('        log_error "Maven이 설치되어 있지 않습니다."');
-      lines.push('        return 1');
+      lines.push('    # Maven local repository와 같은 canonical layout을 그대로 복사합니다.');
+      lines.push('    local maven_source_root="$PACKAGE_DIR"');
+      lines.push('    if [[ -d "$PACKAGE_DIR/m2repo" ]]; then');
+      lines.push('        maven_source_root="$PACKAGE_DIR/m2repo"');
       lines.push('    fi');
+      lines.push('    local maven_repo_local="${MAVEN_REPO_LOCAL:-$HOME/.m2/repository}"');
+      lines.push('    copy_maven_coordinate() {');
+      lines.push('        local relative_path="$1"');
+      lines.push('        local source_path="$maven_source_root/$relative_path"');
+      lines.push('        local target_path="$maven_repo_local/$relative_path"');
+      lines.push('        if [[ ! -d "$source_path" ]]; then');
+      lines.push('            log_error "Maven canonical artifact directory를 찾을 수 없습니다: $source_path"');
+      lines.push('            return 1');
+      lines.push('        fi');
+      lines.push('        mkdir -p "$target_path" || return 1');
+      lines.push('        cp -a "$source_path/." "$target_path/" || return 1');
+      lines.push('    }');
       lines.push('');
-      lines.push('    # 로컬 저장소에 설치');
-      lines.push('    while IFS= read -r -d \'\' jar; do');
-      lines.push('        log_info "$(basename "$jar") 설치 중..."');
-      lines.push('        mvn install:install-file -Dfile="$jar" -DgeneratePom=true || {');
-      lines.push('            log_warn "$(basename "$jar") 설치 실패"');
-      lines.push('        }');
-      lines.push(
-        '    done < <(find "$PACKAGE_DIR" -type f -name \'*.jar\' -print0)',
-      );
+      for (const coordinate of mavenCoordinates) {
+        const relativePath = `${coordinate.groupPath}/${coordinate.artifactId}/${coordinate.version}`;
+        lines.push(`    copy_maven_coordinate ${this.shellQuote(relativePath)} || return 1`);
+      }
+      if (mavenCoordinates.length === 0) {
+        lines.push('    log_error "Maven 패키지에 유효한 groupId/artifactId/version 좌표가 없습니다."');
+        lines.push('    return 1');
+      }
       lines.push('');
       lines.push('    log_info "Maven 패키지 설치 완료"');
       lines.push('}');
@@ -253,7 +314,7 @@ export class ScriptGenerator {
       lines.push('    echo ""');
     }
     if (packagesByType.has('maven')) {
-      lines.push('    install_maven_packages');
+      lines.push('    install_maven_packages || exit 1');
       lines.push('    echo ""');
     }
     if (packagesByType.has('yum')) {
@@ -390,6 +451,7 @@ export class ScriptGenerator {
 
     // Maven 패키지 설치
     if (packagesByType.has('maven')) {
+      const mavenCoordinates = this.getMavenCoordinates(packagesByType.get('maven') || []);
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('# Maven 패키지 설치');
       lines.push('#-------------------------------------------------------------------------------');
@@ -397,23 +459,30 @@ export class ScriptGenerator {
       lines.push('function Install-MavenPackages {');
       lines.push('    Write-Info "Maven 패키지 설치 중..."');
       lines.push('');
-      lines.push('    # Maven 설치 확인');
-      lines.push('    if (-not (Get-Command mvn -ErrorAction SilentlyContinue)) {');
-      lines.push('        Write-Err "Maven이 설치되어 있지 않습니다."');
-      lines.push('        return');
+      lines.push('    # Maven local repository와 같은 canonical layout을 그대로 복사합니다.');
+      lines.push('    $MavenSourceRoot = Join-Path -Path $PackageDir -ChildPath \'m2repo\'');
+      lines.push('    if (-not (Test-Path -LiteralPath $MavenSourceRoot -PathType Container)) {');
+      lines.push('        $MavenSourceRoot = $PackageDir');
+      lines.push('    }');
+      lines.push('    $MavenLocalRepo = if ($env:MAVEN_REPO_LOCAL) { $env:MAVEN_REPO_LOCAL } else { Join-Path $HOME \'.m2/repository\' }');
+      lines.push('    function Copy-MavenCoordinate {');
+      lines.push('        param([string]$RelativePath)');
+      lines.push('        $SourcePath = Join-Path -Path $MavenSourceRoot -ChildPath $RelativePath');
+      lines.push('        $TargetPath = Join-Path -Path $MavenLocalRepo -ChildPath $RelativePath');
+      lines.push('        if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {');
+      lines.push('            throw "Maven canonical artifact directory를 찾을 수 없습니다: $SourcePath"');
+      lines.push('        }');
+      lines.push('        New-Item -ItemType Directory -Path $TargetPath -Force -ErrorAction Stop | Out-Null');
+      lines.push('        Copy-Item -Path (Join-Path $SourcePath \'*\') -Destination $TargetPath -Recurse -Force -ErrorAction Stop');
       lines.push('    }');
       lines.push('');
-      lines.push('    # JAR 파일 설치');
-      lines.push(
-        '    Get-ChildItem -Path $PackageDir -Filter "*.jar" -File -Recurse | ForEach-Object {',
-      );
-      lines.push('        Write-Info "$($_.Name) 설치 중..."');
-      lines.push('        try {');
-      lines.push('            mvn install:install-file -Dfile="$($_.FullName)" -DgeneratePom=true');
-      lines.push('        } catch {');
-      lines.push('            Write-Warn "$($_.Name) 설치 실패"');
-      lines.push('        }');
-      lines.push('    }');
+      for (const coordinate of mavenCoordinates) {
+        const relativePath = `${coordinate.groupPath}/${coordinate.artifactId}/${coordinate.version}`;
+        lines.push(`    Copy-MavenCoordinate ${this.powerShellQuote(relativePath)}`);
+      }
+      if (mavenCoordinates.length === 0) {
+        lines.push('    throw "Maven 패키지에 유효한 groupId/artifactId/version 좌표가 없습니다."');
+      }
       lines.push('');
       lines.push('    Write-Info "Maven 패키지 설치 완료"');
       lines.push('}');

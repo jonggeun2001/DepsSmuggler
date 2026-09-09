@@ -2,12 +2,16 @@
  * ScriptGenerator 테스트
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs-extra';
-import * as path from 'path';
+import { execFile } from 'child_process';
 import * as os from 'os';
+import * as path from 'path';
+import { promisify } from 'util';
+import * as fs from 'fs-extra';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getScriptGenerator, ScriptGenerator } from './script-generator';
 import { PackageInfo } from '../../types';
+
+const execFileAsync = promisify(execFile);
 
 describe('ScriptGenerator', () => {
   let generator: ScriptGenerator;
@@ -78,20 +82,105 @@ describe('ScriptGenerator', () => {
     it('Maven 패키지 설치 명령을 포함해야 함', async () => {
       const outputPath = path.join(tempDir, 'install.sh');
       const packages: PackageInfo[] = [
-        { name: 'spring-core', version: '5.3.0', type: 'maven' },
+        { name: 'org.springframework:spring-core', version: '5.3.0', type: 'maven', metadata: { groupId: 'org.springframework', artifactId: 'spring-core' } },
       ];
 
       await generator.generateBashScript(packages, outputPath);
 
       const content = await fs.readFile(outputPath, 'utf-8');
-      expect(content).toContain('mvn');
-      expect(content).toContain('install:install-file'); // 로컬 저장소에 설치
-      expect(content).toContain(
-        'find "$PACKAGE_DIR" -type f -name \'*.jar\' -print0',
-      );
-      expect(content).not.toContain(
-        'for jar in "$PACKAGE_DIR"/*.jar; do',
-      );
+      expect(content).toContain('MAVEN_REPO_LOCAL');
+      expect(content).toContain('copy_maven_coordinate');
+      expect(content).not.toContain('install:install-file');
+    });
+
+    it('Maven canonical tree의 모든 파일을 실제 설치 subprocess로 복사해야 함', async () => {
+      const packageCoordinates: PackageInfo[] = [
+        { type: 'maven', name: 'org.example:app', version: '1.0', metadata: { groupId: 'org.example', artifactId: 'app' } },
+        { type: 'maven', name: 'org.example:parent', version: '1.0', metadata: { groupId: 'org.example', artifactId: 'parent', packaging: 'pom' } },
+        { type: 'maven', name: 'org.example:bom', version: '1.0', metadata: { groupId: 'org.example', artifactId: 'bom', packaging: 'pom' } },
+        { type: 'maven', name: 'org.example:jar-only', version: '1.0', metadata: { groupId: 'org.example', artifactId: 'jar-only' } },
+      ];
+      const files = new Map([
+        ['org/example/app/1.0/app-1.0.jar', 'app jar'],
+        ['org/example/app/1.0/app-1.0.pom', '<project>app companion</project>'],
+        ['org/example/app/1.0/app-1.0.jar.sha1', 'app checksum'],
+        ['org/example/app/1.0/app-1.0.pom.sha1', 'app POM checksum'],
+        ['org/example/app/1.0/app-1.0-linux-x86_64.jar', 'classifier jar'],
+        ['org/example/parent/1.0/parent-1.0.pom', '<project>parent</project>'],
+        ['org/example/parent/1.0/parent-1.0.pom.sha1', 'parent checksum'],
+        ['org/example/bom/1.0/bom-1.0.pom', '<project>bom</project>'],
+        ['org/example/jar-only/1.0/jar-only-1.0.jar', 'jar without pom'],
+      ]);
+
+      for (const sourceRoot of ['packages', 'packages/m2repo']) {
+        const extractionRoot = path.join(os.tmpdir(), `deps smuggler maven-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+        const sourceDir = path.join(extractionRoot, sourceRoot);
+        const targetDir = path.join(extractionRoot, 'isolated-local-repository');
+        const usePowerShell = process.platform === 'win32';
+        const scriptPath = path.join(extractionRoot, usePowerShell ? 'install.ps1' : 'install.sh');
+        await fs.ensureDir(sourceDir);
+        for (const [relativePath, contents] of files) {
+          const sourcePath = path.join(sourceDir, relativePath);
+          await fs.ensureDir(path.dirname(sourcePath));
+          await fs.writeFile(sourcePath, contents);
+        }
+        await fs.writeFile(path.join(extractionRoot, 'packages', 'unrelated-flat.jar'), 'must not be copied');
+        await fs.ensureDir(path.join(extractionRoot, 'packages', 'pip'));
+        await fs.writeFile(path.join(extractionRoot, 'packages', 'pip', 'requests.whl'), 'must not be copied');
+
+        try {
+          if (usePowerShell) {
+            await generator.generatePowerShellScript(packageCoordinates, scriptPath);
+          } else {
+            await generator.generateBashScript(packageCoordinates, scriptPath);
+          }
+          const command = usePowerShell ? 'powershell.exe' : 'bash';
+          const commandArgs = usePowerShell
+            ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath]
+            : [scriptPath];
+          await execFileAsync(command, commandArgs, {
+            cwd: extractionRoot,
+            env: { ...process.env, MAVEN_REPO_LOCAL: targetDir },
+            timeout: 20_000,
+          });
+
+          for (const [relativePath, contents] of files) {
+            await expect(fs.readFile(path.join(targetDir, relativePath), 'utf8')).resolves.toBe(contents);
+          }
+          await expect(fs.pathExists(path.join(targetDir, 'unrelated-flat.jar'))).resolves.toBe(false);
+          await expect(fs.pathExists(path.join(targetDir, 'pip', 'requests.whl'))).resolves.toBe(false);
+        } finally {
+          await fs.remove(extractionRoot);
+        }
+      }
+    }, 30_000);
+
+    it('Maven canonical source가 없으면 실제 설치 subprocess가 실패해야 함', async () => {
+      const extractionRoot = path.join(os.tmpdir(), `deps smuggler maven-missing-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const usePowerShell = process.platform === 'win32';
+      const scriptPath = path.join(extractionRoot, usePowerShell ? 'install.ps1' : 'install.sh');
+      await fs.ensureDir(path.join(extractionRoot, 'packages'));
+      try {
+        const packages: PackageInfo[] = [
+          { type: 'maven', name: 'org.example:missing', version: '1.0', metadata: { groupId: 'org.example', artifactId: 'missing' } },
+        ];
+        if (usePowerShell) {
+          await generator.generatePowerShellScript(packages, scriptPath);
+        } else {
+          await generator.generateBashScript(packages, scriptPath);
+        }
+        const command = usePowerShell ? 'powershell.exe' : 'bash';
+        const commandArgs = usePowerShell
+          ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath]
+          : [scriptPath];
+        await expect(execFileAsync(command, commandArgs, {
+          cwd: extractionRoot,
+          env: { ...process.env, MAVEN_REPO_LOCAL: path.join(extractionRoot, 'target repo') },
+          timeout: 20_000,
+        })).rejects.toThrow();
+      } finally {
+        await fs.remove(extractionRoot);
+      }
     });
 
     it('YUM 패키지 설치 명령을 포함해야 함', async () => {
@@ -192,21 +281,18 @@ describe('ScriptGenerator', () => {
       expect(content).toContain('@PipFindLinkArgs');
     });
 
-    it('중첩된 Maven JAR를 재귀적으로 설치해야 함', async () => {
+    it('Maven canonical tree 복사 경로를 생성해야 함', async () => {
       const outputPath = path.join(tempDir, 'install.ps1');
       const packages: PackageInfo[] = [
-        { name: 'spring-core', version: '5.3.0', type: 'maven' },
+        { name: 'org.springframework:spring-core', version: '5.3.0', type: 'maven', metadata: { groupId: 'org.springframework', artifactId: 'spring-core' } },
       ];
 
       await generator.generatePowerShellScript(packages, outputPath);
 
       const content = await fs.readFile(outputPath, 'utf-8');
-      expect(content).toContain(
-        'Get-ChildItem -Path $PackageDir -Filter "*.jar" -File -Recurse',
-      );
-      expect(content).not.toContain(
-        'Get-ChildItem $JarPattern',
-      );
+      expect(content).toContain('Copy-MavenCoordinate');
+      expect(content).toContain('$MavenLocalRepo');
+      expect(content).not.toContain('install:install-file');
     });
 
     it('Docker 이미지 로드 명령을 포함해야 함', async () => {
@@ -284,7 +370,7 @@ describe('ScriptGenerator', () => {
       const packages: PackageInfo[] = [
         { name: 'requests', version: '2.28.0', type: 'pip' },
         { name: 'numpy', version: '1.23.0', type: 'conda' },
-        { name: 'spring-core', version: '5.3.0', type: 'maven' },
+        { name: 'org.springframework:spring-core', version: '5.3.0', type: 'maven', metadata: { groupId: 'org.springframework', artifactId: 'spring-core' } },
         { name: 'httpd', version: '2.4.0', type: 'yum' },
         { name: 'nginx', version: 'latest', type: 'docker' },
       ];
@@ -295,7 +381,7 @@ describe('ScriptGenerator', () => {
 
       // 각 패키지 타입에 대한 설치 명령 확인
       expect(content).toContain('pip');
-      expect(content).toContain('mvn');
+      expect(content).toContain('copy_maven_coordinate');
       expect(content).toContain('docker');
     });
 

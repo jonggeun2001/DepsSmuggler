@@ -172,7 +172,7 @@ Get-ChildItem -Path $PackageDir -Directory -Recurse | ForEach-Object {
 pip install --no-index @FindLinkArgs requests==2.31.0
 ```
 
-실제 파일은 헤더, 패키지 디렉터리와 실행 도구 확인, 로그 함수와 타입별 설치 함수를 포함합니다. Python은 하위 디렉터리마다 `--find-links`를 추가하며, Maven은 JAR 파일을 재귀 탐색합니다. Bash는 pip/conda·Maven·YUM·Docker 블록을, PowerShell은 pip/conda·Maven·Docker 블록을 생성하며 YUM 설치 블록은 없습니다.
+실제 파일은 헤더, 패키지 디렉터리와 실행 도구 확인, 로그 함수와 타입별 설치 함수를 포함합니다. Python은 하위 디렉터리마다 `--find-links`를 추가합니다. Maven은 패키지 메타데이터의 GAV 좌표로 canonical 저장소 경로를 선택해 `packages/<group>/<artifact>/<version>/`를 `MAVEN_REPO_LOCAL` 또는 기본 `~/.m2/repository`에 그대로 복사합니다. GUI 출력은 `packages/m2repo/`를 우선 사용하며, 같은 GAV 디렉터리의 원본 POM, parent/BOM POM, POM-only 항목, classifier와 checksum을 보존합니다. Bash와 PowerShell 모두 Maven 플러그인이나 네트워크를 호출하지 않고, 좌표 디렉터리가 없거나 복사에 실패하면 오류로 종료합니다. Bash는 pip/conda·Maven·YUM·Docker 블록을, PowerShell은 pip/conda·Maven·Docker 블록을 생성하며 YUM 설치 블록은 없습니다.
 
 일반 `ScriptGenerator`에는 npm·APT·APK 전용 설치 블록이 없고, Conda 항목도 pip 설치 블록으로 묶입니다. `.conda` 파일을 설치하는 Conda 전용 스크립트로 간주하면 안 됩니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
 
