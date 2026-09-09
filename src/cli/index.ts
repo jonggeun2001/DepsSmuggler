@@ -3,11 +3,12 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { registerOSCommands } from './commands/os';
+import { getPackageVersion } from './version';
 import { logger } from '../utils/logger';
 import { maskString } from '../utils/mask';
 
 // 버전 정보
-const VERSION = '1.0.0';
+const VERSION = getPackageVersion();
 
 // 로거 초기화 (파일 로깅 활성화)
 async function initializeLogger(): Promise<void> {

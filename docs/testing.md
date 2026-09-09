@@ -33,6 +33,8 @@ npm audit
 
 `scripts/verify-worktree.sh`는 현재 저장소의 `scripts.test` 계약을 그대로 호출하는 얇은 래퍼이며, worktree에서 공통 검증 진입점으로 사용합니다. 현재 자동 생성 범위는 `test`만 포함하고 `lint`/`typecheck`는 별도 명령으로 유지합니다.
 
+CLI 버전 회귀 테스트(`src/cli/version.integration.test.ts`)는 실제 하위 프로세스를 사용해 `npm run cli -- --version`과 `-v`, 빌드 후 `dist/src/cli/index.js`, 그리고 `dist/package.json`에 버전이 없는 설치 레이아웃을 확인합니다. 모든 진입점은 루트 `package.json`의 버전을 출력해야 하며, 테스트가 임시 빌드 산출물을 생성하므로 저장소의 추적 파일은 변경하지 않습니다.
+
 `INTEGRATION_TEST=true` 표기는 POSIX shell 예시입니다. PowerShell에서는 `$env:INTEGRATION_TEST='true'`를 지정한 뒤 `npm run test`를 실행합니다. 이 환경 변수는 외부 저장소 호출을 활성화하므로 기본 mock 테스트 실행과 구분합니다.
 
 두 TypeScript 설정 모두 `noUnusedLocals`와 `noUnusedParameters`를 활성화합니다. 죽은 코드·미사용 인수 정리 후 재유입을 검사하며, 외부 호출 규약을 유지할 인수에는 `_` 접두어를 붙입니다. `retry-utils.test.ts`는 `unknown` 오류 처리에서도 HTTP 상태 코드·타임아웃 판정과 비정형 값의 기존 결과가 유지되는지 확인합니다.
