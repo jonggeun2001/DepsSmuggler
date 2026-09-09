@@ -349,24 +349,55 @@ describe('npm CLI resolved root install integration', () => {
     const installCommand = process.platform === 'win32'
       ? { file: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(bundle, 'install.ps1')] }
       : { file: 'bash', args: [path.join(bundle, 'install.sh')] };
-    const install = await execFileAsync(installCommand.file, installCommand.args, {
-      cwd: bundle,
-      env: {
-        ...installEnv,
-        DEPS_SMUGGLER_TEST_USER_DIR: installUser,
-        NODE_OPTIONS: `--require ${JSON.stringify(isolateHomeScript)}`,
-        npm_config_cache: npmCache,
-        npm_config_userconfig: npmConfig,
-        npm_config_registry: trapRegistry,
-        npm_config_globalconfig: npmGlobalConfig,
-        npm_config_prefix: path.join(tempRoot, 'unused global prefix'),
-        npm_config_proxy: '',
-        npm_config_https_proxy: '',
-        NO_PROXY: '127.0.0.1,localhost',
-      },
-      timeout: 120_000,
-      maxBuffer: 4 * 1024 * 1024,
-    });
+    let install: { stdout: string; stderr: string };
+    try {
+      install = await execFileAsync(installCommand.file, installCommand.args, {
+        cwd: bundle,
+        env: {
+          ...installEnv,
+          DEPS_SMUGGLER_TEST_USER_DIR: installUser,
+          NODE_OPTIONS: `--require ${JSON.stringify(isolateHomeScript)}`,
+          npm_config_cache: npmCache,
+          npm_config_userconfig: npmConfig,
+          npm_config_registry: trapRegistry,
+          npm_config_globalconfig: npmGlobalConfig,
+          npm_config_prefix: path.join(tempRoot, 'unused global prefix'),
+          npm_config_proxy: '',
+          npm_config_https_proxy: '',
+          NO_PROXY: '127.0.0.1,localhost',
+        },
+        timeout: 120_000,
+        maxBuffer: 4 * 1024 * 1024,
+      });
+    } catch (error) {
+      const failure = error as typeof error & { stdout?: string; stderr?: string };
+      const npmProjectManifest = path.join(bundle, 'npm-project', 'package.json');
+      const npmLogs: string[] = [];
+      if (await fs.pathExists(path.join(npmCache, '_logs'))) {
+        for (const file of await fs.readdir(path.join(npmCache, '_logs'))) {
+          const logPath = path.join(npmCache, '_logs', file);
+          if ((await fs.stat(logPath)).isFile()) {
+            npmLogs.push(`--- ${file} ---\n${await fs.readFile(logPath, 'utf8')}`);
+          }
+        }
+      }
+      const scriptName = process.platform === 'win32' ? 'install.ps1' : 'install.sh';
+      const scriptLines = (await fs.readFile(path.join(bundle, scriptName), 'utf8'))
+        .split(/\r?\n/)
+        .filter((line) => /ScriptDir|PackageDir|NpmSetup|NpmProject|npm install/.test(line))
+        .join('\n');
+      const manifestState = await fs.pathExists(npmProjectManifest)
+        ? await fs.readFile(npmProjectManifest, 'utf8')
+        : '<missing>';
+      throw new Error([
+        `installer failed: ${failure.message ?? String(error)}`,
+        `stdout:\n${failure.stdout ?? ''}`,
+        `stderr:\n${failure.stderr ?? ''}`,
+        `npm-project/package.json:\n${manifestState}`,
+        `generated setup lines:\n${scriptLines}`,
+        `npm cache logs:\n${npmLogs.join('\n')}`,
+      ].join('\n\n'));
+    }
     expect(install.stderr).not.toContain('npm ERR!');
     expect(installRequests).toEqual([]);
     expect(await fs.readFile(externalRequestMarker, 'utf8')).toBe('0');
