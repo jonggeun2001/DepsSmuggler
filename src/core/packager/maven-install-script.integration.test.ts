@@ -246,6 +246,219 @@ describe('Maven install script canonical layout integration', () => {
     }
   }, 120_000);
 
+  it('Maven Bash/PowerShell execution preserves coexisting GAVs on their own layout paths', async () => {
+    const generator = getScriptGenerator();
+    const packageCases = [
+      {
+        packageInfo: {
+          type: 'maven' as const,
+          name: 'example:demo',
+          version: '1.0.0',
+          metadata: { groupId: 'example', artifactId: 'demo' },
+        },
+        targetCoordinateSuffix: path.join('example', 'demo', '1.0.0'),
+        jarFilename: 'demo-1.0.0.jar',
+        pomFilename: 'demo-1.0.0.pom',
+      },
+      {
+        packageInfo: {
+          type: 'maven' as const,
+          name: 'm2repo.example:demo',
+          version: '1.0.0',
+          metadata: { groupId: 'm2repo.example', artifactId: 'demo' },
+        },
+        targetCoordinateSuffix: path.join('m2repo', 'example', 'demo', '1.0.0'),
+        jarFilename: 'demo-1.0.0.jar',
+        pomFilename: 'demo-1.0.0.pom',
+      },
+    ];
+    const layoutCases = [
+      {
+        name: 'cli',
+        sourceCoordinateSuffixes: [
+          path.join('packages', 'example', 'demo', '1.0.0'),
+          path.join('packages', 'm2repo', 'example', 'demo', '1.0.0'),
+        ],
+      },
+      {
+        name: 'gui',
+        sourceCoordinateSuffixes: [
+          path.join('packages', 'm2repo', 'example', 'demo', '1.0.0'),
+          path.join('packages', 'm2repo', 'm2repo', 'example', 'demo', '1.0.0'),
+        ],
+      },
+    ];
+
+    for (const layoutCase of layoutCases) {
+      const extractionRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), `depssmuggler-maven-layout-coexistence-${layoutCase.name}-`),
+      );
+      temporaryRoots.push(extractionRoot);
+      const scriptDirectory = path.join(extractionRoot, 'delivered-script');
+      const targetRoot = path.join(extractionRoot, 'target-local-repository');
+      const scriptPath = path.join(
+        scriptDirectory,
+        process.platform === 'win32' ? 'install.ps1' : 'install.sh',
+      );
+
+      for (let index = 0; index < packageCases.length; index += 1) {
+        const packageCase = packageCases[index];
+        const sourceCoordinatePath = path.join(
+          scriptDirectory,
+          layoutCase.sourceCoordinateSuffixes[index],
+        );
+        await fs.ensureDir(sourceCoordinatePath);
+        await fs.writeFile(
+          path.join(sourceCoordinatePath, packageCase.jarFilename),
+          `${layoutCase.name} GAV ${index} source jar\n`,
+        );
+        await fs.writeFile(
+          path.join(sourceCoordinatePath, packageCase.pomFilename),
+          `<project>${layoutCase.name} GAV ${index} source pom</project>\n`,
+        );
+      }
+
+      if (process.platform === 'win32') {
+        await generator.generatePowerShellScript(
+          packageCases.map(({ packageInfo }) => packageInfo),
+          scriptPath,
+        );
+      } else {
+        await generator.generateBashScript(
+          packageCases.map(({ packageInfo }) => packageInfo),
+          scriptPath,
+        );
+      }
+
+      const command = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+      const commandArgs = process.platform === 'win32'
+        ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath]
+        : [scriptPath];
+      await execFileAsync(command, commandArgs, {
+        cwd: extractionRoot,
+        env: { ...process.env, MAVEN_REPO_LOCAL: targetRoot },
+        timeout: 45_000,
+      });
+
+      for (let index = 0; index < packageCases.length; index += 1) {
+        const packageCase = packageCases[index];
+        const targetCoordinatePath = path.join(targetRoot, packageCase.targetCoordinateSuffix);
+        const markerText = await fs.readFile(path.join(targetCoordinatePath, REMOTE_MARKER), 'utf8');
+        expect(await fs.readFile(path.join(targetCoordinatePath, packageCase.jarFilename), 'utf8'))
+          .toBe(`${layoutCase.name} GAV ${index} source jar\n`);
+        expect(await fs.readFile(path.join(targetCoordinatePath, packageCase.pomFilename), 'utf8'))
+          .toBe(`<project>${layoutCase.name} GAV ${index} source pom</project>\n`);
+        expect(countMarkerLine(markerText, `${packageCase.jarFilename}>=`)).toBe(1);
+        expect(countMarkerLine(markerText, `${packageCase.pomFilename}>=`)).toBe(1);
+      }
+    }
+  }, 180_000);
+
+  it('Maven Bash/PowerShell execution rejects ambiguous or incomplete source roots before copying', async () => {
+    const generator = getScriptGenerator();
+    const packageCases = [
+      {
+        packageInfo: {
+          type: 'maven' as const,
+          name: 'example:demo',
+          version: '1.0.0',
+          metadata: { groupId: 'example', artifactId: 'demo' },
+        },
+        coordinateSuffix: path.join('example', 'demo', '1.0.0'),
+      },
+      {
+        packageInfo: {
+          type: 'maven' as const,
+          name: 'm2repo.example:demo',
+          version: '1.0.0',
+          metadata: { groupId: 'm2repo.example', artifactId: 'demo' },
+        },
+        coordinateSuffix: path.join('m2repo', 'example', 'demo', '1.0.0'),
+      },
+    ];
+    const negativeCases = [
+      {
+        name: 'ambiguous',
+        sourceCoordinateSuffixes: [
+          path.join('packages', 'example', 'demo', '1.0.0'),
+          path.join('packages', 'm2repo', 'example', 'demo', '1.0.0'),
+          path.join('packages', 'm2repo', 'm2repo', 'example', 'demo', '1.0.0'),
+        ],
+      },
+      {
+        name: 'incomplete',
+        sourceCoordinateSuffixes: [
+          path.join('packages', 'example', 'demo', '1.0.0'),
+          path.join('packages', 'm2repo', 'm2repo', 'example', 'demo', '1.0.0'),
+        ],
+      },
+    ];
+
+    for (const negativeCase of negativeCases) {
+      const extractionRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), `depssmuggler-maven-layout-${negativeCase.name}-`),
+      );
+      temporaryRoots.push(extractionRoot);
+      const scriptDirectory = path.join(extractionRoot, 'delivered-script');
+      const targetRoot = path.join(extractionRoot, 'target-local-repository');
+      const scriptPath = path.join(
+        scriptDirectory,
+        process.platform === 'win32' ? 'install.ps1' : 'install.sh',
+      );
+
+      for (let index = 0; index < negativeCase.sourceCoordinateSuffixes.length; index += 1) {
+        const sourceCoordinatePath = path.join(
+          scriptDirectory,
+          negativeCase.sourceCoordinateSuffixes[index],
+        );
+        await fs.ensureDir(sourceCoordinatePath);
+        await fs.writeFile(
+          path.join(sourceCoordinatePath, 'demo-1.0.0.jar'),
+          `${negativeCase.name} source ${index} jar\n`,
+        );
+        await fs.writeFile(
+          path.join(sourceCoordinatePath, 'demo-1.0.0.pom'),
+          `<project>${negativeCase.name} source ${index} pom</project>\n`,
+        );
+      }
+
+      if (process.platform === 'win32') {
+        await generator.generatePowerShellScript(
+          packageCases.map(({ packageInfo }) => packageInfo),
+          scriptPath,
+        );
+      } else {
+        await generator.generateBashScript(
+          packageCases.map(({ packageInfo }) => packageInfo),
+          scriptPath,
+        );
+      }
+
+      const command = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+      const commandArgs = process.platform === 'win32'
+        ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath]
+        : [scriptPath];
+      let failure: { code?: number | string | null; killed?: boolean } | undefined;
+      try {
+        await execFileAsync(command, commandArgs, {
+          cwd: extractionRoot,
+          env: { ...process.env, MAVEN_REPO_LOCAL: targetRoot },
+          timeout: 45_000,
+        });
+      } catch (error) {
+        failure = error as { code?: number | string | null; killed?: boolean };
+      }
+
+      expect(failure).toBeDefined();
+      expect(typeof failure?.code).toBe('number');
+      expect(failure?.code).not.toBe(0);
+      expect(failure?.killed).not.toBe(true);
+      for (const packageCase of packageCases) {
+        expect(await fs.pathExists(path.join(targetRoot, packageCase.coordinateSuffix))).toBe(false);
+      }
+    }
+  }, 240_000);
+
   const skipReadOnlyMarkerFailure = process.platform !== 'win32'
     && typeof process.getuid === 'function'
     && process.getuid() === 0;

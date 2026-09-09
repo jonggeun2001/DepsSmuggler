@@ -195,13 +195,37 @@ export class ScriptGenerator {
       lines.push('    log_info "Maven 패키지 설치 중..."');
       lines.push('');
       lines.push('    # Maven local repository와 같은 canonical layout을 그대로 복사합니다.');
+      lines.push('    local maven_paths=(');
+      for (const coordinate of mavenCoordinates) {
+        lines.push(`        ${this.shellQuote(`${coordinate.groupPath}/${coordinate.artifactId}/${coordinate.version}`)}`);
+      }
+      lines.push('    )');
+      lines.push('    local maven_source_root=""');
+      lines.push('    local candidate relative_path candidate_complete');
+      lines.push('    for candidate in "$PACKAGE_DIR" "$PACKAGE_DIR/m2repo"; do');
+      lines.push('        candidate_complete=1');
+      lines.push('        for relative_path in "${maven_paths[@]}"; do');
+      lines.push('            if [[ ! -d "$candidate/$relative_path" ]]; then');
+      lines.push('                candidate_complete=0');
+      lines.push('                break');
+      lines.push('            fi');
+      lines.push('        done');
+      lines.push('        if [[ "$candidate_complete" -eq 1 ]]; then');
+      lines.push('            if [[ -n "$maven_source_root" ]]; then');
+      lines.push('                log_error "Maven 저장소 구조가 중복되어 원본을 구분할 수 없습니다: $PACKAGE_DIR"');
+      lines.push('                return 1');
+      lines.push('            fi');
+      lines.push('            maven_source_root="$candidate"');
+      lines.push('        fi');
+      lines.push('    done');
+      lines.push('    if [[ -z "$maven_source_root" ]]; then');
+      lines.push('        log_error "모든 Maven 패키지를 포함하는 저장소 디렉터리를 찾을 수 없습니다: $PACKAGE_DIR"');
+      lines.push('        return 1');
+      lines.push('    fi');
       lines.push('    local maven_repo_local="${MAVEN_REPO_LOCAL:-$HOME/.m2/repository}"');
       lines.push('    copy_maven_coordinate() {');
       lines.push('        local relative_path="$1"');
-      lines.push('        local source_path="$PACKAGE_DIR/$relative_path"');
-      lines.push('        if [[ -d "$PACKAGE_DIR/m2repo/$relative_path" ]]; then');
-      lines.push('            source_path="$PACKAGE_DIR/m2repo/$relative_path"');
-      lines.push('        fi');
+      lines.push('        local source_path="$maven_source_root/$relative_path"');
       lines.push('        local target_path="$maven_repo_local/$relative_path"');
       lines.push('        if [[ ! -d "$source_path" ]]; then');
       lines.push('            log_error "Maven canonical artifact directory를 찾을 수 없습니다: $source_path"');
@@ -229,10 +253,9 @@ export class ScriptGenerator {
       lines.push('        fi');
       lines.push('    }');
       lines.push('');
-      for (const coordinate of mavenCoordinates) {
-        const relativePath = `${coordinate.groupPath}/${coordinate.artifactId}/${coordinate.version}`;
-        lines.push(`    copy_maven_coordinate ${this.shellQuote(relativePath)} || return 1`);
-      }
+      lines.push('    for relative_path in "${maven_paths[@]}"; do');
+      lines.push('        copy_maven_coordinate "$relative_path" || return 1');
+      lines.push('    done');
       if (mavenCoordinates.length === 0) {
         lines.push('    log_error "Maven 패키지에 유효한 groupId/artifactId/version 좌표가 없습니다."');
         lines.push('    return 1');
@@ -477,15 +500,33 @@ export class ScriptGenerator {
       lines.push('    Write-Info "Maven 패키지 설치 중..."');
       lines.push('');
       lines.push('    # Maven local repository와 같은 canonical layout을 그대로 복사합니다.');
+      lines.push('    $MavenPaths = @(');
+      for (const coordinate of mavenCoordinates) {
+        lines.push(`        ${this.powerShellQuote(`${coordinate.groupPath}/${coordinate.artifactId}/${coordinate.version}`)}`);
+      }
+      lines.push('    )');
+      lines.push('    $MavenSourceRoot = $null');
+      lines.push('    foreach ($Candidate in @($PackageDir, (Join-Path $PackageDir \'m2repo\'))) {');
+      lines.push('        $CandidateComplete = $true');
+      lines.push('        foreach ($RelativePath in $MavenPaths) {');
+      lines.push('            if (-not (Test-Path -LiteralPath (Join-Path $Candidate $RelativePath) -PathType Container -ErrorAction Stop)) {');
+      lines.push('                $CandidateComplete = $false');
+      lines.push('                break');
+      lines.push('            }');
+      lines.push('        }');
+      lines.push('        if ($CandidateComplete) {');
+      lines.push('            if ($MavenSourceRoot) { throw "Maven 저장소 구조가 중복되어 원본을 구분할 수 없습니다: $PackageDir" }');
+      lines.push('            $MavenSourceRoot = $Candidate');
+      lines.push('        }');
+      lines.push('    }');
+      lines.push('    if (-not $MavenSourceRoot) { throw "모든 Maven 패키지를 포함하는 저장소 디렉터리를 찾을 수 없습니다: $PackageDir" }');
       lines.push('    $MavenLocalRepo = if ($env:MAVEN_REPO_LOCAL) { $env:MAVEN_REPO_LOCAL } else { Join-Path $HOME \'.m2/repository\' }');
       lines.push('    try {');
       lines.push('        $MavenLocalRepo = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($MavenLocalRepo)');
       lines.push('    } catch { throw "Maven 저장소 경로 해석 실패: $MavenLocalRepo - $_" }');
       lines.push('    function Copy-MavenCoordinate {');
       lines.push('        param([string]$RelativePath)');
-      lines.push('        $SourcePath = Join-Path -Path $PackageDir -ChildPath $RelativePath');
-      lines.push('        $GuiSourcePath = Join-Path -Path (Join-Path $PackageDir \'m2repo\') -ChildPath $RelativePath');
-      lines.push('        if (Test-Path -LiteralPath $GuiSourcePath -PathType Container) { $SourcePath = $GuiSourcePath }');
+      lines.push('        $SourcePath = Join-Path -Path $MavenSourceRoot -ChildPath $RelativePath');
       lines.push('        $TargetPath = Join-Path -Path $MavenLocalRepo -ChildPath $RelativePath');
       lines.push('        if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {');
       lines.push('            throw "Maven canonical artifact directory를 찾을 수 없습니다: $SourcePath"');
@@ -510,10 +551,7 @@ export class ScriptGenerator {
       lines.push('        if ($ArtifactCount -eq 0) { throw "Maven artifact 파일을 찾을 수 없습니다: $SourcePath" }');
       lines.push('    }');
       lines.push('');
-      for (const coordinate of mavenCoordinates) {
-        const relativePath = `${coordinate.groupPath}/${coordinate.artifactId}/${coordinate.version}`;
-        lines.push(`    Copy-MavenCoordinate ${this.powerShellQuote(relativePath)}`);
-      }
+      lines.push('    foreach ($RelativePath in $MavenPaths) { Copy-MavenCoordinate $RelativePath }');
       if (mavenCoordinates.length === 0) {
         lines.push('    throw "Maven 패키지에 유효한 groupId/artifactId/version 좌표가 없습니다."');
       }
