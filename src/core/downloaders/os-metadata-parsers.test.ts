@@ -311,6 +311,67 @@ describe('OS metadata parsers', () => {
     ]);
   });
 
+  it('YUM parser는 버전 문자열과 명시적 숫자 속성을 각각 보존한다', async () => {
+    const parser = new YumMetadataParser(repo, 'x86_64');
+    const repomdXml = [
+      '<repomd>',
+      '  <data type="primary">',
+      '    <checksum type="sha256">deadbeef</checksum>',
+      '    <location href="repodata/primary.xml.gz" />',
+      '    <timestamp>0</timestamp>',
+      '    <size>123</size>',
+      '    <open-size>456</open-size>',
+      '  </data>',
+      '</repomd>',
+    ].join('');
+    const primaryXml = [
+      '<metadata>',
+      '  <package>',
+      '    <name>fixture-package</name>',
+      '    <arch>x86_64</arch>',
+      '    <version epoch="0" ver="1.0" rel="01" />',
+      '    <checksum type="sha256">feedface</checksum>',
+      '    <size package="123" installed="456" archive="789" />',
+      '    <location href="Packages/f/fixture-package-1.0-01.x86_64.rpm" />',
+      '    <format>',
+      '      <rpm:requires>',
+      '        <rpm:entry name="fixture-dependency" flags="EQ" ver="1.0" pre="1" />',
+      '        <rpm:entry name="fixture-rc" flags="EQ" ver="1.0.0~rc1" pre="0" />',
+      '      </rpm:requires>',
+      '    </format>',
+      '  </package>',
+      '</metadata>',
+    ].join('');
+    fetchMock
+      .mockResolvedValueOnce(new Response(repomdXml))
+      .mockResolvedValueOnce(new Response(gzipSync(primaryXml)));
+
+    const repomd = await parser.parseRepomd();
+    const packages = await parser.parsePrimary(repomd.primary?.location ?? '');
+    const packageInfo = packages[0];
+
+    expect(repomd.primary).toEqual(expect.objectContaining({
+      timestamp: 0,
+      size: 123,
+      openSize: 456,
+    }));
+    expect(packageInfo).toEqual(expect.objectContaining({
+      name: 'fixture-package',
+      version: '1.0',
+      release: '01',
+      epoch: 0,
+      size: 123,
+      installedSize: 456,
+      dependencies: expect.arrayContaining([
+        { name: 'fixture-dependency', operator: '=', version: '1.0', isOptional: true },
+        { name: 'fixture-rc', operator: '=', version: '1.0.0~rc1', isOptional: false },
+      ]),
+    }));
+    expect(typeof packageInfo.version).toBe('string');
+    expect(typeof packageInfo.release).toBe('string');
+    expect(typeof packageInfo.dependencies[0].version).toBe('string');
+  });
+
   it('YUM parser는 1000개를 초과하는 표준 entity와 amp entity를 보존해 파싱한다', async () => {
     const parser = new YumMetadataParser(
       {
