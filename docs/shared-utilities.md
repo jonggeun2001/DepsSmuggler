@@ -18,6 +18,7 @@ src/core/shared/
 ├── maven-types.ts                # Maven 관련 타입 정의
 ├── version-utils.ts              # 버전 비교/호환성 유틸리티
 ├── pypi-utils.ts                 # PyPI 다운로드 URL 조회
+├── conda-channel.ts              # 채널별 저장소 URL / API 소유자
 ├── conda-utils.ts                # Conda 패키지 URL 조회
 ├── dependency-resolver.ts        # 의존성 해결 유틸리티
 ├── dependency-tree-utils.ts      # 의존성 트리 유틸리티
@@ -138,6 +139,7 @@ export { getPyPIDownloadUrl } from './pypi-utils';
 
 // Conda 유틸리티
 export { getCondaDownloadUrl, getCondaSubdir } from './conda-utils';
+export { getCondaApiOwner, getCondaRepositoryBase } from './conda-channel';
 
 // 파일 유틸리티
 export { downloadFile, createZipArchive, createTarGzArchive } from './file-utils';

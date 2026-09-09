@@ -110,6 +110,7 @@ Maven의 `-V latest`는 POM을 조회하기 전에 `maven-metadata.xml`의 `late
 - 기본값인 `--target-os any`와 `--conda-channel conda-forge`는 적용 대상이 아닌 타입에서 기존 동작을 유지합니다. 그러나 다른 OS나 채널을 명시하면 적용 타입을 검사합니다.
 - pip에서 대상 OS가 `any`이면 특정 OS wheel을 임의로 선택하지 않고 범용 wheel 또는 `Requires-Python` 조건을 만족하는 소스 배포본을 선택합니다. `--python-version`도 생략하면 특정 CPython ABI wheel 대신 Python 버전 독립 wheel 또는 소스 배포본만 선택합니다.
 - pip 의존성의 PEP 508 환경 마커는 지정한 OS, 아키텍처, Python 버전과 extra를 기준으로 평가합니다. `--python-version`은 `major.minor`만 받으므로 `python_full_version`처럼 patch 버전이 필요한 조건은 결과를 확정할 수 없을 때 제외합니다. 필요한 대상 값이 없거나 마커를 해석할 수 없으면 해당 조건부 의존성을 임의로 포함하지 않습니다.
+- `--conda-channel defaults`는 `https://repo.anaconda.com/pkgs/main`에서 메타데이터와 패키지를 받습니다. 대상 플랫폼과 `noarch` 선택 규칙은 동일하며, 명시적 `main`과 `conda-forge` 같은 일반 채널은 `https://conda.anaconda.org/<채널>`을 사용합니다.
 - Conda에서 대상 OS가 `any`이면 특정 플랫폼을 임의로 가정하지 않고 `noarch` 빌드만 조회합니다. 플랫폼별 빌드가 필요하면 `--target-os`를 명시해야 합니다.
 - Conda에서 지정한 OS, 아키텍처, Python/CUDA 조건과 일치하는 대상 subdir 또는 `noarch` 빌드를 찾지 못하면 다른 플랫폼으로 재조회하지 않고 다운로드 전에 실패합니다.
 - pip와 Conda에서 필수 전이 의존성의 호환 버전이나 아티팩트를 찾지 못하면 해당 직접 루트의 해결이 실패합니다. 기본 모드는 그 직접 루트만 건너뛰고, `--strict`는 명령 전체를 실패 처리합니다. Conda의 OpenSSL, zlib 같은 런타임 라이브러리도 성공한 루트의 오프라인 묶음에 포함됩니다.

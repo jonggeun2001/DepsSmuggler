@@ -23,6 +23,7 @@ export { AptMetadataParser } from './apt-metadata-parser';
 
 // Conda 유틸리티
 export { getCondaDownloadUrl, getCondaSubdir } from './conda-utils';
+export { getCondaApiOwner, getCondaRepositoryBase } from './conda-channel';
 
 // Conda MatchSpec 파서
 export {

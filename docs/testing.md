@@ -93,6 +93,14 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 
 커버리지는 `npm run test:coverage`로 확인합니다. 현재 커버리지 집계 대상은 `src/core/**/*.ts`이며 테스트 파일과 index barrel은 제외합니다. 따라서 CLI, Electron, 렌더러, E2E 테스트의 검증 범위와 구분해야 합니다. text 보고서는 콘솔에, JSON/HTML 보고서는 `coverage/`에 생성되며 커버리지 최소 비율은 설정되어 있지 않습니다. 외부 레지스트리 실제 연동 및 OS별 파일시스템 동작 전체를 mock 테스트가 보장하지는 않습니다.
 
+### Conda defaults 채널 검증
+
+- `conda-channel.test.ts`, `conda-cache.test.ts`, `conda-utils.test.ts`: 기본 `defaults`의 공식 URL, 명시적 `main`과 사용자 지정 origin 유지, repodata 요청 및 API 파일 URL 구성을 검증합니다.
+- `conda.test.ts`, `conda-resolver-target.test.ts`: downloader/resolver의 메타데이터·후보 조회 경계를 모킹해 대상 subdir와 `noarch`의 다운로드 URL을 검증합니다. downloader의 API 응답 모킹으로 `main` 소유자 매핑과 논리 채널 유지, 중복 subdir 방지도 확인합니다.
+- `conda-validator.test.ts`, `download-package-router.test.ts`: 채널 HEAD 검증과 Electron의 파일명 기반 URL 생성에도 같은 규칙이 적용되는지 확인합니다.
+
+실제 네트워크 smoke는 격리한 사용자 디렉터리에서 `download -t conda -p six -V latest --no-deps --conda-channel defaults`를 실행하고 종료 코드, 요청 URL, 아카이브와 manifest를 검사합니다. `--target-os linux --arch x86_64` 및 일반 `conda-forge` 채널도 대조합니다. 이 검증은 패키지 다운로드 범위이며 생성된 스크립트로 Conda 환경을 설치하는 검증은 별도입니다.
+
 ### Maven 모델 POM 검증
 
 `src/core/resolver/maven-resolver.test.ts`는 `latest` 메타데이터의 실제 버전으로 루트 POM과 파일명을 만드는지, release fallback·빈 버전 실패·classifier/type 보존·명시 버전의 조회 생략을 검증합니다. `src/cli/commands/download.test.ts`는 기본 Maven `--no-deps`에서 `latest`만 깊이 0의 루트 해결을 거쳐 다운로드 큐로 전달되는지 확인합니다. 실제 저장소 검증에서는 같은 좌표의 의존성 포함/제외 CLI를 실행하고 메타데이터 버전과 아카이브·manifest를 비교합니다.

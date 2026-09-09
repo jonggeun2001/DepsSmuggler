@@ -11,11 +11,29 @@
 ```
 src/core/shared/
 ├── conda-types.ts         # Conda 타입 정의 (shared-types.md 참조)
+├── conda-channel.ts       # 논리 채널 → 저장소 URL / API 소유자
 ├── conda-utils.ts         # Conda 패키지 URL 조회
 ├── conda-cache.ts         # repodata 캐싱 시스템
 ├── conda-matchspec.ts     # MatchSpec 파싱/매칭
 └── conda-validator.ts     # Conda 채널 검증
 ```
+
+---
+
+## 채널 URL (`conda-channel.ts`)
+
+`getCondaRepositoryBase(channel, baseUrl?)`와 `getCondaApiOwner(channel)`는 `shared/index.ts`에서도 내보냅니다. resolver, downloader, URL 조회, 채널 검증 및 Electron의 파일명 기반 다운로드 경로가 이 규칙을 함께 사용합니다.
+
+| 논리 채널 | 기본 저장소 URL | Anaconda API 소유자 |
+| --- | --- | --- |
+| `defaults` | `https://repo.anaconda.com/pkgs/main` | `main` |
+| `main` | `https://conda.anaconda.org/main` | `main` |
+| `conda-forge` | `https://conda.anaconda.org/conda-forge` | `conda-forge` |
+| 기타 채널 | `https://conda.anaconda.org/<채널>` | 입력 채널 |
+
+저장소 URL 뒤에 `<subdir>/<파일명>`을 붙입니다. API 파일명에 포함된 subdir는 중복해서 붙이지 않습니다. `defaults` 변환은 기본 origin인 `https://conda.anaconda.org`에만 적용하며 끝의 `/`는 제거합니다. 사용자 지정 `baseUrl`은 기존 `<baseUrl>/<channel>` 규칙을 유지합니다. 예를 들어 `https://mirror.example/conda`와 `defaults`를 주면 저장소는 `https://mirror.example/conda/defaults`입니다.
+
+패키지 메타데이터와 디스크 캐시 디렉터리는 논리 채널명을 유지합니다. 캐시 메타데이터의 URL은 실제 요청한 저장소 주소이며, 진행 중인 요청의 중복 제거 키에는 기존처럼 입력 `baseUrl`도 포함합니다. 이 앱의 `defaults`는 `pkgs/main`을 뜻하며 Conda 자체의 `.condarc`나 여러 기본 채널 설정을 읽어 확장하지 않습니다.
 
 ---
 
@@ -167,7 +185,7 @@ interface RepodataCacheMeta {
 
 ```typescript
 interface FetchRepodataOptions {
-  baseUrl?: string;        // Conda 기본 URL (기본: https://conda.anaconda.org)
+  baseUrl?: string;        // 채널명 앞에 붙일 URL (기본: https://conda.anaconda.org)
   cacheDir?: string;       // 캐시 디렉토리
   useCache?: boolean;      // 캐시 사용 여부 (기본: true)
   forceRefresh?: boolean;  // 강제 새로고침 (기본: false)
@@ -262,7 +280,7 @@ const matches = matchesSpec(pkg, spec); // true
 
 ## Conda 채널 검증 (`conda-validator.ts`)
 
-Conda 채널의 원격 repodata에 HEAD 요청을 보내 접근 가능 여부를 확인하는 비동기 유틸리티입니다. 두 함수 모두 `Promise<boolean>`을 반환합니다.
+Conda 채널의 원격 repodata에 HEAD 요청을 보내 접근 가능 여부를 확인하는 비동기 유틸리티입니다. 두 함수 모두 `Promise<boolean>`을 반환합니다. `defaults`도 위 채널 URL 규칙에 따라 `repo.anaconda.com/pkgs/main`의 repodata를 확인합니다.
 
 ### 주요 함수
 

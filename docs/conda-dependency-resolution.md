@@ -8,7 +8,7 @@
 - `PackageCandidate`는 `conda-repodata-processor.ts`에 정의되며 `build`, `buildNumber`, `isPythonMatch`, `size`, `filename`, `subdir`, `depends`를 포함합니다. 아래 축약 예시는 전체 인터페이스 선언을 대체하지 않습니다.
 - 대상 플랫폼에 후보가 없거나 Python이 맞지 않을 때 noarch를 조회합니다. noarch도 Python/Python ABI 제약을 검증하며 무조건 호환으로 처리하지 않습니다. 호환 파일을 찾지 못하면 실패합니다.
 - Python·Python ABI와 `__` 가상 패키지는 외부 환경 조건으로 취급합니다. OpenSSL·zlib·libgcc 같은 실제 런타임 패키지는 수집 대상입니다.
-- 6절의 `defaults`/`main` URL 분기는 채널 URL 설계 참고 예시입니다. 현재 resolver는 `https://conda.anaconda.org/{channel}/{subdir}/{filename}`을 구성하며 `defaults`를 `repo.anaconda.com/pkgs/main`으로 자동 변환하지 않습니다.
+- `defaults`는 공유 채널 헬퍼를 통해 `https://repo.anaconda.com/pkgs/main`으로 변환합니다. 명시적 `main`과 다른 일반 채널은 `https://conda.anaconda.org/{channel}`을 유지하며, 그 뒤에 선택한 subdir와 파일명을 붙입니다.
 
 ## 1. 전체 아키텍처
 
@@ -482,25 +482,14 @@ function parseVersion(version: string): VersionPart[] {
 ## 6. 다운로드 URL 구성
 
 ```typescript
-function getPackageUrl(
-  channel: string,
-  subdir: string,
-  filename: string
-): string {
-  // conda-forge 채널
-  if (channel === 'conda-forge') {
-    return `https://conda.anaconda.org/conda-forge/${subdir}/${filename}`;
-  }
+import { getCondaRepositoryBase } from '../shared/conda-channel';
 
-  // Anaconda 기본 채널
-  if (channel === 'defaults' || channel === 'main') {
-    return `https://repo.anaconda.com/pkgs/main/${subdir}/${filename}`;
-  }
-
-  // 기타 채널
-  return `https://conda.anaconda.org/${channel}/${subdir}/${filename}`;
+function getPackageUrl(channel: string, subdir: string, filename: string): string {
+  return `${getCondaRepositoryBase(channel)}/${subdir}/${filename}`;
 }
 ```
+
+`defaults`의 변환은 기본 저장소 origin에만 적용합니다. 사용자 지정 base URL과 Anaconda API 소유자 매핑은 [공유 Conda 유틸리티](shared-conda.md#채널-url-conda-channelts)를 참고하세요.
 
 ## 7. DepsSmuggler 구현 세부사항
 

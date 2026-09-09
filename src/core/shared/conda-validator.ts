@@ -5,6 +5,7 @@
  */
 
 import axios from 'axios';
+import { getCondaRepositoryBase } from './conda-channel';
 
 /**
  * Conda 채널 유효성 검증 (단순 버전)
@@ -14,9 +15,8 @@ import axios from 'axios';
  */
 export async function validateCondaChannel(channel: string): Promise<boolean> {
   try {
-    // anaconda.org API를 통해 채널 존재 여부 확인
-    // https://conda.anaconda.org/{channel}/noarch/repodata.json
-    const baseUrl = `https://conda.anaconda.org/${channel}/noarch/repodata.json`;
+    // 논리 채널에 대응하는 repository endpoint를 통해 채널 존재 여부 확인
+    const baseUrl = `${getCondaRepositoryBase(channel)}/noarch/repodata.json`;
 
     const response = await axios.head(baseUrl, {
       timeout: 5000,
@@ -45,10 +45,10 @@ export async function validateCondaChannelStrict(
   subdirs: string[] = ['noarch', 'linux-64', 'win-64', 'osx-64']
 ): Promise<boolean> {
   try {
-    // 최소 하나의 subdir에서 repodata.json 접근 가능해야 함
+    // 최소 하나의 subdir에서 대응 repository의 repodata.json 접근 가능해야 함
     const results = await Promise.allSettled(
       subdirs.map((subdir) =>
-        axios.head(`https://conda.anaconda.org/${channel}/${subdir}/repodata.json`, {
+        axios.head(`${getCondaRepositoryBase(channel)}/${subdir}/repodata.json`, {
           timeout: 3000,
         })
       )
