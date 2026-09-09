@@ -8,12 +8,14 @@ import {
 
 const {
   downloadOSPackages,
+  searchOSPackages,
   getOSPackageCacheStats,
   clearOSPackageCache,
   getConfig,
   createInterface,
 } = vi.hoisted(() => ({
   downloadOSPackages: vi.fn(),
+  searchOSPackages: vi.fn(),
   getOSPackageCacheStats: vi.fn(),
   clearOSPackageCache: vi.fn(),
   getConfig: vi.fn(),
@@ -22,6 +24,7 @@ const {
 
 vi.mock('../../core/downloaders/os-shared/cli-backend', () => ({
   downloadOSPackages,
+  searchOSPackages,
   getOSPackageCacheStats,
   clearOSPackageCache,
 }));
@@ -87,9 +90,23 @@ describe('os CLI commands', () => {
         archiveFormat: 'zip',
         concurrency: 7,
         cacheEnabled: true,
+        cacheMaxSize: 1024,
         cacheDirectory: expectedCacheDirectory,
       })
     );
+  });
+
+  it('searchCommand는 설정된 OS 캐시 크기를 backend로 전달한다', async () => {
+    searchOSPackages.mockResolvedValue([]);
+
+    const { searchCommand } = await import('./os');
+    await searchCommand('httpd', { distro: 'rocky-9', arch: 'x86_64', limit: '5' });
+
+    expect(searchOSPackages).toHaveBeenCalledWith(expect.objectContaining({
+      cacheEnabled: true,
+      cacheMaxSize: 1024,
+      cacheDirectory: expectedCacheDirectory,
+    }));
   });
 
   it('cacheStatsCommand는 OS 캐시 통계를 backend에서 조회한다', async () => {

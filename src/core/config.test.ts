@@ -235,6 +235,78 @@ describe('ConfigManager', () => {
       expect(config.cachePath).toBe('/custom/cache');
       expect(config.logLevel).toBe('debug');
     });
+
+    it.each(['cacheEnabled', 'cachingEnabled'])('%s 단독 저장 형식을 async/sync 양쪽에서 읽는다', async (field) => {
+      const configPath = path.join(configManager.getConfigDir(), 'settings.json');
+      await fs.outputJson(configPath, { [field]: false });
+
+      await expect(configManager.loadConfig()).resolves.toMatchObject({ cachingEnabled: false });
+      expect(configManager.getConfig().cacheEnabled).toBe(false);
+    });
+
+    it('캐시 별칭은 enableCache를 우선하고 maxCacheSize를 보존한다', async () => {
+      const configPath = path.join(configManager.getConfigDir(), 'settings.json');
+      await fs.ensureDir(configManager.getConfigDir());
+      await fs.writeJson(configPath, {
+        enableCache: false,
+        cachingEnabled: true,
+        cacheEnabled: true,
+        maxCacheSize: 1234,
+        customField: 'preserve-me',
+      });
+
+      await expect(configManager.loadConfig()).resolves.toMatchObject({ cachingEnabled: false });
+      expect(configManager.getConfig()).toMatchObject({ cacheEnabled: false, maxCacheSize: 1234 });
+    });
+
+    it('선택된 캐시 별칭이 invalid이면 낮은 우선순위 별칭으로 대체하지 않는다', async () => {
+      const configPath = path.join(configManager.getConfigDir(), 'settings.json');
+      await fs.outputJson(configPath, {
+        enableCache: 'false',
+        cachingEnabled: false,
+        cacheEnabled: false,
+      });
+      const original = await fs.readFile(configPath, 'utf8');
+
+      await expect(configManager.loadConfig()).resolves.toMatchObject({ cachingEnabled: true });
+      expect(configManager.getConfig().cacheEnabled).toBe(true);
+      expect(await fs.readFile(configPath, 'utf8')).toBe(original);
+    });
+
+    it('캐시 설정 저장은 canonical enableCache만 기록하고 unknown field를 유지한다', async () => {
+      await configManager.saveConfig({
+        concurrentDownloads: 5,
+        cachingEnabled: false,
+        fileSplitSizeMB: 25,
+        defaultOutputFormat: 'archive',
+        defaultArchiveType: 'zip',
+        enableCache: true,
+        cacheEnabled: true,
+        customField: 'preserve-me',
+      } as Config & Record<string, unknown>);
+
+      const saved = await fs.readJson(path.join(configManager.getConfigDir(), 'settings.json'));
+      expect(saved.enableCache).toBe(false);
+      expect(saved).not.toHaveProperty('cachingEnabled');
+      expect(saved).not.toHaveProperty('cacheEnabled');
+      expect(saved.customField).toBe('preserve-me');
+    });
+
+    it('updateConfig의 cachingEnabled 변경은 stale enableCache보다 우선한다', async () => {
+      const configPath = path.join(configManager.getConfigDir(), 'settings.json');
+      await fs.outputJson(configPath, {
+        concurrentDownloads: 5,
+        enableCache: true,
+        cachingEnabled: true,
+        cacheEnabled: true,
+      });
+
+      await configManager.updateConfig({ cachingEnabled: false });
+      const saved = await fs.readJson(configPath);
+      expect(saved.enableCache).toBe(false);
+      expect(saved).not.toHaveProperty('cachingEnabled');
+      expect(saved).not.toHaveProperty('cacheEnabled');
+    });
   });
 
   describe('에러 처리', () => {
@@ -272,6 +344,52 @@ describe('ConfigManager', () => {
         concurrentDownloads: 5, cacheEnabled: true, cachePath: manager.getCacheDir(),
         maxCacheSize: 10 * 1024 * 1024 * 1024, logLevel: 'info',
       });
+    });
+
+    it('CLI maxCacheSize가 유효하지 않으면 파일을 변경하지 않고 거부한다', async () => {
+      const manager = new ConfigManager();
+      const configPath = path.join(manager.getConfigDir(), 'settings.json');
+      await fs.outputJson(configPath, { maxCacheSize: 4096, customField: 'preserve-me' });
+      const original = await fs.readFile(configPath, 'utf8');
+
+      expect(() => manager.set('maxCacheSize', 0)).toThrow();
+      expect(await fs.readFile(configPath, 'utf8')).toBe(original);
+    });
+
+    it.each([0, -1, 1.5, '1024', Number.MAX_SAFE_INTEGER + 1])(
+      '저장된 invalid maxCacheSize %s는 기본값으로 읽고 원본을 보존한다',
+      async (value) => {
+        const manager = new ConfigManager();
+        const configPath = path.join(manager.getConfigDir(), 'settings.json');
+        await fs.outputJson(configPath, { maxCacheSize: value, customField: 'preserve-me' });
+        const original = await fs.readFile(configPath, 'utf8');
+
+        expect(manager.getConfig().maxCacheSize).toBe(10 * 1024 * 1024 * 1024);
+        expect(await fs.readFile(configPath, 'utf8')).toBe(original);
+      }
+    );
+
+    it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, '1024'])(
+      'CLI maxCacheSize 값 %s는 저장 전에 거부한다',
+      async (value) => {
+        const manager = new ConfigManager();
+        const configPath = path.join(manager.getConfigDir(), 'settings.json');
+        await fs.outputJson(configPath, { maxCacheSize: 4096, customField: 'preserve-me' });
+        const original = await fs.readFile(configPath, 'utf8');
+
+        expect(() => manager.set('maxCacheSize', value)).toThrow();
+        expect(await fs.readFile(configPath, 'utf8')).toBe(original);
+      }
+    );
+
+    it.each(['false', 0, null, 1])('CLI cache alias 값 %s는 저장 전에 거부한다', async (value) => {
+      const manager = new ConfigManager();
+      const configPath = path.join(manager.getConfigDir(), 'settings.json');
+      await fs.outputJson(configPath, { enableCache: true, customField: 'preserve-me' });
+      const original = await fs.readFile(configPath, 'utf8');
+
+      expect(() => manager.set('cacheEnabled', value)).toThrow();
+      expect(await fs.readFile(configPath, 'utf8')).toBe(original);
     });
 
     it('비정상 비동기 설정 필드를 복구하면서 정상 필드는 유지한다', async () => {

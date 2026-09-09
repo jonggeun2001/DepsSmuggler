@@ -454,7 +454,7 @@ class OSDependencyTree {
 interface OSCacheConfig {
   type: CacheMode;               // 'session' | 'persistent' | 'none'
   ttl: number;                   // TTL (초, 기본 3600)
-  maxSize: number;               // 최대 크기 (바이트, 기본 500MB)
+  maxSize: number;               // 추정 데이터 크기 한도 (바이트, 생성자 기본 500MiB)
   directory?: string;            // persistent 모드 저장 경로
 }
 
@@ -466,6 +466,10 @@ class OsPackageCache {
   // 전체 삭제는 invalidate() 호출
 }
 ```
+
+`searchOSPackages`와 `downloadOSPackages`는 선택적인 `cacheMaxSize`를 `OsPackageCache.maxSize`에 전달합니다. 직접 호출하면서 생략하면 생성자의 500MiB 기본값을 유지합니다. CLI는 설정한 `maxCacheSize` 또는 CLI 기본값 10GiB를 명시적으로 전달합니다. `cacheEnabled=false`이면 캐시 모드는 `none`이며 새 메타데이터 파일을 저장하지 않습니다.
+
+크기는 기존 `JSON.stringify(data).length * 2` 추정값으로 계산하므로 실제 JSON 파일 크기와 다를 수 있습니다. 저장하거나 기존 캐시를 다시 읽을 때 한도를 넘으면 오래 접근하지 않은 항목부터 제거합니다. 새 항목 하나가 한도보다 크면 다른 항목을 제거하지 않고 저장을 생략합니다. 같은 키의 이전 값이 있다면 그 값은 제거해 오래된 데이터가 다시 조회되지 않도록 합니다.
 
 ### GPGVerifier
 

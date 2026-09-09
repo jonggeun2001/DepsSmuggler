@@ -169,6 +169,7 @@ export async function searchCommand(
       query,
       cacheDirectory,
       cacheEnabled: config.cacheEnabled,
+      cacheMaxSize: config.maxCacheSize,
     });
     const finalResults = groupedResults
       .flatMap((result) =>
@@ -288,6 +289,7 @@ export async function downloadCommand(
         : config.concurrentDownloads,
       cacheDirectory,
       cacheEnabled: config.cacheEnabled,
+      cacheMaxSize: config.maxCacheSize,
     });
 
     console.log(chalk.green('다운로드가 완료되었습니다.\n'));

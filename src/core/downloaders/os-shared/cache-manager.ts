@@ -164,6 +164,15 @@ export class OsPackageCache {
     }
 
     const size = this.estimateSize(data);
+    if (size > this.config.maxSize) {
+      // Oversized values must not evict useful entries. Remove a stale value
+      // for this key so a failed replacement cannot leave old data behind.
+      this.memoryCache.delete(key);
+      if (this.config.type === 'persistent') {
+        await this.deleteFromDisk(key);
+      }
+      return;
+    }
     const entry: OsPackageCacheEntry = {
       data,
       timestamp: Date.now(),
@@ -172,7 +181,9 @@ export class OsPackageCache {
     };
 
     // 용량 확인 및 정리
-    await this.enforceMaxSize(size);
+    // Keep eviction and insertion in the same synchronous turn so concurrent
+    // metadata requests cannot all observe the same pre-insertion size.
+    this.enforceMaxSizeSync(size);
 
     // 메모리 캐시에 저장
     this.memoryCache.set(key, entry);
@@ -255,9 +266,10 @@ export class OsPackageCache {
   }
 
   /**
-   * 최대 크기 제한 적용 (LRU 정책)
+   * 최대 크기를 초과하면 오래된 항목부터 동기적으로 제거합니다.
+   * 디스크 캐시를 생성자에서 로드할 때도 같은 정책을 적용해야 합니다.
    */
-  private async enforceMaxSize(newEntrySize: number): Promise<void> {
+  private enforceMaxSizeSync(newEntrySize: number): void {
     let currentSize = 0;
     this.memoryCache.forEach((entry) => {
       currentSize += entry.size;
@@ -281,7 +293,7 @@ export class OsPackageCache {
       currentSize -= entry.size;
 
       if (this.config.type === 'persistent') {
-        await this.deleteFromDisk(key);
+        this.deleteFromDiskSync(key);
       }
     }
   }
@@ -396,6 +408,10 @@ export class OsPackageCache {
    * 디스크에서 삭제
    */
   private async deleteFromDisk(key: string): Promise<void> {
+    this.deleteFromDiskSync(key);
+  }
+
+  private deleteFromDiskSync(key: string): void {
     if (!this.config.directory) return;
 
     const filePath = path.join(this.config.directory, this.keyToFilename(key));
@@ -459,12 +475,18 @@ export class OsPackageCache {
             continue;
           }
 
+          if (entry.size > this.config.maxSize) {
+            fs.unlinkSync(filePath);
+            continue;
+          }
+
           this.memoryCache.set(key, entry);
         } catch {
           // 파싱 실패한 파일 삭제
           fs.unlinkSync(filePath);
         }
       }
+      this.enforceMaxSizeSync(0);
     } catch (error) {
       console.warn(`Failed to load cache from disk: ${(error as Error).message}`);
     }

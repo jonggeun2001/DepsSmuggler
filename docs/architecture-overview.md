@@ -143,9 +143,11 @@ depssmuggler/
 5. 진행률은 `os:download:progress`로, 취소는 `os:download:cancel`로 처리됩니다. 취소 요청은 현재 OS 패키지 전송의 `fetch`에도 abort 신호를 전달합니다.
 6. 결과 출력물 경로와 `generatedOutputs`, `warnings`, `conflicts`, `cancelled` 상태는 `os:download:start` 반환값으로 렌더러에 전달됩니다. 취소로 최종 산출물이 생성되지 않은 경우에는 임시 다운로드를 성공으로 승격하지 않고, routed OS 결과 화면에서 중단 상태와 실제 생성물만 안내합니다.
 
-OS 전용 흐름은 로컬 저장으로 동작하며, 일반 다운로드의 SMTP 전달·자동 분할 파이프라인을 사용하지 않습니다. Electron의 `os:cache:*`는 아직 placeholder이고, 실제 OS CLI 캐시는 `<cachePath>/os-packages`의 JSON 파일을 관리합니다.
+OS 전용 흐름은 로컬 저장으로 동작하며, 일반 다운로드의 SMTP 전달·자동 분할 파이프라인을 사용하지 않습니다. Electron의 `os:cache:*`는 아직 placeholder이고, 실제 OS CLI 캐시는 `<cachePath>/os-packages`의 JSON 파일을 관리합니다. CLI의 `cacheEnabled`와 `maxCacheSize`를 검색·다운로드 backend에 전달하며, 크기 한도는 저장 데이터의 추정 크기에 적용합니다. 기본값과 별도 캐시의 범위는 [캐시 문서](shared-cache.md#os-메타데이터-캐시-설정)를 참고하세요.
 
 ## 상태 저장
+
+캐시 여부는 파일의 `enableCache`를 기준으로 CLI의 `cacheEnabled`와 비동기 core API의 `cachingEnabled`에 연결합니다. 이전 별칭은 읽기 호환성을 유지하고 명시적 저장 시 제거합니다. 비동기 `saveConfig`/`updateConfig`는 호출자가 넘긴 `cachingEnabled`를 저장 키에 반영합니다.
 
 - 파일 기반 설정: `~/.depssmuggler/settings.json`
 - 파일 기반 히스토리: `~/.depssmuggler/history.json`

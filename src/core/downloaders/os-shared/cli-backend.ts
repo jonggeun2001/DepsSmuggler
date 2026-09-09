@@ -35,6 +35,7 @@ export interface SearchOSPackagesOptions {
   matchType?: MatchType;
   cacheDirectory: string;
   cacheEnabled: boolean;
+  cacheMaxSize?: number;
 }
 
 export interface DownloadOSPackagesOptions {
@@ -49,6 +50,7 @@ export interface DownloadOSPackagesOptions {
   concurrency: number;
   cacheDirectory: string;
   cacheEnabled: boolean;
+  cacheMaxSize?: number;
 }
 
 export interface OSDownloadArtifact {
@@ -211,10 +213,11 @@ function getActiveRepositories(distribution: OSDistribution): Repository[] {
   return [...distribution.defaultRepos, ...distribution.extendedRepos].filter((repo) => repo.enabled);
 }
 
-function createCacheManager(directory: string, enabled: boolean): OsPackageCache {
+function createCacheManager(directory: string, enabled: boolean, cacheMaxSize?: number): OsPackageCache {
   return new OsPackageCache({
     type: enabled ? 'persistent' : 'none',
     directory,
+    ...(cacheMaxSize !== undefined ? { maxSize: cacheMaxSize } : {}),
   });
 }
 
@@ -349,7 +352,7 @@ function writeRepositoryInstallScripts(
 export async function searchOSPackages(
   options: SearchOSPackagesOptions
 ): Promise<OSPackageSearchResult[]> {
-  const cacheManager = createCacheManager(options.cacheDirectory, options.cacheEnabled);
+  const cacheManager = createCacheManager(options.cacheDirectory, options.cacheEnabled, options.cacheMaxSize);
   const resolver = createResolver(options.distribution, options.architecture, cacheManager);
   const results = await resolver.searchPackages(options.query, options.matchType ?? 'partial');
 
@@ -384,7 +387,7 @@ async function resolveRequestedPackages(
 export async function downloadOSPackages(
   options: DownloadOSPackagesOptions
 ): Promise<DownloadOSPackagesResult> {
-  const cacheManager = createCacheManager(options.cacheDirectory, options.cacheEnabled);
+  const cacheManager = createCacheManager(options.cacheDirectory, options.cacheEnabled, options.cacheMaxSize);
   const resolver = createResolver(options.distribution, options.architecture, cacheManager);
   const requestedPackages = await resolveRequestedPackages(
     options.packageNames,

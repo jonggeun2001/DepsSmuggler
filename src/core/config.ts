@@ -40,6 +40,31 @@ const isPositiveNumber = (value: unknown): value is number =>
 const isPositiveInteger = (value: unknown): value is number =>
   isPositiveNumber(value) && Number.isSafeInteger(value);
 
+const DEFAULT_CLI_MAX_CACHE_SIZE = 10 * 1024 * 1024 * 1024;
+
+function getCacheAliasValue(rawConfig: Record<string, unknown>): { value: boolean; invalid: boolean } {
+  const selected = rawConfig.enableCache ?? rawConfig.cachingEnabled ?? rawConfig.cacheEnabled;
+  if (selected === undefined) {
+    return { value: DEFAULT_CONFIG.cachingEnabled, invalid: false };
+  }
+  if (typeof selected !== 'boolean') {
+    return { value: DEFAULT_CONFIG.cachingEnabled, invalid: true };
+  }
+  return { value: selected, invalid: false };
+}
+
+function canonicalizeCacheAliases(
+  rawConfig: Record<string, unknown>,
+  preferredValue?: boolean
+): Record<string, unknown> {
+  const aliases = getCacheAliasValue(rawConfig);
+  const config = { ...rawConfig };
+  config.enableCache = preferredValue ?? aliases.value;
+  delete config.cachingEnabled;
+  delete config.cacheEnabled;
+  return config;
+}
+
 function readConfigObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('설정 파일은 객체여야 합니다');
@@ -123,6 +148,8 @@ export class ConfigManager {
         // 저장된 설정과 기본값을 병합 (새로운 설정 항목 대응)
         const config: Config = { ...DEFAULT_CONFIG, ...rawConfig };
         const invalidFields: string[] = [];
+        const cacheAlias = getCacheAliasValue(rawConfig);
+        config.cachingEnabled = cacheAlias.value;
         if (!isPositiveInteger(config.concurrentDownloads)) {
           config.concurrentDownloads = DEFAULT_CONFIG.concurrentDownloads;
           invalidFields.push('concurrentDownloads');
@@ -131,8 +158,7 @@ export class ConfigManager {
           config.fileSplitSizeMB = DEFAULT_CONFIG.fileSplitSizeMB;
           invalidFields.push('fileSplitSizeMB');
         }
-        if (typeof config.cachingEnabled !== 'boolean') {
-          config.cachingEnabled = DEFAULT_CONFIG.cachingEnabled;
+        if (cacheAlias.invalid) {
           invalidFields.push('cachingEnabled');
         }
         for (const key of ['smtpHost', 'smtpUser', 'smtpPassword', 'smtpFrom', 'smtpTo'] as const) {
@@ -179,14 +205,21 @@ export class ConfigManager {
    * 설정을 저장합니다.
    */
   async saveConfig(config: Config): Promise<void> {
+    const configRecord = config as Config & Record<string, unknown>;
+    if (typeof config.cachingEnabled !== 'boolean') {
+      throw new TypeError('cachingEnabled는 boolean이어야 합니다');
+    }
+    if (configRecord.maxCacheSize !== undefined && !isPositiveInteger(configRecord.maxCacheSize)) {
+      throw new TypeError('maxCacheSize는 양의 안전한 정수여야 합니다');
+    }
     await this.ensureDirectories();
 
     // 저장용 설정 복사 (원본 수정 방지)
-    const configToSave = { ...config };
+    const configToSave = canonicalizeCacheAliases(configRecord, config.cachingEnabled);
 
     // SMTP 비밀번호 암호화
-    if (configToSave.smtpPassword) {
-      configToSave.smtpPassword = this.encrypt(configToSave.smtpPassword);
+    if (config.smtpPassword) {
+      configToSave.smtpPassword = this.encrypt(config.smtpPassword);
     }
 
     await fs.writeJson(this.configPath, configToSave, { spaces: 2 });
@@ -240,14 +273,16 @@ export class ConfigManager {
       fs.ensureDirSync(this.configDir);
       if (fs.pathExistsSync(this.configPath)) {
         const rawConfig = readConfigObject(fs.readJsonSync(this.configPath));
-        const cacheEnabled = rawConfig.enableCache ?? rawConfig.cachingEnabled;
+        const cacheAlias = getCacheAliasValue(rawConfig);
         const validConcurrency = isPositiveInteger(rawConfig.concurrentDownloads);
-        const validCacheEnabled = typeof cacheEnabled === 'boolean';
+        const validCacheEnabled = !cacheAlias.invalid;
+        const validMaxCacheSize = rawConfig.maxCacheSize === undefined || isPositiveInteger(rawConfig.maxCacheSize);
         const validCachePath = typeof rawConfig.cachePath === 'string' && rawConfig.cachePath.trim().length > 0;
         const validLogLevel = typeof rawConfig.logLevel === 'string' &&
           ['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly'].includes(rawConfig.logLevel);
         if ((!validConcurrency && rawConfig.concurrentDownloads !== undefined) ||
-            (!validCacheEnabled && cacheEnabled !== undefined) ||
+            cacheAlias.invalid ||
+            !validMaxCacheSize ||
             (!validCachePath && rawConfig.cachePath !== undefined && rawConfig.cachePath !== '') ||
             (!validLogLevel && rawConfig.logLevel !== undefined)) {
           console.warn('[config:get] 잘못된 CLI 설정에 기본값 사용');
@@ -255,9 +290,11 @@ export class ConfigManager {
         return {
           concurrentDownloads: validConcurrency ? rawConfig.concurrentDownloads as number : DEFAULT_CONFIG.concurrentDownloads,
           // settings.json은 enableCache 사용, 기존 cachingEnabled도 호환
-          cacheEnabled: validCacheEnabled ? cacheEnabled : DEFAULT_CONFIG.cachingEnabled,
+          cacheEnabled: validCacheEnabled ? cacheAlias.value : DEFAULT_CONFIG.cachingEnabled,
           cachePath: validCachePath ? rawConfig.cachePath as string : this.cacheDir,
-          maxCacheSize: 10 * 1024 * 1024 * 1024, // 10GB
+          maxCacheSize: validMaxCacheSize && rawConfig.maxCacheSize !== undefined
+            ? rawConfig.maxCacheSize as number
+            : DEFAULT_CLI_MAX_CACHE_SIZE,
           logLevel: validLogLevel ? rawConfig.logLevel as string : 'info',
         };
       }
@@ -268,7 +305,7 @@ export class ConfigManager {
       concurrentDownloads: DEFAULT_CONFIG.concurrentDownloads,
       cacheEnabled: DEFAULT_CONFIG.cachingEnabled,
       cachePath: this.cacheDir,
-      maxCacheSize: 10 * 1024 * 1024 * 1024,
+      maxCacheSize: DEFAULT_CLI_MAX_CACHE_SIZE,
       logLevel: 'info',
     };
   }
@@ -281,11 +318,20 @@ export class ConfigManager {
     let config: Record<string, unknown> = {};
 
     if (fs.pathExistsSync(this.configPath)) {
-      config = fs.readJsonSync(this.configPath);
+      config = readConfigObject(fs.readJsonSync(this.configPath));
+    }
+
+    const isCacheAlias = key === 'enableCache' || key === 'cachingEnabled' || key === 'cacheEnabled';
+    if (isCacheAlias && typeof value !== 'boolean') {
+      throw new TypeError(`${key}는 boolean이어야 합니다`);
+    }
+    if (key === 'maxCacheSize' && !isPositiveInteger(value)) {
+      throw new TypeError('maxCacheSize는 양의 안전한 정수여야 합니다');
     }
 
     config[key] = value;
-    fs.writeJsonSync(this.configPath, config, { spaces: 2 });
+    const canonicalConfig = canonicalizeCacheAliases(config, isCacheAlias ? value as boolean : undefined);
+    fs.writeJsonSync(this.configPath, canonicalConfig, { spaces: 2 });
   }
 
   /**
@@ -293,7 +339,7 @@ export class ConfigManager {
    */
   reset(): void {
     fs.ensureDirSync(this.configDir);
-    fs.writeJsonSync(this.configPath, DEFAULT_CONFIG, { spaces: 2 });
+    fs.writeJsonSync(this.configPath, canonicalizeCacheAliases({ ...DEFAULT_CONFIG }), { spaces: 2 });
   }
 
   /**
