@@ -483,6 +483,9 @@ export class ScriptGenerator {
       lines.push('        $MavenSourceRoot = $PackageDir');
       lines.push('    }');
       lines.push('    $MavenLocalRepo = if ($env:MAVEN_REPO_LOCAL) { $env:MAVEN_REPO_LOCAL } else { Join-Path $HOME \'.m2/repository\' }');
+      lines.push('    try {');
+      lines.push('        $MavenLocalRepo = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($MavenLocalRepo)');
+      lines.push('    } catch { throw "Maven 저장소 경로 해석 실패: $MavenLocalRepo - $_" }');
       lines.push('    function Copy-MavenCoordinate {');
       lines.push('        param([string]$RelativePath)');
       lines.push('        $SourcePath = Join-Path -Path $MavenSourceRoot -ChildPath $RelativePath');

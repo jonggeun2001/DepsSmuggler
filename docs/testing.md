@@ -121,6 +121,8 @@ bash scripts/verify-worktree.sh \
 
 `src/core/packager/maven-install-script.integration.test.ts`는 실제 생성 스크립트를 실행해 기존 Maven 추적 기록 보존, 원본 파일에 한정한 로컬 설치 등록, 마지막 개행이 없는 기록 병합, 반복 실행과 기록 쓰기 실패를 검증합니다. Windows CI에서는 `powershell.exe`를 사용하며, 로컬에 PowerShell이 없는 경우의 Bash 성공과 구분합니다.
 
+스크립트 폴더 밖에서 상대 `MAVEN_REPO_LOCAL`을 지정하는 경우에도 아티팩트와 추적 기록이 같은 대상에 저장되는지 검사합니다. Windows PowerShell 프로세스의 시작 지연을 고려해 subprocess 제한과 여러 번 실행하는 테스트의 전체 제한을 별도로 둡니다.
+
 ### Maven 다운로드 목록과 미리보기 검증
 
 모델 POM이 `flatList`에는 있지만 `root` 실행 의존성 그래프에는 없는 응답을 사용해 화면 표시를 검증합니다. 다음 회귀는 renderer 변환과 상태·DOM을 검사하며, 실제 resolver 조회나 파일 다운로드를 실행하지 않습니다.

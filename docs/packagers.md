@@ -176,6 +176,8 @@ pip install --no-index @FindLinkArgs requests==2.31.0
 
 Maven의 `_remote.repositories`는 대상 저장소의 기존 내용을 보존하며 복사한 아티팩트에만 `파일명>=` 로컬 설치 기록을 추가합니다. 체크섬과 대상에만 존재하는 파일은 등록하지 않고, 원본에 있는 추적 파일로 대상 기록을 덮어쓰지도 않습니다. 재실행해도 로컬 기록은 중복되지 않습니다. 기록 저장에 실패하거나 좌표 디렉터리에 아티팩트가 없으면 오류로 종료합니다. 생성된 PowerShell 파일은 Windows PowerShell 5의 한글 해석을 위해 UTF-8 BOM을 포함합니다.
 
+`MAVEN_REPO_LOCAL` 상대 경로는 스크립트 폴더를 기준으로 해석합니다. PowerShell에서는 이를 파일시스템 절대 경로로 변환하여 파일 복사 cmdlet과 .NET 추적 기록 저장이 같은 위치를 사용하도록 합니다. Maven `settings.xml`의 사용자 지정 `localRepository`는 자동 조회하지 않으므로 이 환경 변수로 같은 위치를 지정합니다.
+
 일반 `ScriptGenerator`에는 npm·APT·APK 전용 설치 블록이 없고, Conda 항목도 pip 설치 블록으로 묶입니다. `.conda` 파일을 설치하는 Conda 전용 스크립트로 간주하면 안 됩니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
 
 ### 사용 예시

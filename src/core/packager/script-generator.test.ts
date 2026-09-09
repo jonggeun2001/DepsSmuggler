@@ -143,12 +143,12 @@ describe('ScriptGenerator', () => {
           await execFileAsync(command, commandArgs, {
             cwd: extractionRoot,
             env: { ...process.env, MAVEN_REPO_LOCAL: targetDir },
-            timeout: 20_000,
+            timeout: 45_000,
           });
           await execFileAsync(command, commandArgs, {
             cwd: extractionRoot,
             env: { ...process.env, MAVEN_REPO_LOCAL: targetDir },
-            timeout: 20_000,
+            timeout: 45_000,
           });
 
           for (const [relativePath, contents] of files) {
@@ -166,7 +166,7 @@ describe('ScriptGenerator', () => {
           await fs.remove(extractionRoot);
         }
       }
-    }, 30_000);
+    }, 240_000);
 
     it('Maven canonical source가 없으면 실제 설치 subprocess가 실패해야 함', async () => {
       const extractionRoot = path.join(os.tmpdir(), `deps smuggler maven-missing-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -189,12 +189,12 @@ describe('ScriptGenerator', () => {
         await expect(execFileAsync(command, commandArgs, {
           cwd: extractionRoot,
           env: { ...process.env, MAVEN_REPO_LOCAL: path.join(extractionRoot, 'target repo') },
-          timeout: 20_000,
+          timeout: 45_000,
         })).rejects.toThrow();
       } finally {
         await fs.remove(extractionRoot);
       }
-    });
+    }, 60_000);
 
     it('YUM 패키지 설치 명령을 포함해야 함', async () => {
       const outputPath = path.join(tempDir, 'install.sh');

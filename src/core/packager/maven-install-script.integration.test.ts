@@ -82,7 +82,7 @@ describe('Maven install script canonical layout integration', () => {
       await execFileAsync(command, commandArgs, {
         cwd: extractionRoot,
         env: environment,
-        timeout: 30_000,
+        timeout: 45_000,
       });
 
       const firstMainJar = await fs.readFile(path.join(targetCoordinatePath, MAIN_JAR));
@@ -105,14 +105,81 @@ describe('Maven install script canonical layout integration', () => {
       await execFileAsync(command, commandArgs, {
         cwd: extractionRoot,
         env: environment,
-        timeout: 30_000,
+        timeout: 45_000,
       });
 
       expect(await fs.readFile(path.join(targetCoordinatePath, MAIN_JAR))).toEqual(firstMainJar);
       expect(await fs.readFile(path.join(targetCoordinatePath, MAIN_POM))).toEqual(firstPom);
       expect(await fs.readFile(path.join(targetCoordinatePath, REMOTE_MARKER))).toEqual(firstMarker);
     }
-  }, 90_000);
+  }, 240_000);
+
+  it('Maven Bash/PowerShell execution resolves relative MAVEN_REPO_LOCAL from SCRIPT_DIR', async () => {
+    const generator = getScriptGenerator();
+    const packageInfo: PackageInfo = {
+      type: 'maven',
+      name: 'org.example:relative-repository',
+      version: '1.0.0',
+      metadata: { groupId: 'org.example', artifactId: 'relative-repository' },
+    };
+    const extractionRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-maven-relative-repository-'));
+    temporaryRoots.push(extractionRoot);
+    const scriptDirectory = path.join(extractionRoot, 'delivered-script');
+    const callerDirectory = path.join(extractionRoot, 'caller');
+    const sourceCoordinatePath = path.join(
+      scriptDirectory,
+      'packages',
+      'org',
+      'example',
+      'relative-repository',
+      '1.0.0',
+    );
+    const expectedRepository = path.join(scriptDirectory, 'relative-repository');
+    const callerRepository = path.join(callerDirectory, 'relative-repository');
+    const scriptPath = path.join(
+      scriptDirectory,
+      process.platform === 'win32' ? 'install.ps1' : 'install.sh',
+    );
+    const jarFilename = 'relative-repository-1.0.0.jar';
+    const pomFilename = 'relative-repository-1.0.0.pom';
+
+    await fs.ensureDir(sourceCoordinatePath);
+    await fs.ensureDir(callerDirectory);
+    await fs.writeFile(path.join(sourceCoordinatePath, jarFilename), 'relative source jar\n');
+    await fs.writeFile(path.join(sourceCoordinatePath, pomFilename), '<project>relative source pom</project>\n');
+
+    if (process.platform === 'win32') {
+      await generator.generatePowerShellScript([packageInfo], scriptPath);
+    } else {
+      await generator.generateBashScript([packageInfo], scriptPath);
+    }
+
+    const command = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+    const commandArgs = process.platform === 'win32'
+      ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath]
+      : [scriptPath];
+    await execFileAsync(command, commandArgs, {
+      cwd: callerDirectory,
+      env: { ...process.env, MAVEN_REPO_LOCAL: './relative-repository' },
+      timeout: 45_000,
+    });
+
+    const targetCoordinatePath = path.join(
+      expectedRepository,
+      'org',
+      'example',
+      'relative-repository',
+      '1.0.0',
+    );
+    const markerText = await fs.readFile(path.join(targetCoordinatePath, REMOTE_MARKER), 'utf8');
+    expect(await fs.readFile(path.join(targetCoordinatePath, jarFilename), 'utf8'))
+      .toBe('relative source jar\n');
+    expect(await fs.readFile(path.join(targetCoordinatePath, pomFilename), 'utf8'))
+      .toBe('<project>relative source pom</project>\n');
+    expect(countMarkerLine(markerText, `${jarFilename}>=`)).toBe(1);
+    expect(countMarkerLine(markerText, `${pomFilename}>=`)).toBe(1);
+    expect(await fs.pathExists(callerRepository)).toBe(false);
+  }, 120_000);
 
   const skipReadOnlyMarkerFailure = process.platform !== 'win32'
     && typeof process.getuid === 'function'
@@ -162,7 +229,7 @@ describe('Maven install script canonical layout integration', () => {
           await execFileAsync(command, commandArgs, {
             cwd: extractionRoot,
             env: { ...process.env, MAVEN_REPO_LOCAL: targetRoot },
-            timeout: 30_000,
+            timeout: 45_000,
           });
         } catch (error) {
           failure = error as { stdout?: string; stderr?: string };
@@ -178,7 +245,7 @@ describe('Maven install script canonical layout integration', () => {
         await fs.chmod(targetMarkerPath, 0o666).catch(() => undefined);
       }
     }
-  }, 90_000);
+  }, 120_000);
 
   it('Maven Bash/PowerShell execution does not promote a destination-only POM', async () => {
     const generator = getScriptGenerator();
@@ -222,7 +289,7 @@ describe('Maven install script canonical layout integration', () => {
       await execFileAsync(command, commandArgs, {
         cwd: extractionRoot,
         env: { ...process.env, MAVEN_REPO_LOCAL: targetRoot },
-        timeout: 30_000,
+        timeout: 45_000,
       });
 
       const markerText = await fs.readFile(targetMarkerPath, 'utf8');
@@ -232,5 +299,5 @@ describe('Maven install script canonical layout integration', () => {
       expect(countMarkerLine(markerText, `${pomFilename}>=`)).toBe(0);
       expect(countMarkerLine(markerText, `${jarFilename}>=`)).toBe(1);
     }
-  }, 90_000);
+  }, 120_000);
 });
