@@ -133,6 +133,18 @@ bash scripts/verify-worktree.sh \
 INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/yum.integration.test.ts
 ```
 
+### APK capability 의존성 검증
+
+`src/core/downloaders/os-metadata-parsers.test.ts`는 APKINDEX의 `so:`, `cmd:`, `pc:` 의존성과 provides를 보존하는지 확인합니다. `src/core/resolver/os-resolvers.test.ts`는 제공 APK의 패키지 버전과 capability 버전을 다르게 둔 fixture로 버전 조건·아키텍처·전이 목록·미해결 경고를 검증합니다. 일반 패키지 조건과 `--no-deps`의 루트 전용 다운로드도 기존 backend 회귀에서 확인합니다.
+
+대체 제공자 선택은 `so:`, `cmd:`, `pc:`, `/bin/sh` fixture로 검증하며, 같은 제공 패키지의 여러 버전은 기존 충돌로 남는지도 확인합니다. 기본 테스트에 포함되는 `src/cli/apk-cached-capability.integration.test.ts`는 격리된 실제 캐시 파일에 이전 형식의 결과를 저장하고, 별도 CLI 프로세스가 로컬 HTTP 서버의 APKINDEX를 다시 파싱하는지 검사합니다. 이어지는 다운로드 프로세스는 새 캐시를 재사용하면서 루트와 제공 APK를 모두 아카이브에 넣어야 합니다. 이 로컬 회귀의 APK 응답은 다운로드 경로 검사용 fixture이며, 실제 APK 내용은 아래 네트워크 테스트로 확인합니다.
+
+`src/core/downloaders/apk.integration.test.ts`는 현재 OS backend API로 실제 Alpine 3.20의 `zlib`와 제공 패키지를 내려받고 APK 내부 `.PKGINFO` 및 TAR.GZ의 파일 목록을 비교합니다. 기본 의존성 포함 경로와 `--no-deps`를 구분하며, 오래된 다운로더 API 호출과 조용한 조기 성공 처리를 사용하지 않습니다. 임시 캐시·출력을 정리하며 네이티브 `apk` 설치는 수행하지 않습니다.
+
+```bash
+INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/apk.integration.test.ts
+```
+
 ### CLI 다운로드 실패 종료 코드 검증
 
 `src/cli/download-failure-exit.integration.test.ts`는 별도 Node.js 프로세스에서 실제 CLI 엔트리포인트와 Commander 인자를 실행합니다. 부모 프로세스의 로컬 HTTP 서버가 404를 반환하고, 자식의 테스트 전용 설정이 실제 `MavenDownloader`의 저장소 주소만 이 서버로 연결합니다. 실제 다운로드 매니저가 실패 결과를 반환한 뒤 CLI가 종료 코드 `1`과 실패 원인을 남기고, 새 아카이브와 설치 스크립트를 생성하지 않는지 확인합니다. 설정·로그·출력은 임시 디렉터리로 격리하며 외부 레지스트리에 연결하지 않습니다.

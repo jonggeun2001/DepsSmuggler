@@ -568,6 +568,8 @@ const versions = results[0]?.versions ?? [];
 
 ### 메타데이터 파서 (ApkMetadataParser)
 
+APKINDEX의 `D:`에 있는 `so:`, `cmd:`, `pc:` capability를 버전 조건과 함께 보존합니다. Resolver가 `p:` provides와 매칭해 실제 제공 APK를 다운로드 목록에 포함하며, 제공자 누락·버전 불일치는 unresolved로 전달합니다. 상세 비교 규칙은 [APK Resolver](resolvers.md#apkresolver)를 참고하세요.
+
 | 메서드 | 설명 |
 |--------|------|
 | `parseIndex()` | APKINDEX.tar.gz 파싱 |
