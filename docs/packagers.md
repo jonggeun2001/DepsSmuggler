@@ -194,7 +194,7 @@ CLI와 GUI 저장소 구조는 전체 GAV 목록이 하나의 원본 저장소 �
 
 npm은 스크립트 생성 시 원본 `.tgz`의 `package.json`에서 이름·버전을 읽어 파일 경로와 함께 Bash·PowerShell 안에 기록합니다. CLI는 `npmPackageFiles`에 실제 다운로드 경로와 아카이브 `packages/` 안의 상대 경로를 전달합니다. 이 옵션이 없으면 생성 시점의 `packageDir` 아래에서 `.tgz`를 탐색하므로 패키지 파일이 먼저 준비되어 있어야 합니다. 원본 tarball은 수정하거나 추출하지 않습니다. scoped 패키지와 공백이 포함된 경로를 지원합니다.
 
-실행 시 포함된 Node.js 코드가 스크립트 폴더의 `npm-project/package.json`에 실제 루트만 로컬 `file:` 의존성으로 등록합니다. 전이 패키지는 이를 요구하는 상위 패키지별 `overrides`로 연결해 같은 이름의 여러 버전과 서로 다른 peer 의존성 배치를 보존합니다. 이는 npm 10에서 전역 버전별 override를 로컬 파일로 바꾼 후 다시 해석할 때 첫 버전으로 합쳐지는 문제도 피합니다. tarball과 동일한 실제 경로를 `--prefix`에도 사용해 `npm install --offline`으로 `npm-project/node_modules`에 설치합니다.
+실행 시 포함된 Node.js 코드가 스크립트 폴더의 `npm-project/package.json`에 실제 루트만 로컬 `file:` 의존성으로 등록합니다. 전이 패키지는 이를 요구하는 상위 패키지별 `overrides`로 연결해 같은 이름의 여러 버전과 서로 다른 peer 의존성 배치를 보존합니다. 이는 npm 10에서 전역 버전별 override를 로컬 파일로 바꾼 후 다시 해석할 때 첫 버전으로 합쳐지는 문제도 피합니다. tarball과 설치 대상은 실제 경로로 통일하고, `npm install --offline`으로 `npm-project/node_modules`에 설치합니다. Bash는 이 경로를 `--prefix`로 전달합니다. PowerShell은 생성 프로젝트로 잠시 이동해 `--prefix` 없이 설치한 뒤 성공·실패에 관계없이 위치를 복원합니다. Windows npm 10은 명시한 prefix가 로컬·전역 설치 위치에 함께 적용되면 현재 폴더를 추가 패키지로 읽을 수 있으므로 이 호출 방식을 사용합니다. bundle 루트에 사용자 `package.json`이 없어도 설치할 수 있습니다.
 
 CLI는 `npmRootPackages`에 실제 직접 요청 목록과 해결된 버전을 전달합니다. API 호출에서 이 옵션을 생략하면 이름별 가장 높은 전달 버전을 직접 루트로 취급하므로, 전이 목록을 함께 넘기는 호출자는 실제 루트를 지정해야 합니다. 동일 이름의 서로 다른 직접 버전 요청은 스크립트 생성 오류입니다. 원본 manifest의 일반·선택·peer 의존성을 읽어 전달된 호환 버전에 연결하며, 설치 범위에서 이미 선택한 호환 버전을 우선합니다. 순환 재방문은 반복문으로 처리하고, 계획 깊이 128 또는 규칙 100,000개를 초과하면 스크립트 생성 단계에서 명시적으로 실패합니다.
 
