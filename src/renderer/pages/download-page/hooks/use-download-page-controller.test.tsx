@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import { randomUUID } from 'node:crypto';
+import { groupDownloadItems } from '../utils';
+import type { DownloadStoreItem } from '../../../stores/download-store';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -91,6 +94,9 @@ const createElectronApi = () => {
       add: vi.fn().mockResolvedValue({ success: true }),
       delete: vi.fn().mockResolvedValue({ success: true }),
       clear: vi.fn().mockResolvedValue({ success: true }),
+    },
+    dependency: {
+      resolve: vi.fn(),
     },
     download: {
       checkPath: vi.fn().mockResolvedValue({
@@ -213,6 +219,78 @@ const loadController = async (options?: {
   };
 };
 
+const createFlinkResolutionFixture = () => {
+  const version = '1.20.5';
+  const makeArtifact = (artifactId: string, artifactType: 'jar' | 'pom') => {
+    const filename = `${artifactId}-${version}.${artifactType}`;
+    const metadata = { groupId: 'org.apache.flink', artifactId, type: artifactType, filename, size: 10 };
+    return {
+      id: randomUUID(),
+      type: 'maven' as const,
+      name: `org.apache.flink:${artifactId}`,
+      version,
+      filename,
+      size: 10,
+      downloadUrl: `https://repo.example.invalid/${filename}`,
+      metadata,
+    };
+  };
+  const original = makeArtifact('flink-streaming-java', 'jar');
+  const libraries = Array.from({ length: 35 }, (_, index) => makeArtifact(`flink-library-${index}`, 'jar'));
+  // The companion root POM has the same GAV as the original JAR but is a distinct artifact.
+  const poms = [
+    makeArtifact('flink-streaming-java', 'pom'),
+    ...Array.from({ length: 34 }, (_, index) => makeArtifact(`flink-parent-${index}`, 'pom')),
+  ];
+  const allPackages = [original, ...libraries, ...poms];
+  const toPackage = ({ type, name, version: packageVersion, metadata }: typeof original) => ({
+    type, name, version: packageVersion, metadata,
+  });
+  return {
+    original,
+    poms,
+    payload: {
+      originalPackages: [original],
+      allPackages,
+      dependencyTrees: [{
+        root: {
+          package: toPackage(original),
+          dependencies: libraries.map((item) => ({ package: toPackage(item), dependencies: [] })),
+        },
+        flatList: allPackages.map(toPackage),
+        conflicts: [],
+        totalSize: 710,
+      }],
+      failedPackages: [],
+    },
+  };
+};
+
+const expectCompleteFlinkPreview = (
+  items: DownloadStoreItem[],
+  fixture: ReturnType<typeof createFlinkResolutionFixture>
+) => {
+  expect(items).toHaveLength(71);
+  const groups = groupDownloadItems(items);
+  expect(groups).toHaveLength(1);
+  expect(groups.reduce((total, group) => total + group.status.total, 0)).toBe(71);
+  expect(groups[0].parent.id).toBe(fixture.original.id);
+  expect(groups[0].dependencies).toHaveLength(70);
+  expect(groups[0].dependencies.filter((item) => item.metadata?.type === 'pom')).toHaveLength(35);
+  for (const expected of fixture.poms) {
+    expect(items.find((item) => item.id === expected.id)).toMatchObject({
+      id: expected.id,
+      isDependency: true,
+      parentId: fixture.original.id,
+      dependencyOf: fixture.original.name,
+      filename: expected.filename,
+      metadata: expected.metadata,
+      downloadUrl: expected.downloadUrl,
+      totalBytes: expected.size,
+    });
+  }
+};
+
 describe('useDownloadPageController', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -223,6 +301,40 @@ describe('useDownloadPageController', () => {
 
   afterEach(() => {
     delete (window as typeof window & { electronAPI?: unknown }).electronAPI;
+  });
+
+  it('의존성 확인에서 트리 밖 부모 POM까지 71개 항목을 원본 장바구니 ID 아래 표시한다', async () => {
+    const fixture = createFlinkResolutionFixture();
+    const { electronAPI, rendered } = await loadController({
+      cartItems: [{ ...fixture.original, addedAt: Date.now() }],
+      includeDependencies: true,
+    });
+    electronAPI.dependency.resolve.mockResolvedValueOnce(fixture.payload);
+
+    await act(async () => {
+      await rendered.result.current.handleResolveDependencies();
+    });
+
+    expect(electronAPI.dependency.resolve).toHaveBeenCalledWith(expect.objectContaining({
+      packages: [expect.objectContaining({ id: fixture.original.id, metadata: fixture.original.metadata })],
+    }));
+    expectCompleteFlinkPreview(rendered.result.current.downloadItems, fixture);
+  });
+
+  it('다운로드 의존성 완료 이벤트도 트리 밖 POM의 소속과 아티팩트 정보를 유지한다', async () => {
+    const fixture = createFlinkResolutionFixture();
+    const { listeners, rendered } = await loadController({
+      cartItems: [{ ...fixture.original, addedAt: Date.now() }],
+      includeDependencies: true,
+      downloadState: { isDownloading: true },
+    });
+
+    await act(async () => {
+      listeners.depsResolved?.(fixture.payload);
+      await flushMicrotasks();
+    });
+
+    expectCompleteFlinkPreview(rendered.result.current.downloadItems, fixture);
   });
 
   it('start 시 다운로드 API에 현재 장바구니와 옵션을 전달한다', async () => {

@@ -208,11 +208,13 @@ export function getPackageGroupStatus(items: DownloadStoreItem[], parentItem: Do
 /** 원본 순서를 유지하며 의존성 조회를 전체 목록당 한 번의 인덱싱으로 처리한다. */
 export function groupDownloadItems(items: DownloadStoreItem[]) {
   const parents: DownloadStoreItem[] = [];
+  const originalIds = new Set(items.filter(item => !item.isDependency).map(item => item.id));
   const dependenciesByParent = new Map<string, DownloadStoreItem[]>();
   for (const item of items) {
-    if (!item.isDependency) {
+    // Incomplete/older tree metadata must not hide an actual download item.
+    if (originalIds.has(item.id) || item.parentId === undefined || !originalIds.has(item.parentId)) {
       parents.push(item);
-    } else if (item.parentId !== undefined) {
+    } else {
       const dependencies = dependenciesByParent.get(item.parentId);
       if (dependencies) dependencies.push(item);
       else dependenciesByParent.set(item.parentId, [item]);
