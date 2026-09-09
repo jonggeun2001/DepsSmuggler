@@ -549,6 +549,8 @@ maven-queue-processor.ts
 | `parseFromText` | content: string | Promise<PackageInfo[]> | pom.xml 파싱 |
 | `flattenDependencies` (private) | node: DependencyNode | PackageInfo[] | 트리를 플랫 리스트로 변환 |
 
+루트 버전이 `latest`이면 POM 조회 전에 설정된 저장소의 `maven-metadata.xml`에서 `latest`, 없으면 `release`를 선택합니다. 둘 다 비어 있으면 버전 조회 실패로 처리합니다. 해결 결과의 루트·플랫 목록·파일명에는 실제 버전이 들어가며 classifier와 artifact type은 유지합니다. 명시한 버전은 메타데이터 조회 없이 사용합니다. CLI의 기본 `--no-deps`도 `latest` 요청이면 깊이 0으로 이 과정을 실행합니다.
+
 ### 내부 메서드
 
 | 메서드 | 설명 |

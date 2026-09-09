@@ -95,6 +95,8 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 
 ### Maven 모델 POM 검증
 
+`src/core/resolver/maven-resolver.test.ts`는 `latest` 메타데이터의 실제 버전으로 루트 POM과 파일명을 만드는지, release fallback·빈 버전 실패·classifier/type 보존·명시 버전의 조회 생략을 검증합니다. `src/cli/commands/download.test.ts`는 기본 Maven `--no-deps`에서 `latest`만 깊이 0의 루트 해결을 거쳐 다운로드 큐로 전달되는지 확인합니다. 실제 저장소 검증에서는 같은 좌표의 의존성 포함/제외 CLI를 실행하고 메타데이터 버전과 아카이브·manifest를 비교합니다.
+
 Parent POM과 import BOM이 조회 캐시에만 남아 오프라인 출력에서 누락되는 문제는 다음 기본 회귀 세트로 검증합니다. `INTEGRATION_TEST` 설정 없이 실행하며 외부 Maven Central에 접속하지 않습니다.
 
 | 테스트 | 검증 범위 |

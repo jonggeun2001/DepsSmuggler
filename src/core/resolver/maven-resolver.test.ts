@@ -264,6 +264,144 @@ describe('MavenResolver 단위 테스트', () => {
     });
   });
 
+  describe('latest root version resolution', () => {
+    it('latest는 metadata의 concrete version으로 root POM과 artifact metadata를 조회한다', async () => {
+      const metadataGet = vi.fn().mockResolvedValue({
+        data: '<metadata><versioning><latest>3.0.2</latest><release>3.0.1</release></versioning></metadata>',
+      });
+      const head = vi.fn().mockResolvedValue({ headers: { 'content-length': '10' } });
+      (resolver as any).axiosInstance.get = metadataGet;
+      (resolver as any).axiosInstance.head = head;
+      fetchPomFromCacheMock.mockResolvedValue({
+        groupId: 'org.example',
+        artifactId: 'demo',
+        version: '3.0.2',
+        packaging: 'jar',
+      });
+
+      const result = await resolver.resolveDependencies('org.example:demo', 'latest', {
+        maxDepth: 0,
+        classifier: 'sources',
+        artifactType: 'jar',
+      });
+
+      expect(metadataGet).toHaveBeenCalledWith(
+        'https://repo1.maven.org/maven2/org/example/demo/maven-metadata.xml',
+      );
+      expect(fetchPomFromCacheMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          groupId: 'org.example',
+          artifactId: 'demo',
+          version: '3.0.2',
+          classifier: 'sources',
+          type: 'jar',
+        }),
+        expect.any(Object),
+      );
+      expect(result.root.package.version).toBe('3.0.2');
+      expect(result.root.package.metadata).toMatchObject({
+        classifier: 'sources',
+        type: 'jar',
+        filename: 'demo-3.0.2-sources.jar',
+      });
+      expect(result.flatList).toHaveLength(1);
+      expect(head).toHaveBeenCalled();
+    });
+
+    it('latest의 concrete root로 전체 의존성 그래프를 해결한다', async () => {
+      const metadataGet = vi.fn().mockResolvedValue({
+        data: '<metadata><versioning><latest>3.0.2</latest></versioning></metadata>',
+      });
+      const head = vi.fn().mockResolvedValue({ headers: { 'content-length': '10' } });
+      (resolver as any).axiosInstance.get = metadataGet;
+      (resolver as any).axiosInstance.head = head;
+      fetchPomFromCacheMock.mockImplementation(async (coordinate) => {
+        if (coordinate.artifactId === 'demo' && coordinate.version === '3.0.2') {
+          return {
+            groupId: 'org.example',
+            artifactId: 'demo',
+            version: '3.0.2',
+            dependencies: {
+              dependency: {
+                groupId: 'org.example',
+                artifactId: 'child',
+                version: '1.0.0',
+              },
+            },
+          };
+        }
+        if (coordinate.artifactId === 'child' && coordinate.version === '1.0.0') {
+          return {
+            groupId: 'org.example',
+            artifactId: 'child',
+            version: '1.0.0',
+          };
+        }
+        throw new Error(`Unexpected POM: ${coordinate.groupId}:${coordinate.artifactId}:${coordinate.version}`);
+      });
+
+      const result = await resolver.resolveDependencies('org.example:demo', 'latest');
+
+      expect(result.flatList.map((pkg) => `${pkg.name}@${pkg.version}`).sort()).toEqual([
+        'org.example:child@1.0.0',
+        'org.example:demo@3.0.2',
+      ]);
+      expect(fetchPomFromCacheMock.mock.calls.map(([coordinate]) => coordinate.version)).not.toContain('latest');
+      expect(fetchPomFromCacheMock).toHaveBeenCalledWith(
+        expect.objectContaining({ artifactId: 'child', version: '1.0.0' }),
+        expect.any(Object),
+      );
+    });
+
+    it('latest가 없으면 release를 사용하고 metadata가 둘 다 비어 있으면 실패한다', async () => {
+      const metadataGet = vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: '<metadata><versioning><release>2.4.1</release></versioning></metadata>',
+        })
+        .mockResolvedValueOnce({
+          data: '<metadata><versioning><latest></latest><release></release></versioning></metadata>',
+        });
+      (resolver as any).axiosInstance.get = metadataGet;
+
+      await expect(resolver.getLatestVersion('org.example', 'release-only'))
+        .resolves.toBe('2.4.1');
+      await expect(resolver.getLatestVersion('org.example', 'empty-metadata'))
+        .rejects.toThrow('org.example:empty-metadata');
+      expect(metadataGet).toHaveBeenNthCalledWith(
+        1,
+        'https://repo1.maven.org/maven2/org/example/release-only/maven-metadata.xml',
+      );
+      expect(metadataGet).toHaveBeenNthCalledWith(
+        2,
+        'https://repo1.maven.org/maven2/org/example/empty-metadata/maven-metadata.xml',
+      );
+    });
+
+    it('명시 버전은 latest metadata를 조회하지 않는다', async () => {
+      const metadataGet = vi.fn();
+      const head = vi.fn().mockResolvedValue({ headers: { 'content-length': '10' } });
+      (resolver as any).axiosInstance.get = metadataGet;
+      (resolver as any).axiosInstance.head = head;
+      fetchPomFromCacheMock.mockResolvedValue({
+        groupId: 'org.example',
+        artifactId: 'demo',
+        version: '3.0.1',
+      });
+
+      const result = await resolver.resolveDependencies('org.example:demo', '3.0.1', {
+        maxDepth: 0,
+      });
+
+      expect(metadataGet).not.toHaveBeenCalled();
+      expect(result.root.package.version).toBe('3.0.1');
+      expect(fetchPomFromCacheMock).toHaveBeenCalledWith(
+        expect.objectContaining({ version: '3.0.1' }),
+        expect.any(Object),
+      );
+    });
+  });
+
   describe('resolveProperty (유틸리티 함수)', () => {
     it('빈 값은 그대로 반환', () => {
       expect(resolveProperty('')).toBe('');

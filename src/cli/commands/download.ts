@@ -161,6 +161,7 @@ async function preparePackagesForDownload(
   const shouldResolveTargetedRoots =
     !options.deps &&
     (CLI_ROOT_ARTIFACT_RESOLUTION_TYPES.has(options.type) ||
+      (options.type === 'maven' && packages.some((pkg) => pkg.version === 'latest')) ||
       (CLI_TARGET_ENVIRONMENT_TYPES.has(options.type) &&
         hasExplicitTargetEnvironment(options)));
 

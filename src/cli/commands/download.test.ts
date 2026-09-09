@@ -97,6 +97,7 @@ function commandOptions(
 describe('downloadCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(resolveAllDependencies).mockReset();
 
     ensureDir.mockResolvedValue(undefined);
     startDownload.mockResolvedValue({
@@ -933,6 +934,83 @@ describe('downloadCommand', () => {
         metadata: expect.objectContaining({
           filename: 'numpy-2.0.0-py312_0.conda',
         }),
+      }),
+    ]);
+  });
+
+  it('기본 Maven --no-deps의 latest는 concrete root artifact를 resolver로 검증한다', async () => {
+    const concreteRoot = {
+      id: 'maven-org.example:demo-3.0.2',
+      type: 'maven' as const,
+      name: 'org.example:demo',
+      version: '3.0.2',
+      architecture: 'x86_64' as const,
+      metadata: {
+        groupId: 'org.example',
+        artifactId: 'demo',
+        type: 'jar',
+        filename: 'demo-3.0.2.jar',
+      },
+    };
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'maven-org.example:demo-latest',
+          type: 'maven',
+          name: 'org.example:demo',
+          version: 'latest',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [concreteRoot],
+      successfulPackages: [concreteRoot],
+      dependencyTrees: [],
+      failedPackages: [],
+    });
+
+    await downloadCommand(commandOptions({
+      type: 'maven',
+      package: 'org.example:demo',
+      pkgVersion: 'latest',
+      deps: false,
+    }));
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      [expect.objectContaining({
+        type: 'maven',
+        name: 'org.example:demo',
+        version: 'latest',
+      })],
+      expect.objectContaining({
+        includeDependencies: true,
+        maxDepth: 0,
+        resolveRootArtifactsOnly: true,
+      }),
+    );
+    expect(addToQueue).toHaveBeenCalledWith([
+      expect.objectContaining({
+        type: 'maven',
+        name: 'org.example:demo',
+        version: '3.0.2',
+        metadata: expect.objectContaining({ filename: 'demo-3.0.2.jar' }),
+      }),
+    ]);
+  });
+
+  it('기본 Maven --no-deps의 명시 버전은 latest resolver 조회를 추가하지 않는다', async () => {
+    await downloadCommand(commandOptions({
+      type: 'maven',
+      package: 'org.example:demo',
+      pkgVersion: '3.0.1',
+      deps: false,
+    }));
+
+    expect(resolveAllDependencies).not.toHaveBeenCalled();
+    expect(addToQueue).toHaveBeenCalledWith([
+      expect.objectContaining({
+        type: 'maven',
+        name: 'org.example:demo',
+        version: '3.0.1',
       }),
     ]);
   });

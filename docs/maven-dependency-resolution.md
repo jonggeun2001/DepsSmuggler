@@ -5,6 +5,7 @@
 ## 현재 구현 요약
 
 - `MavenResolver`는 BF 탐색을 `MavenQueueProcessor`와 조합하고, `MavenBomProcessor`, `DependencyResolutionSkipper` 및 Maven 공용 캐시를 사용합니다. Maven JVM 라이브러리를 직접 실행하지 않습니다.
+- 루트의 `latest`는 저장소 메타데이터의 `latest` 또는 `release` 실제 버전으로 바꾼 뒤 POM을 조회합니다. 두 값이 모두 없으면 실패합니다. CLI의 `--no-deps`에서도 버전 확인은 수행하며 자식 라이브러리 의존성은 펼치지 않습니다.
 - 루트의 명시적 `metadata.type`은 `artifactType`으로 전달되며 원격 POM packaging이 이를 덮어쓰지 않습니다. 아티팩트 키는 type을 포함합니다. classifier는 사용자가 선택하며 OS/아키텍처만으로 자동 생성하지 않습니다.
 - `dependencyManagement`와 BOM은 버전 관리에 사용하고, 그 목록 전체를 실제 다운로드 의존성으로 펼치지 않습니다. `MavenQueueProcessor`가 `src/core/shared/maven-pom-utils.ts`의 `extractDependencies()`를 호출합니다.
 - 선택된 패키지의 모델 해석에 필요한 Parent POM과 import BOM은 전체 GAV로 중복 제거하여 `metadata.type: 'pom'`인 다운로드 항목으로 포함합니다. Parent/BOM 탐색과 그래프 평탄화는 반복 처리하며, 필수 모델의 누락이나 순환 참조는 해당 루트의 해결 실패로 보고합니다.
