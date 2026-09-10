@@ -17,13 +17,19 @@ interface ModelFrame {
   pom: PomProject;
   coordinate?: MavenCoordinate;
   properties: Properties;
+  dependencies: PomDependency[];
   includeManagement: boolean;
   phase: 'parent' | 'management' | 'imports' | 'done';
   imports: PomDependency[];
   importIndex: number;
-  parentResult?: Properties;
+  parentResult?: ModelResult;
   isParent: boolean;
   isImport: boolean;
+}
+
+interface ModelResult {
+  properties: Properties;
+  dependencies: PomDependency[];
 }
 
 /**
@@ -72,13 +78,25 @@ export class MavenBomProcessor {
     pom: PomProject,
     coordinate: MavenCoordinate,
     rootManagement: Map<string, string>
-  ): Promise<{ properties: Properties; dependencyManagement: Map<string, string> }> {
+  ): Promise<{
+    properties: Properties;
+    dependencyManagement: Map<string, string>;
+    dependencies: PomDependency[];
+  }> {
     const previousManagement = this.dependencyManagement;
     this.setDependencyManagement(new Map(rootManagement));
     try {
-      const properties = await this.processParentPom(pom, coordinate);
-      await this.processDependencyManagement(pom, properties);
-      return { properties, dependencyManagement: this.dependencyManagement };
+      const model = await this.walkModels(this.frame(pom, coordinate, undefined, false));
+      await this.processDependencyManagement(pom, model.properties);
+      return {
+        properties: model.properties,
+        dependencyManagement: this.dependencyManagement,
+        dependencies: this.resolveEffectiveDependencies(
+          model.dependencies,
+          model.properties,
+          this.dependencyManagement,
+        ),
+      };
     } finally {
       this.setDependencyManagement(previousManagement);
     }
@@ -89,7 +107,8 @@ export class MavenBomProcessor {
     coordinate: MavenCoordinate,
     inheritedProperties?: Properties
   ): Promise<Properties> {
-    return this.walkModels(this.frame(pom, coordinate, inheritedProperties, false));
+    const result = await this.walkModels(this.frame(pom, coordinate, inheritedProperties, false));
+    return result.properties;
   }
 
   async processDependencyManagement(pom: PomProject, properties?: Properties): Promise<void> {
@@ -137,6 +156,7 @@ export class MavenBomProcessor {
       pom,
       coordinate,
       properties: { ...inheritedProperties, ...pom.properties, ...this.projectProperties(coordinate) },
+      dependencies: this.ownDependencies(pom),
       includeManagement,
       phase: 'parent',
       imports: [],
@@ -144,6 +164,130 @@ export class MavenBomProcessor {
       isParent,
       isImport,
     };
+  }
+
+  private ownDependencies(pom: PomProject): PomDependency[] {
+    const dependencies = pom.dependencies?.dependency;
+    if (!dependencies) return [];
+    return (Array.isArray(dependencies) ? dependencies : [dependencies])
+      .map((dependency) => ({ ...dependency }));
+  }
+
+  private resolveDependencyFields(
+    dependency: PomDependency,
+    properties: Properties,
+  ): PomDependency {
+    const resolved: PomDependency = {
+      ...dependency,
+      groupId: resolveProperty(dependency.groupId, properties),
+      artifactId: resolveProperty(dependency.artifactId, properties),
+    };
+    if (dependency.version !== undefined) {
+      resolved.version = resolveProperty(dependency.version, properties);
+    }
+    if (dependency.scope !== undefined) {
+      resolved.scope = resolveProperty(dependency.scope, properties);
+    }
+    if (dependency.type !== undefined) {
+      resolved.type = resolveProperty(dependency.type, properties);
+    }
+    if (dependency.classifier !== undefined) {
+      resolved.classifier = resolveProperty(dependency.classifier, properties);
+    }
+    if (typeof dependency.optional === 'string') {
+      resolved.optional = resolveProperty(dependency.optional, properties);
+    }
+    if (dependency.exclusions) {
+      const exclusions = Array.isArray(dependency.exclusions.exclusion)
+        ? dependency.exclusions.exclusion
+        : [dependency.exclusions.exclusion];
+      const resolvedExclusions = exclusions.map((exclusion) => ({
+        ...exclusion,
+        groupId: resolveProperty(exclusion.groupId, properties),
+        artifactId: resolveProperty(exclusion.artifactId, properties),
+      }));
+      resolved.exclusions = {
+        exclusion: Array.isArray(dependency.exclusions.exclusion)
+          ? resolvedExclusions
+          : resolvedExclusions[0],
+      };
+    }
+    return resolved;
+  }
+
+  private cloneDependency(dependency: PomDependency): PomDependency {
+    if (!dependency.exclusions) return { ...dependency };
+    const exclusions = Array.isArray(dependency.exclusions.exclusion)
+      ? dependency.exclusions.exclusion.map((exclusion) => ({ ...exclusion }))
+      : { ...dependency.exclusions.exclusion };
+    return { ...dependency, exclusions: { exclusion: exclusions } };
+  }
+
+  private mergeExclusions(
+    first: PomDependency['exclusions'],
+    second: PomDependency['exclusions'],
+  ): PomDependency['exclusions'] | undefined {
+    if (!first && !second) return undefined;
+    const exclusions = [first, second]
+      .filter((value): value is NonNullable<PomDependency['exclusions']> => Boolean(value))
+      .flatMap((value) => Array.isArray(value.exclusion) ? value.exclusion : [value.exclusion])
+      .map((exclusion) => ({ ...exclusion }));
+    const unique = new Map(exclusions.map((exclusion) => [
+      `${exclusion.groupId}\0${exclusion.artifactId}`,
+      exclusion,
+    ]));
+    const values = [...unique.values()];
+    return {
+      exclusion: values.length === 1 ? values[0] : values,
+    };
+  }
+
+  private dependencyIdentity(dependency: PomDependency, properties: Properties): string {
+    const resolved = this.resolveDependencyFields(dependency, properties);
+    return [
+      resolved.groupId,
+      resolved.artifactId,
+      resolved.type || 'jar',
+      resolved.classifier || '',
+    ].join('\0');
+  }
+
+  private mergeDependencies(
+    inherited: PomDependency[],
+    own: PomDependency[],
+    properties: Properties,
+  ): PomDependency[] {
+    const merged = new Map<string, PomDependency>();
+    for (const dependency of inherited) {
+      const raw = this.cloneDependency(dependency);
+      merged.set(this.dependencyIdentity(raw, properties), raw);
+    }
+    for (const dependency of own) {
+      const raw = this.cloneDependency(dependency);
+      const key = this.dependencyIdentity(raw, properties);
+      const inheritedDependency = merged.get(key);
+      merged.set(key, {
+        ...inheritedDependency,
+        ...raw,
+        exclusions: this.mergeExclusions(inheritedDependency?.exclusions, raw.exclusions),
+      });
+    }
+    return [...merged.values()];
+  }
+
+  private resolveEffectiveDependencies(
+    dependencies: PomDependency[],
+    properties: Properties,
+    dependencyManagement: Map<string, string>,
+  ): PomDependency[] {
+    return dependencies.map((dependency) => {
+      const resolved = this.resolveDependencyFields(dependency, properties);
+      if (!resolved.version) {
+        const managedVersion = dependencyManagement.get(`${resolved.groupId}:${resolved.artifactId}`);
+        if (managedVersion) resolved.version = managedVersion;
+      }
+      return resolved;
+    });
   }
 
   private inferCoordinate(pom: PomProject, properties?: Properties): MavenCoordinate | undefined {
@@ -208,7 +352,7 @@ export class MavenBomProcessor {
     return false;
   }
 
-  private async walkModels(root: ModelFrame): Promise<Properties> {
+  private async walkModels(root: ModelFrame): Promise<ModelResult> {
     const stack = [root];
     const active = new Set<string>();
     if (root.coordinate) active.add(this.key(root.coordinate));
@@ -255,10 +399,15 @@ export class MavenBomProcessor {
       if (current.phase === 'management') {
         if (current.parentResult) {
           current.properties = {
-            ...current.parentResult,
+            ...current.parentResult.properties,
             ...current.pom.properties,
             ...this.projectProperties(current.coordinate),
           };
+          current.dependencies = this.mergeDependencies(
+            current.parentResult.dependencies,
+            current.dependencies,
+            current.properties,
+          );
         }
         current.phase = 'imports';
         if (current.includeManagement) {
@@ -268,7 +417,9 @@ export class MavenBomProcessor {
               current.imports.push(dep);
             } else {
               const version = resolveProperty(dep.version || '', current.properties);
-              const key = `${dep.groupId}:${dep.artifactId}`;
+              const groupId = resolveProperty(dep.groupId, current.properties);
+              const artifactId = resolveProperty(dep.artifactId, current.properties);
+              const key = `${groupId}:${artifactId}`;
               // Preserve first registration; BOMs are visited in declaration order.
               if (version && !this.dependencyManagement.has(key)) {
                 this.dependencyManagement.set(key, version);
@@ -294,9 +445,12 @@ export class MavenBomProcessor {
         if (current.isImport) this.completedImports.add(key);
       }
       if (current.isParent && stack.length > 0) {
-        stack[stack.length - 1].parentResult = current.properties;
+        stack[stack.length - 1].parentResult = {
+          properties: current.properties,
+          dependencies: current.dependencies,
+        };
       }
     }
-    return root.properties;
+    return { properties: root.properties, dependencies: root.dependencies };
   }
 }

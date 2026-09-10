@@ -80,6 +80,8 @@ depssmuggler --help
 | OS `apk` | 지원 | 지원 | Alpine, APK 다운로드·아카이브·로컬 저장소 출력 |
 | Container `docker` | 지원 | 지원 | Docker Hub 이미지·태그·플랫폼 선택과 이미지 아카이브 |
 
+Maven 반출은 한 BFS에서 실제로 발견된 모든 버전의 원래 아티팩트와 POM·하위 의존성를 보존합니다. Parent POM의 일반 dependencies는 상속하고, BOM의 `dependencyManagement` 전체 라이브러리는 펼치지 않습니다. scope·optional·exclusion·탐색 깊이 제한은 유지됩니다.
+
 OS 패키지 CLI는 `os list-distros/search/download/cache`를 사용합니다. 배포판과 아키텍처 목록은 저장소 프리셋 및 조회 결과에 따라 달라지므로 `depssmuggler os list-distros`로 확인하세요.
 
 GUI에는 Docker Hub 외 GHCR, ECR Public, Quay, 사용자 지정 레지스트리 선택도 있습니다. 익명 pull과 검색 전략이 구현되어 있으나 GHCR/ECR Public은 정확한 이미지명을 입력해야 하며, 공통 메타데이터 조회는 Docker Hub 중심입니다. 모든 레지스트리에서 같은 검색·메타데이터 기능을 제공하지는 않습니다. 자세한 범위는 [Docker 아키텍처](docs/docker-architecture.md)를 참고하세요.

@@ -311,15 +311,15 @@ POM 파일 파싱 및 속성 해석 유틸리티:
 
 ---
 
-`resolveVersionRange()`는 저장소 버전 목록을 조회하거나 상·하한을 검증하지 않습니다. 예를 들어 `[1.0,2.0)`에서 `1.0`을 추출하며 Maven 전체 범위 해결을 구현한 것은 아닙니다. `dependencyManagement` 항목은 버전 관리용이고 `extractDependencies()`에서 실제 의존성으로 확장하지 않습니다.
+`resolveVersionRange()`는 저장소 버전 목록을 조회하거나 상·하한을 검증하지 않습니다. 예를 들어 `[1.0,2.0)`에서 `1.0`을 추출하며 Maven 전체 범위 해결을 구현한 것은 아닙니다. `dependencyManagement` 항목은 버전 관리용이고 `extractDependencies()`에서 그 목록 전체를 실제 의존성으로 확장하지 않습니다. 단, Parent POM의 일반 `<dependencies>`는 모델 상속에 따라 자식 문맥에 적용되며, BFS에서 실제로 발견한 각 버전의 원래 아티팩트와 POM·하위 closure는 충돌 승자 여부와 관계없이 수집 대상이 될 수 있습니다.
 
 ## Maven BOM 처리기 (`maven-bom-processor.ts`)
 
 `MavenBomProcessor(fetchPom, dependencyManagement?)`는 Parent POM의 속성·관리 버전을 상속하고 BOM import를 처리합니다. `processParentPom(pom, coordinate, inheritedProperties?)`는 병합된 속성을 반환하며, `processDependencyManagement(pom, properties?)`와 `importBom(dep, properties?)`는 관리 맵을 갱신하고 `Promise<void>`를 반환합니다. 맵은 `getDependencyManagement()`, `setDependencyManagement()`, `clearDependencyManagement()`로 관리합니다.
 
-전이 패키지의 모델 해석에는 `processModel(pom, coordinate, rootManagement)`를 사용합니다. 루트 관리 맵을 복사한 문맥에서 해당 POM의 부모와 import BOM을 적용하고 `{ properties, dependencyManagement }`를 반환한 뒤 기존 관리 맵을 복원합니다. 관리 버전은 루트 값을 우선하며, 형제 패키지의 사용하지 않는 관리 항목이 다른 패키지의 의존성 버전을 바꾸지 않습니다. 이 메서드는 resolver의 순차 큐에서 호출합니다. 모델 POM 조회 캐시와 다운로드 좌표 수집은 요청 전체에서 공유하지만, 완료 import 상태는 관리 문맥이 바뀔 때 초기화합니다.
+`processModel(pom, coordinate, rootManagement)`는 `{ properties, dependencyManagement, dependencies }`를 반환합니다. `dependencies`는 부모의 일반 의존성을 상속하고 자식의 같은 G:A:type:classifier 선언과 병합한 결과입니다. 속성은 최종 자식 문맥에서 해석하고 제외 목록은 병합하며, 원시 POM을 변경하지 않습니다. import BOM의 일반 dependencies는 상속하지 않습니다. Resolver는 모델별 관리 맵으로 선언 버전을 수집하고, 해당 의존성에 적용되는 루트 관리 버전도 추가합니다. 이 메서드는 순차 큐에서 호출하며 호출 전 관리 맵은 복원합니다. 모델 POM 조회와 필요한 모델 좌표는 요청 전체에서 공유합니다.
 
-모델 해석 중 필요한 Parent POM과 import BOM의 좌표도 수집합니다. 부모 체인, BOM의 부모 및 중첩 import를 포함하고, `groupId:artifactId:version` 전체 좌표로 중복을 제거합니다. `getRequiredPoms(): MavenCoordinate[]`는 `type: 'pom'`이고 classifier가 없는 좌표의 복사본을 반환합니다. resolver는 이 수집 결과를 `metadata.type: 'pom'`인 다운로드 항목으로 추가하므로, POM이 조회 캐시에만 남고 전달 파일에서 누락되지 않습니다. 관리 맵의 일반 라이브러리 항목을 다운로드 의존성으로 확장하는 것은 아닙니다.
+모델 해석 중 필요한 Parent POM과 import BOM의 좌표도 수집합니다. 부모 체인, BOM의 부모 및 중첩 import를 포함하고, `groupId:artifactId:version` 전체 좌표로 중복을 제거합니다. resolver는 모델 POM을 `metadata.type: 'pom'`인 다운로드 항목으로 추가하며, 충돌 경로에서 실제로 발견한 원래 JAR/POM과 하위 closure도 별도 항목으로 보존합니다. 관리 맵의 일반 라이브러리 항목 전체를 다운로드 의존성으로 확장하는 것은 아닙니다.
 
 탐색은 재귀 호출 대신 반복 처리하며 현재 탐색 경로의 Parent/BOM 순환을 감지합니다. 여러 경로가 같은 모델 POM을 참조하는 정상적인 공유 구조는 순환으로 처리하지 않습니다. 필요한 모델의 조회 실패, 해결할 수 없는 좌표, 순환 참조는 `MavenPomResolutionError`로 호출자에게 전달합니다. BOM import는 선언 순서대로 처리하여 먼저 등록된 관리 버전을 유지합니다. 처리 완료된 import는 재사용하되 활성 조상으로 이어질 수 있으면 다시 탐색하고, 부모의 속성은 자식 문맥별로 재평가합니다. `clearDependencyManagement()`는 관리 맵, 수집된 모델 좌표, 처리기 내부 모델 조회 캐시, 완료 import 및 참조 그래프를 함께 초기화합니다. 원시 POM 공용 캐시의 재사용과 해당 resolver 호출의 다운로드 항목 수집은 별개입니다.
 

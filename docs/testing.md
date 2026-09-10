@@ -119,8 +119,9 @@ Parent POM과 import BOM이 조회 캐시에만 남아 오프라인 출력에서
 
 | 테스트 | 검증 범위 |
 |--------|-----------|
+| `src/core/shared/maven-effective-dependencies.test.ts` | 부모 일반 의존성 상속, 자식 필드·제외 목록 병합, 3단계 속성 해석, 공유 부모의 자식 문맥 격리, import BOM 일반 의존성 미확장 |
 | `src/core/shared/maven-bom-processor.test.ts` | 전체 GAV로 모델 POM 중복 제거, 깊은 부모/BOM 체인, Parent/BOM/혼합 순환, 공유 BOM 그래프의 반복 처리 제한, 문맥별 부모 속성 상속과 import 순서, 필수 모델 누락·미해결 좌표, 호출 간 상태 초기화 |
-| `src/core/resolver/maven-model-resolution.test.ts` | 전이 패키지의 BOM 버전 적용과 모델 POM 포함, 형제 간 관리 버전 격리와 루트 관리 우선순위, 같은 부모의 여러 버전, 깊이 경계의 부모 수집, POM 조회 실패, 깊은 그래프 평탄화 및 순환·공유 노드 종료, 같은 GAV의 JAR/POM 구분, 충돌로 제외된 버전과 하위 descriptor POM 보존 |
+| `src/core/resolver/maven-model-resolution.test.ts` | 전이 패키지의 BOM 버전 적용과 모델 POM 포함, Parent 일반 dependencies 상속, 형제 간 관리 버전 격리와 루트 관리 우선순위, 같은 부모의 여러 버전, 깊이 경계의 부모 수집, POM 조회 실패, 깊은 그래프 평탄화 및 순환·공유 노드 종료, 같은 GAV의 JAR/POM 구분, 충돌로 제외된 모든 실제 버전의 아티팩트·하위 descriptor closure 보존 |
 | `src/core/shared/maven-parent-pom-download.test.ts` | Flink 전이 체인 fixture의 부모/BOM POM 및 compile/runtime JAR·부속 POM·SHA1 실제 파일, 미사용 관리 항목 631개와 optional/test 제외, JAR/POM 동시 보존, 필수 부모 404 및 모델 조회 후 POM 파일 저장 실패 |
 
 다운로드 회귀는 Axios adapter의 HTTP 응답만 XML/JAR/SHA1 fixture로 대체합니다. `resolveAllDependencies()`부터 실제 resolver·POM 파싱·캐시·`MavenDownloader`와 임시 디렉터리 파일 쓰기를 실행합니다. Electron 라우터의 같은 GAV 직렬화와 최상위 복사본은 기존 `electron/services/download-package-router.test.ts`에서 별도로 검증합니다.
@@ -135,11 +136,11 @@ bash scripts/verify-worktree.sh \
 
 이 fixture 검증은 실제 Maven Central의 현재 파일 존재 여부나 외부 Maven 실행의 오프라인 성공을 보장하지 않습니다. 외부 저장소 검증에는 아래 통합 테스트를 별도로 사용하고, 실행 명령·대상 좌표·파일 확인 결과를 해당 작업의 검증 기록에 남깁니다.
 
-### Maven 충돌 descriptor의 오프라인 소비자 검증
+### Maven 모든 버전 반출의 오프라인 소비자 검증
 
-충돌로 선택하지 않은 버전의 POM이 캐시에만 있고 반출 목록에는 없는 경우를 별도로 검증합니다. 실제 Flink 1.20.5 CLI 실행에서는 `flink-core`가 요구하는 Kryo 2.24.0 JAR와 `chill-java:0.7.6`이 참조하는 Kryo 2.21 POM이 압축물·manifest 및 생성 설치 스크립트의 대상 저장소에 모두 반영되는지 확인합니다. 단순 종료 코드나 캐시 파일 존재만으로 성공을 판정하지 않습니다.
+충돌로 선택하지 않은 버전의 원래 아티팩트 또는 POM·하위 closure가 캐시에만 있고 반출 목록에는 없는 경우를 별도로 검증합니다. 실제 Flink 1.20.5 CLI 실행에서는 `flink-core`가 요구하는 Kryo 2.24.0 JAR와 `chill-java:0.7.6`이 참조하는 Kryo 2.21 경로의 실제 아티팩트·POM·부모/하위 descriptor가 발견된 형태로 압축물·manifest 및 생성 설치 스크립트의 대상 저장소에 반영되는지 확인합니다. 단순 종료 코드나 캐시 파일 존재만으로 성공을 판정하지 않습니다.
 
-`src/core/packager/maven-native-consumer.integration.test.ts`는 기본 테스트에서도 로컬 HTTP fixture로 resolver·다운로더·압축물을 검증하고, macOS/Linux에서는 생성한 Bash 설치 스크립트를 실행해 원본 POM 바이트와 POM-only 전달을 확인합니다. Windows 기본 검사에서는 압축물 검증까지 수행합니다. 같은 파일의 native 검사는 `DEPS_SMUGGLER_NATIVE_MAVEN=1`일 때 실행합니다. Linux와 기존 `mvn`이 필요하며, opt-in 상태에서 도구가 없으면 실패합니다. 테스트는 별도의 의존성 없는 프로젝트로 Maven 빌드 플러그인만 격리된 저장소에 준비한 후, 실제 resolver·downloader·압축기·생성 Bash 스크립트로 전달한 fixture를 `mvn -o package`로 소비합니다. fixture POM을 bootstrap 단계에서 미리 받아 누락을 가리지 않고, 충돌 버전 POM을 제거한 대조군에서 누락 경고 또는 실패를 탐지합니다. 실제 사용자 `~/.m2`나 호스트 패키지 설치는 사용하지 않습니다.
+`src/core/packager/maven-native-consumer.integration.test.ts`는 기본 테스트에서도 로컬 HTTP fixture로 resolver·다운로더·압축물을 검증하고, macOS/Linux에서는 생성한 Bash 설치 스크립트를 실행해 원본 아티팩트·POM·체크섬 전달을 확인합니다. Windows 기본 검사에서는 압축물 검증까지 수행합니다. 같은 파일의 native 검사는 `DEPS_SMUGGLER_NATIVE_MAVEN=1`일 때 실행합니다. Linux와 기존 `mvn`이 필요하며, opt-in 상태에서 도구가 없으면 실패합니다. 테스트는 별도의 의존성 없는 프로젝트로 Maven 빌드 플러그인만 격리된 저장소에 준비한 후, 실제 resolver·downloader·압축기·생성 Bash 스크립트로 전달한 fixture를 `mvn -o package`로 소비합니다. fixture POM을 bootstrap 단계에서 미리 받아 누락을 가리지 않고, 의존성 선언 순서가 다른 두 소비자가 각각 Kryo에 대응하는 충돌 버전을 선택해도 오프라인 빌드가 성공하는지 검사합니다. 2.21 JAR만 제거한 대조군에서는 정확한 누락 좌표와 실패 종료를 요구합니다. 실제 사용자 `~/.m2`나 호스트 패키지 설치는 사용하지 않습니다.
 
 ```bash
 DEPS_SMUGGLER_NATIVE_MAVEN=1 bash scripts/verify-worktree.sh \
