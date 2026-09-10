@@ -9,6 +9,7 @@
 - 루트의 명시적 `metadata.type`은 `artifactType`으로 전달되며 원격 POM packaging이 이를 덮어쓰지 않습니다. 아티팩트 키는 type을 포함합니다. classifier는 사용자가 선택하며 OS/아키텍처만으로 자동 생성하지 않습니다.
 - `dependencyManagement`와 BOM은 버전 관리에 사용하고, 그 목록 전체를 실제 다운로드 의존성으로 펼치지 않습니다. `MavenQueueProcessor`가 `src/core/shared/maven-pom-utils.ts`의 `extractDependencies()`를 호출합니다.
 - 선택된 패키지의 모델 해석에 필요한 Parent POM과 import BOM은 전체 GAV로 중복 제거하여 `metadata.type: 'pom'`인 다운로드 항목으로 포함합니다. Parent/BOM 탐색과 그래프 평탄화는 반복 처리하며, 필수 모델의 누락이나 순환 참조는 해당 루트의 해결 실패로 보고합니다.
+- 선택 그래프에서 충돌로 제외된 버전은 별도 descriptor 큐에서 POM과 필요한 하위·부모·BOM POM을 수집합니다. JAR 선택을 바꾸지 않고 POM-only 다운로드 목록을 보완하며 기존 scope·optional·exclusion·깊이 제한을 적용합니다. 프리페치 캐시에 POM이 존재하는 것과 오프라인 반출 목록에 포함하는 것은 별개의 조건입니다.
 - `MavenDownloader.downloadPackage()`는 `metadata.packaging` → `metadata.type` → POM의 `<packaging>` → `jar` 순서로 파일 타입을 정합니다. 메인 아티팩트와 POM, 사용 가능한 `.sha1` 파일을 내려받습니다. source/javadoc은 classifier 또는 type으로 선택하며 자동으로 모두 포함하지 않습니다.
 - 9절의 구현 권장사항과 10.4절의 축약 코드는 설계 설명입니다. 예시의 모든 타입·체크섬 알고리즘이 호출 옵션으로 노출되는 것은 아닙니다. 12–13절은 현재 구현의 크기 조회·POM 처리·요청 재사용을 설명합니다.
 
@@ -210,6 +211,8 @@ protected void doCollectDependencies(...) {
 ### 4.3 Skipper 알고리즘
 
 Skipper는 노드 해결 전에 충돌을 예측하여 불필요한 계산을 방지합니다.
+
+아래 설명은 선택할 실행 아티팩트의 탐색에 관한 것입니다. DepsSmuggler의 오프라인 반출에서는 충돌로 건너뛴 버전의 POM을 별도 수집합니다. 예를 들어 Flink의 Kryo 2.24.0 JAR를 유지하면서 chill-java가 참조하는 Kryo 2.21 POM도 보존하므로, Skipper의 제외 결과를 그대로 전체 반출 파일 목록으로 사용하지 않습니다.
 
 ```java
 // DependencyResolutionSkipper.java

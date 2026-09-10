@@ -171,6 +171,7 @@ depssmuggler download -t maven -p org.lwjgl:lwjgl -V 3.3.6 \
 - Maven 설치 스크립트는 아카이브의 `packages/` canonical 저장소 경로를 GAV별로 `MAVEN_REPO_LOCAL`에 복사합니다. 기본 대상은 `~/.m2/repository`이며, GUI 출력의 `packages/m2repo/`도 지원합니다. 원본 POM·parent/BOM·POM-only·classifier·checksum은 같은 GAV 디렉터리에서 함께 보존되며 Maven 플러그인이나 네트워크 호출은 필요하지 않습니다.
 - Maven의 기존 `_remote.repositories` 기록은 보존하고, 이번에 복사한 아티팩트에만 로컬 설치 기록을 추가합니다. 파일 복사나 기록 저장에 실패하면 설치 스크립트도 오류로 종료합니다. PowerShell 스크립트는 Windows PowerShell 5에서도 한글을 읽을 수 있도록 UTF-8 BOM으로 저장합니다.
 - `MAVEN_REPO_LOCAL`을 상대 경로로 지정하면 설치 스크립트가 있는 폴더를 기준으로 사용합니다. 사용자 Maven 설정에서 별도의 `localRepository`를 사용하는 경우 이 변수에도 같은 위치를 지정합니다.
+- Maven은 버전 충돌로 JAR 선택에서 제외된 버전도 의존성 분석에 필요한 POM을 별도 다운로드 항목으로 포함합니다. 예를 들어 Flink 1.20.5에서 Kryo 2.24.0을 선택해도 `chill-java:0.7.6`이 참조하는 `kryo:2.21`의 POM과 필요한 하위·부모·BOM POM을 함께 전달합니다. 다운로드 목록에는 이 POM-only 항목도 포함되므로 표시 개수는 JAR 개수와 다를 수 있습니다. 제외된 버전의 JAR를 추가로 선택하는 동작은 아닙니다.
 - 출력 형식은 `zip` 또는 `tar.gz`만 지원합니다. `--format rar`처럼 지원하지 않는 값을 지정하면 허용 형식을 안내하고 종료 코드 `1`을 반환합니다. 입력 파일 읽기·의존성 해결·다운로드·출력 디렉터리 생성 전에 검사하며, 다른 형식의 압축물이나 설치 스크립트를 만들지 않습니다.
 - OS 패키지(`yum`, `apt`, `apk`)는 이 명령이 아니라 `os` 네임스페이스를 사용해야 합니다.
 

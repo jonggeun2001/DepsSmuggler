@@ -57,6 +57,12 @@ jobs:
           DEPS_SMUGGLER_NATIVE_APK: '1'
         run: bash scripts/verify-worktree.sh src/core/downloaders/apk-native-consumer.integration.test.ts
 
+      - name: Test generated Maven bundle with native Maven
+        if: runner.os == 'Linux'
+        env:
+          DEPS_SMUGGLER_NATIVE_MAVEN: '1'
+        run: bash scripts/verify-worktree.sh src/core/packager/maven-native-consumer.integration.test.ts
+
       - name: Build project
         run: npm run build
 

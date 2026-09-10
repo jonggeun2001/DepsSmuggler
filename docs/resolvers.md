@@ -602,6 +602,14 @@ Parent/BOM 탐색과 다운로드 목록으로의 그래프 평탄화는 반복 
 
 예를 들어 `org.apache.flink:flink-streaming-java:1.20.5`에서 `flink-core → flink-core-api → flink-metrics-core`를 선택하면, 마지막 패키지의 부모인 `org.apache.flink:flink-metrics:1.20.5`도 POM 다운로드 항목에 포함합니다. 이 부모는 실행 코드가 있는 JAR 의존성으로 바뀌지 않으며 기존 compile/runtime 의존성 다운로드도 유지됩니다.
 
+### 충돌로 제외된 버전의 descriptor POM
+
+선택 그래프를 완성한 뒤, 버전 충돌로 제외된 경로를 별도 큐에서 탐색합니다. 해당 버전과 하위 의존성의 POM을 읽고 필요한 부모/import BOM을 처리하며, 선택되지 않은 좌표는 `metadata.type: 'pom'`으로 `flatList`에 추가합니다. 이 수집은 JAR 승자나 `root` 실행 그래프를 변경하지 않습니다. 같은 GAV의 POM은 한 번만 전달하고, 이미 선택된 아티팩트가 전달하는 부속 POM을 중복 항목으로 추가하지 않습니다.
+
+수집에는 기존 scope·optional·exclusion·최대 깊이를 적용합니다. 같은 POM이 다른 제외 조건이나 더 얕은 경로로 다시 나타나면 그 경로에서 필요한 하위 POM을 누락하지 않아야 합니다. 사용하지 않는 dependencyManagement 항목을 전체 다운로드 대상으로 펼치지 않습니다. 반복 큐와 방문 기록으로 순환·중복을 제어합니다. 제외 조건을 통과한 descriptor 탐색 컨텍스트가 10,000개를 넘으면 부분 목록을 성공으로 반환하지 않고 오류를 반환합니다. 필수 descriptor 또는 그 부모/BOM을 읽지 못하면 해당 루트의 해결을 실패로 보고합니다. 내부 프리페치 성공만으로 반출 파일이 준비됐다고 간주하지 않습니다.
+
+Flink 1.20.5의 `flink-core → kryo:2.24.0` 경로가 선택되어도 `flink-java → chill-java:0.7.6 → kryo:2.21` 경로의 POM은 반출합니다. Maven이 최종 JAR 버전을 정하기 전에 다른 버전의 descriptor를 읽을 수 있기 때문입니다.
+
 ### Packaging 타입 처리
 
 명시한 artifact type을 우선하고, type이 없을 때만 원격 POM의 `<packaging>` 태그를 사용합니다. 루트 요청은 `MavenResolverOptions.artifactType`으로 전달되며 전이 의존성은 `<dependency><type>`을 사용합니다. packaging으로 type을 보완할 때는 metadata의 파일명도 함께 갱신합니다.

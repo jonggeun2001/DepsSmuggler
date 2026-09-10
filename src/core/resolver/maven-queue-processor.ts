@@ -31,6 +31,14 @@ export interface MavenResolutionContext {
   nodeMap: Map<string, DependencyNode>;
   /** BFS 처리 큐 */
   queue: DependencyProcessingContext[];
+  /** 충돌로 선택되지 않은 descriptor를 수집하는 별도 큐 */
+  descriptorQueue: DependencyProcessingContext[];
+  /** descriptor 컨텍스트별 가장 얕은 처리 깊이 */
+  descriptorContextDepths: Map<string, number>;
+  /** 최종 저장소에 필요한 descriptor 좌표 (classifier 제외 G:A:V) */
+  descriptorCoordinates: Map<string, MavenCoordinate>;
+  /** descriptor 탐색 작업 수 */
+  descriptorWorkCount: number;
   /** 최대 탐색 깊이 */
   maxDepth: number;
   /** optional 의존성 포함 여부 */
@@ -84,6 +92,8 @@ export interface QueueProcessorDependencies {
  * BFS 방식의 의존성 탐색 큐 처리를 담당
  */
 export class MavenQueueProcessor {
+  private static readonly MAX_DESCRIPTOR_CONTEXTS = 10000;
+
   constructor(private deps: QueueProcessorDependencies) {}
 
   /**
@@ -93,6 +103,17 @@ export class MavenQueueProcessor {
     while (ctx.queue.length > 0) {
       const item = ctx.queue.shift()!;
       await this.processQueueItem(item, ctx);
+    }
+  }
+
+  /**
+   * 일반 dependency graph가 확정된 뒤, conflict loser의 POM과 하위
+   * descriptor만 수집한다. 이 단계에서는 skipper 상태를 건드리지 않는다.
+   */
+  async processDescriptorQueue(ctx: MavenResolutionContext): Promise<void> {
+    while (ctx.descriptorQueue.length > 0) {
+      const item = ctx.descriptorQueue.shift()!;
+      await this.processDescriptorItem(item, ctx);
     }
   }
 
@@ -124,6 +145,7 @@ export class MavenQueueProcessor {
           coordinate.artifactId
         );
         this.deps.recordConflict(coordinate, winnerVersion || '', parentPath);
+        this.enqueueDescriptor({ ...item }, ctx);
       }
       return;
     }
@@ -302,6 +324,104 @@ export class MavenQueueProcessor {
     // POM 병렬 프리페치
     if (childCoordinates.length > 0) {
       this.deps.prefetchPomsParallel(childCoordinates);
+    }
+  }
+
+  private descriptorCoordinateKey(coordinate: MavenCoordinate): string {
+    return `${coordinate.groupId}:${coordinate.artifactId}:${coordinate.version}`;
+  }
+
+  private descriptorContextKey(item: DependencyProcessingContext): string {
+    const exclusions = [...item.exclusions].sort().join(',');
+    return `${this.descriptorCoordinateKey(item.coordinate)}|${item.scope}|${exclusions}`;
+  }
+
+  private descriptorPathContains(
+    coordinate: MavenCoordinate,
+    parentPath: string[],
+  ): boolean {
+    const prefix = this.descriptorCoordinateKey(coordinate);
+    return parentPath.some((path) => path === prefix || path.startsWith(`${prefix}:`));
+  }
+
+  private enqueueDescriptor(
+    item: DependencyProcessingContext,
+    ctx: MavenResolutionContext,
+  ): void {
+    if (item.depth > ctx.maxDepth) return;
+    if (matchesExclusion(item.coordinate, item.exclusions)) return;
+
+    if (this.descriptorPathContains(item.coordinate, item.parentPath)) return;
+
+    const contextKey = this.descriptorContextKey(item);
+    const previousDepth = ctx.descriptorContextDepths.get(contextKey);
+    if (previousDepth !== undefined && previousDepth <= item.depth) return;
+
+    ctx.descriptorWorkCount += 1;
+    if (ctx.descriptorWorkCount > MavenQueueProcessor.MAX_DESCRIPTOR_CONTEXTS) {
+      throw new Error('Maven descriptor 의존성 해결 작업 수가 제한을 초과했습니다.');
+    }
+
+    ctx.descriptorContextDepths.set(contextKey, item.depth);
+    ctx.descriptorQueue.push(item);
+  }
+
+  private async processDescriptorItem(
+    item: DependencyProcessingContext,
+    ctx: MavenResolutionContext,
+  ): Promise<void> {
+    const { coordinate, depth, parentPath, scope, exclusions } = item;
+    if (depth > ctx.maxDepth || matchesExclusion(coordinate, exclusions)) return;
+
+    const descriptorKey = this.descriptorCoordinateKey(coordinate);
+    ctx.descriptorCoordinates.set(descriptorKey, {
+      groupId: coordinate.groupId,
+      artifactId: coordinate.artifactId,
+      version: coordinate.version,
+      type: 'pom',
+    });
+
+    let pom: PomProject;
+    try {
+      pom = await this.deps.fetchPomWithCache(coordinate);
+    } catch (error) {
+      throw new Error(
+        `필수 descriptor POM 조회 실패: ${coordinateToString(coordinate)} - ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+
+    const { properties, dependencyManagement } = await this.deps.bomProcessor.processModel(
+      pom,
+      coordinate,
+      ctx.dependencyManagement,
+    );
+    const currentPath = [...parentPath, coordinateToString(coordinate)];
+    const dependencies = extractDependencies(pom, coordinate);
+    let childSequence = 0;
+
+    for (const dep of dependencies) {
+      if (!this.deps.shouldIncludeDependency(dep, ctx.includeOptional)) continue;
+
+      const depCoordinate = resolveDependencyCoordinate(dep, properties, dependencyManagement);
+      if (!depCoordinate) continue;
+
+      const depOriginalScope = (dep.scope as DependencyScope) || 'compile';
+      const transitedScope = transitScope(scope, depOriginalScope);
+      if (!transitedScope) continue;
+
+      childSequence += 1;
+      if (this.descriptorPathContains(depCoordinate, currentPath)) continue;
+
+      this.enqueueDescriptor({
+        coordinate: depCoordinate,
+        parentPath: currentPath,
+        depth: depth + 1,
+        nodeCoordinate: { depth: depth + 1, sequence: childSequence },
+        scope: transitedScope,
+        originalScope: depOriginalScope,
+        exclusions: new Set([...exclusions, ...extractExclusions(dep)]),
+        managedVersion: !!dependencyManagement.get(coordinateToKey(depCoordinate)),
+      }, ctx);
     }
   }
 }
