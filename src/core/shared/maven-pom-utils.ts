@@ -10,6 +10,7 @@ import {
   PomDependency,
   MavenCoordinate,
   coordinateToString,
+  dependencyManagementKey,
   exclusionKey,
 } from './maven-types';
 import logger from '../../utils/logger';
@@ -149,16 +150,20 @@ export function resolveDependencyCoordinate(
   properties?: Record<string, string>,
   dependencyManagement?: Map<string, string>
 ): MavenCoordinate | null {
+  const groupId = resolveProperty(dep.groupId, properties);
+  const artifactId = resolveProperty(dep.artifactId, properties);
+  const type = dep.type ? resolveProperty(dep.type, properties) : undefined;
+  const classifier = dep.classifier ? resolveProperty(dep.classifier, properties) : undefined;
   let version = resolveProperty(dep.version || '', properties);
 
   // dependencyManagement에서 버전 찾기
   if (!version && dependencyManagement) {
-    const managedKey = `${dep.groupId}:${dep.artifactId}`;
+    const managedKey = dependencyManagementKey({ groupId, artifactId, type, classifier });
     version = dependencyManagement.get(managedKey) || '';
   }
 
   if (!version) {
-    logger.debug('버전 정보 없음', { groupId: dep.groupId, artifactId: dep.artifactId });
+    logger.debug('버전 정보 없음', { groupId, artifactId });
     return null;
   }
 
@@ -166,10 +171,10 @@ export function resolveDependencyCoordinate(
   version = resolveVersionRange(version);
 
   return {
-    groupId: dep.groupId,
-    artifactId: dep.artifactId,
+    groupId,
+    artifactId,
     version,
-    classifier: dep.classifier,
-    type: dep.type,
+    classifier,
+    type,
   };
 }

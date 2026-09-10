@@ -539,7 +539,15 @@ maven-queue-processor.ts
     └── addChildToParent() - 부모에 자식 노드 추가
 ```
 
-`QueueProcessorDependencies`는 기존 `PomProject`와 `PomDependency` 타입을 사용합니다. POM 조회·부모 POM 처리·의존성 필터 경계에서 필드 검사가 이어지며, 큐 순서와 scope·충돌 처리 동작은 유지됩니다. `maven-resolver.test.ts`와 `maven-pom-resolution.test.ts`가 관련 동작을 검증합니다.
+`QueueProcessorDependencies`는 기존 `PomProject`와 `PomDependency` 타입을 사용합니다. POM 조회·부모 POM 처리·의존성 필터 경계에서 필드 검사가 이어지며, 큐는 버전 충돌 때문에 탐색을 생략하지 않습니다. `maven-resolver.test.ts`와 `maven-pom-resolution.test.ts`가 관련 동작을 검증합니다.
+
+### Maven 반출 계약
+
+Maven 반출 목록은 실제 의존성에서 발견한 모든 버전의 JAR(또는 명시한 아티팩트), 부속 POM 및 전이 의존성을 포함합니다. 부모 POM의 일반 `<dependencies>`도 자식에 상속합니다. 각 모델 자체의 의존성 버전과 그 의존성에 적용되는 루트 관리 버전을 함께 보존하며, 사용하지 않는 `dependencyManagement`의 라이브러리를 모두 다운로드하지는 않습니다.
+
+하나의 BFS로 모든 버전을 탐색하며 `conflicts`는 발견된 여러 버전을 알리는 정보입니다. `resolvedVersion`을 지정하거나 반출할 버전을 하나로 줄이지 않습니다. 최종 빌드에 사용할 버전은 오프라인 Maven이 원본 POM으로 결정합니다.
+
+Maven 관리 버전은 G:A:type:classifier가 같은 의존성에만 적용합니다. 일반 JAR의 관리 버전으로 별도 classifier의 배포되지 않은 파일을 만들어 요청하지 않습니다.
 
 ### 클래스 구조
 
@@ -580,13 +588,13 @@ maven-queue-processor.ts
 
 ### BOM/Parent POM 지원
 
-루트와 선택된 전이 의존성의 POM을 해석하는 데 필요한 Parent POM 및 import BOM도 다운로드 결과의 `flatList`에 포함합니다. 부모의 부모, BOM의 부모, 중첩 import BOM을 따라가며 `groupId:artifactId:version` 전체 좌표로 중복을 제거하고 `metadata.type: 'pom'`을 지정합니다. 같은 부모가 여러 경로에서 필요하면 한 번만 포함하고, 같은 GA라도 버전이 다르면 각각 유지합니다.
+루트와 BFS에서 발견된 각 전이 버전의 POM을 해석하는 데 필요한 Parent POM 및 import BOM도 다운로드 결과의 `flatList`에 포함합니다. 부모의 일반 dependencies, 부모의 부모, BOM의 부모, 중첩 import BOM을 따라가며 `groupId:artifactId:version` 전체 좌표로 중복을 제거하고 필요한 아티팩트 type을 보존합니다. 같은 부모가 여러 경로에서 필요하면 한 번만 포함하고, 같은 GA라도 버전이 다르면 각각 유지합니다.
 
-`root`의 실행 의존성 그래프와 `flatList`의 다운로드 대상 목록은 같지 않을 수 있습니다. 모델 POM은 `flatList`에만 추가되므로 다운로드 UI는 `root.dependencies`만 다시 펼쳐 전체 파일 목록을 만들지 않습니다. renderer는 루트별 `flatList`로 다운로드 그룹을 연결하고, 장바구니 미리보기는 그래프 밖의 POM을 별도 목록으로 보여줍니다. 이 표시를 위해 모델 POM을 실행 의존성 간선으로 추가하지 않습니다.
+`root`의 수집 의존성 그래프와 `flatList`의 다운로드 대상 목록은 같지 않을 수 있습니다. 모델 POM은 `flatList`에만 추가되므로 다운로드 UI는 `root.dependencies`만 다시 펼쳐 전체 파일 목록을 만들지 않습니다. renderer는 루트별 `flatList`로 다운로드 그룹을 연결하고, 장바구니 미리보기는 그래프 밖의 POM을 별도 목록으로 보여줍니다. 이 표시를 위해 모델 POM을 실행 의존성 간선으로 추가하지 않습니다.
 
-실제 라이브러리 의존성은 `<dependencies>`와 기존 scope·optional·최대 깊이 설정에 따라 선택합니다. `<dependencyManagement>`는 버전 관리 정보이며, 그 안의 사용하지 않는 라이브러리를 전부 펼치지 않습니다. `type=pom`, `scope=import`인 BOM 자체와 모델 해석에 필요한 부모 POM을 모으는 과정은 이 라이브러리 선택과 별개입니다. `dependencies`가 없는 BOM 루트도 자신의 POM과 필요한 모델 POM만 포함합니다.
+실제 라이브러리 의존성은 `<dependencies>`와 기존 scope·optional·최대 깊이 설정에 따라 선택합니다. Parent POM의 일반 `<dependencies>`는 모델 상속에 따라 자식에 적용합니다. `<dependencyManagement>`는 버전 관리 정보이며, 그 안의 사용하지 않는 라이브러리를 전부 펼치지 않습니다. `type=pom`, `scope=import`인 BOM 자체와 모델 해석에 필요한 부모 POM을 모으는 과정은 이 라이브러리 선택과 별개입니다. `dependencies`가 없는 BOM 루트도 자신의 POM과 필요한 모델 POM만 포함합니다.
 
-전이 패키지의 부모/BOM 관리 맵은 루트의 관리 값을 기준으로 패키지별로 분리합니다. 버전이 생략된 의존성을 해결할 때 루트의 관리 버전은 유지하고, 한 형제 패키지의 미사용 관리 항목이 다른 형제의 부모/BOM 버전 선택을 오염시키지 않습니다. 필요한 모델 POM의 수집과 중복 제거는 요청 전체에서 공유합니다.
+전이 패키지의 부모/BOM 관리 맵은 모델별로 분리합니다. 한 형제의 미사용 관리 항목이 다른 형제의 버전을 바꾸지 않으며, 필요한 모델 POM의 수집과 조회 캐시는 요청 전체에서 공유합니다.
 
 ```typescript
 // Parent POM 예시 (dependencies 없음)
@@ -602,13 +610,13 @@ Parent/BOM 탐색과 다운로드 목록으로의 그래프 평탄화는 반복 
 
 예를 들어 `org.apache.flink:flink-streaming-java:1.20.5`에서 `flink-core → flink-core-api → flink-metrics-core`를 선택하면, 마지막 패키지의 부모인 `org.apache.flink:flink-metrics:1.20.5`도 POM 다운로드 항목에 포함합니다. 이 부모는 실행 코드가 있는 JAR 의존성으로 바뀌지 않으며 기존 compile/runtime 의존성 다운로드도 유지됩니다.
 
-### 충돌로 제외된 버전의 descriptor POM
+### 여러 버전과 전이 의존성 반입
 
-선택 그래프를 완성한 뒤, 버전 충돌로 제외된 경로를 별도 큐에서 탐색합니다. 해당 버전과 하위 의존성의 POM을 읽고 필요한 부모/import BOM을 처리하며, 선택되지 않은 좌표는 `metadata.type: 'pom'`으로 `flatList`에 추가합니다. 이 수집은 JAR 승자나 `root` 실행 그래프를 변경하지 않습니다. 같은 GAV의 POM은 한 번만 전달하고, 이미 선택된 아티팩트가 전달하는 부속 POM을 중복 항목으로 추가하지 않습니다.
+Flink 1.20.5의 Kryo 2.24.0 경로와 `chill-java:0.7.6 → kryo:2.21` 경로를 모두 탐색합니다. 두 버전의 JAR·POM과 하위 의존성, 필요한 부모/import BOM POM을 `flatList`에 포함합니다. Kafka connector 3.4.0-1.20은 부모의 일반 의존성을 통해 Jackson 2.15.2를 상속하므로, 별도로 선택한 Jackson 2.15.3과 함께 반입할 수 있습니다.
 
-수집에는 기존 scope·optional·exclusion·최대 깊이를 적용합니다. 같은 POM이 다른 제외 조건이나 더 얕은 경로로 다시 나타나면 그 경로에서 필요한 하위 POM을 누락하지 않아야 합니다. 사용하지 않는 dependencyManagement 항목을 전체 다운로드 대상으로 펼치지 않습니다. 반복 큐와 방문 기록으로 순환·중복을 제어합니다. 제외 조건을 통과한 descriptor 탐색 컨텍스트가 10,000개를 넘으면 부분 목록을 성공으로 반환하지 않고 오류를 반환합니다. 필수 descriptor 또는 그 부모/BOM을 읽지 못하면 해당 루트의 해결을 실패로 보고합니다. 내부 프리페치 성공만으로 반출 파일이 준비됐다고 간주하지 않습니다.
+아티팩트 노드는 GAV·type·classifier로 구분합니다. 탐색은 scope·exclusion 조건과 가장 얕은 방문 깊이를 기록하며, 더 열린 제외 조건이나 더 얕은 경로에서는 필요한 자손을 다시 수집합니다. 기존 scope·optional·최대 깊이 설정을 적용합니다. 의존성 엣지에 선언한 exclusions는 해당 아티팩트의 자손부터 적용하므로 `*:*`도 선택한 JAR 자체를 제거하지 않습니다.
 
-Flink 1.20.5의 `flink-core → kryo:2.24.0` 경로가 선택되어도 `flink-java → chill-java:0.7.6 → kryo:2.21` 경로의 POM은 반출합니다. Maven이 최종 JAR 버전을 정하기 전에 다른 버전의 descriptor를 읽을 수 있기 때문입니다.
+경로상의 순환은 종료하고, 공유 노드에 간선을 추가할 때도 기존 자손에서 부모에 도달하는지 반복 탐색해 순환 간선만 생략합니다. 이미 수집한 아티팩트와 다른 경로의 자손은 유지합니다. 의존성 탐색 컨텍스트가 10,000개를 넘으면 부분 목록을 성공으로 반환하지 않습니다. 필수 POM 또는 부모/BOM을 읽지 못한 경우에도 해결 실패를 보고합니다. 내부 프리페치 성공만으로 반출 파일이 준비됐다고 간주하지 않습니다.
 
 ### Packaging 타입 처리
 

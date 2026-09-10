@@ -219,6 +219,23 @@ export function coordinateToKey(coord: MavenCoordinate): string {
 }
 
 /**
+ * dependencyManagement identity. Preserve the public G:A key for ordinary
+ * JAR dependencies, while separating classifiers and non-JAR types.
+ */
+export function dependencyManagementKey(value: {
+  groupId: string;
+  artifactId: string;
+  type?: string;
+  classifier?: string;
+}): string {
+  const type = value.type || 'jar';
+  if (type === 'jar' && !value.classifier) {
+    return `${value.groupId}:${value.artifactId}`;
+  }
+  return `${value.groupId}:${value.artifactId}:${type}:${value.classifier || ''}`;
+}
+
+/**
  * 문자열을 Maven 좌표로 파싱
  */
 export function parseCoordinate(str: string): MavenCoordinate | null {

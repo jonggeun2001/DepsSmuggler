@@ -39,13 +39,21 @@ function fixturePoms(): Map<string, string> {
   const poms = new Map<string, string>();
   const put = (g: string, a: string, v: string, body = '') =>
     poms.set(`/${coordinatePath(g, a, v)}/${a}-${v}.pom`, pom(g, a, v, body));
-  put('fixture', 'fixture-parent', '1.0', '<packaging>pom</packaging>');
+  put(
+    'fixture',
+    'fixture-parent',
+    '1.0',
+    '<packaging>pom</packaging><dependencies><dependency><groupId>fixture</groupId><artifactId>inherited-lib</artifactId><version>1.0</version></dependency><dependency><groupId>fixture</groupId><artifactId>managed-child</artifactId></dependency></dependencies><dependencyManagement><dependencies><dependency><groupId>fixture</groupId><artifactId>fixture-bom</artifactId><version>2.15.2</version><type>pom</type><scope>import</scope></dependency></dependencies></dependencyManagement>'
+  );
   put(
     'fixture',
     'fixture-bom',
-    '1.0',
-    '<packaging>pom</packaging><dependencyManagement><dependencies><dependency><groupId>fixture</groupId><artifactId>bom-child</artifactId><version>1.0</version></dependency></dependencies></dependencyManagement>'
+    '2.15.2',
+    '<packaging>pom</packaging><dependencyManagement><dependencies><dependency><groupId>fixture</groupId><artifactId>managed-child</artifactId><version>2.15.2</version></dependency></dependencies></dependencyManagement>'
   );
+  put('fixture', 'inherited-lib', '1.0');
+  put('fixture', 'managed-child', '2.15.2');
+  put('fixture', 'managed-child', '2.15.3');
   put('fixture', 'lost-child', '1.0');
   put('fixture', 'lost-parent', '1.0', '<packaging>pom</packaging>');
   put('fixture', 'lost-bom', '1.0', '<packaging>pom</packaging>');
@@ -60,19 +68,19 @@ function fixturePoms(): Map<string, string> {
     'fixture',
     'path-a',
     '1.0',
-    '<dependencies><dependency><groupId>fixture</groupId><artifactId>conflict</artifactId><version>2.21</version></dependency></dependencies>'
+    '<parent><groupId>fixture</groupId><artifactId>fixture-parent</artifactId><version>1.0</version></parent><dependencies><dependency><groupId>fixture</groupId><artifactId>conflict</artifactId><version>2.21</version></dependency></dependencies>'
   );
   put(
     'fixture',
     'path-b',
     '1.0',
-    '<dependencies><dependency><groupId>fixture</groupId><artifactId>conflict</artifactId><version>2.24</version></dependency></dependencies>'
+    '<dependencies><dependency><groupId>fixture</groupId><artifactId>conflict</artifactId><version>2.24</version></dependency><dependency><groupId>fixture</groupId><artifactId>managed-child</artifactId><version>2.15.3</version></dependency></dependencies>'
   );
   put(
     'fixture',
     'app',
     '1.0.0',
-    '<parent><groupId>fixture</groupId><artifactId>fixture-parent</artifactId><version>1.0</version></parent><dependencyManagement><dependencies><dependency><groupId>fixture</groupId><artifactId>fixture-bom</artifactId><version>1.0</version><type>pom</type><scope>import</scope></dependency></dependencies></dependencyManagement><dependencies><dependency><groupId>fixture</groupId><artifactId>path-b</artifactId><version>1.0</version></dependency><dependency><groupId>fixture</groupId><artifactId>path-a</artifactId><version>1.0</version></dependency></dependencies>'
+    '<parent><groupId>fixture</groupId><artifactId>fixture-parent</artifactId><version>1.0</version></parent><dependencies><dependency><groupId>fixture</groupId><artifactId>path-b</artifactId><version>1.0</version></dependency><dependency><groupId>fixture</groupId><artifactId>path-a</artifactId><version>1.0</version></dependency><dependency><groupId>fixture</groupId><artifactId>managed-child</artifactId><version>2.15.3</version></dependency></dependencies>'
   );
   return poms;
 }
@@ -150,7 +158,7 @@ function buildProjectPom(
   return `<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>${groupId}</groupId><artifactId>${artifactId}</artifactId><version>${version}</version><properties><maven.compiler.release>8</maven.compiler.release><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties><build><plugins><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-resources-plugin</artifactId><version>3.3.1</version></plugin><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.11.0</version></plugin><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.2.5</version></plugin><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId><version>3.3.0</version></plugin></plugins></build>${dependency}</project>`;
 }
 
-describe('Maven conflict descriptor delivery and native consumer', () => {
+describe('Maven all-version delivery and native consumer', () => {
   const temporaryRoots: string[] = [];
   let server: http.Server | undefined;
 
@@ -160,7 +168,7 @@ describe('Maven conflict descriptor delivery and native consumer', () => {
     await Promise.all(temporaryRoots.splice(0).map((root) => fs.remove(root)));
   });
 
-  it('preserves conflict descriptors through archive and installer, with opt-in offline Maven', async () => {
+  it('preserves all version artifacts through archive and installer, with opt-in offline Maven', async () => {
     if (nativeEnabled) await requireMaven();
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-maven-native-'));
     temporaryRoots.push(root);
@@ -204,10 +212,13 @@ describe('Maven conflict descriptor delivery and native consumer', () => {
     expect(resolvedKeys).toContain('fixture:conflict:2.21');
     expect(resolvedKeys).toContain('fixture:lost-parent:1.0');
     expect(resolvedKeys).toContain('fixture:lost-child:1.0');
+    expect(resolvedKeys).toContain('fixture:inherited-lib:1.0');
+    expect(resolvedKeys).toContain('fixture:managed-child:2.15.2');
+    expect(resolvedKeys).toContain('fixture:managed-child:2.15.3');
     expect(
       resolved.flatList.find((pkg) => packageCoordinate(pkg) === 'fixture:conflict:2.21')?.metadata
         ?.type
-    ).toBe('pom');
+    ).not.toBe('pom');
 
     const deliveryRoot = path.join(root, 'delivery');
     const downloadRoot = path.join(deliveryRoot, 'packages');
@@ -231,12 +242,15 @@ describe('Maven conflict descriptor delivery and native consumer', () => {
     await tar.x({ file: archivePath, cwd: bundleRoot });
     const requiredPoms = [
       '/fixture/fixture-parent/1.0/fixture-parent-1.0.pom',
-      '/fixture/fixture-bom/1.0/fixture-bom-1.0.pom',
       '/fixture/conflict/2.21/conflict-2.21.pom',
       '/fixture/conflict/2.24/conflict-2.24.pom',
       '/fixture/lost-parent/1.0/lost-parent-1.0.pom',
       '/fixture/lost-bom/1.0/lost-bom-1.0.pom',
       '/fixture/lost-child/1.0/lost-child-1.0.pom',
+      '/fixture/fixture-bom/2.15.2/fixture-bom-2.15.2.pom',
+      '/fixture/inherited-lib/1.0/inherited-lib-1.0.pom',
+      '/fixture/managed-child/2.15.2/managed-child-2.15.2.pom',
+      '/fixture/managed-child/2.15.3/managed-child-2.15.3.pom',
     ];
     for (const relativePom of requiredPoms) {
       await expect(fs.readFile(path.join(bundleRoot, 'packages', relativePom))).resolves.toEqual(
@@ -245,7 +259,7 @@ describe('Maven conflict descriptor delivery and native consumer', () => {
     }
     expect(
       requests.some((request) => request.includes('/fixture/conflict/2.21/conflict-2.21.jar'))
-    ).toBe(false);
+    ).toBe(true);
     expect(
       requests.some((request) => request.includes('/fixture/conflict/2.24/conflict-2.24.jar'))
     ).toBe(true);
@@ -253,18 +267,40 @@ describe('Maven conflict descriptor delivery and native consumer', () => {
       downloadedFiles.some((file) =>
         file.split(path.sep).join('/').endsWith('/fixture/conflict/2.21/conflict-2.21.jar')
       )
-    ).toBe(false);
+    ).toBe(true);
     expect(
       downloadedFiles.some((file) =>
         file.split(path.sep).join('/').endsWith('/fixture/conflict/2.24/conflict-2.24.jar')
       )
     ).toBe(true);
+    for (const relativeJar of [
+      '/fixture/conflict/2.21/conflict-2.21.jar',
+      '/fixture/conflict/2.24/conflict-2.24.jar',
+      '/fixture/managed-child/2.15.2/managed-child-2.15.2.jar',
+      '/fixture/managed-child/2.15.3/managed-child-2.15.3.jar',
+      '/fixture/inherited-lib/1.0/inherited-lib-1.0.jar',
+    ]) {
+      expect(
+        downloadedFiles.some((file) => file.split(path.sep).join('/').endsWith(relativeJar))
+      ).toBe(true);
+    }
     await expect(
       fs.pathExists(path.join(bundleRoot, 'packages', 'fixture/conflict/2.24/conflict-2.24.jar'))
     ).resolves.toBe(true);
     await expect(
       fs.pathExists(path.join(bundleRoot, 'packages', 'fixture/conflict/2.21/conflict-2.21.jar'))
-    ).resolves.toBe(false);
+    ).resolves.toBe(true);
+    for (const relativeJar of [
+      'fixture/conflict/2.21/conflict-2.21.jar',
+      'fixture/conflict/2.24/conflict-2.24.jar',
+      'fixture/managed-child/2.15.2/managed-child-2.15.2.jar',
+      'fixture/managed-child/2.15.3/managed-child-2.15.3.jar',
+      'fixture/inherited-lib/1.0/inherited-lib-1.0.jar',
+    ]) {
+      await expect(fs.pathExists(path.join(bundleRoot, 'packages', relativeJar))).resolves.toBe(
+        true
+      );
+    }
 
     if (process.platform === 'win32') {
       console.log(
@@ -366,9 +402,65 @@ describe('Maven conflict descriptor delivery and native consumer', () => {
       true
     );
 
+    for (const [name, dependencies] of [
+      ['consumer-path-a-first', ['path-a', 'path-b']],
+      ['consumer-path-b-first', ['path-b', 'path-a']],
+    ] as const) {
+      const versionConsumer = path.join(root, name);
+      await fs.ensureDir(path.join(versionConsumer, 'src', 'main', 'java', 'consumer'));
+      await fs.writeFile(
+        path.join(versionConsumer, 'src', 'main', 'java', 'consumer', 'Main.java'),
+        'package consumer; public final class Main {}\n'
+      );
+      const dependencyXml = dependencies
+        .map(
+          (artifactId) =>
+            `<dependency><groupId>fixture</groupId><artifactId>${artifactId}</artifactId><version>1.0</version></dependency>`
+        )
+        .join('');
+      await fs.writeFile(
+        path.join(versionConsumer, 'pom.xml'),
+        buildProjectPom('consumer', name, '1', `<dependencies>${dependencyXml}</dependencies>`)
+      );
+      const versionResult = await run(
+        'mvn',
+        [
+          '-B',
+          '-o',
+          `-Dmaven.repo.local=${isolatedRepo}`,
+          '-f',
+          path.join(versionConsumer, 'pom.xml'),
+          'package',
+          '-DskipTests',
+        ],
+        versionConsumer,
+        { ...process.env }
+      );
+      expect(versionResult.code, `${versionResult.stdout}\n${versionResult.stderr}`).toBe(0);
+      expect(versionResult.stdout).toContain('BUILD SUCCESS');
+      await expect(
+        fs.pathExists(path.join(versionConsumer, 'target', `${name}-1.jar`))
+      ).resolves.toBe(true);
+    }
+
     const negativeRepo = path.join(root, 'negative-m2');
     await fs.copy(isolatedRepo, negativeRepo);
-    await fs.remove(path.join(negativeRepo, 'fixture', 'conflict', '2.21', 'conflict-2.21.pom'));
+    await fs.remove(path.join(negativeRepo, 'fixture', 'conflict', '2.21', 'conflict-2.21.jar'));
+    const negativeConsumer = path.join(root, 'negative-consumer');
+    await fs.ensureDir(path.join(negativeConsumer, 'src', 'main', 'java', 'consumer'));
+    await fs.writeFile(
+      path.join(negativeConsumer, 'src', 'main', 'java', 'consumer', 'Main.java'),
+      'package consumer; public final class Main {}\n'
+    );
+    await fs.writeFile(
+      path.join(negativeConsumer, 'pom.xml'),
+      buildProjectPom(
+        'consumer',
+        'negative-consumer',
+        '1',
+        '<dependencies><dependency><groupId>fixture</groupId><artifactId>path-a</artifactId><version>1.0</version></dependency><dependency><groupId>fixture</groupId><artifactId>path-b</artifactId><version>1.0</version></dependency></dependencies>'
+      )
+    );
     const negative = await run(
       'mvn',
       [
@@ -376,21 +468,20 @@ describe('Maven conflict descriptor delivery and native consumer', () => {
         '-o',
         `-Dmaven.repo.local=${negativeRepo}`,
         '-f',
-        path.join(consumer, 'pom.xml'),
+        path.join(negativeConsumer, 'pom.xml'),
         'package',
         '-DskipTests',
       ],
-      consumer,
+      negativeConsumer,
       { ...process.env }
     );
     console.log(
-      `native Maven missing-POM control (exit ${negative.code}):\n${negative.stdout}\n${negative.stderr}`
+      `native Maven missing-JAR control (exit ${negative.code}):\n${negative.stdout}\n${negative.stderr}`
     );
     expect(negative.signal).toBeNull();
     expect(negative.code).not.toBeNull();
-    expect(`${negative.stdout}\n${negative.stderr}`).toMatch(
-      /Could not find artifact fixture:conflict:pom:2\.21|POM.*2\.21.*missing/i
-    );
+    expect(negative.code).not.toBe(0);
+    expect(`${negative.stdout}\n${negative.stderr}`).toMatch(/fixture:conflict:jar:2\.21/);
     expect(
       requests.some((request) => request.includes('/fixture/conflict/2.21/conflict-2.21.pom'))
     ).toBe(true);

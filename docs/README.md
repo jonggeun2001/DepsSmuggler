@@ -52,7 +52,7 @@
 |------|----------------------|
 | [pip 의존성 해결](pip-dependency-resolution.md) | resolvelib·PEP 태그와 현재 BFS·파일 선택 |
 | [Conda 의존성 해결](conda-dependency-resolution.md) | SAT·MatchSpec과 현재 BFS·Python/noarch 선택 |
-| [Maven 의존성 해결](maven-dependency-resolution.md) | DF/BF·Skipper와 현재 POM·BOM·artifact 선택 |
+| [Maven 의존성 해결](maven-dependency-resolution.md) | DF/BF·Skipper 참고 분석과 현재 모든 버전·POM·BOM 반입 |
 | [npm 의존성 해결](npm-dependency-resolution.md) | Arborist·hoisting·peer·lockfile과 현재 resolver |
 
 ## 설계와 이행 기록

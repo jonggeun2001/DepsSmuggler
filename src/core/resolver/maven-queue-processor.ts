@@ -6,39 +6,30 @@
  */
 
 import { DependencyNode, DependencyScope } from '../../types';
-import logger from '../../utils/logger';
 import {
   MavenCoordinate,
   PomDependency,
   PomProject,
   DependencyProcessingContext,
   coordinateToString,
-  coordinateToKey,
+  dependencyManagementKey,
   matchesExclusion,
   transitScope,
 } from '../shared/maven-types';
-import {
-  extractDependencies,
-  extractExclusions,
-  resolveDependencyCoordinate,
-} from '../shared/maven-pom-utils';
+import { extractExclusions, resolveDependencyCoordinate } from '../shared/maven-pom-utils';
 
 /**
  * BFS 의존성 해결 컨텍스트
  */
 export interface MavenResolutionContext {
-  /** 노드 저장소 (G:A:V -> DependencyNode) */
+  /** 노드 저장소 (GAV/type/classifier -> DependencyNode) */
   nodeMap: Map<string, DependencyNode>;
   /** BFS 처리 큐 */
   queue: DependencyProcessingContext[];
-  /** 충돌로 선택되지 않은 descriptor를 수집하는 별도 큐 */
-  descriptorQueue: DependencyProcessingContext[];
-  /** descriptor 컨텍스트별 가장 얕은 처리 깊이 */
-  descriptorContextDepths: Map<string, number>;
-  /** 최종 저장소에 필요한 descriptor 좌표 (classifier 제외 G:A:V) */
-  descriptorCoordinates: Map<string, MavenCoordinate>;
-  /** descriptor 탐색 작업 수 */
-  descriptorWorkCount: number;
+  /** 아티팩트·scope·exclusion 컨텍스트별 가장 얕은 처리 깊이 */
+  contextDepths: Map<string, number>;
+  /** 의존성 탐색 작업 수 */
+  workCount: number;
   /** 최대 탐색 깊이 */
   maxDepth: number;
   /** optional 의존성 포함 여부 */
@@ -64,17 +55,14 @@ export interface QueueProcessorDependencies {
   /** 의존성 노드 생성 */
   createDependencyNode: (coordinate: MavenCoordinate, scope: DependencyScope) => DependencyNode;
   /** 충돌 기록 */
-  recordConflict: (coordinate: MavenCoordinate, winnerVersion: string, parentPath: string[]) => void;
+  recordConflict: (coordinate: MavenCoordinate, firstVersion: string, parentPath: string[]) => void;
   /** Skipper 관련 */
   skipper: {
-    skipResolution: (
-      coordinate: MavenCoordinate,
-      depth: number,
-      parentPath: string[]
-    ) => { skip: boolean; reason?: string; forceResolution?: boolean };
     recordResolved: (coordinate: MavenCoordinate) => void;
     getResolvedVersion: (groupId: string, artifactId: string) => string | undefined;
-    getCoordinateManager: () => { createCoordinate: (coordinate: MavenCoordinate, depth: number) => void };
+    getCoordinateManager: () => {
+      createCoordinate: (coordinate: MavenCoordinate, depth: number) => void;
+    };
   };
   /** BOM 프로세서 */
   bomProcessor: {
@@ -82,7 +70,11 @@ export interface QueueProcessorDependencies {
       pom: PomProject,
       coordinate: MavenCoordinate,
       rootManagement: Map<string, string>
-    ) => Promise<{ properties: Record<string, string>; dependencyManagement: Map<string, string> }>;
+    ) => Promise<{
+      properties: Record<string, string>;
+      dependencyManagement: Map<string, string>;
+      dependencies: PomDependency[];
+    }>;
   };
 }
 
@@ -92,7 +84,7 @@ export interface QueueProcessorDependencies {
  * BFS 방식의 의존성 탐색 큐 처리를 담당
  */
 export class MavenQueueProcessor {
-  private static readonly MAX_DESCRIPTOR_CONTEXTS = 10000;
+  private static readonly MAX_DEPENDENCY_CONTEXTS = 10000;
 
   constructor(private deps: QueueProcessorDependencies) {}
 
@@ -103,17 +95,6 @@ export class MavenQueueProcessor {
     while (ctx.queue.length > 0) {
       const item = ctx.queue.shift()!;
       await this.processQueueItem(item, ctx);
-    }
-  }
-
-  /**
-   * 일반 dependency graph가 확정된 뒤, conflict loser의 POM과 하위
-   * descriptor만 수집한다. 이 단계에서는 skipper 상태를 건드리지 않는다.
-   */
-  async processDescriptorQueue(ctx: MavenResolutionContext): Promise<void> {
-    while (ctx.descriptorQueue.length > 0) {
-      const item = ctx.descriptorQueue.shift()!;
-      await this.processDescriptorItem(item, ctx);
     }
   }
 
@@ -129,29 +110,19 @@ export class MavenQueueProcessor {
     // 최대 깊이 체크
     if (depth > ctx.maxDepth) return;
 
-    // Exclusion 체크
-    if (matchesExclusion(coordinate, exclusions)) {
-      logger.debug('의존성 제외됨 (exclusion)', { coordinate: coordinateToString(coordinate) });
-      return;
-    }
+    // 모든 버전을 보존한다. 경로상 순환과 동일 탐색 컨텍스트만 중복 제거한다.
+    const nodeKey = this.artifactKey(coordinate);
+    if (parentPath.includes(nodeKey)) return;
 
-    // Skipper로 건너뛰기 여부 결정
-    const skipResult = this.deps.skipper.skipResolution(coordinate, depth, parentPath);
-
-    if (skipResult.skip) {
-      if (skipResult.reason === 'version_conflict') {
-        const winnerVersion = this.deps.skipper.getResolvedVersion(
-          coordinate.groupId,
-          coordinate.artifactId
-        );
-        this.deps.recordConflict(coordinate, winnerVersion || '', parentPath);
-        this.enqueueDescriptor({ ...item }, ctx);
-      }
-      return;
+    const firstVersion = this.deps.skipper.getResolvedVersion(
+      coordinate.groupId,
+      coordinate.artifactId
+    );
+    if (firstVersion && firstVersion !== coordinate.version) {
+      this.deps.recordConflict(coordinate, firstVersion, parentPath);
     }
 
     // 노드 생성 또는 가져오기
-    const nodeKey = coordinateToString(coordinate);
     let node = ctx.nodeMap.get(nodeKey);
 
     if (!node) {
@@ -160,23 +131,36 @@ export class MavenQueueProcessor {
     }
 
     // 부모 노드에 자식 추가
-    this.addChildToParent(nodeKey, node, parentPath, ctx);
+    this.addChildToParent(node, parentPath, ctx);
 
-    // 강제 해결이면 자식 탐색 건너뛰기
-    if (skipResult.forceResolution) return;
+    const contextKey = JSON.stringify([nodeKey, scope, [...exclusions].sort()]);
+    const previousDepth = ctx.contextDepths.get(contextKey);
+    if (previousDepth !== undefined && previousDepth <= depth) return;
+    if (++ctx.workCount > MavenQueueProcessor.MAX_DEPENDENCY_CONTEXTS) {
+      throw new Error('Maven 의존성 해결 작업 수가 제한을 초과했습니다.');
+    }
+    ctx.contextDepths.set(contextKey, depth);
 
     // 해결됨으로 기록
     this.deps.skipper.recordResolved(coordinate);
 
     // 자식 의존성 처리
-    await this.enqueueChildDependencies(coordinate, node, parentPath, scope, exclusions, ctx);
+    await this.enqueueChildDependencies(
+      coordinate,
+      nodeKey,
+      node,
+      parentPath,
+      depth,
+      scope,
+      exclusions,
+      ctx
+    );
   }
 
   /**
    * 부모 노드에 자식 추가
    */
   private addChildToParent(
-    nodeKey: string,
     node: DependencyNode,
     parentPath: string[],
     ctx: MavenResolutionContext
@@ -186,17 +170,31 @@ export class MavenQueueProcessor {
 
     if (
       parentNode &&
-      !parentNode.dependencies.some(
-        (d) =>
-          coordinateToString({
-            groupId: d.package.metadata?.groupId as string,
-            artifactId: d.package.metadata?.artifactId as string,
-            version: d.package.version,
-          }) === nodeKey
-      )
+      !parentNode.dependencies.includes(node) &&
+      !this.wouldCreateCycle(parentNode, node)
     ) {
       parentNode.dependencies.push(node);
     }
+  }
+
+  /**
+   * Shared nodes can be reached through multiple paths. Check only the new
+   * edge, keeping the node's own dependency traversal intact for closure.
+   */
+  private wouldCreateCycle(parent: DependencyNode, child: DependencyNode): boolean {
+    if (parent === child) return true;
+    if (child.dependencies.length === 0) return false;
+
+    const pending: DependencyNode[] = [child];
+    const visited = new Set<DependencyNode>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (current === parent) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      pending.push(...current.dependencies);
+    }
+    return false;
   }
 
   /**
@@ -205,11 +203,9 @@ export class MavenQueueProcessor {
   async enqueueRootDependencies(
     rootCoordinate: MavenCoordinate,
     resolvedProperties: Record<string, string>,
+    rootDependencies: PomDependency[],
     ctx: MavenResolutionContext
   ): Promise<void> {
-    const rootPom = await this.deps.fetchPomWithCache(rootCoordinate);
-    const rootDependencies = extractDependencies(rootPom, rootCoordinate, true);
-
     // 루트 좌표 등록
     this.deps.skipper.getCoordinateManager().createCoordinate(rootCoordinate, 0);
     this.deps.skipper.recordResolved(rootCoordinate);
@@ -238,7 +234,7 @@ export class MavenQueueProcessor {
         scope: (dep.scope as DependencyScope) || 'compile',
         originalScope: (dep.scope as DependencyScope) || 'compile',
         exclusions: extractExclusions(dep),
-        managedVersion: !!ctx.dependencyManagement.get(coordinateToKey(depCoordinate)),
+        managedVersion: !!ctx.dependencyManagement.get(dependencyManagementKey(depCoordinate)),
       });
     }
 
@@ -253,8 +249,10 @@ export class MavenQueueProcessor {
    */
   private async enqueueChildDependencies(
     coordinate: MavenCoordinate,
+    nodeKey: string,
     node: DependencyNode,
     parentPath: string[],
+    depth: number,
     parentScope: DependencyScope,
     exclusions: Set<string>,
     ctx: MavenResolutionContext
@@ -271,20 +269,23 @@ export class MavenQueueProcessor {
 
     // dependency에 명시한 type을 우선하고, packaging으로 보완하면 파일명도 갱신한다.
     if (!coordinate.type && pom.packaging) {
-      coordinate.type = pom.packaging;
       node.package.metadata = {
         ...node.package.metadata,
-        ...this.deps.createDependencyNode(coordinate, node.scope || 'compile').package.metadata,
+        ...this.deps.createDependencyNode(
+          { ...coordinate, type: pom.packaging },
+          node.scope || 'compile'
+        ).package.metadata,
       };
     }
 
-    // 루트 관리 버전을 유지하면서 이 POM의 관리 버전을 형제에게 누출하지 않는다.
-    const { properties: childProperties, dependencyManagement: childManagement } =
-      await this.deps.bomProcessor.processModel(pom, coordinate, ctx.dependencyManagement);
+    // 각 POM 자체의 버전도 보존한다. 루트 관리 버전은 별도 후보로 추가한다.
+    const {
+      properties: childProperties,
+      dependencyManagement: childManagement,
+      dependencies,
+    } = await this.deps.bomProcessor.processModel(pom, coordinate, new Map());
 
     // 하위 의존성 처리
-    const dependencies = extractDependencies(pom, coordinate);
-    const nodeKey = coordinateToString(coordinate);
     const newPath = [...parentPath, nodeKey];
     const childCoordinates: MavenCoordinate[] = [];
     let childSequence = 0;
@@ -292,12 +293,26 @@ export class MavenQueueProcessor {
     for (const dep of dependencies) {
       if (!this.deps.shouldIncludeDependency(dep, ctx.includeOptional)) continue;
 
-      const depCoordinate = resolveDependencyCoordinate(
-        dep,
-        childProperties,
-        childManagement
-      );
-      if (!depCoordinate) continue;
+      // 현재 엣지의 exclusions는 다음 자손부터 적용한다.
+      const declared = resolveDependencyCoordinate(dep, childProperties, childManagement);
+      const managedVersion = ctx.dependencyManagement.get(dependencyManagementKey(dep));
+      const managed = managedVersion
+        ? resolveDependencyCoordinate(
+            { ...dep, version: managedVersion },
+            childProperties,
+            ctx.dependencyManagement
+          )
+        : null;
+      const coordinates = [declared, managed]
+        .filter((candidate): candidate is MavenCoordinate => candidate !== null)
+        .filter(
+          (candidate, index, candidates) =>
+            !matchesExclusion(candidate, exclusions) &&
+            candidates.findIndex(
+              (other) => this.artifactKey(other) === this.artifactKey(candidate)
+            ) === index
+        );
+      if (coordinates.length === 0) continue;
 
       // Scope 전이 계산
       const depOriginalScope = (dep.scope as DependencyScope) || 'compile';
@@ -306,19 +321,21 @@ export class MavenQueueProcessor {
 
       // Exclusion 병합
       const mergedExclusions = new Set([...exclusions, ...extractExclusions(dep)]);
-      childCoordinates.push(depCoordinate);
-      childSequence++;
+      for (const depCoordinate of coordinates) {
+        childCoordinates.push(depCoordinate);
+        childSequence++;
 
-      ctx.queue.push({
-        coordinate: depCoordinate,
-        parentPath: newPath,
-        depth: parentPath.length + 1,
-        nodeCoordinate: { depth: parentPath.length + 1, sequence: childSequence },
-        scope: transitedScope,
-        originalScope: depOriginalScope,
-        exclusions: mergedExclusions,
-        managedVersion: !!childManagement.get(coordinateToKey(depCoordinate)),
-      });
+        ctx.queue.push({
+          coordinate: depCoordinate,
+          parentPath: newPath,
+          depth: depth + 1,
+          nodeCoordinate: { depth: depth + 1, sequence: childSequence },
+          scope: transitedScope,
+          originalScope: depOriginalScope,
+          exclusions: mergedExclusions,
+          managedVersion: !!managedVersion,
+        });
+      }
     }
 
     // POM 병렬 프리페치
@@ -327,101 +344,14 @@ export class MavenQueueProcessor {
     }
   }
 
-  private descriptorCoordinateKey(coordinate: MavenCoordinate): string {
-    return `${coordinate.groupId}:${coordinate.artifactId}:${coordinate.version}`;
-  }
-
-  private descriptorContextKey(item: DependencyProcessingContext): string {
-    const exclusions = [...item.exclusions].sort().join(',');
-    return `${this.descriptorCoordinateKey(item.coordinate)}|${item.scope}|${exclusions}`;
-  }
-
-  private descriptorPathContains(
-    coordinate: MavenCoordinate,
-    parentPath: string[],
-  ): boolean {
-    const prefix = this.descriptorCoordinateKey(coordinate);
-    return parentPath.some((path) => path === prefix || path.startsWith(`${prefix}:`));
-  }
-
-  private enqueueDescriptor(
-    item: DependencyProcessingContext,
-    ctx: MavenResolutionContext,
-  ): void {
-    if (item.depth > ctx.maxDepth) return;
-    if (matchesExclusion(item.coordinate, item.exclusions)) return;
-
-    if (this.descriptorPathContains(item.coordinate, item.parentPath)) return;
-
-    const contextKey = this.descriptorContextKey(item);
-    const previousDepth = ctx.descriptorContextDepths.get(contextKey);
-    if (previousDepth !== undefined && previousDepth <= item.depth) return;
-
-    ctx.descriptorWorkCount += 1;
-    if (ctx.descriptorWorkCount > MavenQueueProcessor.MAX_DESCRIPTOR_CONTEXTS) {
-      throw new Error('Maven descriptor 의존성 해결 작업 수가 제한을 초과했습니다.');
-    }
-
-    ctx.descriptorContextDepths.set(contextKey, item.depth);
-    ctx.descriptorQueue.push(item);
-  }
-
-  private async processDescriptorItem(
-    item: DependencyProcessingContext,
-    ctx: MavenResolutionContext,
-  ): Promise<void> {
-    const { coordinate, depth, parentPath, scope, exclusions } = item;
-    if (depth > ctx.maxDepth || matchesExclusion(coordinate, exclusions)) return;
-
-    const descriptorKey = this.descriptorCoordinateKey(coordinate);
-    ctx.descriptorCoordinates.set(descriptorKey, {
-      groupId: coordinate.groupId,
-      artifactId: coordinate.artifactId,
-      version: coordinate.version,
-      type: 'pom',
-    });
-
-    let pom: PomProject;
-    try {
-      pom = await this.deps.fetchPomWithCache(coordinate);
-    } catch (error) {
-      throw new Error(
-        `필수 descriptor POM 조회 실패: ${coordinateToString(coordinate)} - ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-
-    const { properties, dependencyManagement } = await this.deps.bomProcessor.processModel(
-      pom,
-      coordinate,
-      ctx.dependencyManagement,
-    );
-    const currentPath = [...parentPath, coordinateToString(coordinate)];
-    const dependencies = extractDependencies(pom, coordinate);
-    let childSequence = 0;
-
-    for (const dep of dependencies) {
-      if (!this.deps.shouldIncludeDependency(dep, ctx.includeOptional)) continue;
-
-      const depCoordinate = resolveDependencyCoordinate(dep, properties, dependencyManagement);
-      if (!depCoordinate) continue;
-
-      const depOriginalScope = (dep.scope as DependencyScope) || 'compile';
-      const transitedScope = transitScope(scope, depOriginalScope);
-      if (!transitedScope) continue;
-
-      childSequence += 1;
-      if (this.descriptorPathContains(depCoordinate, currentPath)) continue;
-
-      this.enqueueDescriptor({
-        coordinate: depCoordinate,
-        parentPath: currentPath,
-        depth: depth + 1,
-        nodeCoordinate: { depth: depth + 1, sequence: childSequence },
-        scope: transitedScope,
-        originalScope: depOriginalScope,
-        exclusions: new Set([...exclusions, ...extractExclusions(dep)]),
-        managedVersion: !!dependencyManagement.get(coordinateToKey(depCoordinate)),
-      }, ctx);
-    }
+  /** GAV뿐 아니라 type과 classifier도 서로 다른 반출 아티팩트다. */
+  artifactKey(coordinate: MavenCoordinate): string {
+    return JSON.stringify([
+      coordinate.groupId,
+      coordinate.artifactId,
+      coordinate.version,
+      coordinate.type || 'jar',
+      coordinate.classifier || '',
+    ]);
   }
 }
