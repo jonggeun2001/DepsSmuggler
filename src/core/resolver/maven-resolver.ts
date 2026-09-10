@@ -24,6 +24,7 @@ import {
   MavenCoordinate,
   coordinateToString,
   coordinateToKey,
+  dependencyManagementKey,
 } from '../shared/maven-types';
 import {
   MavenQueueProcessor,
@@ -632,7 +633,7 @@ export class MavenResolver implements IResolver {
 
           let version = resolveProperty(dep.version || '', pom.properties);
           if (!version) {
-            version = dependencyManagement.get(`${dep.groupId}:${dep.artifactId}`) || 'LATEST';
+            version = dependencyManagement.get(dependencyManagementKey(dep)) || 'LATEST';
           }
 
           packages.push({

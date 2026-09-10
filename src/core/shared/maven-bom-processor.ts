@@ -1,5 +1,10 @@
 /** Maven parent/BOM model processing and required POM collection. */
-import { PomProject, PomDependency, MavenCoordinate } from './maven-types';
+import {
+  dependencyManagementKey,
+  PomProject,
+  PomDependency,
+  MavenCoordinate,
+} from './maven-types';
 import { resolveProperty } from './maven-pom-utils';
 
 export type FetchPomFunction = (coordinate: MavenCoordinate) => Promise<PomProject>;
@@ -283,7 +288,7 @@ export class MavenBomProcessor {
     return dependencies.map((dependency) => {
       const resolved = this.resolveDependencyFields(dependency, properties);
       if (!resolved.version) {
-        const managedVersion = dependencyManagement.get(`${resolved.groupId}:${resolved.artifactId}`);
+        const managedVersion = dependencyManagement.get(dependencyManagementKey(resolved));
         if (managedVersion) resolved.version = managedVersion;
       }
       return resolved;
@@ -413,13 +418,12 @@ export class MavenBomProcessor {
         if (current.includeManagement) {
           const managed = current.pom.dependencyManagement?.dependencies?.dependency;
           for (const dep of managed ? (Array.isArray(managed) ? managed : [managed]) : []) {
-            if (dep.scope === 'import' && dep.type === 'pom') {
+            const resolved = this.resolveDependencyFields(dep, current.properties);
+            if (resolved.scope === 'import' && resolved.type === 'pom') {
               current.imports.push(dep);
             } else {
-              const version = resolveProperty(dep.version || '', current.properties);
-              const groupId = resolveProperty(dep.groupId, current.properties);
-              const artifactId = resolveProperty(dep.artifactId, current.properties);
-              const key = `${groupId}:${artifactId}`;
+              const version = resolved.version || '';
+              const key = dependencyManagementKey(resolved);
               // Preserve first registration; BOMs are visited in declaration order.
               if (version && !this.dependencyManagement.has(key)) {
                 this.dependencyManagement.set(key, version);

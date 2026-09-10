@@ -202,6 +202,39 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
     ).toBe(true);
   });
 
+  it('일반 JAR 관리 버전을 다른 type/classifier에 적용하지 않는다', async () => {
+    serveModels({
+      'root:1.0': {
+        dependencyManagement: { dependencies: { dependency: coordinate('library', '2.0') } },
+        dependencies: { dependency: coordinate('consumer') },
+      },
+      'consumer:1.0': { dependencies: { dependency: [
+        { ...coordinate('library'), classifier: 'linux' },
+        { ...coordinate('library'), type: 'pom' },
+      ] } },
+      'library:1.0': {},
+    });
+    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
+    expect(result.flatList.filter(p => p.name === 'org.example:library').map(p => p.metadata?.filename).sort())
+      .toEqual(['library-1.0-linux.jar', 'library-1.0.pom']);
+    expect(fetchPomMock.mock.calls.some(([coord]) => coord.artifactId === 'library' && coord.version === '2.0')).toBe(false);
+  });
+
+  it('일치하는 classifier 관리 버전과 선언 버전은 함께 보존한다', async () => {
+    serveModels({
+      'root:1.0': {
+        dependencyManagement: { dependencies: { dependency: { ...coordinate('library', '2.0'), classifier: 'linux' } } },
+        dependencies: { dependency: coordinate('consumer') },
+      },
+      'consumer:1.0': { dependencies: { dependency: { ...coordinate('library'), classifier: 'linux' } } },
+      'library:1.0': {},
+      'library:2.0': {},
+    });
+    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
+    expect(result.flatList.filter(p => p.name === 'org.example:library').map(p => p.metadata?.filename).sort())
+      .toEqual(['library-1.0-linux.jar', 'library-2.0-linux.jar']);
+  });
+
   it('같은 부모의 여러 버전을 모두 보존하고 다음 요청에는 이전 모델을 남기지 않는다', async () => {
     serveModels({
       'root:1.0': { dependencies: { dependency: [coordinate('left'), coordinate('right')] } },

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MavenBomProcessor } from './maven-bom-processor';
+import { dependencyManagementKey } from './maven-types';
 import type { MavenCoordinate, PomDependency, PomProject } from './maven-types';
 
 const coordinate = (artifactId: string, version = '1.0'): MavenCoordinate => ({
@@ -188,5 +189,59 @@ describe('Maven effective ordinary dependencies', () => {
     expect(first.dependencies).toEqual([dependency('property-library', 'first')]);
     expect(second.dependencies).toEqual([dependency('property-library', 'second')]);
     expect(parentDependency.version).toBe('${library.version}');
+  });
+
+  it('keeps generic management from selecting a classified artifact version', async () => {
+    const classifiedDependency: PomDependency = {
+      ...dependency('library'),
+      classifier: 'linux',
+    };
+
+    const { processor } = processorFor({});
+    const result = await processor.processModel({
+      dependencies: { dependency: classifiedDependency },
+    }, coordinate('child'), new Map([['test:library', '2.0']]));
+
+    expect(result.dependencies).toEqual([classifiedDependency]);
+    expect(result.dependencyManagement.get('test:library')).toBe('2.0');
+    expect(result.dependencyManagement.get(dependencyManagementKey(classifiedDependency))).toBeUndefined();
+  });
+
+  it('registers imported BOM management with its classifier and type identity', async () => {
+    const managedDependency: PomDependency = {
+      ...dependency('library', '7.0'),
+      classifier: 'linux',
+      type: 'jar',
+    };
+    const childDependency: PomDependency = {
+      ...dependency('library'),
+      classifier: 'linux',
+      type: 'jar',
+    };
+    const child = {
+      dependencyManagement: {
+        dependencies: {
+          dependency: {
+            groupId: 'test',
+            artifactId: 'fixture-bom',
+            version: '1.0',
+            type: 'pom',
+            scope: 'import',
+          },
+        },
+      },
+      dependencies: { dependency: childDependency },
+    } satisfies PomProject;
+    const { processor } = processorFor({
+      'fixture-bom:1.0': {
+        dependencyManagement: { dependencies: { dependency: managedDependency } },
+      },
+    });
+
+    const result = await processor.processModel(child, coordinate('child'), new Map());
+
+    expect(result.dependencies).toEqual([{ ...childDependency, version: '7.0' }]);
+    expect(result.dependencyManagement.get(dependencyManagementKey(managedDependency))).toBe('7.0');
+    expect(result.dependencyManagement.get('test:library')).toBeUndefined();
   });
 });

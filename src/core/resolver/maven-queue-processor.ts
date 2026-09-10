@@ -12,7 +12,7 @@ import {
   PomProject,
   DependencyProcessingContext,
   coordinateToString,
-  coordinateToKey,
+  dependencyManagementKey,
   matchesExclusion,
   transitScope,
 } from '../shared/maven-types';
@@ -210,7 +210,7 @@ export class MavenQueueProcessor {
         scope: (dep.scope as DependencyScope) || 'compile',
         originalScope: (dep.scope as DependencyScope) || 'compile',
         exclusions: extractExclusions(dep),
-        managedVersion: !!ctx.dependencyManagement.get(coordinateToKey(depCoordinate)),
+        managedVersion: !!ctx.dependencyManagement.get(dependencyManagementKey(depCoordinate)),
       });
     }
 
@@ -271,7 +271,7 @@ export class MavenQueueProcessor {
 
       // 현재 엣지의 exclusions는 다음 자손부터 적용한다.
       const declared = resolveDependencyCoordinate(dep, childProperties, childManagement);
-      const managedVersion = ctx.dependencyManagement.get(`${dep.groupId}:${dep.artifactId}`);
+      const managedVersion = ctx.dependencyManagement.get(dependencyManagementKey(dep));
       const managed = managedVersion
         ? resolveDependencyCoordinate(
             { ...dep, version: managedVersion },
