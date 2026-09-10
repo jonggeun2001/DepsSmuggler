@@ -209,8 +209,12 @@ export class MavenResolver implements IResolver {
         algorithm: opts.algorithm,
       });
 
-      const root = await this.resolveBF(rootCoordinate, opts);
-      const flatList = this.includeRequiredPoms(this.flattenDependencies(root));
+      const resolution = await this.resolveBF(rootCoordinate, opts);
+      const root = resolution.root;
+      const flatList = this.includeRequiredPoms(
+        this.flattenDependencies(root),
+        resolution.descriptorCoordinates,
+      );
 
       // 패키지 크기 조회 (병렬 HEAD 요청)
       const flatListWithSizes = await this.fetchPackageSizes(flatList);
@@ -248,7 +252,10 @@ export class MavenResolver implements IResolver {
   private async resolveBF(
     rootCoordinate: MavenCoordinate,
     options: MavenResolverOptions
-  ): Promise<DependencyNode> {
+  ): Promise<{
+    root: DependencyNode;
+    descriptorCoordinates: Map<string, MavenCoordinate>;
+  }> {
     // 컨텍스트 초기화
     const ctx = this.initializeResolutionContext(rootCoordinate, options);
 
@@ -258,8 +265,12 @@ export class MavenResolver implements IResolver {
 
     // BFS 큐 처리 (큐 프로세서에 위임)
     await this.queueProcessor.processQueue(ctx);
+    await this.queueProcessor.processDescriptorQueue(ctx);
 
-    return ctx.rootNode;
+    return {
+      root: ctx.rootNode,
+      descriptorCoordinates: ctx.descriptorCoordinates,
+    };
   }
 
   /**
@@ -279,6 +290,10 @@ export class MavenResolver implements IResolver {
     return {
       nodeMap,
       queue: [],
+      descriptorQueue: [],
+      descriptorContextDepths: new Map(),
+      descriptorCoordinates: new Map(),
+      descriptorWorkCount: 0,
       maxDepth: options.maxDepth ?? MAVEN_CONSTANTS.DEFAULT_MAX_DEPTH,
       includeOptional: options.includeOptionalDependencies ?? false,
       dependencyManagement: this.bomProcessor.getDependencyManagement(),
@@ -520,8 +535,33 @@ export class MavenResolver implements IResolver {
   }
 
   /** 해석에 사용한 모델 POM도 오프라인 저장소에 반입한다. 관리 라이브러리는 확장하지 않는다. */
-  private includeRequiredPoms(packages: PackageInfo[]): PackageInfo[] {
+  private includeRequiredPoms(
+    packages: PackageInfo[],
+    descriptorCoordinates?: Map<string, MavenCoordinate>,
+  ): PackageInfo[] {
     const artifacts = new Map(packages.map(pkg => [getPackageArtifactKey(pkg), pkg]));
+    const selectedGavs = new Set(
+      packages
+        .filter(pkg => pkg.type === 'maven')
+        .map(pkg => {
+          const metadata = pkg.metadata as Record<string, unknown> | undefined;
+          const groupId = typeof metadata?.groupId === 'string'
+            ? metadata.groupId
+            : pkg.name.split(':')[0];
+          const artifactId = typeof metadata?.artifactId === 'string'
+            ? metadata.artifactId
+            : pkg.name.split(':')[1];
+          return `${groupId}:${artifactId}:${pkg.version}`;
+        }),
+    );
+
+    for (const coordinate of descriptorCoordinates?.values() || []) {
+      const gav = `${coordinate.groupId}:${coordinate.artifactId}:${coordinate.version}`;
+      if (selectedGavs.has(gav)) continue;
+      const pomPackage = this.createDependencyNode({ ...coordinate, type: 'pom' }, 'compile').package;
+      artifacts.set(getPackageArtifactKey(pomPackage), pomPackage);
+    }
+
     for (const coordinate of this.bomProcessor.getRequiredPoms()) {
       const pomPackage = this.createDependencyNode({ ...coordinate, type: 'pom' }, 'compile').package;
       const key = getPackageArtifactKey(pomPackage);
