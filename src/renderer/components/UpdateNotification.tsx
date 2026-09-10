@@ -1,13 +1,15 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Modal, Button, Progress, Typography, Space, message } from 'antd';
 import { SyncOutlined, DownloadOutlined, ReloadOutlined, CloseOutlined } from '@ant-design/icons';
+import { Modal, Button, Progress, Typography, Space, message } from 'antd';
+import { useEffect, useState, useCallback } from 'react';
+import { ReleaseNotes } from './ReleaseNotes';
+import type { UpdateReleaseNotes } from '../../types/updater';
 
-const { Text, Title, Paragraph } = Typography;
+const { Text, Title } = Typography;
 
 interface UpdateInfo {
   version: string;
   releaseDate: string;
-  releaseNotes?: string;
+  releaseNotes?: UpdateReleaseNotes;
 }
 
 interface ProgressInfo {
@@ -144,19 +146,7 @@ export function UpdateNotification() {
             릴리즈 날짜: {new Date(status.updateInfo.releaseDate).toLocaleDateString('ko-KR')}
           </Text>
 
-          {status.updateInfo.releaseNotes && (
-            <Paragraph
-              style={{
-                maxHeight: 150,
-                overflow: 'auto',
-                background: '#f5f5f5',
-                padding: 12,
-                borderRadius: 4,
-              }}
-            >
-              {status.updateInfo.releaseNotes}
-            </Paragraph>
-          )}
+          <ReleaseNotes releaseNotes={status.updateInfo.releaseNotes} />
 
           {/* 다운로드 진행률 */}
           {status.downloading && status.progress && (
