@@ -139,6 +139,8 @@ await downloader.searchPackages('numpy', 'conda-forge');
 await downloader.searchPackages('numpy', 'all'); // 검색에서만 채널 필터 생략
 ```
 
+`defaults`의 repodata와 패키지 파일은 `https://repo.anaconda.com/pkgs/main/<subdir>/`에서 조회합니다. 버전·파일 목록 API에서는 공식 `main` 소유자를 사용하며, 선택한 채널은 패키지 메타데이터의 `defaults/<name>`으로 유지합니다. API 파일명이 `noarch/six-….conda`처럼 subdir를 포함해도 다운로드 URL에 subdir를 한 번만 붙입니다. 명시적인 `main`은 기존 `https://conda.anaconda.org/main` 채널로 유지하고, 다른 채널도 기존 주소를 사용합니다. URL 규칙은 [공유 Conda 유틸리티](shared-conda.md#채널-url-conda-channelts)를 참고하세요.
+
 ### Subdir 매핑
 
 | OS + 아키텍처 | Subdir |
@@ -228,6 +230,7 @@ if (expectedMd5) await downloader.verifyChecksum(filePath, expectedMd5, 'md5');
 | `getVersions` | packageName: string (groupId:artifactId) | Promise<string[]> | 아티팩트 버전 목록 조회 |
 | `getPackageMetadata` | name: string, version: string | Promise<PackageInfo> | 아티팩트 메타데이터 조회 |
 | `downloadPackage` | info: PackageInfo, destPath, onProgress?, _options? | Promise<string> | 아티팩트 다운로드 (jar, pom, 체크섬 포함) |
+| `downloadPackageFiles` | info: PackageInfo, destPath, onProgress?, _options? | Promise<string[]> | 이번 다운로드에서 저장한 전체 파일 경로 반환 (첫 항목은 주 아티팩트) |
 | `downloadArtifact` | groupId, artifactId, version, destPath, artifactType?, onProgress?, classifier? | Promise<string> | 특정 타입 아티팩트 다운로드 |
 | `downloadPom` | groupId, artifactId, version, destPath | Promise<string> | POM 파일 다운로드 |
 | `downloadSources` | groupId, artifactId, version, destPath | Promise<string> | 소스 JAR 다운로드 |
@@ -302,7 +305,11 @@ if (isPomOnly) {
 
 POM 파일은 모든 아티팩트에서 필수입니다. 일반 JAR를 받은 뒤라도 부속 POM 다운로드가 실패하면 해당 패키지는 실패로 처리합니다. `.sha1` companion 파일은 선택 사항이므로 조회 실패 후 계속할 수 있습니다. `_options`의 OS/아키텍처는 현재 사용하지 않으며 네이티브 classifier는 metadata에서 명시해야 합니다.
 
+`downloadPackageFiles`는 실제 저장에 성공한 주 아티팩트, 부속 POM, 선택적 체크섬 경로를 한 번의 다운로드 결과로 반환합니다. 기존 `downloadPackage`는 같은 다운로드를 수행하고 첫 번째 경로만 반환하므로 기존 호출 계약을 유지합니다. CLI는 전체 경로를 압축기에 전달해 JAR만 포함되던 누락을 방지합니다. POM-only 항목이나 classifier가 있는 JAR에도 적용하며, 출력 디렉터리의 기존 파일을 검색해 결과에 추가하지 않습니다.
+
 의존성 해결에 필요한 Parent/BOM의 조회 실패는 resolver의 실패로 전달됩니다. 모델 조회가 성공했더라도 이후 실제 POM 파일 저장이 실패하면 다운로드를 성공으로 반환하지 않습니다.
+
+버전 충돌로 제외된 라이브러리도 Maven이 의존성 그래프를 수집할 때 POM을 필요로 할 수 있습니다. Resolver는 이 descriptor와 그 해석에 필요한 하위·부모·BOM POM을 `metadata.type: 'pom'` 항목으로 전달하며, 다운로더는 같은 POM-only 경로로 저장합니다. 예를 들어 Kryo 2.24.0 JAR가 선택된 상태에서 Kryo 2.21 POM만 추가로 전달할 수 있습니다. 해당 POM은 내부 조회 캐시에만 남지 않고 압축물과 설치 스크립트의 대상 목록에도 포함됩니다.
 
 ### .m2 저장소 구조 지원
 
@@ -424,6 +431,7 @@ const artifactResult = await downloader.downloadArtifact(
 ### 주요 기능
 
 - **의존성 자동 해결**: 현재 YUM/APT/APK는 저장소 메타데이터 파싱 사용
+- **충돌 버전의 의존성**: 다운로드 대상으로 유지한 충돌 버전도 공통 BFS에서 하위 의존성과 추가 충돌을 탐색합니다. 큐·트리·충돌 병합은 다운로드 파일과 같은 이름·버전·RPM release·아키텍처 키를 사용해 릴리스별 의존성을 구분합니다. 단일 루트의 10,000개 처리 한도에 도달한 뒤 작업이 남으면 오류를 반환합니다.
 - **메타데이터 캐싱**: LRU 캐시 + TTL 지원
 - **검증**: GPGVerifier 주입 시 체크섬 검증 (실제 GPG 서명 검증은 미구현)
 - **스크립트 생성**: bash/PowerShell 설치 스크립트
@@ -441,6 +449,7 @@ const common = {
   architecture: 'x86_64' as const,
   cacheDirectory: '/tmp/depssmuggler-os-cache',
   cacheEnabled: true,
+  cacheMaxSize: 1024 * 1024, // 선택: 추정 메타데이터 크기 한도 (바이트)
 };
 const result = await searchOSPackages({ ...common, query: 'nginx', matchType: 'partial' });
 const downloadResult = await downloadOSPackages({
@@ -482,6 +491,8 @@ const downloadResult = await downloadOSPackages({
 | `searchPackages(query)` | 패키지 검색 |
 | `getPackageVersions(name)` | 버전 목록 조회 |
 
+YUM XML 파서는 표준 엔티티 디코딩을 유지하며 전체 치환 횟수와 DTD 선언·확장 크기에 유한한 제한을 적용합니다. 큰 Rocky primary XML의 정상 파싱과 한도 초과 오류를 함께 검증합니다. 로딩 실패는 resolver에서 검색·다운로드 호출자에게 전달하며, 상세 제한과 캐시 반영 규칙은 [OS 패키지 문서](os-package-downloader.md#메타데이터-파싱-yummetadataparser)를 참고하세요.
+
 ### 타입 정의
 
 | 타입 | 설명 |
@@ -519,6 +530,8 @@ const downloadResult = await downloadOSPackages({
 | `getPackageVersions(name)` | 버전 목록 조회 |
 | `parseDebControlFields(content)` (private) | Debian Control 형식 파싱 |
 | `parseDebDepends(depends)` (private) | Depends 필드 파싱 |
+
+파서는 기존 resolver용 정보와 함께 JSON 객체 `aptControlFields`에 수신한 `Packages`의 Control 값을 보존합니다. APT 저장소를 다시 생성할 때 정확한 의존성 연산자·대안, `Pre-Depends`, `Provides`, 충돌·대체 조건, `Multi-Arch`, 설치 크기와 수신한 설명을 이 값에서 가져옵니다. 상위 저장소가 설명 요약만 제공하면 요약을 유지하며 긴 설명을 별도로 가져오지는 않습니다. 다운로드 파일명·크기·SHA256은 로컬 파일 기준으로 다시 계산합니다. APT resolver의 스키마 1 캐시는 원본 필드를 유지하며, 이전 배열 캐시는 다시 파싱합니다.
 
 ### 지원 배포판
 
@@ -563,6 +576,10 @@ const versions = results[0]?.versions ?? [];
 
 ### 메타데이터 파서 (ApkMetadataParser)
 
+APKINDEX의 `D:`에 있는 `so:`, `cmd:`, `pc:` capability를 버전 조건과 함께 보존합니다. Resolver가 `p:` provides와 매칭해 실제 제공 APK를 다운로드 목록에 포함하며, 제공자 누락·버전 불일치는 unresolved로 전달합니다. 상세 비교 규칙은 [APK Resolver](resolvers.md#apkresolver)를 참고하세요.
+
+원본 필드는 JSON으로 저장 가능한 `OSPackageInfo.apkIndexFields`에도 유지합니다. 저장소 생성은 이 원본의 `D:` 연산자(`~`, `!` 포함), 버전이 있는 `p:`, 체크섬 `C:`, 설치 크기 `I:` 등을 사용합니다. Resolver가 사용하는 정규화된 의존성과 원본 출력 필드는 구분되며, 원본 보존이 resolver의 버전 비교 규칙을 확장하지는 않습니다. APK 파싱 캐시는 스키마 2를 사용하여 원본 필드가 없는 이전 결과를 다시 조회합니다.
+
 | 메서드 | 설명 |
 |--------|------|
 | `parseIndex()` | APKINDEX.tar.gz 파싱 |
@@ -579,9 +596,10 @@ const versions = results[0]?.versions ?? [];
 | `V` | Version |
 | `A` | Architecture |
 | `D` | Dependencies |
-| `S` | Size |
+| `S` | APK 파일 크기 (바이트); 저장소 출력은 실제 전달 파일 기준 |
+| `I` | 설치 크기 (바이트); APK 파일 크기와 구분 |
 | `p` | Provides |
-| `C` | Checksum (SHA1) |
+| `C` | 패키지 식별 체크섬; `Q1` + SHA1 Base64 등 APKINDEX 표기 |
 | `T` | Description |
 
 ### 지원 배포판
@@ -616,6 +634,7 @@ const versions = results[0]?.versions ?? [];
 - 위치: `src/core/downloaders/npm.ts`
 - 버전 스펙 해석과 packument 조회는 `src/core/shared/npm-version-resolver.ts`를 재사용한다.
 - tarball 저장과 진행률 이벤트 생성은 `BaseLanguageDownloader`가 담당하고, `NpmDownloader`는 packument 해석과 integrity/sha1 검증 기준을 제공한다.
+- `downloadPackage()`는 파일 저장과 제공된 무결성 검증이 성공한 뒤 전달받은 `PackageInfo`의 `version`을 실제 선택한 버전으로 갱신하고 조회한 메타데이터를 병합한다. 기존 객체·이름·타입·아키텍처와 별도 호출자 메타데이터는 유지하며, 다운로드 URL과 체크섬은 실제 받은 패키지 기준으로 반영한다. 다운로드나 무결성 검증에 실패하면 입력 정보는 갱신하지 않는다.
 
 ### 클래스 구조
 
@@ -958,9 +977,16 @@ interface IDownloader {
     destPath: string,
     onProgress?: (progress: DownloadProgressEvent) => void
   ): Promise<string>;
+  downloadPackageFiles?(
+    info: PackageInfo,
+    destPath: string,
+    onProgress?: (progress: DownloadProgressEvent) => void
+  ): Promise<string[]>;
   verifyChecksum?(filePath: string, expected: string): Promise<boolean>;
 }
 ```
+
+`downloadPackageFiles`는 여러 파일을 생성하는 다운로더가 선택적으로 구현합니다. CLI 다운로드 매니저는 이 메서드가 있으면 전체 파일 목록을 사용하고, 없으면 기존 `downloadPackage`의 단일 파일 경로를 사용합니다. 두 메서드를 함께 호출해 중복 다운로드하지 않습니다.
 
 ---
 

@@ -148,6 +148,10 @@ export interface OSPackageInfo {
   suggests?: string[];
   /** 권장 의존성 */
   recommends?: string[];
+  /** APKINDEX 원본 필드 (JSON 직렬화 가능한 단일 문자 키/값 record) */
+  apkIndexFields?: Record<string, string>;
+  /** APT 원본 control fields (JSON 직렬화 가능한 semantic record) */
+  aptControlFields?: Record<string, string>;
 }
 
 /**

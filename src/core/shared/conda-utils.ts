@@ -1,14 +1,19 @@
 // Conda 관련 유틸리티 함수 (repodata.json 기반 패키지 URL 조회)
 import axios from 'axios';
 import * as fzstd from 'fzstd';
-import type { DownloadUrlResult } from './types';
-import type { RepoData, RepoDataPackage, AnacondaFileInfo } from './conda-types';
+import {
+  CONDA_STANDARD_ORIGIN,
+  getCondaApiOwner,
+  getCondaRepositoryBase,
+} from './conda-channel';
 import logger from '../../utils/logger';
+import type { RepoData, RepoDataPackage, AnacondaFileInfo } from './conda-types';
+import type { DownloadUrlResult } from './types';
 
 // repodata 캐시 (channel/subdir -> RepoData)
 const repodataCache = new Map<string, RepoData>();
 
-const CONDA_URL = 'https://conda.anaconda.org';
+const CONDA_URL = CONDA_STANDARD_ORIGIN;
 const ANACONDA_API_URL = 'https://api.anaconda.org';
 
 /**
@@ -44,10 +49,11 @@ async function getRepoData(channel: string, subdir: string): Promise<RepoData | 
   }
 
   // 우선순위: zstd 압축 > current_repodata.json > repodata.json
+  const repositoryBase = getCondaRepositoryBase(channel, CONDA_URL);
   const urls = [
-    { url: `${CONDA_URL}/${channel}/${subdir}/repodata.json.zst`, compressed: true },
-    { url: `${CONDA_URL}/${channel}/${subdir}/current_repodata.json`, compressed: false },
-    { url: `${CONDA_URL}/${channel}/${subdir}/repodata.json`, compressed: false },
+    { url: `${repositoryBase}/${subdir}/repodata.json.zst`, compressed: true },
+    { url: `${repositoryBase}/${subdir}/current_repodata.json`, compressed: false },
+    { url: `${repositoryBase}/${subdir}/repodata.json`, compressed: false },
   ];
 
   for (const { url, compressed } of urls) {
@@ -194,7 +200,7 @@ async function getPackageFromAnacondaApi(
     logger.debug('[conda-utils] Anaconda API fallback', { packageName, version, subdir });
 
     const response = await axios.get<AnacondaFileInfo[]>(
-      `${ANACONDA_API_URL}/package/${channel}/${packageName}/files`,
+      `${ANACONDA_API_URL}/package/${getCondaApiOwner(channel)}/${packageName}/files`,
       {
         headers: { 'User-Agent': 'DepsSmuggler/1.0' },
         timeout: 30000,
@@ -222,7 +228,7 @@ async function getPackageFromAnacondaApi(
         const filename = selected.basename.split('/').pop() || selected.basename;
         logger.debug('[conda-utils] API에서 noarch 패키지 찾음', { filename });
         return {
-          url: `${CONDA_URL}/${channel}/noarch/${filename}`,
+          url: `${getCondaRepositoryBase(channel, CONDA_URL)}/noarch/${filename}`,
           filename,
           size: selected.size || 0,
         };
@@ -258,7 +264,7 @@ async function getPackageFromAnacondaApi(
     logger.debug('[conda-utils] API에서 찾음', { filename, build: selected.attrs.build });
 
     return {
-      url: `${CONDA_URL}/${channel}/${subdir}/${filename}`,
+      url: `${getCondaRepositoryBase(channel, CONDA_URL)}/${subdir}/${filename}`,
       filename,
       size: selected.size || 0,
     };
@@ -289,7 +295,7 @@ export async function getCondaDownloadUrl(
     const found = findPackageInRepoData(repodata, packageName, version, pythonVersion);
     if (found) {
       const { filename, pkg } = found;
-      const downloadUrl = `${CONDA_URL}/${channel}/${subdir}/${filename}`;
+      const downloadUrl = `${getCondaRepositoryBase(channel, CONDA_URL)}/${subdir}/${filename}`;
       logger.debug('[conda-utils] 찾음', { filename, build: pkg.build });
       return {
         url: downloadUrl,
@@ -305,7 +311,7 @@ export async function getCondaDownloadUrl(
     const found = findPackageInRepoData(noarchRepodata, packageName, version);
     if (found) {
       const { filename, pkg } = found;
-      const downloadUrl = `${CONDA_URL}/${channel}/noarch/${filename}`;
+      const downloadUrl = `${getCondaRepositoryBase(channel, CONDA_URL)}/noarch/${filename}`;
       logger.debug('[conda-utils] noarch에서 찾음', { filename });
       return {
         url: downloadUrl,

@@ -14,6 +14,7 @@ import type {
 } from './types';
 import type { OsPackageCache } from './cache-manager';
 import { OSDependencyTree } from './dependency-tree';
+import { getDownloadedFileKey } from './package-file-utils';
 import { isArchitectureCompatible } from './repositories';
 import logger from '../../../utils/logger';
 
@@ -72,7 +73,7 @@ export abstract class BaseOSDependencyResolver {
    * 패키지 키 생성
    */
   protected getPackageKey(pkg: OSPackageInfo): string {
-    return `${pkg.name}-${pkg.version}-${pkg.architecture}`;
+    return getDownloadedFileKey(pkg);
   }
 
   protected createAbortError(): Error {
@@ -141,6 +142,8 @@ export abstract class BaseOSDependencyResolver {
 
     // BFS 큐: 처리할 패키지 목록
     const queue: OSPackageInfo[] = [pkg];
+    // 큐에 등록된 패키지 추적 (중복 enqueue 및 순환 의존성 방지)
+    const queuedPackages = new Set<string>([this.getPackageKey(pkg)]);
     // 처리 중인 패키지 추적 (순환 의존성 방지)
     const processing = new Set<string>();
     // 최대 반복 횟수 (무한 루프 방지)
@@ -209,32 +212,49 @@ export abstract class BaseOSDependencyResolver {
           continue;
         }
 
+        const selectedPackages = this.selectCandidatesForDependency(compatiblePackages, dep);
+
+        const uniqueVersions = selectedPackages.length > 1
+          ? this.getUniqueVersions(selectedPackages)
+          : [];
+
         // 여러 버전이 있으면 충돌로 기록 (모든 버전 다운로드)
-        if (compatiblePackages.length > 1) {
-          const uniqueVersions = this.getUniqueVersions(compatiblePackages);
-          if (uniqueVersions.length > 1) {
-            tree.addConflict(dep.name, uniqueVersions, [
-              { package: currentPkg, requiredVersion: dep.version },
-            ]);
-          }
+        if (uniqueVersions.length > 1) {
+          tree.addConflict(dep.name, uniqueVersions, [
+            { package: currentPkg, requiredVersion: dep.version },
+          ]);
         }
 
         // 최선의 패키지 선택 (최신 버전)
-        const bestMatch = this.selectBestMatch(compatiblePackages);
-        const bestMatchKey = this.getPackageKey(bestMatch);
+        const bestMatch = this.selectBestMatch(selectedPackages);
 
         // 엣지 추가
         tree.addEdge(currentPkg, bestMatch, dep);
 
-        // 아직 처리되지 않은 패키지만 큐에 추가
-        if (!this.resolvedPackages.has(bestMatchKey) && !processing.has(bestMatchKey)) {
-          queue.push(bestMatch);
+        // 최선의 버전과 현재 충돌에 포함된 대안을 모두 탐색한다.
+        // 대안도 자체 전이 의존성을 가질 수 있으므로 설치 목록에 직접 포함한다.
+        const packagesToQueue = uniqueVersions.length > 1
+          ? [bestMatch, ...uniqueVersions]
+          : [bestMatch];
+        for (const packageToQueue of packagesToQueue) {
+          const packageToQueueKey = this.getPackageKey(packageToQueue);
+          if (
+            !this.resolvedPackages.has(packageToQueueKey)
+            && !processing.has(packageToQueueKey)
+            && !queuedPackages.has(packageToQueueKey)
+          ) {
+            queue.push(packageToQueue);
+            queuedPackages.add(packageToQueueKey);
+          }
         }
       }
     }
 
-    if (iterations >= MAX_ITERATIONS) {
-      logger.warn(`의존성 해결 최대 반복 횟수 도달 (${MAX_ITERATIONS})`);
+    if (
+      iterations >= MAX_ITERATIONS
+      && queue.some((queuedPkg) => !this.resolvedPackages.has(this.getPackageKey(queuedPkg)))
+    ) {
+      throw new Error(`의존성 해결 최대 처리 개수(${MAX_ITERATIONS})를 초과했습니다`);
     }
   }
 
@@ -266,6 +286,18 @@ export abstract class BaseOSDependencyResolver {
     return packages.filter((pkg) =>
       this.compareVersionWithOperator(pkg.version, dep.operator!, dep.version!)
     );
+  }
+
+  /**
+   * Select compatible candidates for a dependency after architecture filtering.
+   * Subclasses can narrow mutually substitutable candidates without changing
+   * the shared version or architecture mismatch semantics.
+   */
+  protected selectCandidatesForDependency(
+    packages: OSPackageInfo[],
+    _dep: PackageDependency
+  ): OSPackageInfo[] {
+    return packages;
   }
 
   /**
@@ -348,7 +380,7 @@ export abstract class BaseOSDependencyResolver {
   protected getUniqueVersions(packages: OSPackageInfo[]): OSPackageInfo[] {
     const versionMap = new Map<string, OSPackageInfo>();
     for (const pkg of packages) {
-      const key = `${pkg.version}-${pkg.release || ''}`;
+      const key = JSON.stringify([pkg.version, pkg.release ?? '']);
       if (!versionMap.has(key)) {
         versionMap.set(key, pkg);
       }

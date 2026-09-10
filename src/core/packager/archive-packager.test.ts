@@ -42,6 +42,43 @@ describe('ArchivePackager', () => {
   });
 
   describe('createArchive', () => {
+    it('지원하지 않는 형식은 파일을 읽거나 출력 부모를 만들기 전에 거부한다', async () => {
+      const sourcePath = path.join(tempDir, 'source.txt');
+      const outputParent = path.join(tempDir, 'missing-parent');
+      const outputPath = path.join(outputParent, 'archive.zip');
+      await fs.writeFile(sourcePath, 'content');
+
+      await expect(
+        packager.createArchive(
+          [sourcePath],
+          outputPath,
+          [],
+          { format: 'rar' as ArchiveFormat },
+        ),
+      ).rejects.toThrow('지원하지 않는 압축 형식입니다: rar');
+      expect(await fs.pathExists(outputPath)).toBe(false);
+      expect(await fs.pathExists(outputParent)).toBe(false);
+    });
+
+    it('디렉터리 입력도 지원하지 않는 형식을 읽기 전에 거부한다', async () => {
+      const sourceDir = path.join(tempDir, 'source-dir');
+      const outputParent = path.join(tempDir, 'missing-dir-parent');
+      const outputPath = path.join(outputParent, 'archive.tar.gz');
+      await fs.ensureDir(sourceDir);
+      await fs.writeFile(path.join(sourceDir, 'source.txt'), 'content');
+
+      await expect(
+        packager.createArchiveFromDirectory(
+          sourceDir,
+          outputPath,
+          [],
+          { format: 'rar' as ArchiveFormat },
+        ),
+      ).rejects.toThrow('지원하지 않는 압축 형식입니다: rar');
+      expect(await fs.pathExists(outputPath)).toBe(false);
+      expect(await fs.pathExists(outputParent)).toBe(false);
+    });
+
     it('출력 디렉터리 아래의 중첩 아티팩트 경로를 보존한다', async () => {
       const firstFile = path.join(
         tempDir,
@@ -353,4 +390,5 @@ describe('ArchiveFormat 타입', () => {
     expect(formats).toContain('zip');
     expect(formats).toContain('tar.gz');
   });
+
 });

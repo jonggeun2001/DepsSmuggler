@@ -3,11 +3,12 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { registerOSCommands } from './commands/os';
+import { getPackageVersion } from './version';
 import { logger } from '../utils/logger';
 import { maskString } from '../utils/mask';
 
 // 버전 정보
-const VERSION = '1.0.0';
+const VERSION = getPackageVersion();
 
 // 로거 초기화 (파일 로깅 활성화)
 async function initializeLogger(): Promise<void> {
@@ -50,7 +51,10 @@ program
   .option('--concurrency <num>', '동시 다운로드 수', '3')
   .action(async (options) => {
     const { downloadCommand } = await import('./commands/download');
-    await downloadCommand(options);
+    // Commander camel-cases `--target-os` to `targetOs`; keep the command
+    // handler's existing `targetOS` contract at this CLI boundary.
+    const { targetOs, ...downloadOptions } = options;
+    await downloadCommand({ ...downloadOptions, targetOS: targetOs });
   });
 
 // config 명령어

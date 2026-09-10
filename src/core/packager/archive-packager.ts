@@ -15,6 +15,17 @@ export type {
 // 압축 형식 타입
 export type ArchiveFormat = ArchiveType;
 
+/**
+ * Validate archive format values received from CLI and other runtime callers.
+ */
+export function assertArchiveFormat(value: unknown): asserts value is ArchiveFormat {
+  if (value !== 'zip' && value !== 'tar.gz') {
+    throw new Error(
+      `지원하지 않는 압축 형식입니다: ${String(value)}. 지원 형식: zip, tar.gz`,
+    );
+  }
+}
+
 // 압축 옵션
 export interface ArchiveOptions {
   format: ArchiveFormat;
@@ -43,6 +54,7 @@ export class ArchivePackager {
     packages: PackageInfo[],
     options: ArchiveOptions
   ): Promise<string> {
+    assertArchiveFormat(options.format);
     const archiveBasePath = path.dirname(resolvePath(outputPath));
     const fileEntries = files.map((file) => {
       const sourcePath = resolvePath(file);
@@ -78,6 +90,7 @@ export class ArchivePackager {
     packages: PackageInfo[],
     options: ArchiveOptions
   ): Promise<string> {
+    assertArchiveFormat(options.format);
     const sourceFiles = await this.collectFiles(sourceDir);
     const { totalBytes, totalFiles } = await this.reportPreparationProgress(sourceFiles, options.onProgress);
     const metadataEntries = this.buildMetadataEntries(

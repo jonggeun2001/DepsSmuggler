@@ -181,7 +181,7 @@ export class MavenResolver implements IResolver {
     const rootCoordinate: MavenCoordinate = {
       groupId,
       artifactId,
-      version,
+      version: version === 'latest' ? await this.getLatestVersion(groupId, artifactId) : version,
       // 사용자가 UI에서 선택한 classifier 사용
       classifier: opts.classifier,
       type: opts.artifactType,
@@ -205,12 +205,16 @@ export class MavenResolver implements IResolver {
     try {
       logger.info('Maven 의존성 해결 시작', {
         package: packageName,
-        version,
+        version: rootCoordinate.version,
         algorithm: opts.algorithm,
       });
 
-      const root = await this.resolveBF(rootCoordinate, opts);
-      const flatList = this.includeRequiredPoms(this.flattenDependencies(root));
+      const resolution = await this.resolveBF(rootCoordinate, opts);
+      const root = resolution.root;
+      const flatList = this.includeRequiredPoms(
+        this.flattenDependencies(root),
+        resolution.descriptorCoordinates,
+      );
 
       // 패키지 크기 조회 (병렬 HEAD 요청)
       const flatListWithSizes = await this.fetchPackageSizes(flatList);
@@ -248,7 +252,10 @@ export class MavenResolver implements IResolver {
   private async resolveBF(
     rootCoordinate: MavenCoordinate,
     options: MavenResolverOptions
-  ): Promise<DependencyNode> {
+  ): Promise<{
+    root: DependencyNode;
+    descriptorCoordinates: Map<string, MavenCoordinate>;
+  }> {
     // 컨텍스트 초기화
     const ctx = this.initializeResolutionContext(rootCoordinate, options);
 
@@ -258,8 +265,12 @@ export class MavenResolver implements IResolver {
 
     // BFS 큐 처리 (큐 프로세서에 위임)
     await this.queueProcessor.processQueue(ctx);
+    await this.queueProcessor.processDescriptorQueue(ctx);
 
-    return ctx.rootNode;
+    return {
+      root: ctx.rootNode,
+      descriptorCoordinates: ctx.descriptorCoordinates,
+    };
   }
 
   /**
@@ -279,6 +290,10 @@ export class MavenResolver implements IResolver {
     return {
       nodeMap,
       queue: [],
+      descriptorQueue: [],
+      descriptorContextDepths: new Map(),
+      descriptorCoordinates: new Map(),
+      descriptorWorkCount: 0,
       maxDepth: options.maxDepth ?? MAVEN_CONSTANTS.DEFAULT_MAX_DEPTH,
       includeOptional: options.includeOptionalDependencies ?? false,
       dependencyManagement: this.bomProcessor.getDependencyManagement(),
@@ -450,9 +465,14 @@ export class MavenResolver implements IResolver {
     try {
       const response = await this.axiosInstance.get<string>(url);
       const parsed = this.parser.parse(response.data);
-      return (
-        parsed.metadata?.versioning?.latest || parsed.metadata?.versioning?.release || ''
-      );
+      const version = [
+        parsed.metadata?.versioning?.latest,
+        parsed.metadata?.versioning?.release,
+      ].find((candidate) => typeof candidate === 'string' && candidate.trim());
+      if (!version) {
+        throw new Error('Maven 메타데이터에 latest 또는 release 버전이 없습니다.');
+      }
+      return version.trim();
     } catch {
       throw new Error(`버전 조회 실패: ${groupId}:${artifactId}`);
     }
@@ -515,8 +535,33 @@ export class MavenResolver implements IResolver {
   }
 
   /** 해석에 사용한 모델 POM도 오프라인 저장소에 반입한다. 관리 라이브러리는 확장하지 않는다. */
-  private includeRequiredPoms(packages: PackageInfo[]): PackageInfo[] {
+  private includeRequiredPoms(
+    packages: PackageInfo[],
+    descriptorCoordinates?: Map<string, MavenCoordinate>,
+  ): PackageInfo[] {
     const artifacts = new Map(packages.map(pkg => [getPackageArtifactKey(pkg), pkg]));
+    const selectedGavs = new Set(
+      packages
+        .filter(pkg => pkg.type === 'maven')
+        .map(pkg => {
+          const metadata = pkg.metadata as Record<string, unknown> | undefined;
+          const groupId = typeof metadata?.groupId === 'string'
+            ? metadata.groupId
+            : pkg.name.split(':')[0];
+          const artifactId = typeof metadata?.artifactId === 'string'
+            ? metadata.artifactId
+            : pkg.name.split(':')[1];
+          return `${groupId}:${artifactId}:${pkg.version}`;
+        }),
+    );
+
+    for (const coordinate of descriptorCoordinates?.values() || []) {
+      const gav = `${coordinate.groupId}:${coordinate.artifactId}:${coordinate.version}`;
+      if (selectedGavs.has(gav)) continue;
+      const pomPackage = this.createDependencyNode({ ...coordinate, type: 'pom' }, 'compile').package;
+      artifacts.set(getPackageArtifactKey(pomPackage), pomPackage);
+    }
+
     for (const coordinate of this.bomProcessor.getRequiredPoms()) {
       const pomPackage = this.createDependencyNode({ ...coordinate, type: 'pom' }, 'compile').package;
       const key = getPackageArtifactKey(pomPackage);

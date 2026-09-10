@@ -188,12 +188,15 @@ interface DockerManifestEntry {
 |------|------|
 | `extractRegistry(fullName)` | 알려진 호스트 또는 점이 있는 첫 경로 요소를 레지스트리로 분리 |
 | `parseImageName(name)` | 레지스트리를 제거하고 namespace/repo로 분리; 단일 이름은 library namespace 사용 |
+| `buildDockerArchiveFilename(repository, tag)` | 다운로더와 설치 스크립트가 공유하는 이미지 tar 파일명 생성 |
 | `getRegistryType(registry)` | Docker Hub/GHCR/ECR Public/Quay/custom 분류 |
 | `createCustomRegistryConfig(registryUrl)` | `/v2` API와 `/v2/auth` 기본 인증 URL 구성 |
 | `calculateSha256(filePath)` | 공통 checksum 유틸리티로 SHA256 계산 |
 | `ARCH_MAP` | x86_64→amd64, ARM64, 386, arm/v7 variant 매핑 |
 
 이미지 이름과 태그는 각각 전달합니다. `extractRegistry()`는 태그를 분리하는 함수가 아니며 `localhost:5000`처럼 점이 없는 주소는 이름에서 자동 추출되지 않습니다. 이 경우 registry 인수를 명시합니다.
+
+이미지 tar 파일명은 기존 다운로드 규칙인 `<안전한 repo 이름>-<안전한 tag>.tar`를 사용합니다. 예를 들어 `busybox:1.36`과 `library/busybox:1.36`은 모두 `busybox-1.36.tar`가 됩니다. `buildDockerArchiveFilename()`이 이름 분리와 파일명 정규화를 함께 적용하며, 다운로더와 Bash·PowerShell 생성기가 이를 공유해 실제 파일과 `docker load -i` 인자가 일치합니다. 아키텍처와 바깥 아카이브 형식은 이 이름을 바꾸지 않습니다.
 
 ---
 

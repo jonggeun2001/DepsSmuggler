@@ -10,6 +10,13 @@ import { isArchitectureCompatible } from '../downloaders/os-shared/repositories'
 import { AptMetadataParser } from '../shared/apt-metadata-parser';
 import type { OSPackageInfo, PackageDependency, Repository, OSPackageSearchResult } from '../downloaders/os-shared/types';
 
+const APT_PACKAGES_CACHE_SCHEMA_VERSION = 1;
+
+interface AptPackagesCacheEnvelope {
+  schemaVersion: typeof APT_PACKAGES_CACHE_SCHEMA_VERSION;
+  packages: OSPackageInfo[];
+}
+
 /**
  * APT 의존성 해결기
  */
@@ -59,11 +66,15 @@ export class AptDependencyResolver extends BaseOSDependencyResolver {
             this.options.architecture,
             'packages'
           );
-          let packages = await this.options.cacheManager?.get<OSPackageInfo[]>(cacheKey);
+          const cached = await this.options.cacheManager?.get<unknown>(cacheKey);
+          let packages = this.readCacheEnvelope(cached);
 
           if (!packages) {
             packages = await parser.parsePackages();
-            await this.options.cacheManager?.set(cacheKey, packages);
+            await this.options.cacheManager?.set(cacheKey, {
+              schemaVersion: APT_PACKAGES_CACHE_SCHEMA_VERSION,
+              packages,
+            } satisfies AptPackagesCacheEnvelope);
           }
 
           // 아키텍처 필터링
@@ -99,6 +110,18 @@ export class AptDependencyResolver extends BaseOSDependencyResolver {
         }
       }
     }
+  }
+
+  private readCacheEnvelope(cached: unknown): OSPackageInfo[] | null {
+    if (!cached || typeof cached !== 'object') {
+      return null;
+    }
+
+    const envelope = cached as Partial<AptPackagesCacheEnvelope>;
+    return envelope.schemaVersion === APT_PACKAGES_CACHE_SCHEMA_VERSION &&
+      Array.isArray(envelope.packages)
+      ? envelope.packages
+      : null;
   }
 
   /**

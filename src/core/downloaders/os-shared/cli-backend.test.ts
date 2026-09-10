@@ -22,6 +22,7 @@ const {
   OSArchivePackager,
   OSRepoPackager,
   OSScriptGenerator,
+  OsPackageCache,
 } = vi.hoisted(() => ({
   searchPackages: vi.fn(),
   resolveDependencies: vi.fn(),
@@ -55,6 +56,9 @@ const {
       generateDependencyOrderScript,
     };
   }),
+  OsPackageCache: vi.fn(function MockOsPackageCache() {
+    return {};
+  }),
 }));
 
 vi.mock('../../resolver/yum-resolver', () => ({
@@ -75,6 +79,10 @@ vi.mock('./repo-packager', () => ({
 
 vi.mock('./script-generator', () => ({
   OSScriptGenerator,
+}));
+
+vi.mock('./cache-manager', () => ({
+  OsPackageCache,
 }));
 
 function createPackage(
@@ -191,8 +199,14 @@ describe('OS CLI backend', () => {
       concurrency: 3,
       cacheDirectory: path.join(tempDir, 'cache'),
       cacheEnabled: true,
+      cacheMaxSize: 2048,
     });
 
+    expect(OsPackageCache).toHaveBeenCalledWith({
+      type: 'persistent',
+      directory: path.join(tempDir, 'cache'),
+      maxSize: 2048,
+    });
     expect(searchPackages).toHaveBeenCalledWith('httpd', 'exact');
     expect(resolveDependencies).toHaveBeenCalledWith([httpd]);
     expect(downloadPackages).toHaveBeenCalledWith([
@@ -262,6 +276,10 @@ describe('OS CLI backend', () => {
 
     expect(downloadPackages).toHaveBeenCalledWith([newerRelease]);
     expect(result.requestedPackages).toEqual([newerRelease]);
+    expect(OsPackageCache).toHaveBeenCalledWith({
+      type: 'persistent',
+      directory: path.join(tempDir, 'cache'),
+    });
   });
 
   it('YUM exact lookup은 prerelease보다 정식 릴리스를 우선 선택한다', async () => {

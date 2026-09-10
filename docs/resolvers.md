@@ -287,6 +287,8 @@ torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl
 - 캐시: `src/core/shared/conda-cache.ts` 모듈 사용 (repodata 디스크 캐시와 processor의 요청 중 메모리 캐시)
 - **알고리즘**: BFS 큐 기반 (call stack overflow 방지)
 
+`defaults` 채널은 `https://repo.anaconda.com/pkgs/main`을 기준으로 대상 subdir와 `noarch`의 repodata를 조회하고 다운로드 URL을 생성합니다. `metadata.repository`에는 요청한 `defaults/<name>`을 유지합니다. 명시적인 `main` 등 일반 채널은 `https://conda.anaconda.org/<채널>`을 사용합니다. 채널 URL 변환은 [공유 헬퍼](shared-conda.md#채널-url-conda-channelts)에 모으며, 버전·빌드 선택은 계속 repodata에 한정합니다.
+
 ### 모듈 구조
 
 ```
@@ -549,6 +551,8 @@ maven-queue-processor.ts
 | `parseFromText` | content: string | Promise<PackageInfo[]> | pom.xml 파싱 |
 | `flattenDependencies` (private) | node: DependencyNode | PackageInfo[] | 트리를 플랫 리스트로 변환 |
 
+루트 버전이 `latest`이면 POM 조회 전에 설정된 저장소의 `maven-metadata.xml`에서 `latest`, 없으면 `release`를 선택합니다. 둘 다 비어 있으면 버전 조회 실패로 처리합니다. 해결 결과의 루트·플랫 목록·파일명에는 실제 버전이 들어가며 classifier와 artifact type은 유지합니다. 명시한 버전은 메타데이터 조회 없이 사용합니다. CLI의 기본 `--no-deps`도 `latest` 요청이면 깊이 0으로 이 과정을 실행합니다.
+
 ### 내부 메서드
 
 | 메서드 | 설명 |
@@ -597,6 +601,14 @@ const result = await resolver.resolveDependencies(
 Parent/BOM 탐색과 다운로드 목록으로의 그래프 평탄화는 반복 방식으로 처리합니다. 깊은 체인에서 재귀 호출 스택이 증가하지 않으며, Parent/BOM의 순환 참조는 오류로 보고합니다. 필요한 Parent/BOM을 읽을 수 없거나 좌표를 해결하지 못하면 해당 루트의 의존성 해결을 실패로 처리하여 불완전한 결과를 성공으로 반환하지 않습니다.
 
 예를 들어 `org.apache.flink:flink-streaming-java:1.20.5`에서 `flink-core → flink-core-api → flink-metrics-core`를 선택하면, 마지막 패키지의 부모인 `org.apache.flink:flink-metrics:1.20.5`도 POM 다운로드 항목에 포함합니다. 이 부모는 실행 코드가 있는 JAR 의존성으로 바뀌지 않으며 기존 compile/runtime 의존성 다운로드도 유지됩니다.
+
+### 충돌로 제외된 버전의 descriptor POM
+
+선택 그래프를 완성한 뒤, 버전 충돌로 제외된 경로를 별도 큐에서 탐색합니다. 해당 버전과 하위 의존성의 POM을 읽고 필요한 부모/import BOM을 처리하며, 선택되지 않은 좌표는 `metadata.type: 'pom'`으로 `flatList`에 추가합니다. 이 수집은 JAR 승자나 `root` 실행 그래프를 변경하지 않습니다. 같은 GAV의 POM은 한 번만 전달하고, 이미 선택된 아티팩트가 전달하는 부속 POM을 중복 항목으로 추가하지 않습니다.
+
+수집에는 기존 scope·optional·exclusion·최대 깊이를 적용합니다. 같은 POM이 다른 제외 조건이나 더 얕은 경로로 다시 나타나면 그 경로에서 필요한 하위 POM을 누락하지 않아야 합니다. 사용하지 않는 dependencyManagement 항목을 전체 다운로드 대상으로 펼치지 않습니다. 반복 큐와 방문 기록으로 순환·중복을 제어합니다. 제외 조건을 통과한 descriptor 탐색 컨텍스트가 10,000개를 넘으면 부분 목록을 성공으로 반환하지 않고 오류를 반환합니다. 필수 descriptor 또는 그 부모/BOM을 읽지 못하면 해당 루트의 해결을 실패로 보고합니다. 내부 프리페치 성공만으로 반출 파일이 준비됐다고 간주하지 않습니다.
+
+Flink 1.20.5의 `flink-core → kryo:2.24.0` 경로가 선택되어도 `flink-java → chill-java:0.7.6 → kryo:2.21` 경로의 POM은 반출합니다. Maven이 최종 JAR 버전을 정하기 전에 다른 버전의 descriptor를 읽을 수 있기 때문입니다.
 
 ### Packaging 타입 처리
 
@@ -656,6 +668,10 @@ YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 �
 
 실제 클래스명은 `YumDependencyResolver`이며 `YumResolver`는 호환성 alias입니다. `BaseOSDependencyResolver`를 상속하고 생성자에서 `DependencyResolverOptions`를 받습니다.
 
+메타데이터는 모든 활성 저장소의 조회·파싱이 성공한 뒤 메모리 목록과 이름/provides 인덱스에 반영합니다. primary 누락이나 저장소 오류가 있으면 저장소 이름과 원인을 포함한 오류를 전달하며, 취소 오류는 유지합니다. 실패 시 일부 패키지가 로드 완료 상태로 남지 않아 같은 인스턴스의 재시도가 가능합니다. 파서는 각 저장소를 읽을 때 생성하며 사용하지 않는 인스턴스 맵은 보관하지 않습니다. 비활성 저장소는 조회하지 않으며 정상적인 저장소별 디스크 캐시는 재시도에서 재사용할 수 있습니다.
+
+YUM 캐시는 `{ schemaVersion: 1, packages }` 형식으로 버전·release·의존성 버전 문자열을 보존합니다. 이전 배열 형식이나 알 수 없는 스키마, 숫자형 버전 등이 들어 있는 잘못된 결과는 캐시 miss로 처리해 다시 파싱합니다. 현재 형식은 JSON 저장·복원 후 재사용하며 캐시 키와 기존 버전 비교·충돌 처리 규칙은 유지합니다.
+
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `searchPackages` | query, matchType? | Promise<OSPackageSearchResult[]> | 이름별 검색 |
@@ -675,7 +691,6 @@ YUM/APT/APK의 후보 병합은 호출별 `Set`으로 기존 패키지 키의 �
 
 | 속성 | 타입 | 설명 |
 |------|------|------|
-| `parsers` | Map<string, YumMetadataParser> | 저장소별 파서 |
 | `allPackages` | OSPackageInfo[] | 호환 아키텍처의 패키지 목록 |
 | `providesMap` | Map<string, OSPackageInfo[]> | capability 제공자 인덱스 |
 | `metadataCache` (상속) | PackageMetadataCache | 이름별 패키지 목록 |
@@ -733,6 +748,14 @@ OS resolver는 `parseFromText()`나 공개 `clearCache()`를 제공하지 않습
 
 실제 클래스는 `ApkDependencyResolver`이며 `ApkResolver` alias와 `getApkResolver(options)` 팩토리를 제공합니다. 검색 외에 상속한 `resolveDependencies(packages)`를 사용합니다.
 
+`so:`, `cmd:`, `pc:` 의존성은 APKINDEX `p:` provides에서 후보를 얻습니다. 버전 조건은 일치하는 제공 항목의 버전과 비교하며 제공 APK의 패키지 버전은 대신 사용하지 않습니다. 버전 조건이 없으면 같은 이름의 제공 항목으로 충족할 수 있고, 버전 조건이 있으면 제공 버전이 필요합니다. 같은 패키지에 일치하는 제공 항목이 여러 개면 하나라도 조건을 만족할 때 선택합니다. 일반 패키지 의존성의 버전 비교는 기존 공통 구현을 사용합니다.
+
+제공자 누락은 `not_found`, 제공 버전 불일치는 `version_mismatch`로 기록하며 경고·unresolved 결과에 포함합니다. CLI의 `--no-deps`는 이 전이 탐색을 우회합니다.
+
+서로 다른 이름의 APK 제공자는 대체 관계이므로 기존 `selectBestMatch`로 선택한 패키지 이름의 후보만 남깁니다. 이 규칙은 `/bin/sh` 같은 경로 제공자에도 적용합니다. 선택한 패키지 자체에 조건을 만족하는 여러 버전이 있을 때는 기존 버전 충돌 정책을 유지합니다.
+
+파싱 결과 캐시는 스키마 2에서 `apkIndexFields` 원본 필드도 보존합니다. 이전 배열 형식·스키마 1 또는 유효하지 않은 캐시는 다시 조회하며, 현재 형식은 JSON 저장·복원 후 재사용합니다. 저장소 출력이 원본 의존성 조건을 유지하더라도 resolver의 정규화·비교 규칙은 그대로입니다.
+
 ### 개요
 - 목적: APK 패키지 의존성 해결 (Alpine Linux)
 - 위치: `src/core/resolver/apk-resolver.ts`
@@ -744,6 +767,8 @@ OS resolver는 `parseFromText()`나 공개 `clearCache()`를 제공하지 않습
 | `loadMetadata` (protected) | - | Promise<void> | APK 저장소 메타데이터 로드 (APKINDEX.tar.gz) |
 | `searchPackages` | query, matchType? | Promise<OSPackageSearchResult[]> | 패키지 검색 |
 | `findPackagesForDependency` (protected) | dependency | Promise<OSPackageInfo[]> | 의존성에 해당하는 패키지 찾기 |
+| `filterByVersion` (protected) | packages, dependency | OSPackageInfo[] | capability 제공 버전 또는 일반 패키지 버전으로 조건 확인 |
+| `selectCandidatesForDependency` (protected) | packages, dependency | OSPackageInfo[] | 버전·아키텍처 조건을 통과한 후보에서 하나의 제공 패키지 이름 선택 |
 
 ### 내부 메서드
 
@@ -858,6 +883,8 @@ interface NpmResolutionResult {
   maxDepth: number; // 배치 경로로 계산한 실제 깊이
 }
 ```
+
+`root`는 직접 요청한 패키지이며 `flatList`에는 전이 패키지만 들어갑니다. `totalSize`와 `totalPackages`도 이 전이 목록을 기준으로 계산합니다. 공통 다운로드 목록에서는 [shared 해결기](./shared-dependency.md)가 해결된 직접 루트를 별도로 포함합니다.
 
 ### 의존성 호이스팅
 

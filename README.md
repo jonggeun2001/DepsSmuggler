@@ -146,13 +146,13 @@ depssmuggler os cache clear
 | 항목 | 현재 동작 |
 |------|-----------|
 | 압축·설치 스크립트 | 일반 GUI와 CLI에서 ZIP/tar.gz 지원. 일반 GUI는 설치 스크립트 포함 여부를 선택하고 OS 출력에는 전용 스크립트 생성기가 있습니다. |
-| 설치 스크립트 범위 | 패키지 수집과 설치 자동화의 지원 범위는 다릅니다. 일반 스크립트에는 npm 전용 설치가 없고 Conda 항목도 pip 명령으로 처리하므로 Conda 오프라인 설치를 보장하지 않습니다. 생성기별 범위는 [Packagers](docs/packagers.md)를 참고하세요. |
+| 설치 스크립트 범위 | CLI의 npm 스크립트는 전달된 `.tgz`를 오프라인으로 설치해 스크립트 폴더의 `npm-project/node_modules`에 배치하며, 전이 의존성의 여러 버전을 함께 보존합니다. Conda 항목은 아직 pip 명령으로 처리하므로 Conda 오프라인 설치를 보장하지 않습니다. 생성기별 범위는 [Packagers](docs/packagers.md)를 참고하세요. |
 | 파일 분할 | 일반 GUI의 이메일 전달 중 첨부 한도를 초과하고 분할 설정이 켜진 경우 적용합니다. 로컬 저장 경로에서 자동 분할하지 않습니다. |
 | SMTP 테스트 | Electron IPC로 실제 연결을 테스트합니다. 브라우저 개발 환경에서는 시뮬레이션이며, Electron API가 일부 누락되면 안내 후 비활성화됩니다. |
 | 업데이트 | 배포 앱에서 시작 후 확인하고 사용자가 다운로드·설치할 수 있습니다. 개발 환경은 모의 동작입니다. `autoUpdate`·`autoDownloadUpdate` 설정은 저장되지만 updater 동작을 제어하는 연결은 아직 없습니다. |
 | 브라우저 실행·E2E | 일부 조회·히스토리 폴백과 UI 검증용입니다. Playwright는 `window.electronAPI` mock/stub을 사용하므로 실제 Electron·외부 저장소·SMTP 통합 검증과 구분합니다. |
 | 저장소 인증·무결성 | 공개 저장소 사용을 대상으로 하며 사용자 자격 증명을 쓰는 프라이빗 저장소 인증 UI/CLI는 없습니다. 체크섬 처리는 downloader마다 다르고, OS의 실제 GPG 서명 검증은 미구현입니다. |
-| OS 로컬 저장소 | 관리자별 메타데이터 생성 코드가 있습니다. APK 인덱스 출력은 간소화 구현이므로 실제 Alpine 저장소 호환성은 [OS 문서](docs/os-package-downloader.md)의 제한을 확인해야 합니다. |
+| OS 로컬 저장소 | 관리자별 메타데이터를 생성하며 APK 인덱스는 `APKINDEX`를 담은 gzip tar 형식입니다. APK 메타데이터 필드 보존과 실제 Alpine 저장소 호환성의 남은 제한은 [OS 문서](docs/os-package-downloader.md)를 확인하세요. |
 
 이 범위는 기존 구현을 설명합니다. 상세 동작과 설계 기록의 구분은 [문서 상태](docs/documentation-status.md)에서 확인할 수 있습니다.
 

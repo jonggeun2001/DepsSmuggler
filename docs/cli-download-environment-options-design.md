@@ -89,7 +89,7 @@ DownloadManager queue
 | 타입 | 깊이 0 루트 해결 조건 |
 |------|----------------------|
 | pip, Conda | 환경 옵션이 모두 기본값이어도 항상 수행 |
-| Maven | `hasExplicitTargetEnvironment(options)`가 참일 때 수행. 유효한 명령에서는 classifier를 명시한 경우가 해당하며, 비기본 OS·아키텍처에도 classifier가 필요함 |
+| Maven | 요청 목록에 `latest`가 있거나 `hasExplicitTargetEnvironment(options)`가 참일 때 수행. 유효한 환경 지정 명령에서는 classifier를 명시한 경우가 해당하며, 비기본 OS·아키텍처에도 classifier가 필요함 |
 | npm, Docker 및 일반 `download`의 OS 타입 | resolver를 호출하지 않고 입력 패키지를 반환 |
 
 `hasExplicitTargetEnvironment()`는 비기본 `arch`, `targetOS`, `condaChannel` 또는 지정된 `pythonVersion`, `cudaVersion`, `classifier`를 검사한다. 타입에 맞지 않는 환경 옵션은 이 단계 전에 검증 오류로 거부된다. 이 판별 함수와 별개로 pip·Conda는 항상 루트 아티팩트를 해결하므로, 기본 환경의 `--no-deps`도 호환 파일 선택과 해결 실패 검사를 거친다.
@@ -125,7 +125,7 @@ DownloadManager queue
 
 1. CLI command 테스트에서 각 환경 옵션이 `resolveAllDependencies`로 전달되는지 확인한다.
 2. 잘못된 OS, 아키텍처, Python/CUDA 버전과 패키지 타입별 잘못된 조합이 다운로드 시작 전에 거부되는지 확인한다.
-3. pip·Conda의 `--no-deps`는 기본 환경과 명시한 환경 모두에서 깊이 0 루트 해결만 수행하고 의존성을 큐에 추가하지 않는지 확인한다. Maven의 환경 지정 여부와 나머지 타입의 resolver 생략 조건도 구분한다.
+3. pip·Conda의 `--no-deps`는 기본 환경과 명시한 환경 모두에서 깊이 0 루트 해결만 수행하고 의존성을 큐에 추가하지 않는지 확인한다. Maven은 환경 지정 여부와 `latest` 요청 포함 여부를 검사하며, 나머지 타입의 resolver 생략 조건도 구분한다.
 4. 공용 dependency resolver 테스트에서 기존 루트 패키지에 resolver의 URL, 파일명, classifier 메타데이터가 병합되는지 확인한다.
 5. pip resolver에서 downloader까지 이어지는 테스트로 PyPI JSON과 Simple API에서 선택한 URL·체크섬을 재조회 없이 사용하는지 확인하고, ARM64 별칭·`abi3` 최소 버전·`Requires-Python` 제약을 검증한다.
 6. 파일 입력과 `--no-deps`에도 비기본 아키텍처가 적용되고, pip/Conda의 미지원 아키텍처와 classifier 없는 Maven 대상 OS/아키텍처가 부수 효과 전에 거부되는지 확인한다.

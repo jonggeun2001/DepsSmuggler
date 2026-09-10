@@ -3,16 +3,26 @@
  * Bash 및 PowerShell 설치 스크립트를 자동으로 생성
  */
 
-import * as fs from 'fs-extra';
 import * as path from 'path';
+import * as fs from 'fs-extra';
+import { createNpmInstallPlan, NpmPackageFile } from './npm-install-plan';
+import { buildNpmProjectSetupScript } from './npm-install-runtime';
 import { PackageInfo } from '../../types';
 import logger from '../../utils/logger';
 import { stripLeadingDotSlash, toUnixPath, getWriteOptions } from '../shared/path-utils';
+import { buildDockerArchiveFilename } from '../downloaders/docker-utils';
 
 export interface ScriptOptions {
   includeHeader?: boolean;
   includeErrorHandling?: boolean;
   packageDir?: string; // 패키지 디렉토리 경로 (기본: ./packages)
+  npmPackageFiles?: NpmPackageFile[]; // 다운로드 원본과 압축물 packages/ 내부 상대 경로
+  npmRootPackages?: PackageInfo[]; // 직접 요청한 npm 패키지의 해결된 버전
+  condaPackageFiles?: CondaPackageFile[]; // 압축물 packages/ 내부 Conda archive 상대 경로
+}
+
+export interface CondaPackageFile {
+  relativePath: string;
 }
 
 export interface GeneratedScript {
@@ -21,10 +31,99 @@ export interface GeneratedScript {
   type: 'bash' | 'powershell';
 }
 
+interface MavenCoordinate {
+  groupPath: string;
+  artifactId: string;
+  version: string;
+}
+
 /**
  * 설치 스크립트 생성기 클래스
  */
 export class ScriptGenerator {
+  private getMavenCoordinates(packages: PackageInfo[]): MavenCoordinate[] {
+    const coordinates = new Map<string, MavenCoordinate>();
+
+    for (const pkg of packages) {
+      if (pkg.type !== 'maven') continue;
+
+      const metadata = pkg.metadata as Record<string, unknown> | undefined;
+      const nameParts = pkg.name.split(':');
+      const groupId = typeof metadata?.groupId === 'string'
+        ? metadata.groupId
+        : nameParts[0];
+      const artifactId = typeof metadata?.artifactId === 'string'
+        ? metadata.artifactId
+        : nameParts[1];
+
+      // The Maven downloader always carries these coordinates. Refuse unsafe
+      // path segments so generated scripts cannot escape the repository root.
+      if (!groupId || !artifactId || !pkg.version ||
+          groupId.split('.').some(segment => !/^[A-Za-z0-9_-]+$/.test(segment)) ||
+          !/^[A-Za-z0-9_.+-]+$/.test(artifactId) || artifactId === '.' || artifactId === '..' ||
+          !/^[A-Za-z0-9_.+-]+$/.test(pkg.version) || pkg.version === '.' || pkg.version === '..') {
+        throw new Error(`Maven 패키지 좌표가 유효하지 않습니다: ${pkg.name}:${pkg.version}`);
+      }
+
+      const coordinate = {
+        groupPath: groupId.split('.').join('/'),
+        artifactId,
+        version: pkg.version,
+      };
+      coordinates.set(`${coordinate.groupPath}/${artifactId}/${pkg.version}`, coordinate);
+    }
+
+    return [...coordinates.values()];
+  }
+
+  private shellQuote(value: string): string {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+  }
+
+  private powerShellQuote(value: string): string {
+    return `'${value.replace(/'/g, "''")}'`;
+  }
+
+  private getCondaArchivePaths(
+    packages: PackageInfo[],
+    packageFiles?: CondaPackageFile[],
+  ): string[] {
+    const relativePaths = packageFiles !== undefined
+      ? packageFiles.map(file => file.relativePath)
+      : packages.map(pkg => {
+        const filename = pkg.metadata?.filename;
+        if (typeof filename !== 'string' || filename.length === 0) {
+          throw new Error(`Conda 패키지 ${pkg.name}@${pkg.version}의 아카이브 파일명이 없습니다 (metadata.filename)`);
+        }
+        return filename;
+      });
+
+    if (relativePaths.length === 0) {
+      throw new Error('Conda 패키지 파일 매핑이 비어 있습니다.');
+    }
+
+    const normalized = new Set<string>();
+    for (const relativePath of relativePaths) {
+      if (typeof relativePath !== 'string') {
+        throw new Error('Conda 패키지 파일 경로가 유효하지 않습니다.');
+      }
+      const portablePath = relativePath.replace(/\\/g, '/');
+      const segments = portablePath.split('/');
+      if (
+        portablePath.length === 0 ||
+        portablePath.startsWith('/') ||
+        /^[A-Za-z]:\//.test(portablePath) ||
+        segments.some(segment => segment.length === 0 || segment === '.' || segment === '..') ||
+        !/\.(?:conda|tar\.bz2)$/i.test(portablePath)
+      ) {
+        throw new Error(`Conda 패키지 파일 경로가 유효하지 않습니다: ${relativePath}`);
+      }
+      normalized.add(portablePath);
+    }
+
+    return [...normalized];
+  }
+
   /**
    * Bash 설치 스크립트 생성 (Linux/macOS용)
    */
@@ -78,6 +177,21 @@ export class ScriptGenerator {
       lines.push('');
     }
 
+    lines.push('# 설치 실패 집계');
+    lines.push('FAILED_PACKAGES=()');
+    lines.push('record_failure() { FAILED_PACKAGES+=("$1"); }');
+    lines.push('run_install_group() {');
+    lines.push('    local group_name="$1"');
+    lines.push('    shift');
+    lines.push('    local failures_before="${#FAILED_PACKAGES[@]}"');
+    lines.push('    if ! "$@"; then');
+    lines.push('        if [[ "${#FAILED_PACKAGES[@]}" -eq "$failures_before" ]]; then');
+    lines.push('            record_failure "$group_name"');
+    lines.push('        fi');
+    lines.push('    fi');
+    lines.push('}');
+    lines.push('');
+
     // 패키지 디렉토리 확인
     lines.push('# 패키지 디렉토리 확인');
     lines.push(`PACKAGE_DIR="${packageDir}"`);
@@ -95,12 +209,9 @@ export class ScriptGenerator {
     // 패키지 타입별로 그룹화
     const packagesByType = this.groupPackagesByType(packages);
 
-    // pip/conda 패키지 설치
-    if (packagesByType.has('pip') || packagesByType.has('conda')) {
-      const pipPackages = [
-        ...(packagesByType.get('pip') || []),
-        ...(packagesByType.get('conda') || []),
-      ];
+    // pip 패키지 설치
+    if (packagesByType.has('pip')) {
+      const pipPackages = packagesByType.get('pip') || [];
 
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('# Python 패키지 설치');
@@ -115,28 +226,137 @@ export class ScriptGenerator {
       lines.push('        return 1');
       lines.push('    fi');
       lines.push('');
+      lines.push('    local pip_failed=0');
       lines.push('    PIP_FIND_LINK_ARGS=()');
-      lines.push('    while IFS= read -r -d \'\' directory; do');
-      lines.push('        PIP_FIND_LINK_ARGS+=(--find-links="$directory")');
-      lines.push('    done < <(find "$PACKAGE_DIR" -type d -print0)');
+      lines.push('    local pip_directories_file');
+      lines.push('    if ! pip_directories_file="$(mktemp)"; then');
+      lines.push('        log_error "pip 패키지 디렉터리 목록을 만들 수 없습니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('    if ! find "$PACKAGE_DIR" -type d -print0 > "$pip_directories_file"; then');
+      lines.push('        rm -f "$pip_directories_file"');
+      lines.push('        log_error "pip 패키지 디렉터리를 찾을 수 없습니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('    if ! {');
+      lines.push('        while IFS= read -r -d \'\' directory; do');
+      lines.push('            PIP_FIND_LINK_ARGS+=(--find-links="$directory")');
+      lines.push('        done < "$pip_directories_file"');
+      lines.push('    }; then');
+      lines.push('        rm -f "$pip_directories_file"');
+      lines.push('        log_error "pip 패키지 디렉터리 목록을 읽을 수 없습니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('    if ! rm -f "$pip_directories_file"; then');
+      lines.push('        log_error "pip 패키지 디렉터리 목록을 정리할 수 없습니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
       lines.push('');
 
       for (const pkg of pipPackages) {
         lines.push(`    # ${pkg.name} 설치`);
         lines.push(`    log_info "${pkg.name}==${pkg.version} 설치 중..."`);
-        lines.push(`    pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" ${pkg.name}==${pkg.version} || {`);
+        lines.push(`    if pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" ${pkg.name}==${pkg.version}; then`);
+        lines.push('        :');
+        lines.push('    else');
         lines.push(`        log_warn "${pkg.name} 설치 실패, 계속 진행합니다."`);
-        lines.push('    }');
+        lines.push(`        record_failure ${this.shellQuote(`${pkg.name}==${pkg.version}`)}`);
+        lines.push('        pip_failed=1');
+        lines.push('    fi');
         lines.push('');
       }
 
+      lines.push('    if [[ "$pip_failed" -ne 0 ]]; then return 1; fi');
       lines.push('    log_info "Python 패키지 설치 완료"');
+      lines.push('}');
+      lines.push('');
+    }
+
+    // Conda 패키지 설치
+    if (packagesByType.has('conda')) {
+      const condaPackages = packagesByType.get('conda') || [];
+      const condaArchivePaths = this.getCondaArchivePaths(condaPackages, options.condaPackageFiles);
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('# Conda 패키지 오프라인 설치');
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('');
+      lines.push('install_conda_packages() {');
+      lines.push('    log_info "Conda 패키지 설치 중..."');
+      lines.push('    if ! command -v conda &> /dev/null; then');
+      lines.push('        log_error "Conda가 설치되어 있지 않습니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('');
+      lines.push('    local conda_relative_path conda_archive_path');
+      lines.push('    local conda_archive_paths=()');
+      for (const relativePath of condaArchivePaths) {
+        lines.push(`    conda_relative_path=${this.shellQuote(relativePath)}`);
+        lines.push('    conda_archive_path="$SCRIPT_DIR/$PACKAGE_DIR/$conda_relative_path"');
+        lines.push('    if [[ ! -f "$conda_archive_path" ]]; then');
+        lines.push('        log_error "Conda 아카이브를 찾을 수 없습니다: $conda_archive_path"');
+        lines.push('        return 1');
+        lines.push('    fi');
+        lines.push('    conda_archive_paths+=("$conda_archive_path")');
+      }
+      lines.push('');
+      lines.push('    local conda_prefix="${DEPS_SMUGGLER_CONDA_PREFIX:-$SCRIPT_DIR/conda-env}"');
+      lines.push('    if [[ "$conda_prefix" != /* ]]; then conda_prefix="$SCRIPT_DIR/$conda_prefix"; fi');
+      lines.push('    if [[ -e "$conda_prefix" && ! -d "$conda_prefix" ]]; then');
+      lines.push('        log_error "Conda 환경 경로가 디렉터리가 아닙니다: $conda_prefix"');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('    if [[ -f "$conda_prefix/conda-meta/history" ]]; then');
+      lines.push('        conda install --offline --yes --prefix "$conda_prefix" "${conda_archive_paths[@]}" || {');
+      lines.push('            log_error "Conda 패키지 설치에 실패했습니다."');
+      lines.push('            return 1');
+      lines.push('        }');
+      lines.push('    elif [[ -e "$conda_prefix" ]]; then');
+      lines.push('        log_error "기존 경로가 Conda 환경이 아닙니다: $conda_prefix"');
+      lines.push('        return 1');
+      lines.push('    else');
+      lines.push('        conda create --offline --yes --no-default-packages --prefix "$conda_prefix" "${conda_archive_paths[@]}" || {');
+      lines.push('            log_error "Conda 환경 생성에 실패했습니다."');
+      lines.push('            return 1');
+      lines.push('        }');
+      lines.push('    fi');
+      lines.push('    log_info "Conda 패키지 설치 완료: $conda_prefix"');
+      lines.push('}');
+      lines.push('');
+    }
+
+    // npm 패키지 설치
+    if (packagesByType.has('npm')) {
+      const npmPlan = await createNpmInstallPlan(packages, outputPath, packageDir, options.npmPackageFiles, options.npmRootPackages);
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('# npm 패키지 오프라인 설치');
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('');
+      lines.push('install_npm_packages() {');
+      lines.push('    log_info "npm 패키지 설치 중..."');
+      lines.push('    if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then');
+      lines.push('        log_error "Node.js와 npm이 설치되어 있어야 합니다."');
+      lines.push('        return 1');
+      lines.push('    fi');
+      lines.push('');
+      lines.push('    local npm_project_encoded npm_project');
+      lines.push('    npm_project_encoded="$(node - "$SCRIPT_DIR" "$PACKAGE_DIR" <<\'DEPS_SMUGGLER_NPM\'');
+      lines.push(buildNpmProjectSetupScript(npmPlan));
+      lines.push('DEPS_SMUGGLER_NPM');
+      lines.push('    )" || return 1');
+      lines.push('    npm_project="$(node -e \'process.stdout.write(Buffer.from(process.argv[1], "base64").toString("utf8"))\' "$npm_project_encoded")" || return 1');
+      lines.push('');
+      lines.push('    npm install --offline --no-audit --no-fund --update-notifier=false --no-save --package-lock=false --global=false --prefix "$npm_project" || {');
+      lines.push('        log_error "npm 패키지 설치에 실패했습니다."');
+      lines.push('        return 1');
+      lines.push('    }');
+      lines.push('    log_info "npm 패키지 설치 완료: $npm_project/node_modules"');
       lines.push('}');
       lines.push('');
     }
 
     // Maven 패키지 설치
     if (packagesByType.has('maven')) {
+      const mavenCoordinates = this.getMavenCoordinates(packagesByType.get('maven') || []);
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('# Maven 패키지 설치');
       lines.push('#-------------------------------------------------------------------------------');
@@ -144,21 +364,72 @@ export class ScriptGenerator {
       lines.push('install_maven_packages() {');
       lines.push('    log_info "Maven 패키지 설치 중..."');
       lines.push('');
-      lines.push('    # Maven 설치 확인');
-      lines.push('    if ! command -v mvn &> /dev/null; then');
-      lines.push('        log_error "Maven이 설치되어 있지 않습니다."');
+      lines.push('    # Maven local repository와 같은 canonical layout을 그대로 복사합니다.');
+      lines.push('    local maven_paths=(');
+      for (const coordinate of mavenCoordinates) {
+        lines.push(`        ${this.shellQuote(`${coordinate.groupPath}/${coordinate.artifactId}/${coordinate.version}`)}`);
+      }
+      lines.push('    )');
+      lines.push('    local maven_source_root=""');
+      lines.push('    local candidate relative_path candidate_complete');
+      lines.push('    for candidate in "$PACKAGE_DIR" "$PACKAGE_DIR/m2repo"; do');
+      lines.push('        candidate_complete=1');
+      lines.push('        for relative_path in "${maven_paths[@]}"; do');
+      lines.push('            if [[ ! -d "$candidate/$relative_path" ]]; then');
+      lines.push('                candidate_complete=0');
+      lines.push('                break');
+      lines.push('            fi');
+      lines.push('        done');
+      lines.push('        if [[ "$candidate_complete" -eq 1 ]]; then');
+      lines.push('            if [[ -n "$maven_source_root" ]]; then');
+      lines.push('                log_error "Maven 저장소 구조가 중복되어 원본을 구분할 수 없습니다: $PACKAGE_DIR"');
+      lines.push('                return 1');
+      lines.push('            fi');
+      lines.push('            maven_source_root="$candidate"');
+      lines.push('        fi');
+      lines.push('    done');
+      lines.push('    if [[ -z "$maven_source_root" ]]; then');
+      lines.push('        log_error "모든 Maven 패키지를 포함하는 저장소 디렉터리를 찾을 수 없습니다: $PACKAGE_DIR"');
       lines.push('        return 1');
       lines.push('    fi');
+      lines.push('    local maven_repo_local="${MAVEN_REPO_LOCAL:-$HOME/.m2/repository}"');
+      lines.push('    copy_maven_coordinate() {');
+      lines.push('        local relative_path="$1"');
+      lines.push('        local source_path="$maven_source_root/$relative_path"');
+      lines.push('        local target_path="$maven_repo_local/$relative_path"');
+      lines.push('        if [[ ! -d "$source_path" ]]; then');
+      lines.push('            log_error "Maven canonical artifact directory를 찾을 수 없습니다: $source_path"');
+      lines.push('            return 1');
+      lines.push('        fi');
+      lines.push('        mkdir -p "$target_path" || return 1');
+      lines.push('        local remote_marker="$target_path/_remote.repositories"');
+      lines.push('        local artifact_count=0');
+      lines.push('        local artifact_path artifact_name');
+      lines.push('        for artifact_path in "$source_path"/* "$source_path"/.[!.]* "$source_path"/..?*; do');
+      lines.push('            [[ -f "$artifact_path" ]] || continue');
+      lines.push('            artifact_name="${artifact_path##*/}"');
+      lines.push('            [[ "$artifact_name" == "_remote.repositories" ]] && continue');
+      lines.push('            cp -p "$artifact_path" "$target_path/$artifact_name" || return 1');
+      lines.push('            case "$artifact_name" in *.sha1|*.md5|*.sha256|*.sha512) continue ;; esac');
+      lines.push('            artifact_count=$((artifact_count + 1))');
+      lines.push('            touch "$remote_marker" || return 1');
+      lines.push('            if ! grep -Fqx -- "${artifact_name}>=" "$remote_marker" && ! grep -Fqx -- "${artifact_name}>=$(printf \'\\r\')" "$remote_marker"; then');
+      lines.push('                printf "\\n%s\\n" "${artifact_name}>=" >> "$remote_marker" || return 1');
+      lines.push('            fi');
+      lines.push('        done');
+      lines.push('        if [[ "$artifact_count" -eq 0 ]]; then');
+      lines.push('            log_error "Maven artifact 파일을 찾을 수 없습니다: $source_path"');
+      lines.push('            return 1');
+      lines.push('        fi');
+      lines.push('    }');
       lines.push('');
-      lines.push('    # 로컬 저장소에 설치');
-      lines.push('    while IFS= read -r -d \'\' jar; do');
-      lines.push('        log_info "$(basename "$jar") 설치 중..."');
-      lines.push('        mvn install:install-file -Dfile="$jar" -DgeneratePom=true || {');
-      lines.push('            log_warn "$(basename "$jar") 설치 실패"');
-      lines.push('        }');
-      lines.push(
-        '    done < <(find "$PACKAGE_DIR" -type f -name \'*.jar\' -print0)',
-      );
+      lines.push('    for relative_path in "${maven_paths[@]}"; do');
+      lines.push('        copy_maven_coordinate "$relative_path" || return 1');
+      lines.push('    done');
+      if (mavenCoordinates.length === 0) {
+        lines.push('    log_error "Maven 패키지에 유효한 groupId/artifactId/version 좌표가 없습니다."');
+        lines.push('    return 1');
+      }
       lines.push('');
       lines.push('    log_info "Maven 패키지 설치 완료"');
       lines.push('}');
@@ -185,19 +456,25 @@ export class ScriptGenerator {
       lines.push('        SUDO=""');
       lines.push('    fi');
       lines.push('');
+      lines.push('    local yum_failed=0');
 
       for (const pkg of yumPackages) {
         const arch = pkg.arch || 'x86_64';
         lines.push(`    # ${pkg.name} 설치`);
         lines.push(`    log_info "${pkg.name}-${pkg.version} 설치 중..."`);
-        lines.push(`    $SUDO rpm -ivh "$PACKAGE_DIR/${pkg.name}-${pkg.version}.${arch}.rpm" 2>/dev/null || {`);
-        lines.push(`        $SUDO rpm -Uvh "$PACKAGE_DIR/${pkg.name}-${pkg.version}.${arch}.rpm" 2>/dev/null || {`);
-        lines.push(`            log_warn "${pkg.name} 설치 실패 또는 이미 설치됨"`);
-        lines.push('        }');
-        lines.push('    }');
+        lines.push(`    if $SUDO rpm -ivh "$PACKAGE_DIR/${pkg.name}-${pkg.version}.${arch}.rpm" 2>/dev/null; then`);
+        lines.push('        :');
+        lines.push(`    elif $SUDO rpm -Uvh "$PACKAGE_DIR/${pkg.name}-${pkg.version}.${arch}.rpm" 2>/dev/null; then`);
+        lines.push('        :');
+        lines.push('    else');
+        lines.push(`        log_warn "${pkg.name} 설치에 실패했습니다."`);
+        lines.push(`        record_failure ${this.shellQuote(`${pkg.name}==${pkg.version}`)}`);
+        lines.push('        yum_failed=1');
+        lines.push('    fi');
         lines.push('');
       }
 
+      lines.push('    if [[ "$yum_failed" -ne 0 ]]; then return 1; fi');
       lines.push('    log_info "YUM/RPM 패키지 설치 완료"');
       lines.push('}');
       lines.push('');
@@ -220,17 +497,23 @@ export class ScriptGenerator {
       lines.push('        return 1');
       lines.push('    fi');
       lines.push('');
+      lines.push('    local docker_failed=0');
 
       for (const pkg of dockerPackages) {
-        const imageName = pkg.name.replace(/\//g, '_');
+        const tarFileName = buildDockerArchiveFilename(pkg.name, pkg.version);
         lines.push(`    # ${pkg.name}:${pkg.version} 로드`);
         lines.push(`    log_info "${pkg.name}:${pkg.version} 로드 중..."`);
-        lines.push(`    docker load -i "$PACKAGE_DIR/${imageName}_${pkg.version}.tar" || {`);
+        lines.push(`    if docker load -i "$PACKAGE_DIR"/${this.shellQuote(tarFileName)}; then`);
+        lines.push('        :');
+        lines.push('    else');
         lines.push(`        log_warn "${pkg.name}:${pkg.version} 로드 실패"`);
-        lines.push('    }');
+        lines.push(`        record_failure ${this.shellQuote(`${pkg.name}:${pkg.version}`)}`);
+        lines.push('        docker_failed=1');
+        lines.push('    fi');
         lines.push('');
       }
 
+      lines.push('    if [[ "$docker_failed" -ne 0 ]]; then return 1; fi');
       lines.push('    log_info "Docker 이미지 로드 완료"');
       lines.push('}');
       lines.push('');
@@ -248,23 +531,45 @@ export class ScriptGenerator {
     lines.push('    echo ""');
     lines.push('');
 
-    if (packagesByType.has('pip') || packagesByType.has('conda')) {
-      lines.push('    install_python_packages');
+    const groupFailureLabel = (label: string, type: string): string => {
+      const group = packagesByType.get(type) || [];
+      const packagesSummary = group.map(pkg => `${pkg.name}@${pkg.version}`).join(', ');
+      return `${label} (${packagesSummary})`;
+    };
+
+    if (packagesByType.has('pip')) {
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('Python 패키지', 'pip'))} install_python_packages`);
+      lines.push('    echo ""');
+    }
+    if (packagesByType.has('conda')) {
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('Conda 패키지', 'conda'))} install_conda_packages`);
       lines.push('    echo ""');
     }
     if (packagesByType.has('maven')) {
-      lines.push('    install_maven_packages');
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('Maven 패키지', 'maven'))} install_maven_packages`);
+      lines.push('    echo ""');
+    }
+    if (packagesByType.has('npm')) {
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('npm 패키지', 'npm'))} install_npm_packages`);
       lines.push('    echo ""');
     }
     if (packagesByType.has('yum')) {
-      lines.push('    install_yum_packages');
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('YUM 패키지', 'yum'))} install_yum_packages`);
       lines.push('    echo ""');
     }
     if (packagesByType.has('docker')) {
-      lines.push('    load_docker_images');
+      lines.push(`    run_install_group ${this.shellQuote(groupFailureLabel('Docker 이미지', 'docker'))} load_docker_images`);
       lines.push('    echo ""');
     }
 
+    lines.push('');
+    lines.push('    if [[ "${#FAILED_PACKAGES[@]}" -gt 0 ]]; then');
+    lines.push('        log_error "실패한 패키지:"');
+    lines.push('        for failed_package in "${FAILED_PACKAGES[@]}"; do');
+    lines.push('            log_error "  - $failed_package"');
+    lines.push('        done');
+    lines.push('        return 1');
+    lines.push('    fi');
     lines.push('');
     lines.push('    log_info "====================================="');
     lines.push('    log_info "모든 설치가 완료되었습니다!"');
@@ -321,6 +626,18 @@ export class ScriptGenerator {
       lines.push('');
     }
 
+    lines.push('$script:FailedPackages = @()');
+    lines.push('function Add-FailedPackage { param([string]$Message) $script:FailedPackages += $Message }');
+    lines.push('function Invoke-InstallGroup {');
+    lines.push('    param([string]$GroupName, [scriptblock]$Action)');
+    lines.push('    $failureCountBefore = $script:FailedPackages.Count');
+    lines.push('    try { & $Action } catch {');
+    lines.push('        Write-Err $_');
+    lines.push('        if ($script:FailedPackages.Count -eq $failureCountBefore) { Add-FailedPackage $GroupName }');
+    lines.push('    }');
+    lines.push('}');
+    lines.push('');
+
     // 로깅 함수
     lines.push('# 로깅 함수');
     lines.push('function Write-Info { param($Message) Write-Host "[INFO] $Message" -ForegroundColor Green }');
@@ -345,12 +662,9 @@ export class ScriptGenerator {
     // 패키지 타입별로 그룹화
     const packagesByType = this.groupPackagesByType(packages);
 
-    // pip/conda 패키지 설치
-    if (packagesByType.has('pip') || packagesByType.has('conda')) {
-      const pipPackages = [
-        ...(packagesByType.get('pip') || []),
-        ...(packagesByType.get('conda') || []),
-      ];
+    // pip 패키지 설치
+    if (packagesByType.has('pip')) {
+      const pipPackages = packagesByType.get('pip') || [];
 
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('# Python 패키지 설치');
@@ -361,35 +675,124 @@ export class ScriptGenerator {
       lines.push('');
       lines.push('    # pip 설치 확인');
       lines.push('    if (-not (Get-Command pip -ErrorAction SilentlyContinue)) {');
-      lines.push('        Write-Err "pip가 설치되어 있지 않습니다."');
-      lines.push('        return');
+      lines.push('        throw "pip가 설치되어 있지 않습니다."');
       lines.push('    }');
       lines.push('');
+      lines.push('    $pipFailed = $false');
       lines.push('    $PipFindLinkArgs = @("--find-links=$PackageDir")');
-      lines.push('    $PipFindLinkArgs += @(');
-      lines.push('        Get-ChildItem -Path $PackageDir -Directory -Recurse |');
-      lines.push('            ForEach-Object { "--find-links=$($_.FullName)" }');
-      lines.push('    )');
+      lines.push('    try {');
+      lines.push('        $PipFindLinkArgs += @(Get-ChildItem -LiteralPath $PackageDir -Directory -Recurse -ErrorAction Stop |');
+      lines.push('            ForEach-Object { "--find-links=$($_.FullName)" })');
+      lines.push('    } catch {');
+      lines.push('        throw "pip 패키지 디렉터리를 찾을 수 없습니다: $_"');
+      lines.push('    }');
       lines.push('');
 
       for (const pkg of pipPackages) {
         lines.push(`    # ${pkg.name} 설치`);
         lines.push(`    Write-Info "${pkg.name}==${pkg.version} 설치 중..."`);
         lines.push('    try {');
-        lines.push(`        pip install --no-index @PipFindLinkArgs ${pkg.name}==${pkg.version}`);
+        lines.push(`        & pip install --no-index @PipFindLinkArgs ${pkg.name}==${pkg.version}`);
+        lines.push('        $pipExitCode = $LASTEXITCODE');
+        lines.push('        if ($pipExitCode -ne 0) {');
+        lines.push(`            Write-Warn "${pkg.name} 설치 실패, 계속 진행합니다."`);
+        lines.push(`            Add-FailedPackage ${this.powerShellQuote(`${pkg.name}==${pkg.version}`)}`);
+        lines.push('            $pipFailed = $true');
+        lines.push('        }');
         lines.push('    } catch {');
-        lines.push(`        Write-Warn "${pkg.name} 설치 실패, 계속 진행합니다."`);
+        lines.push('        Write-Err $_');
+        lines.push(`        Add-FailedPackage ${this.powerShellQuote(`${pkg.name}==${pkg.version}`)}`);
+        lines.push('        $pipFailed = $true');
         lines.push('    }');
         lines.push('');
       }
 
+      lines.push('    if ($pipFailed) { return }');
       lines.push('    Write-Info "Python 패키지 설치 완료"');
+      lines.push('}');
+      lines.push('');
+    }
+
+    // Conda 패키지 설치
+    if (packagesByType.has('conda')) {
+      const condaPackages = packagesByType.get('conda') || [];
+      const condaArchivePaths = this.getCondaArchivePaths(condaPackages, options.condaPackageFiles);
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('# Conda 패키지 오프라인 설치');
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('');
+      lines.push('function Install-CondaPackages {');
+      lines.push('    Write-Info "Conda 패키지 설치 중..."');
+      lines.push('    if (-not (Get-Command conda -ErrorAction SilentlyContinue)) {');
+      lines.push('        throw "Conda가 설치되어 있지 않습니다."');
+      lines.push('    }');
+      lines.push('');
+      lines.push('    $CondaArchivePaths = @()');
+      for (const relativePath of condaArchivePaths) {
+        lines.push(`    $CondaArchivePath = Join-Path -Path $PackageDir -ChildPath ${this.powerShellQuote(relativePath)}`);
+        lines.push('    if (-not (Test-Path -LiteralPath $CondaArchivePath -PathType Leaf)) {');
+        lines.push('        throw "Conda 아카이브를 찾을 수 없습니다: $CondaArchivePath"');
+        lines.push('    }');
+        lines.push('    $CondaArchivePaths += $CondaArchivePath');
+      }
+      lines.push('');
+      lines.push('    $CondaPrefix = $env:DEPS_SMUGGLER_CONDA_PREFIX');
+      lines.push('    if ([string]::IsNullOrWhiteSpace($CondaPrefix)) {');
+      lines.push('        $CondaPrefix = Join-Path -Path $ScriptDir -ChildPath \'conda-env\'');
+      lines.push('    } elseif (-not [System.IO.Path]::IsPathRooted($CondaPrefix)) {');
+      lines.push('        $CondaPrefix = Join-Path -Path $ScriptDir -ChildPath $CondaPrefix');
+      lines.push('    }');
+      lines.push('    if (Test-Path -LiteralPath $CondaPrefix -PathType Leaf) {');
+      lines.push('        throw "Conda 환경 경로가 디렉터리가 아닙니다: $CondaPrefix"');
+      lines.push('    }');
+      lines.push('    $CondaHistory = Join-Path -Path $CondaPrefix -ChildPath \'conda-meta/history\'');
+      lines.push('    if (Test-Path -LiteralPath $CondaHistory -PathType Leaf) {');
+      lines.push('        & conda install --offline --yes --prefix $CondaPrefix @CondaArchivePaths');
+      lines.push('        if ($LASTEXITCODE -ne 0) { throw "Conda 패키지 설치에 실패했습니다: 종료 코드 $LASTEXITCODE" }');
+      lines.push('    } elseif (Test-Path -LiteralPath $CondaPrefix) {');
+      lines.push('        throw "기존 경로가 Conda 환경이 아닙니다: $CondaPrefix"');
+      lines.push('    } else {');
+      lines.push('        & conda create --offline --yes --no-default-packages --prefix $CondaPrefix @CondaArchivePaths');
+      lines.push('        if ($LASTEXITCODE -ne 0) { throw "Conda 환경 생성에 실패했습니다: 종료 코드 $LASTEXITCODE" }');
+      lines.push('    }');
+      lines.push('    Write-Info "Conda 패키지 설치 완료: $CondaPrefix"');
+      lines.push('}');
+      lines.push('');
+    }
+
+    // npm 패키지 설치
+    if (packagesByType.has('npm')) {
+      const npmPlan = await createNpmInstallPlan(packages, outputPath, packageDir, options.npmPackageFiles, options.npmRootPackages);
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('# npm 패키지 오프라인 설치');
+      lines.push('#-------------------------------------------------------------------------------');
+      lines.push('');
+      lines.push('function Install-NpmPackages {');
+      lines.push('    Write-Info "npm 패키지 설치 중..."');
+      lines.push('    if (-not (Get-Command node -ErrorAction SilentlyContinue) -or -not (Get-Command npm -ErrorAction SilentlyContinue)) {');
+      lines.push('        throw "Node.js와 npm이 설치되어 있어야 합니다."');
+      lines.push('    }');
+      lines.push('    $NpmSetupScript = @\'');
+      lines.push(buildNpmProjectSetupScript(npmPlan));
+      lines.push('\'@');
+      lines.push('    $NpmProjectEncoded = $NpmSetupScript | & node - "$ScriptDir" "$PackageDir"');
+      lines.push('    if ($LASTEXITCODE -ne 0) { throw "npm 설치 프로젝트 준비에 실패했습니다." }');
+      lines.push('    $NpmProject = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($NpmProjectEncoded))');
+      lines.push('    Push-Location -LiteralPath $NpmProject -ErrorAction Stop');
+      lines.push('    try {');
+      lines.push('        & npm install --offline --no-audit --no-fund --update-notifier=false --no-save --package-lock=false --global=false');
+      lines.push('        if ($LASTEXITCODE -ne 0) { throw "npm 패키지 설치에 실패했습니다: 종료 코드 $LASTEXITCODE" }');
+      lines.push('    } finally {');
+      lines.push('        Pop-Location');
+      lines.push('    }');
+      lines.push('    Write-Info "npm 패키지 설치 완료: $NpmProject/node_modules"');
       lines.push('}');
       lines.push('');
     }
 
     // Maven 패키지 설치
     if (packagesByType.has('maven')) {
+      const mavenCoordinates = this.getMavenCoordinates(packagesByType.get('maven') || []);
       lines.push('#-------------------------------------------------------------------------------');
       lines.push('# Maven 패키지 설치');
       lines.push('#-------------------------------------------------------------------------------');
@@ -397,23 +800,62 @@ export class ScriptGenerator {
       lines.push('function Install-MavenPackages {');
       lines.push('    Write-Info "Maven 패키지 설치 중..."');
       lines.push('');
-      lines.push('    # Maven 설치 확인');
-      lines.push('    if (-not (Get-Command mvn -ErrorAction SilentlyContinue)) {');
-      lines.push('        Write-Err "Maven이 설치되어 있지 않습니다."');
-      lines.push('        return');
-      lines.push('    }');
-      lines.push('');
-      lines.push('    # JAR 파일 설치');
-      lines.push(
-        '    Get-ChildItem -Path $PackageDir -Filter "*.jar" -File -Recurse | ForEach-Object {',
-      );
-      lines.push('        Write-Info "$($_.Name) 설치 중..."');
-      lines.push('        try {');
-      lines.push('            mvn install:install-file -Dfile="$($_.FullName)" -DgeneratePom=true');
-      lines.push('        } catch {');
-      lines.push('            Write-Warn "$($_.Name) 설치 실패"');
+      lines.push('    # Maven local repository와 같은 canonical layout을 그대로 복사합니다.');
+      lines.push('    $MavenPaths = @(');
+      for (const coordinate of mavenCoordinates) {
+        lines.push(`        ${this.powerShellQuote(`${coordinate.groupPath}/${coordinate.artifactId}/${coordinate.version}`)}`);
+      }
+      lines.push('    )');
+      lines.push('    $MavenSourceRoot = $null');
+      lines.push('    foreach ($Candidate in @($PackageDir, (Join-Path $PackageDir \'m2repo\'))) {');
+      lines.push('        $CandidateComplete = $true');
+      lines.push('        foreach ($RelativePath in $MavenPaths) {');
+      lines.push('            if (-not (Test-Path -LiteralPath (Join-Path $Candidate $RelativePath) -PathType Container -ErrorAction Stop)) {');
+      lines.push('                $CandidateComplete = $false');
+      lines.push('                break');
+      lines.push('            }');
+      lines.push('        }');
+      lines.push('        if ($CandidateComplete) {');
+      lines.push('            if ($MavenSourceRoot) { throw "Maven 저장소 구조가 중복되어 원본을 구분할 수 없습니다: $PackageDir" }');
+      lines.push('            $MavenSourceRoot = $Candidate');
       lines.push('        }');
       lines.push('    }');
+      lines.push('    if (-not $MavenSourceRoot) { throw "모든 Maven 패키지를 포함하는 저장소 디렉터리를 찾을 수 없습니다: $PackageDir" }');
+      lines.push('    $MavenLocalRepo = if ($env:MAVEN_REPO_LOCAL) { $env:MAVEN_REPO_LOCAL } else { Join-Path $HOME \'.m2/repository\' }');
+      lines.push('    try {');
+      lines.push('        $MavenLocalRepo = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($MavenLocalRepo)');
+      lines.push('    } catch { throw "Maven 저장소 경로 해석 실패: $MavenLocalRepo - $_" }');
+      lines.push('    function Copy-MavenCoordinate {');
+      lines.push('        param([string]$RelativePath)');
+      lines.push('        $SourcePath = Join-Path -Path $MavenSourceRoot -ChildPath $RelativePath');
+      lines.push('        $TargetPath = Join-Path -Path $MavenLocalRepo -ChildPath $RelativePath');
+      lines.push('        if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {');
+      lines.push('            throw "Maven canonical artifact directory를 찾을 수 없습니다: $SourcePath"');
+      lines.push('        }');
+      lines.push('        New-Item -ItemType Directory -Path $TargetPath -Force -ErrorAction Stop | Out-Null');
+      lines.push('        $RemoteMarker = Join-Path $TargetPath \'_remote.repositories\'');
+      lines.push('        $KnownEntries = if (Test-Path -LiteralPath $RemoteMarker) { @(Get-Content -LiteralPath $RemoteMarker -ErrorAction Stop) } else { @() }');
+      lines.push('        $ArtifactCount = 0');
+      lines.push('        foreach ($Artifact in (Get-ChildItem -LiteralPath $SourcePath -File -Force -ErrorAction Stop)) {');
+      lines.push('            if ($Artifact.Name -eq \'_remote.repositories\') { continue }');
+      lines.push('            Copy-Item -LiteralPath $Artifact.FullName -Destination $TargetPath -Force -ErrorAction Stop');
+      lines.push('            if ($Artifact.Name -match \'\\.(sha1|md5|sha256|sha512)$\') { continue }');
+      lines.push('            $ArtifactCount += 1');
+      lines.push('            $Entry = "$($Artifact.Name)>="');
+      lines.push('            if ($KnownEntries -notcontains $Entry) {');
+      lines.push('                try {');
+      lines.push('                    [System.IO.File]::AppendAllText($RemoteMarker, [Environment]::NewLine + $Entry + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))');
+      lines.push('                } catch { throw "Maven 로컬 설치 기록 저장 실패: $RemoteMarker - $_" }');
+      lines.push('                $KnownEntries = @($KnownEntries) + $Entry');
+      lines.push('            }');
+      lines.push('        }');
+      lines.push('        if ($ArtifactCount -eq 0) { throw "Maven artifact 파일을 찾을 수 없습니다: $SourcePath" }');
+      lines.push('    }');
+      lines.push('');
+      lines.push('    foreach ($RelativePath in $MavenPaths) { Copy-MavenCoordinate $RelativePath }');
+      if (mavenCoordinates.length === 0) {
+        lines.push('    throw "Maven 패키지에 유효한 groupId/artifactId/version 좌표가 없습니다."');
+      }
       lines.push('');
       lines.push('    Write-Info "Maven 패키지 설치 완료"');
       lines.push('}');
@@ -433,25 +875,33 @@ export class ScriptGenerator {
       lines.push('');
       lines.push('    # Docker 설치 확인');
       lines.push('    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {');
-      lines.push('        Write-Err "Docker가 설치되어 있지 않습니다."');
-      lines.push('        return');
+      lines.push('        throw "Docker가 설치되어 있지 않습니다."');
       lines.push('    }');
       lines.push('');
+      lines.push('    $dockerFailed = $false');
 
       for (const pkg of dockerPackages) {
-        const imageName = pkg.name.replace(/\//g, '_');
-        const tarFileName = `${imageName}_${pkg.version}.tar`;
+        const tarFileName = buildDockerArchiveFilename(pkg.name, pkg.version);
         lines.push(`    # ${pkg.name}:${pkg.version} 로드`);
         lines.push(`    Write-Info "${pkg.name}:${pkg.version} 로드 중..."`);
-        lines.push(`    $ImagePath = Join-Path -Path $PackageDir -ChildPath '${tarFileName}'`);
+        lines.push(`    $ImagePath = Join-Path -Path $PackageDir -ChildPath ${this.powerShellQuote(tarFileName)}`);
         lines.push('    try {');
-        lines.push('        docker load -i $ImagePath');
+        lines.push('        & docker load -i $ImagePath');
+        lines.push('        $dockerExitCode = $LASTEXITCODE');
+        lines.push('        if ($dockerExitCode -ne 0) {');
+        lines.push(`            Write-Warn "${pkg.name}:${pkg.version} 로드 실패"`);
+        lines.push(`            Add-FailedPackage ${this.powerShellQuote(`${pkg.name}:${pkg.version}`)}`);
+        lines.push('            $dockerFailed = $true');
+        lines.push('        }');
         lines.push('    } catch {');
-        lines.push(`        Write-Warn "${pkg.name}:${pkg.version} 로드 실패"`);
+        lines.push('        Write-Err $_');
+        lines.push(`        Add-FailedPackage ${this.powerShellQuote(`${pkg.name}:${pkg.version}`)}`);
+        lines.push('        $dockerFailed = $true');
         lines.push('    }');
         lines.push('');
       }
 
+      lines.push('    if ($dockerFailed) { return }');
       lines.push('    Write-Info "Docker 이미지 로드 완료"');
       lines.push('}');
       lines.push('');
@@ -468,25 +918,47 @@ export class ScriptGenerator {
     lines.push('Write-Host ""');
     lines.push('');
 
-    if (packagesByType.has('pip') || packagesByType.has('conda')) {
-      lines.push('Install-PythonPackages');
+    const groupFailureLabel = (label: string, type: string): string => {
+      const group = packagesByType.get(type) || [];
+      const packagesSummary = group.map(pkg => `${pkg.name}@${pkg.version}`).join(', ');
+      return `${label} (${packagesSummary})`;
+    };
+
+    if (packagesByType.has('pip')) {
+      lines.push(`Invoke-InstallGroup ${this.powerShellQuote(groupFailureLabel('Python 패키지', 'pip'))} { Install-PythonPackages }`);
+      lines.push('Write-Host ""');
+    }
+    if (packagesByType.has('conda')) {
+      lines.push(`Invoke-InstallGroup ${this.powerShellQuote(groupFailureLabel('Conda 패키지', 'conda'))} { Install-CondaPackages }`);
       lines.push('Write-Host ""');
     }
     if (packagesByType.has('maven')) {
-      lines.push('Install-MavenPackages');
+      lines.push(`Invoke-InstallGroup ${this.powerShellQuote(groupFailureLabel('Maven 패키지', 'maven'))} { Install-MavenPackages }`);
+      lines.push('Write-Host ""');
+    }
+    if (packagesByType.has('npm')) {
+      lines.push(`Invoke-InstallGroup ${this.powerShellQuote(groupFailureLabel('npm 패키지', 'npm'))} { Install-NpmPackages }`);
       lines.push('Write-Host ""');
     }
     if (packagesByType.has('docker')) {
-      lines.push('Load-DockerImages');
+      lines.push(`Invoke-InstallGroup ${this.powerShellQuote(groupFailureLabel('Docker 이미지', 'docker'))} { Load-DockerImages }`);
       lines.push('Write-Host ""');
     }
 
+    lines.push('');
+    lines.push('if ($script:FailedPackages.Count -gt 0) {');
+    lines.push('    Write-Err "실패한 패키지:"');
+    lines.push('    foreach ($failedPackage in $script:FailedPackages) { Write-Err "  - $failedPackage" }');
+    lines.push('    exit 1');
+    lines.push('}');
     lines.push('');
     lines.push('Write-Info "====================================="');
     lines.push('Write-Info "모든 설치가 완료되었습니다!"');
     lines.push('Write-Info "====================================="');
 
-    const content = lines.join('\r\n'); // Windows 줄바꿈
+    // Windows PowerShell 5 interprets a BOM-less script using the system ANSI
+    // code page, which breaks the Korean comments and strings in this file.
+    const content = `\uFEFF${lines.join('\r\n')}`; // Windows 줄바꿈 + UTF-8 BOM
     await fs.ensureDir(path.dirname(outputPath));
     await fs.writeFile(outputPath, content, 'utf-8');
 

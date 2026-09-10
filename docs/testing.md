@@ -33,6 +33,8 @@ npm audit
 
 `scripts/verify-worktree.sh`는 현재 저장소의 `scripts.test` 계약을 그대로 호출하는 얇은 래퍼이며, worktree에서 공통 검증 진입점으로 사용합니다. 현재 자동 생성 범위는 `test`만 포함하고 `lint`/`typecheck`는 별도 명령으로 유지합니다.
 
+CLI 버전 회귀 테스트(`src/cli/version.integration.test.ts`)는 실제 하위 프로세스를 사용해 `npm run cli -- --version`과 `-v`, 빌드 후 `dist/src/cli/index.js`, 그리고 `dist/package.json`에 버전이 없는 설치 레이아웃을 확인합니다. 모든 진입점은 루트 `package.json`의 버전을 출력해야 하며, 테스트가 임시 빌드 산출물을 생성하므로 저장소의 추적 파일은 변경하지 않습니다.
+
 `INTEGRATION_TEST=true` 표기는 POSIX shell 예시입니다. PowerShell에서는 `$env:INTEGRATION_TEST='true'`를 지정한 뒤 `npm run test`를 실행합니다. 이 환경 변수는 외부 저장소 호출을 활성화하므로 기본 mock 테스트 실행과 구분합니다.
 
 두 TypeScript 설정 모두 `noUnusedLocals`와 `noUnusedParameters`를 활성화합니다. 죽은 코드·미사용 인수 정리 후 재유입을 검사하며, 외부 호출 규약을 유지할 인수에는 `_` 접두어를 붙입니다. `retry-utils.test.ts`는 `unknown` 오류 처리에서도 HTTP 상태 코드·타임아웃 판정과 비정형 값의 기존 결과가 유지되는지 확인합니다.
@@ -91,14 +93,34 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 
 커버리지는 `npm run test:coverage`로 확인합니다. 현재 커버리지 집계 대상은 `src/core/**/*.ts`이며 테스트 파일과 index barrel은 제외합니다. 따라서 CLI, Electron, 렌더러, E2E 테스트의 검증 범위와 구분해야 합니다. text 보고서는 콘솔에, JSON/HTML 보고서는 `coverage/`에 생성되며 커버리지 최소 비율은 설정되어 있지 않습니다. 외부 레지스트리 실제 연동 및 OS별 파일시스템 동작 전체를 mock 테스트가 보장하지는 않습니다.
 
+### CLI 캐시 설정 검증
+
+`src/cli/cache-commands.integration.test.ts`는 실제 파일·디렉터리가 섞인 캐시에서 별도 CLI 프로세스로 `cache list`를 실행합니다. 정상 디렉터리의 패키지 정보와 개수가 표시되고 일반 파일은 목록에서 제외되는지 확인합니다. `commands/cache.test.ts`는 심볼릭 링크 제외, 디렉터리가 없는 경우, manifest 유무에 따른 표시를 검증합니다.
+
+같은 통합 테스트에서 캐시 경로가 일반 파일일 때 `cache size/list/clear --force`가 실제 종료 코드 `1`과 파일 작업 오류를 반환하고 파일을 보존하는지 검사합니다. 없는 디렉터리는 세 명령 모두 종료 코드 `0`을 유지해야 합니다. POSIX의 일반 사용자 환경에서는 임시 디렉터리의 권한을 차단해 실제 권한 오류도 확인하고 테스트 후 권한을 복구합니다. 이 권한 검사는 Windows와 root 실행 환경에서 제외하며, `EACCES`·`EPERM` 처리와 삭제 실패는 단위 테스트에서도 검증합니다.
+
+`src/cli/cache-settings.integration.test.ts`는 격리한 사용자 디렉터리와 별도 CLI 프로세스로 설정 저장·조회가 연결되는지 확인합니다. 로컬 HTTP APK 저장소를 이용해 캐시 비활성화 시 재요청과 파일 미생성, 활성화 시 저장·재사용, 설정한 크기 한도에 따른 캐시 저장 생략도 검사합니다. 잘못된 입력의 종료 코드와 설정 파일 보존은 실제 CLI 경계에서 확인합니다.
+
+`src/core/config.test.ts`는 저장 키와 이전 별칭의 우선순위, 비동기 API와의 호환성, 불리언·양의 안전 정수 검증을 담당합니다. OS backend 테스트는 옵션 전달을 확인하고, `cache-manager.test.ts`는 실제 임시 디렉터리에서 LRU와 한도 초과 항목의 저장 생략을 검증합니다. 저장 순서와 조회 순서를 다르게 만든 뒤 작은 용량으로 다시 열어도 최근 조회한 항목이 남는지 확인합니다. 이 테스트에는 native apt/yum/apk 실행 파일이 필요하지 않습니다.
+
+### Conda defaults 채널 검증
+
+- `conda-channel.test.ts`, `conda-cache.test.ts`, `conda-utils.test.ts`: 기본 `defaults`의 공식 URL, 명시적 `main`과 사용자 지정 origin 유지, repodata 요청 및 API 파일 URL 구성을 검증합니다.
+- `conda.test.ts`, `conda-resolver-target.test.ts`: downloader/resolver의 메타데이터·후보 조회 경계를 모킹해 대상 subdir와 `noarch`의 다운로드 URL을 검증합니다. downloader의 API 응답 모킹으로 `main` 소유자 매핑과 논리 채널 유지, 중복 subdir 방지도 확인합니다.
+- `conda-validator.test.ts`, `download-package-router.test.ts`: 채널 HEAD 검증과 Electron의 파일명 기반 URL 생성에도 같은 규칙이 적용되는지 확인합니다.
+
+실제 네트워크 smoke는 격리한 사용자 디렉터리에서 `download -t conda -p six -V latest --no-deps --conda-channel defaults`를 실행하고 종료 코드, 요청 URL, 아카이브와 manifest를 검사합니다. `--target-os linux --arch x86_64` 및 일반 `conda-forge` 채널도 대조합니다. 이 검증은 패키지 다운로드 범위이며 생성된 스크립트로 Conda 환경을 설치하는 검증은 별도입니다.
+
 ### Maven 모델 POM 검증
+
+`src/core/resolver/maven-resolver.test.ts`는 `latest` 메타데이터의 실제 버전으로 루트 POM과 파일명을 만드는지, release fallback·빈 버전 실패·classifier/type 보존·명시 버전의 조회 생략을 검증합니다. `src/cli/commands/download.test.ts`는 기본 Maven `--no-deps`에서 `latest`만 깊이 0의 루트 해결을 거쳐 다운로드 큐로 전달되는지 확인합니다. 실제 저장소 검증에서는 같은 좌표의 의존성 포함/제외 CLI를 실행하고 메타데이터 버전과 아카이브·manifest를 비교합니다.
 
 Parent POM과 import BOM이 조회 캐시에만 남아 오프라인 출력에서 누락되는 문제는 다음 기본 회귀 세트로 검증합니다. `INTEGRATION_TEST` 설정 없이 실행하며 외부 Maven Central에 접속하지 않습니다.
 
 | 테스트 | 검증 범위 |
 |--------|-----------|
 | `src/core/shared/maven-bom-processor.test.ts` | 전체 GAV로 모델 POM 중복 제거, 깊은 부모/BOM 체인, Parent/BOM/혼합 순환, 공유 BOM 그래프의 반복 처리 제한, 문맥별 부모 속성 상속과 import 순서, 필수 모델 누락·미해결 좌표, 호출 간 상태 초기화 |
-| `src/core/resolver/maven-model-resolution.test.ts` | 전이 패키지의 BOM 버전 적용과 모델 POM 포함, 형제 간 관리 버전 격리와 루트 관리 우선순위, 같은 부모의 여러 버전, 깊이 경계의 부모 수집, POM 조회 실패, 깊은 그래프 평탄화 및 순환·공유 노드 종료, 같은 GAV의 JAR/POM 구분 |
+| `src/core/resolver/maven-model-resolution.test.ts` | 전이 패키지의 BOM 버전 적용과 모델 POM 포함, 형제 간 관리 버전 격리와 루트 관리 우선순위, 같은 부모의 여러 버전, 깊이 경계의 부모 수집, POM 조회 실패, 깊은 그래프 평탄화 및 순환·공유 노드 종료, 같은 GAV의 JAR/POM 구분, 충돌로 제외된 버전과 하위 descriptor POM 보존 |
 | `src/core/shared/maven-parent-pom-download.test.ts` | Flink 전이 체인 fixture의 부모/BOM POM 및 compile/runtime JAR·부속 POM·SHA1 실제 파일, 미사용 관리 항목 631개와 optional/test 제외, JAR/POM 동시 보존, 필수 부모 404 및 모델 조회 후 POM 파일 저장 실패 |
 
 다운로드 회귀는 Axios adapter의 HTTP 응답만 XML/JAR/SHA1 fixture로 대체합니다. `resolveAllDependencies()`부터 실제 resolver·POM 파싱·캐시·`MavenDownloader`와 임시 디렉터리 파일 쓰기를 실행합니다. Electron 라우터의 같은 GAV 직렬화와 최상위 복사본은 기존 `electron/services/download-package-router.test.ts`에서 별도로 검증합니다.
@@ -112,6 +134,178 @@ bash scripts/verify-worktree.sh \
 ```
 
 이 fixture 검증은 실제 Maven Central의 현재 파일 존재 여부나 외부 Maven 실행의 오프라인 성공을 보장하지 않습니다. 외부 저장소 검증에는 아래 통합 테스트를 별도로 사용하고, 실행 명령·대상 좌표·파일 확인 결과를 해당 작업의 검증 기록에 남깁니다.
+
+### Maven 충돌 descriptor의 오프라인 소비자 검증
+
+충돌로 선택하지 않은 버전의 POM이 캐시에만 있고 반출 목록에는 없는 경우를 별도로 검증합니다. 실제 Flink 1.20.5 CLI 실행에서는 `flink-core`가 요구하는 Kryo 2.24.0 JAR와 `chill-java:0.7.6`이 참조하는 Kryo 2.21 POM이 압축물·manifest 및 생성 설치 스크립트의 대상 저장소에 모두 반영되는지 확인합니다. 단순 종료 코드나 캐시 파일 존재만으로 성공을 판정하지 않습니다.
+
+`src/core/packager/maven-native-consumer.integration.test.ts`는 기본 테스트에서도 로컬 HTTP fixture로 resolver·다운로더·압축물을 검증하고, macOS/Linux에서는 생성한 Bash 설치 스크립트를 실행해 원본 POM 바이트와 POM-only 전달을 확인합니다. Windows 기본 검사에서는 압축물 검증까지 수행합니다. 같은 파일의 native 검사는 `DEPS_SMUGGLER_NATIVE_MAVEN=1`일 때 실행합니다. Linux와 기존 `mvn`이 필요하며, opt-in 상태에서 도구가 없으면 실패합니다. 테스트는 별도의 의존성 없는 프로젝트로 Maven 빌드 플러그인만 격리된 저장소에 준비한 후, 실제 resolver·downloader·압축기·생성 Bash 스크립트로 전달한 fixture를 `mvn -o package`로 소비합니다. fixture POM을 bootstrap 단계에서 미리 받아 누락을 가리지 않고, 충돌 버전 POM을 제거한 대조군에서 누락 경고 또는 실패를 탐지합니다. 실제 사용자 `~/.m2`나 호스트 패키지 설치는 사용하지 않습니다.
+
+```bash
+DEPS_SMUGGLER_NATIVE_MAVEN=1 bash scripts/verify-worktree.sh \
+  src/core/packager/maven-native-consumer.integration.test.ts
+```
+
+이 검사는 fixture의 오프라인 의존성 해석과 패키징을 확인합니다. 임의 사용자 프로젝트의 플러그인·확장·모든 Maven 프로파일을 포함한 오프라인 빌드까지 보장하지는 않습니다.
+
+### 빈 `--file` 입력 검증
+
+`src/cli/empty-package-file.integration.test.ts`는 빈 파일·공백만 있는 파일·주석만 있는 파일을 별도 Node.js 프로세스에서 실행합니다. 테스트 전용 user directory와 경로에 공백이 있는 출력 디렉터리를 사용하며, 입력 오류가 종료 코드 `1`을 반환하고 archive와 설치 스크립트를 만들지 않는지 확인합니다. 단위 테스트는 parser 결과가 비어 있을 때 resolver, 출력 디렉터리, 다운로드 큐, archive, script generator가 호출되지 않는 순서를 검증합니다.
+
+### YUM 메타데이터와 검색 오류 검증
+
+`src/core/downloaders/os-metadata-parsers.test.ts`는 실제 gzip XML 파서에 1,001개의 표준 엔티티를 전달해 정상 디코딩을 확인하고, 100,000회 한도 초과 및 취소 오류 전달을 검증합니다. `src/core/resolver/os-resolvers.test.ts`는 primary 누락, 비활성 저장소 제외, 뒤쪽 저장소 실패 후 일부 목록이 남지 않는지와 동일 resolver 재시도를 확인합니다.
+
+같은 파서 테스트는 버전 `1.0`, release `01`, 의존성 버전 `1.0`의 값과 런타임 문자열 타입을 확인합니다. 숫자 모양이 아닌 버전과 숫자형 epoch·파일 크기·설치 크기도 함께 검사합니다. Resolver 테스트는 이전 숫자형 배열 캐시와 잘못된 스키마를 다시 파싱하고, 스키마 1 결과를 JSON으로 저장·복원한 새 resolver가 문자열을 유지하며 캐시를 재사용하는지 확인합니다.
+
+`src/cli/yum-metadata-failure.integration.test.ts`는 로컬 HTTP 서버의 repomd/primary XML을 실제 자식 CLI로 읽습니다. XML 제한 초과 시 저장소·원인과 종료 코드 `1`이 전달되고 빈 검색 성공으로 바뀌지 않아야 합니다. 이 세 파일은 외부 저장소 없이 기본 테스트에서 실행합니다.
+
+`src/core/downloaders/yum.integration.test.ts`는 현재 OS backend API로 실제 Rocky Linux 9 저장소의 `zlib` 검색(limit 3)과 의존성 없는 RPM ZIP 다운로드를 검증합니다. 오래된 다운로더 API와 조용한 조기 성공 처리를 제거했으며, 아래 명령으로 명시적으로 실행합니다. 외부 네트워크를 사용하고 임시 캐시·출력을 정리합니다. 네이티브 Yum/RPM 설치 트랜잭션을 수행하는 테스트는 아닙니다.
+
+```bash
+INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/yum.integration.test.ts
+```
+
+### OS 충돌 버전의 전이 의존성 검증
+
+`src/core/downloaders/os-shared/base-resolver.test.ts`는 다운로드에 포함되는 충돌 버전의 하위 의존성과 추가 충돌을 탐색하는지 검증합니다. 순환 참조·중복 엣지에서도 패키지를 한 번만 처리하며, 고유 패키지 10,000개로 완료하는 경우와 한도를 넘겨 오류를 반환하는 경우를 구분합니다.
+
+`src/core/resolver/apt-alternative-closure.test.ts`는 로컬 HTTP 서버의 실제 `Packages.gz`를 APT 파서와 resolver로 읽습니다. 최선 후보 외 버전이 요구하는 정확한 하위 버전과 그 하위 의존성, 순환 참조, 미해결 항목을 검사합니다. 외부 저장소 검증은 Ubuntu의 `zlib1g` 묶음에서 각 DEB 내부 control의 요구 버전을 다운로드 목록과 비교하며, 생성한 저장소 `Packages`를 원본 요구 조건의 대용으로 사용하지 않습니다. 파일·제어 정보 검사는 네이티브 APT 설치 트랜잭션과 구분합니다.
+
+`src/core/resolver/yum-alternative-closure.test.ts`는 실제 YUM 메타데이터 fixture를 읽어 이름·버전·아키텍처가 같고 release만 다른 후보의 하위 의존성이 모두 남는지 확인합니다. 공통 resolver와 `dependency-tree.test.ts`에서도 릴리스별 탐색·노드·충돌 병합을 검사합니다.
+
+`src/core/downloaders/apt.integration.test.ts`는 현재 OS backend API로 Ubuntu 22.04 검색, 의존성 없는 단일 DEB 다운로드, 의존성을 포함한 아카이브·저장소 출력을 검사합니다. DEB 내부의 정확한 버전 요구와 전달된 파일을 비교하며, 저장소 버전은 테스트에 고정하지 않습니다. 외부 네트워크와 DEB control 압축을 읽을 수 있는 POSIX `ar`·`tar`가 필요하며, 명시 실행 시 필수 도구가 없으면 실패합니다. 임시 캐시·출력은 정리합니다.
+
+```bash
+INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/apt.integration.test.ts
+```
+
+### APT 저장소 Control 필드 검증
+
+`src/core/downloaders/apt-repo-metadata.test.ts`는 로컬 HTTP의 `Packages.gz`를 실제 파서로 읽고 저장소를 생성해 `Packages`와 `Packages.gz`의 필드를 비교합니다. 정확한 의존성 연산자와 대안, `Pre-Depends`, 제공·충돌·대체 조건, `Multi-Arch`, 설치 크기, 여러 줄 설명을 검사합니다. 로컬 파일명·크기·SHA256은 실제 파일과 비교하며 상위 저장소의 오래된 경로·체크섬이 남지 않아야 합니다. 공통 parser·resolver 테스트는 이전 캐시의 재파싱과 현재 스키마의 JSON 왕복·재사용도 검사합니다.
+
+Linux 전용 `src/core/downloaders/apt-native-consumer.integration.test.ts`는 임시 DEB와 생성한 저장소를 네이티브 `apt-get update`·`apt-cache show`로 읽습니다. `APT_CONFIG`, 설정 파일, sources, state/status, cache, logs를 임시 경로로 격리하고 이 저장소만 조회합니다. 기본 테스트에서는 건너뛰며, `DEPS_SMUGGLER_NATIVE_APT=1`로 명시 실행하면 Linux 및 `apt-get`·`apt-cache`·`dpkg-deb`가 필요합니다. 필수 환경이 없으면 실패합니다. Ubuntu CI에서 이 검사를 별도로 실행하며, 패키지 설치 트랜잭션은 수행하지 않습니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/downloaders/apt-repo-metadata.test.ts
+DEPS_SMUGGLER_NATIVE_APT=1 bash scripts/verify-worktree.sh src/core/downloaders/apt-native-consumer.integration.test.ts
+```
+
+Control continuation과 필드 의미는 [Debian Policy](https://www.debian.org/doc/debian-policy/ch-controlfields.html)를 기준으로 검사하며, 들여쓰기 문자 자체의 바이트 일치와 필드 값 보존을 구분합니다. 원본 Control 필드가 없는 API 입력도 [Debian 관계 연산자](https://www.debian.org/doc/debian-policy/ch-relationships.html)에 맞게 `<`·`>`를 `<<`·`>>`로 출력하고 `<=`·`>=`·`=`의 의미를 유지하는지 검사합니다.
+
+실제 Ubuntu CLI 검증에서는 의존성·제공·충돌·설치 크기와 파일 정보를 DEB control 및 실물과 비교합니다. `Description`은 수신한 `Packages`와도 비교합니다. 상위 저장소가 긴 설명을 Translation 파일로 분리한 경우 DEB 내부의 긴 설명과 index의 요약은 다를 수 있으므로, 이 차이를 패키저의 필드 손실로 판정하지 않습니다. 이 저장소 구성은 [apt-ftparchive의 LongDescription 옵션](https://manpages.debian.org/bookworm/apt-utils/apt-ftparchive.1.en.html)에 설명돼 있습니다.
+
+### APK capability 의존성 검증
+
+`src/core/downloaders/os-metadata-parsers.test.ts`는 APKINDEX의 `so:`, `cmd:`, `pc:` 의존성과 provides를 보존하는지 확인합니다. `src/core/resolver/os-resolvers.test.ts`는 제공 APK의 패키지 버전과 capability 버전을 다르게 둔 fixture로 버전 조건·아키텍처·전이 목록·미해결 경고를 검증합니다. 일반 패키지 조건과 `--no-deps`의 루트 전용 다운로드도 기존 backend 회귀에서 확인합니다.
+
+대체 제공자 선택은 `so:`, `cmd:`, `pc:`, `/bin/sh` fixture로 검증하며, 같은 제공 패키지의 여러 버전은 기존 충돌로 남는지도 확인합니다. 기본 테스트에 포함되는 `src/cli/apk-cached-capability.integration.test.ts`는 격리된 실제 캐시 파일에 이전 형식의 결과를 저장하고, 별도 CLI 프로세스가 로컬 HTTP 서버의 APKINDEX를 다시 파싱하는지 검사합니다. 이어지는 다운로드 프로세스는 새 캐시를 재사용하면서 루트와 제공 APK를 모두 아카이브에 넣어야 합니다. 이 로컬 회귀의 APK 응답은 다운로드 경로 검사용 fixture이며, 실제 APK 내용은 아래 네트워크 테스트로 확인합니다.
+
+이 CLI 캐시 회귀는 실제 loopback 포트가 포함된 저장소 URL로 캐시 키를 만들고, 검색·다운로드의 두 프로세스를 통틀어 인덱스 요청이 한 번인지 확인합니다. `src/core/downloaders/os-shared/cache-manager.test.ts`는 별도 캐시 인스턴스로 다시 읽어 일반 URL·포트 URL·IPv6 URL의 값과 인코딩된 파일명이 유지되는지, 잘못된 키와 이전 파일명은 제거되는지 검증합니다.
+
+`src/core/downloaders/apk.integration.test.ts`는 현재 OS backend API로 실제 Alpine 3.20의 `zlib`와 제공 패키지를 내려받고 APK 내부 `.PKGINFO` 및 TAR.GZ의 파일 목록을 비교합니다. 기본 의존성 포함 경로와 `--no-deps`를 구분하며, 오래된 다운로더 API 호출과 조용한 조기 성공 처리를 사용하지 않습니다. 임시 캐시·출력을 정리하며 네이티브 `apk` 설치는 수행하지 않습니다.
+
+```bash
+INTEGRATION_TEST=true bash scripts/verify-worktree.sh src/core/downloaders/apk.integration.test.ts
+```
+
+### APK 저장소 인덱스 구조 검증
+
+`src/core/downloaders/os-shared/repo-packager.test.ts`는 생성한 `APKINDEX.tar.gz`가 인덱스 항목 하나를 담은 tar인지 확인하고, 아카이브 생성 실패 시 기존 파일 보존과 임시 디렉터리 정리를 검사합니다. `src/core/downloaders/os-shared/apk-repository-consumer.test.ts`는 생성한 아카이브를 로컬 HTTP 서버에서 제공해 실제 `ApkMetadataParser.parseIndex()`가 읽는지 검증합니다. 두 테스트는 기본 테스트에 포함되며 외부 저장소나 네이티브 Alpine 도구가 필요하지 않습니다.
+
+메타데이터 회귀는 원본 체크섬·의존성 조건·provides·설치 크기의 JSON 저장·복원과 출력 보존, 실제 APK 파일 크기, 원본 없는 API 입력의 체크섬 변환 및 누락 메타데이터 오류를 확인합니다. 이전 APK 파싱 캐시를 다시 조회하고 스키마 2 결과를 재사용하는지도 검증합니다.
+
+`src/core/downloaders/apk-native-consumer.integration.test.ts`는 실제 CLI로 Alpine 3.20 `zlib`를 의존성 포함 다운로드하여 서로 다른 체크섬의 APK가 최소 두 개 있는 저장소를 생성합니다. 네트워크가 없는 Alpine 컨테이너 안에서 loopback HTTP 서버로 이를 제공하고, 빈 전용 데이터베이스와 전용 저장소 목록으로 `apk update` 및 모든 생성 패키지의 정확한 이름·버전 검색을 검사합니다. 저장소 파일은 읽기 전용으로 연결하고 실행 전후 해시를 비교합니다. 패키지 설치나 저장소 설정 스크립트 실행은 이 검증에 포함되지 않습니다.
+
+네이티브 검사는 기본 테스트에서는 skip이며 Ubuntu CI에서 별도로 실행합니다. 온라인 준비 단계에서 Alpine 3.20에 HTTP 서버용 `busybox-extras`를 포함한 임시 이미지를 만든 뒤, 저장소 소비 단계는 네트워크를 끄고 실행합니다. 명시적으로 활성화한 실행은 Linux·Docker·이미지 준비에 실패하면 오류로 종료합니다. 임시 이미지와 테스트 파일은 정리하며 호스트에 `apk`를 설치하지 않습니다.
+
+```bash
+bash scripts/verify-worktree.sh \
+  src/core/downloaders/os-shared/repo-packager.test.ts \
+  src/core/downloaders/os-shared/apk-repository-consumer.test.ts
+
+DEPS_SMUGGLER_NATIVE_APK=1 bash scripts/verify-worktree.sh \
+  src/core/downloaders/apk-native-consumer.integration.test.ts
+```
+
+### CLI 동시 다운로드 수 입력 검증
+
+`src/cli/concurrency-validation.integration.test.ts`는 일반 `download`와 `os download`를 별도 CLI 프로세스로 실행해 `--concurrency 1.5`가 종료 코드 `1`과 양의 정수 안내로 거부되는지 확인합니다. 숫자로 변환하면 `1`로 반올림되는 원문 `1.0000000000000001`과 언더플로로 `0`이 되는 `.5e-999`도 같은 조건으로 검사합니다. HTTP·HTTPS 요청 횟수가 0이고 전달 출력이 생성되지 않아야 합니다. 자식 프로세스의 실행 실패·타임아웃·신호 종료는 정상적인 입력 오류로 취급하지 않습니다.
+
+두 명령의 단위 테스트는 소수·일부만 숫자인 값·안전한 정수 범위를 벗어난 값의 사전 거부와 정상 정수 전달을 검사합니다. `0`, `-1`, `abc`는 일반 경로의 기존 값 전달과 OS 경로의 설정 fallback을 유지하는지도 확인합니다.
+
+### CLI 다운로드 실패 종료 코드 검증
+
+`src/cli/download-format.integration.test.ts`는 격리한 실제 CLI 프로세스에 `--format rar`를 전달해 종료 코드 `1`, 거부한 값과 지원 형식 안내, 출력 미생성을 확인합니다. CLI를 불러오기 전에 HTTP·HTTPS 요청을 차단하고 요청 횟수를 기록하므로 네트워크 호출 전에 입력 검증이 끝나는지도 검사합니다. `archive-packager.test.ts`는 두 공개 압축 메서드를 직접 호출해 잘못된 형식의 거부와 기존 ZIP·tar.gz 생성을 검증합니다.
+
+`src/cli/download-failure-exit.integration.test.ts`는 별도 Node.js 프로세스에서 실제 CLI 엔트리포인트와 Commander 인자를 실행합니다. 부모 프로세스의 로컬 HTTP 서버가 404를 반환하고, 자식의 테스트 전용 설정이 실제 `MavenDownloader`의 저장소 주소만 이 서버로 연결합니다. 실제 다운로드 매니저가 실패 결과를 반환한 뒤 CLI가 종료 코드 `1`과 실패 원인을 남기고, 새 아카이브와 설치 스크립트를 생성하지 않는지 확인합니다. 설정·로그·출력은 임시 디렉터리로 격리하며 외부 레지스트리에 연결하지 않습니다.
+
+`src/cli/commands/download.test.ts`는 전체·일부 항목 실패 분기를 빠르게 검증합니다. 다운로드 전 의존성 해결의 기본 건너뛰기 정책은 별도 동작으로 유지합니다. 실제 레지스트리 검증에는 존재하지 않는 Maven classifier와 Docker 태그의 HTTP 404, 정상 패키지 다운로드의 종료 코드와 산출물을 함께 기록합니다.
+
+```bash
+bash scripts/verify-worktree.sh \
+  src/cli/download-failure-exit.integration.test.ts \
+  src/cli/commands/download.test.ts
+```
+
+### 생성 설치 스크립트의 실패 집계 검증
+
+`src/core/packager/script-aggregation.integration.test.ts`는 생성 스크립트를 실제 Bash 또는 Windows PowerShell 프로세스로 실행합니다. 기록용 실행 파일이 앞의 pip 패키지 두 개를 실패시키고 세 번째를 성공시키며, 세 항목 모두 시도됐는지와 최종 실패 목록·종료 코드·성공 배너 부재를 검사합니다. 오류 처리 옵션을 끈 경우, 여러 패키지 관리자에 걸친 실패, 도구 부재와 디렉터리 탐색 실패도 같은 계약으로 검증합니다. 모든 항목이 성공하는 대조군에서는 종료 코드 `0`과 완료 메시지를 확인합니다. 기록용 명령은 호스트에 패키지를 설치하지 않습니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/packager/script-aggregation.integration.test.ts
+```
+
+실제 CLI 검증에서는 `requests==2.32.3`, `httpx==0.27.0`, `colorama==0.4.6`을 `--no-deps`로 내려받은 뒤 새 Python 가상 환경에서 원본 설치 스크립트를 실행합니다. `--python-version`은 실행할 Python 버전과 일치시킵니다(예: Python 3.9 환경에서는 `--python-version 3.9`). 앞의 두 패키지는 누락 의존성으로 실패하고 colorama는 import가 가능해야 합니다. 스크립트는 두 실패를 요약하고 non-zero로 끝나야 하며, 의존성을 포함한 requests 대조군은 설치·import·`pip check`를 모두 통과해야 합니다.
+
+### Docker 설치 스크립트 파일명과 실제 로드 검증
+
+`src/core/downloaders/docker-download.test.ts`는 이미지 이름·태그 정규화와 아키텍처별 실제 반환 파일명을 확인합니다. `src/core/packager/docker-install-script.integration.test.ts`는 같은 파일명 fixture를 준비하고, 공백이 있는 폴더와 외부 작업 디렉터리에서 생성 스크립트를 실행합니다. macOS·Linux에서는 Bash, Windows에서는 PowerShell을 사용하며 Docker 기록용 대체 명령이 받은 `load -i` 인자와 실제 파일 경로를 검사합니다. 이 검증은 Docker 엔진의 이미지 로드를 대신하지 않습니다.
+
+경로 비교에는 Node.js의 `realpathSync.native()`를 사용합니다. Windows 임시 폴더의 8.3 짧은 이름(`RUNNER~1`)과 PowerShell이 전달하는 긴 이름이 같은 실제 파일을 가리키는 경우도 동일하게 판정합니다.
+
+Docker 엔진이 실행 중인 환경에서는 아래 명령으로 실제 로드 테스트를 실행합니다. 테스트가 만든 고유 태그의 로컬 이미지 tar를 생성 스크립트로 로드하고, Docker에서 이미지 ID를 확인한 뒤 해당 태그만 정리합니다. 외부 레지스트리 다운로드는 필요하지 않습니다. 명시적으로 활성화한 상태에서 Docker에 연결할 수 없으면 테스트가 실패하며, 기본 단위 테스트에서는 이 사례를 건너뜁니다. Ubuntu CI는 별도 단계에서 이 검증을 활성화합니다.
+
+```bash
+DEPS_SMUGGLER_NATIVE_DOCKER=1 bash scripts/verify-worktree.sh \
+  src/core/packager/docker-install-script.integration.test.ts -t 'native Docker'
+```
+
+실제 CLI 다운로드 검증은 `busybox:1.36`의 `--arch amd64 --format zip`과 `--arch arm64 --format tar.gz` 출력에서 `packages/busybox-1.36.tar`, tar 내부 manifest와 config 아키텍처, 원본 설치 스크립트의 참조 경로를 함께 확인합니다. Docker가 없는 환경의 파일·스크립트 검사와 엔진을 사용한 로드 결과는 구분해 기록합니다.
+
+### Conda 설치 스크립트 오프라인 검증
+
+`src/core/packager/conda-install-script.integration.test.ts`는 생성한 Bash와 Windows PowerShell 스크립트를 실제 프로세스로 실행합니다. 기본 회귀는 기록용 실행 파일로 pip·Conda 인자 분리, `.conda`·`.tar.bz2`의 정확한 경로, 공백·인용 문자, 루트만 포함한 목록, 환경 경로 지정, 재실행과 오류 종료를 검사합니다. 기록용 실행 파일의 성공을 실제 Conda 설치 성공으로 간주하지 않습니다. CLI 단위 테스트는 다운로드 항목에 메타데이터 파일명이 없어도 실제 완료 경로를 전달하며 다른 타입의 파일을 Conda 목록에 섞지 않는지 확인합니다.
+
+`src/core/packager/conda-native-consumer.integration.test.ts`는 Ubuntu CI의 기존 Miniconda를 사용하는 native 검증을 별도로 실행합니다.
+
+```bash
+DEPS_SMUGGLER_NATIVE_CONDA=1 bash scripts/verify-worktree.sh src/core/packager/conda-native-consumer.integration.test.ts
+```
+
+기본 실행에서는 native 검증을 건너뛰며, 명시적으로 opt-in한 환경에서 Linux나 필수 도구 조건이 맞지 않으면 실패합니다. 임시 prefix·캐시·설정과 `CONDA_REGISTER_ENVS=false`로 사용자 환경 등록 파일까지 격리합니다. 실제 Conda로 두 아카이브 형식을 설치하고 패키지 목록과 설치 파일을 검사하며, 설정한 로컬 채널의 HTTP 요청이 없는지 확인합니다. Python noarch 설치는 호환되는 Python이 있는 임시 환경에서 별도로 검사합니다. 일반 noarch 파일의 설치만으로 Python import 성공을 주장하지 않습니다. 도구 설치나 호스트 base 환경 변경은 수행하지 않습니다.
+
+Python 검증 환경은 runner의 base 환경에 설치된 Python과 전이 의존성 기록에 해당하는 캐시 아카이브만 임시 경로로 복사해 준비합니다. 필요한 아카이브가 없으면 구체적인 준비 오류로 실패합니다. 생성 스크립트에는 `CONDA_OFFLINE=false`를 전달해 스크립트 자체의 `--offline` 옵션을 검증하며, 환경 준비·설치·import 단계별 실행 시간을 CI 로그에 남깁니다.
+
+### npm 설치 스크립트 오프라인 검증
+
+`src/cli/npm-root-resolution.integration.test.ts`는 로컬 레지스트리와 실제 tarball로 의존성 포함 CLI를 실행합니다. 버전을 생략한 직접 패키지와 전이 의존성이 모두 실제 버전으로 아카이브·manifest에 포함돼야 합니다. 이어서 원본 설치 스크립트를 격리된 npm 캐시·설정으로 실행하고 직접 모듈과 그 의존성을 실제로 불러옵니다. 단위 테스트도 npm `flatList`가 루트를 제외하는 실제 반환 형식을 사용하며, 버전 선택자와 요청 ID·아키텍처·메타데이터 보존을 검사합니다.
+
+`src/cli/npm-manifest.integration.test.ts`는 로컬 레지스트리와 실제 tarball을 제공하고 별도 CLI 프로세스에서 `--no-deps` 다운로드를 실행합니다. `latest`와 고정 버전 요청 모두 ZIP의 manifest 버전이 tarball 내부 `package/package.json`의 버전과 일치하는지 확인합니다. 이 검증은 npm 설치를 실행하지 않습니다. npm 다운로더 단위 테스트는 성공 후 버전·메타데이터 갱신과 기존 입력 정보 보존, 실패 시 입력 미변경을 검증합니다.
+
+`src/core/packager/npm-install-script.integration.test.ts`는 레지스트리에 연결하지 않고 로컬 tarball fixture로 생성 스크립트를 실제 실행합니다. macOS·Linux에서는 Bash, Windows에서는 `powershell.exe`와 해당 환경의 npm을 사용합니다. 빈 npm 캐시와 별도 설정·설치 경로를 사용하며, 공백이 포함된 경로와 scoped 전이 의존성을 설치한 뒤 Node.js에서 실제 모듈을 불러와 검사합니다. 같은 패키지의 1.x·2.x를 요구하는 두 루트가 각각 올바른 버전을 불러오는지, 명시적으로 선택한 직접 버전이 유지되는지도 검증합니다. 서로 다른 peer 버전을 요구하는 전이 플러그인과 순환 의존성도 실제 npm 설치 및 모듈 로딩으로 확인합니다. 설치 대상은 `npm-project/node_modules`이며 상위 사용자 manifest 보존과 기존 사용자 프로젝트 덮어쓰기 방지를 확인합니다. 패키지 파일 또는 필요한 의존성이 없거나 tarball이 손상된 경우에는 오류 종료와 성공 문구 부재를 확인합니다. macOS 임시 디렉터리의 `/var`→`/private/var` 경로 차이에서도 여러 버전을 설치할 수 있어야 합니다. Windows의 `NODE_OPTIONS` preload 경로는 `JSON.stringify`로 인코딩해 역슬래시가 손실되지 않도록 합니다.
+
+위 npm 소비자 테스트는 bundle 루트에 사용자 `package.json`이 있는 경우와 없는 경우를 모두 실행합니다. 사용자 manifest가 있으면 바이트를 보존하고 해당 프로젝트를 추가 패키지로 설치하지 않아야 하며, 없으면 새로 만들지 않아야 합니다. 이는 Windows npm 10에서 `--prefix` 때문에 현재 bundle 폴더가 추가 설치 대상이 되어 발생했던 오류를 검출합니다.
+
+### Maven 설치 스크립트 canonical 저장소 검증
+
+`src/core/packager/script-generator.test.ts`의 canonical tree 회귀는 Maven 없이도 실행할 수 있습니다. 공백이 포함된 임시 추출 경로에서 실제 Bash subprocess(Windows에서는 native PowerShell)를 생성·실행하고, CLI `packages/<m2path>`와 GUI `packages/m2repo/<m2path>`의 JAR-only·companion POM·parent/BOM POM-only·classifier·checksum을 `MAVEN_REPO_LOCAL`에 경로·바이트 그대로 복사하는지 검사합니다. pip 파일과 flat 파일은 대상 저장소에 복사되지 않습니다. Maven native offline consumer 검증과 macOS에서 PowerShell이 없는 경우는 별도 환경 제한으로 기록합니다.
+
+`src/core/packager/maven-install-script.integration.test.ts`는 실제 생성 스크립트를 실행해 기존 Maven 추적 기록 보존, 원본 파일에 한정한 로컬 설치 등록, 마지막 개행이 없는 기록 병합, 반복 실행과 기록 쓰기 실패를 검증합니다. Windows CI에서는 `powershell.exe`를 사용하며, 로컬에 PowerShell이 없는 경우의 Bash 성공과 구분합니다.
+
+스크립트 폴더 밖에서 상대 `MAVEN_REPO_LOCAL`을 지정하는 경우에도 아티팩트와 추적 기록이 같은 대상에 저장되는지 검사합니다. Windows PowerShell 프로세스의 시작 지연을 고려해 subprocess 제한과 여러 번 실행하는 테스트의 전체 제한을 별도로 둡니다.
+
+`m2repo.example` 그룹 단독 및 `example` 그룹과 함께 있는 CLI·GUI 경로도 실제 스크립트로 검증하여 그룹 이름을 GUI 저장소 폴더로 오인하거나 다른 그룹의 파일을 설치하는 회귀를 방지합니다. 모호하거나 두 구조에 분산된 원본은 설치 전에 실패하는지도 확인합니다. `.demo`처럼 점으로 시작하는 아티팩트도 파일 복사와 로컬 설치 기록에서 누락되지 않는지 검사합니다.
 
 ### Maven 다운로드 목록과 미리보기 검증
 

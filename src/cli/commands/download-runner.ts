@@ -23,6 +23,7 @@ export type DownloadManagerItemStatus = CanonicalDownloadStatus;
 
 // 다운로드 아이템
 export interface DownloadManagerItem extends CanonicalDownloadItem {
+  filePaths?: string[];
   downloadedBytes: number;
   totalBytes: number;
   speed: number;
@@ -230,13 +231,22 @@ export class DownloadManager extends EventEmitter<DownloadManagerEvents> {
     this.emit('itemStart', item);
 
     try {
-      const filePath = await downloader.downloadPackage(
-        item.package,
-        this.options.outputPath,
-        (progress: DownloadProgressEvent) => {
-          this.updateItemProgress(id, progress);
-        }
-      );
+      const onProgress = (progress: DownloadProgressEvent) => {
+        this.updateItemProgress(id, progress);
+      };
+      let filePath: string;
+      if (downloader.downloadPackageFiles) {
+        const files = await downloader.downloadPackageFiles(
+          item.package, this.options.outputPath, onProgress
+        );
+        if (!files[0]) throw new Error('다운로드된 파일이 없습니다.');
+        filePath = files[0];
+        item.filePaths = [...files];
+      } else {
+        filePath = await downloader.downloadPackage(
+          item.package, this.options.outputPath, onProgress
+        );
+      }
 
       item.status = 'completed';
       item.progress = 100;

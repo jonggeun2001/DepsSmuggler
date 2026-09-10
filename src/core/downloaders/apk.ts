@@ -212,6 +212,7 @@ export class ApkMetadataParser {
       license,
       dependencies,
       provides: provides.length > 0 ? provides : undefined,
+      apkIndexFields: Object.fromEntries(fields),
     };
   }
 
@@ -280,11 +281,6 @@ export class ApkMetadataParser {
     if (!match) return null;
 
     const name = match[1].trim();
-
-    // 시스템 의존성 필터링
-    if (name.startsWith('so:') || name.startsWith('cmd:') || name.startsWith('pc:')) {
-      return null;
-    }
 
     const operator = match[2] ? this.parseApkOperator(match[2]) : undefined;
     const version = match[3]?.trim();

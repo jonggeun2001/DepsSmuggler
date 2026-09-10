@@ -8,12 +8,66 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
+import * as tar from 'tar';
 import type { OSPackageInfo, OSPackageManager } from './types';
 import { getDownloadedFileKey, getPackageFilename } from './package-file-utils';
 import { OSScriptGenerator } from './script-generator';
 import { getWriteOptions } from '../../shared/path-utils';
 
 const gzip = promisify(zlib.gzip);
+const APK_INDEX_GENERATED_FIELDS = new Set(['P', 'V', 'A', 'S', 'I', 'C', 'D', 'p', 'T']);
+
+function isSafeNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isCanonicalBase64(value: string, byteLength: number): boolean {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
+    return false;
+  }
+  const decoded = Buffer.from(value, 'base64');
+  return decoded.length === byteLength && decoded.toString('base64') === value;
+}
+
+function validateApkIndexChecksum(value: string): string {
+  if (/^Q1[A-Za-z0-9+/]{27}={0,2}$/.test(value)) {
+    const digest = value.substring(2);
+    if (isCanonicalBase64(digest, 20)) return value;
+  }
+  if (/^X1[0-9a-fA-F]{40}$/.test(value)) return value;
+  if (/^[0-9a-f]{32}$/i.test(value)) return value;
+  throw new Error(`APK 체크섬 형식이 유효하지 않습니다: ${value}`);
+}
+
+function formatApkChecksum(pkg: OSPackageInfo): string {
+  const rawChecksum = pkg.apkIndexFields?.C;
+  if (rawChecksum !== undefined) return validateApkIndexChecksum(rawChecksum);
+
+  const checksum = pkg.checksum;
+  if (!checksum?.value) {
+    throw new Error(`APK 체크섬이 없습니다: ${pkg.name}-${pkg.version}`);
+  }
+  if (checksum.type === 'sha1') {
+    if (/^[0-9a-f]{40}$/i.test(checksum.value)) {
+      return `Q1${Buffer.from(checksum.value, 'hex').toString('base64')}`;
+    }
+    if (isCanonicalBase64(checksum.value, 20)) return `Q1${checksum.value}`;
+  }
+  if (checksum.type === 'md5' && /^[0-9a-f]{32}$/i.test(checksum.value)) {
+    return checksum.value;
+  }
+  throw new Error(`APK 체크섬 형식을 지원하지 않습니다: ${pkg.name}-${pkg.version}`);
+}
+
+function resolveApkInstalledSize(pkg: OSPackageInfo): string {
+  const rawInstalledSize = pkg.apkIndexFields?.I;
+  if (rawInstalledSize !== undefined && /^\d+$/.test(rawInstalledSize)) {
+    const parsed = Number(rawInstalledSize);
+    if (isSafeNonNegativeInteger(parsed)) return rawInstalledSize;
+  }
+  if (isSafeNonNegativeInteger(pkg.installedSize)) return String(pkg.installedSize);
+  throw new Error(`APK 설치 크기 메타데이터가 없습니다: ${pkg.name}-${pkg.version}`);
+}
 
 /**
  * 저장소 옵션
@@ -77,10 +131,10 @@ export class OSRepoPackager {
         metadataFiles = await this.createYumRepoMetadata(packages, repoPath);
         break;
       case 'apt':
-        metadataFiles = await this.createAptRepoMetadata(packages, repoPath);
+        metadataFiles = await this.createAptRepoMetadata(packages, repoPath, downloadedFiles);
         break;
       case 'apk':
-        metadataFiles = await this.createApkRepoMetadata(packages, repoPath);
+        metadataFiles = await this.createApkRepoMetadata(packages, repoPath, downloadedFiles);
         break;
     }
 
@@ -299,12 +353,13 @@ export class OSRepoPackager {
    */
   private async createAptRepoMetadata(
     packages: OSPackageInfo[],
-    repoPath: string
+    repoPath: string,
+    downloadedFiles: Map<string, string>
   ): Promise<string[]> {
     const metadataFiles: string[] = [];
 
     // Packages 파일 생성
-    const packagesContent = this.generateAptPackagesFile(packages);
+    const packagesContent = await this.generateAptPackagesFile(packages, repoPath, downloadedFiles);
     const packagesPath = path.join(repoPath, 'Packages');
     fs.writeFileSync(packagesPath, packagesContent);
     metadataFiles.push(packagesPath);
@@ -327,48 +382,113 @@ export class OSRepoPackager {
   /**
    * APT Packages 파일 생성
    */
-  private generateAptPackagesFile(packages: OSPackageInfo[]): string {
+  private async generateAptPackagesFile(
+    packages: OSPackageInfo[],
+    repoPath: string,
+    downloadedFiles: Map<string, string>
+  ): Promise<string> {
     const entries: string[] = [];
 
     for (const pkg of packages) {
+      const sourcePath = downloadedFiles.get(getDownloadedFileKey(pkg));
+      if (!sourcePath || !fs.existsSync(sourcePath)) {
+        throw new Error(`APT 패키지 ${pkg.name}의 다운로드 payload가 없습니다`);
+      }
+
+      const filename = path.basename(sourcePath);
+      const copiedPath = path.join(repoPath, filename);
+      if (!fs.existsSync(copiedPath) || !fs.statSync(copiedPath).isFile()) {
+        throw new Error(`APT 패키지 ${pkg.name}의 복사된 payload가 없습니다: ${filename}`);
+      }
+
+      const actualSize = fs.statSync(copiedPath).size;
+      const actualSha256 = await this.calculateSha256(copiedPath);
+      const fields = new Map<string, string>(Object.entries(pkg.aptControlFields || {}));
+
+      const removeFields = (...names: string[]) => {
+        for (const key of [...fields.keys()]) {
+          if (names.some((name) => key.toLowerCase() === name.toLowerCase())) {
+            fields.delete(key);
+          }
+        }
+      };
+      const setField = (name: string, value: string) => {
+        removeFields(name);
+        fields.set(name, value);
+      };
+      const hasField = (name: string): boolean =>
+        [...fields.keys()].some((key) => key.toLowerCase() === name.toLowerCase());
+
       const arch = pkg.architecture === 'x86_64' ? 'amd64' : pkg.architecture;
-      const filename = `${pkg.name}_${pkg.version}_${arch}.deb`;
+      setField('Package', pkg.name);
+      setField('Version', pkg.version);
+      setField('Architecture', arch);
+      if (!hasField('Maintainer')) {
+        setField('Maintainer', 'DepsSmuggler');
+      }
+      if (!hasField('Installed-Size') && pkg.installedSize !== undefined) {
+        setField('Installed-Size', String(Math.ceil(pkg.installedSize / 1024)));
+      }
+      if (!hasField('Depends') && pkg.dependencies.length > 0) {
+        const deps = pkg.dependencies
+          .filter((dependency) => !dependency.isOptional)
+          .map((dependency) => {
+            if (!dependency.version) return dependency.name;
+            const operator = dependency.operator === '<'
+              ? '<<'
+              : dependency.operator === '>'
+                ? '>>'
+                : dependency.operator || '>=';
+            return `${dependency.name} (${operator} ${dependency.version})`;
+          })
+          .join(', ');
+        if (deps) setField('Depends', deps);
+      }
+      if (!hasField('Provides') && pkg.provides?.length) {
+        setField('Provides', pkg.provides.join(', '));
+      }
+      if (!hasField('Conflicts') && pkg.conflicts?.length) {
+        setField('Conflicts', pkg.conflicts.join(', '));
+      }
+      if (!hasField('Recommends') && pkg.recommends?.length) {
+        setField('Recommends', pkg.recommends.join(', '));
+      }
+      if (!hasField('Suggests') && pkg.suggests?.length) {
+        setField('Suggests', pkg.suggests.join(', '));
+      }
+      if (!hasField('Description')) {
+        setField('Description', pkg.description || pkg.name);
+      }
+
+      setField('Filename', `./${filename}`);
+      setField('Size', String(actualSize));
+      removeFields('MD5sum', 'SHA1', 'SHA256', 'SHA512');
+      fields.set('SHA256', actualSha256);
 
       const lines: string[] = [];
-      lines.push(`Package: ${pkg.name}`);
-      lines.push(`Version: ${pkg.version}`);
-      lines.push(`Architecture: ${arch}`);
-      lines.push(`Maintainer: DepsSmuggler`);
-      lines.push(`Installed-Size: ${Math.ceil(pkg.size / 1024)}`);
-
-      if (pkg.dependencies.length > 0) {
-        const deps = pkg.dependencies
-          .filter((d) => !d.isOptional)
-          .map((d) => d.version ? `${d.name} (>= ${d.version})` : d.name)
-          .join(', ');
-        if (deps) {
-          lines.push(`Depends: ${deps}`);
+      for (const [name, value] of fields) {
+        const valueLines = value.split('\n');
+        lines.push(`${name}: ${valueLines[0]}`);
+        for (const continuation of valueLines.slice(1)) {
+          lines.push(` ${continuation || '.'}`);
         }
       }
-
-      lines.push(`Filename: ./${filename}`);
-      lines.push(`Size: ${pkg.size}`);
-
-      if (pkg.checksum) {
-        if (pkg.checksum.type === 'sha256') {
-          lines.push(`SHA256: ${pkg.checksum.value}`);
-        } else {
-          lines.push(`SHA256: ${pkg.checksum.value}`);
-        }
-      }
-
-      lines.push(`Description: ${pkg.description || pkg.name}`);
       lines.push('');
-
       entries.push(lines.join('\n'));
     }
 
     return entries.join('\n');
+  }
+
+  private async calculateSha256(filePath: string): Promise<string> {
+    const hash = crypto.createHash('sha256');
+    await new Promise<void>((resolve, reject) => {
+      const stream = fs.createReadStream(filePath);
+      stream.on('data', (chunk) => hash.update(chunk));
+      stream.on('end', () => resolve());
+      stream.on('error', reject);
+    });
+    return hash.digest('hex');
   }
 
   /**
@@ -396,19 +516,38 @@ export class OSRepoPackager {
    */
   private async createApkRepoMetadata(
     packages: OSPackageInfo[],
-    repoPath: string
+    repoPath: string,
+    downloadedFiles: Map<string, string>
   ): Promise<string[]> {
     const metadataFiles: string[] = [];
+    const deliveredFiles = this.resolveApkDeliveredFiles(packages, downloadedFiles, repoPath);
 
     // APKINDEX 내용 생성
-    const apkindexContent = this.generateApkIndexContent(packages);
+    const apkindexContent = this.generateApkIndexContent(packages, deliveredFiles);
 
-    // APKINDEX.tar.gz 생성 (간단한 형태)
-    // 실제로는 tar 아카이브지만, 여기서는 gzip된 인덱스만 생성
-    const apkindexGz = await gzip(Buffer.from(apkindexContent));
+    // Keep caller-owned repository files untouched until the completed archive is ready.
+    const stagingDir = fs.mkdtempSync(path.join(repoPath, '.depssmuggler-apkindex-'));
+    const stagedIndexPath = path.join(stagingDir, 'APKINDEX');
+    const stagedArchivePath = path.join(stagingDir, 'APKINDEX.tar.gz');
     const apkindexPath = path.join(repoPath, 'APKINDEX.tar.gz');
-    fs.writeFileSync(apkindexPath, apkindexGz);
-    metadataFiles.push(apkindexPath);
+
+    try {
+      fs.writeFileSync(stagedIndexPath, apkindexContent, 'utf8');
+      await tar.c(
+        {
+          cwd: stagingDir,
+          file: stagedArchivePath,
+          gzip: true,
+          noPax: true,
+          portable: true,
+        },
+        ['APKINDEX']
+      );
+      fs.renameSync(stagedArchivePath, apkindexPath);
+      metadataFiles.push(apkindexPath);
+    } finally {
+      fs.rmSync(stagingDir, { recursive: true, force: true });
+    }
 
     return metadataFiles;
   }
@@ -416,37 +555,76 @@ export class OSRepoPackager {
   /**
    * APK 인덱스 내용 생성
    */
-  private generateApkIndexContent(packages: OSPackageInfo[]): string {
+  private generateApkIndexContent(
+    packages: OSPackageInfo[],
+    deliveredFiles: Map<string, string>
+  ): string {
     const entries: string[] = [];
 
     for (const pkg of packages) {
+      const deliveredPath = deliveredFiles.get(getDownloadedFileKey(pkg));
+      if (!deliveredPath) {
+        throw new Error(`APK 패키지 파일을 찾을 수 없습니다: ${pkg.name}-${pkg.version}`);
+      }
+      const deliveredSize = fs.statSync(deliveredPath).size;
+      const rawFields = pkg.apkIndexFields;
       const lines: string[] = [];
       lines.push(`P:${pkg.name}`);
       lines.push(`V:${pkg.version}`);
       lines.push(`A:${pkg.architecture}`);
-      lines.push(`S:${pkg.size}`);
-      lines.push(`I:${pkg.size}`);
-      lines.push(`T:${pkg.description || pkg.name}`);
+      lines.push(`S:${deliveredSize}`);
+      lines.push(`I:${resolveApkInstalledSize(pkg)}`);
+      lines.push(`T:${rawFields?.T ?? pkg.description ?? pkg.name}`);
+      for (const [field, value] of Object.entries(rawFields || {})) {
+        if (!APK_INDEX_GENERATED_FIELDS.has(field)) lines.push(`${field}:${value}`);
+      }
 
-      if (pkg.dependencies.length > 0) {
+      if (rawFields?.D !== undefined) {
+        if (rawFields.D) lines.push(`D:${rawFields.D}`);
+      } else if (pkg.dependencies.length > 0) {
         const deps = pkg.dependencies
           .filter((d) => !d.isOptional)
-          .map((d) => d.name)
+          .map((d) => (d.operator && d.version ? `${d.name}${d.operator}${d.version}` : d.name))
           .join(' ');
         if (deps) {
           lines.push(`D:${deps}`);
         }
       }
 
-      if (pkg.checksum) {
-        lines.push(`C:${pkg.checksum.value}`);
+      if (rawFields?.p !== undefined) {
+        if (rawFields.p) lines.push(`p:${rawFields.p}`);
+      } else if (pkg.provides?.length) {
+        lines.push(`p:${pkg.provides.join(' ')}`);
       }
+
+      lines.push(`C:${formatApkChecksum(pkg)}`);
 
       lines.push('');
       entries.push(lines.join('\n'));
     }
 
     return entries.join('\n');
+  }
+
+  private resolveApkDeliveredFiles(
+    packages: OSPackageInfo[],
+    downloadedFiles: Map<string, string>,
+    repoPath: string
+  ): Map<string, string> {
+    const deliveredFiles = new Map<string, string>();
+    for (const pkg of packages) {
+      const key = getDownloadedFileKey(pkg);
+      const sourcePath = downloadedFiles.get(key);
+      if (!sourcePath || !fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+        throw new Error(`APK 패키지 파일을 찾을 수 없습니다: ${pkg.name}-${pkg.version}`);
+      }
+      const copiedPath = path.join(repoPath, path.basename(sourcePath));
+      if (!fs.existsSync(copiedPath) || !fs.statSync(copiedPath).isFile()) {
+        throw new Error(`APK 패키지 파일을 저장하지 못했습니다: ${pkg.name}-${pkg.version}`);
+      }
+      deliveredFiles.set(key, copiedPath);
+    }
+    return deliveredFiles;
   }
 
   /**

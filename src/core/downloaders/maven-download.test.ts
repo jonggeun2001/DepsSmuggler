@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
+import * as path from 'path';
 
 // vi.hoisted를 사용하여 모킹 함수 정의
 const { mockAxiosDefault, mockAxiosGet } = vi.hoisted(() => {
@@ -39,6 +40,7 @@ vi.mock('fs-extra', async () => {
     createReadStream: vi.fn(),
     remove: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn(),
+    writeFile: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -47,6 +49,60 @@ import { MavenDownloader } from './maven';
 
 describe('MavenDownloader downloadPackage 테스트', () => {
   let downloader: MavenDownloader;
+
+  const downloadPackageFiles = async (
+    info: Parameters<MavenDownloader['downloadPackage']>[0],
+    destPath: string,
+  ): Promise<string[]> => {
+    const filesMethod = (downloader as MavenDownloader & {
+      downloadPackageFiles?: (
+        info: Parameters<MavenDownloader['downloadPackage']>[0],
+        destPath: string,
+      ) => Promise<string[]>;
+    }).downloadPackageFiles;
+
+    // The compatibility adapter makes the RED failure assert the missing
+    // companion files, while still allowing this test to compile before the
+    // additive downloader API exists.
+    if (filesMethod) {
+      return filesMethod.call(downloader, info, destPath);
+    }
+    return [await downloader.downloadPackage(info, destPath)];
+  };
+
+  const prepareArtifactNetworkMocks = (missingChecksumSuffix?: string) => {
+    mockAxiosGet.mockImplementation(async (url: string) => {
+      if (url.endsWith('.sha1')) {
+        if (missingChecksumSuffix && url.endsWith(missingChecksumSuffix)) {
+          throw new Error('404 Not Found');
+        }
+        return { data: '0123456789abcdef0123456789abcdef01234567' };
+      }
+      return { data: '<project><packaging>jar</packaging></project>' };
+    });
+
+    mockAxiosDefault.mockImplementation(async () => {
+      const stream = new EventEmitter() as EventEmitter & {
+        pipe: (writer: EventEmitter) => EventEmitter;
+      };
+      stream.pipe = (writer) => {
+        process.nextTick(() => {
+          stream.emit('data', Buffer.from('artifact'));
+          writer.emit('finish');
+        });
+        return writer;
+      };
+
+      return {
+        data: stream,
+        headers: { 'content-length': '8' },
+      };
+    });
+
+    (fs.createWriteStream as any).mockImplementation(() => new EventEmitter());
+    (fs.writeFile as any).mockResolvedValue(undefined);
+    (downloader as any).verifyChecksum = vi.fn().mockResolvedValue(true);
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -495,6 +551,77 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         onProgress,
         undefined
       );
+    });
+
+    it('JAR와 classifier companion POM 및 체크섬의 모든 파일 경로를 반환한다', async () => {
+      prepareArtifactNetworkMocks();
+      const info = {
+        type: 'maven' as const,
+        name: 'com.example:demo',
+        version: '1.0.0',
+        metadata: {
+          groupId: 'com.example',
+          artifactId: 'demo',
+          packaging: 'jar',
+          classifier: 'sources',
+        },
+      };
+      const destination = '/tmp/depssmuggler-issue-67-maven';
+
+      const files = await downloadPackageFiles(info, destination);
+
+      expect(files).toEqual([
+        path.join(destination, 'com/example/demo/1.0.0/demo-1.0.0-sources.jar'),
+        path.join(destination, 'com/example/demo/1.0.0/demo-1.0.0-sources.jar.sha1'),
+        path.join(destination, 'com/example/demo/1.0.0/demo-1.0.0.pom'),
+        path.join(destination, 'com/example/demo/1.0.0/demo-1.0.0.pom.sha1'),
+      ]);
+    });
+
+    it('POM-only 패키지는 POM과 체크섬만 반환한다', async () => {
+      prepareArtifactNetworkMocks();
+      const info = {
+        type: 'maven' as const,
+        name: 'org.example:demo-bom',
+        version: '1.0.0',
+        metadata: {
+          groupId: 'org.example',
+          artifactId: 'demo-bom',
+          packaging: 'pom',
+        },
+      };
+      const destination = '/tmp/depssmuggler-issue-67-maven';
+
+      const files = await downloadPackageFiles(info, destination);
+
+      expect(files).toEqual([
+        path.join(destination, 'org/example/demo-bom/1.0.0/demo-bom-1.0.0.pom'),
+        path.join(destination, 'org/example/demo-bom/1.0.0/demo-bom-1.0.0.pom.sha1'),
+      ]);
+    });
+
+    it('없는 선택적 체크섬은 파일 목록에서 제외한다', async () => {
+      prepareArtifactNetworkMocks('demo-1.0.0.pom.sha1');
+      const info = {
+        type: 'maven' as const,
+        name: 'com.example:demo',
+        version: '1.0.0',
+        metadata: {
+          groupId: 'com.example',
+          artifactId: 'demo',
+          packaging: 'jar',
+        },
+      };
+      const destination = '/tmp/depssmuggler-issue-67-maven';
+
+      const files = await downloadPackageFiles(info, destination);
+
+      expect(files).toEqual([
+        path.join(destination, 'com/example/demo/1.0.0/demo-1.0.0.jar'),
+        path.join(destination, 'com/example/demo/1.0.0/demo-1.0.0.jar.sha1'),
+        path.join(destination, 'com/example/demo/1.0.0/demo-1.0.0.pom'),
+      ]);
+      expect(files.some((file) => file.endsWith('.pom.sha1'))).toBe(false);
     });
   });
 

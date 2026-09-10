@@ -16,6 +16,7 @@ import {
   CondaPackageFile,
 } from '../shared/conda-types';
 import { BaseLanguageDownloader } from './lang-shared/base-language-downloader';
+import { getCondaApiOwner, getCondaRepositoryBase } from '../shared/conda-channel';
 import { verifyFileChecksum } from '../shared/integrity/checksum';
 
 // CondaPackageInfo는 downloader 전용 (files, versions 등 추가 필드 포함)
@@ -143,7 +144,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
 
         // 채널 필터링
         const filtered = response.data.filter(
-          (pkg) => pkg.owner === channel || channel === 'all'
+          (pkg) => pkg.owner === getCondaApiOwner(channel) || channel === 'all'
         );
 
         return filtered.slice(0, 50).map((pkg) => ({
@@ -152,7 +153,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
           version: 'latest',
           metadata: {
             description: pkg.summary,
-            repository: pkg.full_name,
+            repository: channel === 'defaults' ? `defaults/${pkg.name}` : pkg.full_name,
           },
         }));
       } catch (error) {
@@ -184,7 +185,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
   ): Promise<string[]> {
     try {
       const response = await this.client.get<CondaPackageInfo>(
-        `${this.apiUrl}/package/${channel}/${packageName}`
+        `${this.apiUrl}/package/${getCondaApiOwner(channel)}/${packageName}`
       );
 
       // 버전 정렬 (최신순)
@@ -218,7 +219,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
         const found = this.findPackageInRepoData(repodata, name, version, subdir);
         if (found) {
           const { filename, pkg } = found;
-          const downloadUrl = `${this.condaUrl}/${channel}/${subdir}/${filename}`;
+          const downloadUrl = `${getCondaRepositoryBase(channel, this.condaUrl)}/${subdir}/${filename}`;
 
           return {
             type: 'conda',
@@ -248,7 +249,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
         const found = this.findPackageInRepoData(noarchRepodata, name, version, 'noarch');
         if (found) {
           const { filename, pkg } = found;
-          const downloadUrl = `${this.condaUrl}/${channel}/noarch/${filename}`;
+          const downloadUrl = `${getCondaRepositoryBase(channel, this.condaUrl)}/noarch/${filename}`;
 
           return {
             type: 'conda',
@@ -290,13 +291,18 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
   ): Promise<PackageInfo> {
     try {
       const response = await this.client.get<CondaPackageInfo>(
-        `${this.apiUrl}/package/${channel}/${name}`
+        `${this.apiUrl}/package/${getCondaApiOwner(channel)}/${name}`
       );
       const pkgInfo = response.data;
 
       // 버전과 아키텍처에 맞는 파일 찾기
       const file = this.selectBestFile(pkgInfo.files, version, arch);
 
+      const basenameParts = file?.basename.split('/') || [];
+      const fileSubdir = basenameParts.length > 1
+        ? basenameParts[basenameParts.length - 2]
+        : file?.attrs.subdir || 'noarch';
+      const fileName = basenameParts[basenameParts.length - 1];
       const metadata: PackageMetadata = {
         description: pkgInfo.summary || pkgInfo.description,
         license: pkgInfo.license,
@@ -309,8 +315,8 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
               sha256: file.sha256,
             }
           : undefined,
-        downloadUrl: file
-          ? `${this.condaUrl}/${channel}/${file.attrs.subdir || 'noarch'}/${file.basename}`
+        downloadUrl: file && fileName
+          ? `${getCondaRepositoryBase(channel, this.condaUrl)}/${fileSubdir}/${fileName}`
           : undefined,
       };
 
@@ -493,7 +499,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
     channel: CondaChannel = 'conda-forge'
   ): Promise<CondaPackageFile[]> {
     const response = await this.client.get<CondaPackageInfo>(
-      `${this.apiUrl}/package/${channel}/${name}`
+      `${this.apiUrl}/package/${getCondaApiOwner(channel)}/${name}`
     );
     return response.data.files;
   }

@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { downloadCommand } from './download';
 import { resolveAllDependencies } from '../../core/shared';
@@ -60,11 +61,15 @@ vi.mock('./download-runner', () => ({
   }),
 }));
 
-vi.mock('../../core/packager/archive-packager', () => ({
-  getArchivePackager: vi.fn(() => ({
-    createArchive,
-  })),
-}));
+vi.mock('../../core/packager/archive-packager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../core/packager/archive-packager')>();
+  return {
+    ...actual,
+    getArchivePackager: vi.fn(() => ({
+      createArchive,
+    })),
+  };
+});
 
 vi.mock('../../core/packager/script-generator', () => ({
   getScriptGenerator: vi.fn(() => ({
@@ -97,6 +102,7 @@ function commandOptions(
 describe('downloadCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(resolveAllDependencies).mockReset();
 
     ensureDir.mockResolvedValue(undefined);
     startDownload.mockResolvedValue({
@@ -136,6 +142,131 @@ describe('downloadCommand', () => {
       dependencyTrees: [],
       failedPackages: [],
     });
+  });
+
+  it('지원하지 않는 archive 형식은 resolver와 출력 부수 효과 전에 거부한다', async () => {
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => {
+        throw new Error('process.exit');
+      }) as never);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      await expect(downloadCommand(commandOptions({ format: 'rar' }))).rejects.toThrow('process.exit');
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('지원하지 않는 압축 형식입니다: rar. 지원 형식: zip, tar.gz'),
+      );
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      errorSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(resolveAllDependencies).not.toHaveBeenCalled();
+    expect(addToQueue).not.toHaveBeenCalled();
+    expect(ensureDir).not.toHaveBeenCalled();
+    expect(startDownload).not.toHaveBeenCalled();
+    expect(createArchive).not.toHaveBeenCalled();
+  });
+
+  it('완료된 Maven 항목의 모든 파일을 중복 없이 아카이브하고 실패 항목은 제외한다', async () => {
+    const jarPath = '/tmp/output/com/example/demo/1.0.0/demo-1.0.0.jar';
+    const pomPath = '/tmp/output/com/example/demo/1.0.0/demo-1.0.0.pom';
+    const pomChecksumPath = `${pomPath}.sha1`;
+    const staleFailedPath = '/tmp/output/stale/old-artifact.pom';
+
+    startDownload.mockResolvedValueOnce({
+      success: true,
+      totalSize: 1024,
+      duration: 1000,
+      items: [
+        {
+          id: 'maven-demo-1.0.0',
+          package: {
+            type: 'maven',
+            name: 'com.example:demo',
+            version: '1.0.0',
+          },
+          status: 'completed',
+          progress: 100,
+          filePath: jarPath,
+          filePaths: [jarPath, pomPath, pomPath, pomChecksumPath],
+        },
+        {
+          id: 'maven-failed-1.0.0',
+          package: {
+            type: 'maven',
+            name: 'com.example:failed',
+            version: '1.0.0',
+          },
+          status: 'failed',
+          progress: 0,
+          filePath: staleFailedPath,
+          filePaths: [staleFailedPath],
+        },
+      ],
+    });
+
+    await downloadCommand(commandOptions({
+      type: 'maven',
+      package: 'com.example:demo',
+      pkgVersion: '1.0.0',
+    }));
+
+    expect(createArchive).toHaveBeenCalledWith(
+      [jarPath, pomPath, pomChecksumPath],
+      expect.any(String),
+      expect.any(Array),
+      expect.objectContaining({ format: 'zip' }),
+    );
+  });
+
+  it.each([
+    ['partial failure', [
+      {
+        id: 'pip-completed-2.28.0',
+        package: { type: 'pip', name: 'requests', version: '2.28.0' },
+        status: 'completed',
+        progress: 100,
+        filePath: '/tmp/output/requests.whl',
+      },
+      {
+        id: 'pip-failed-2.28.0',
+        package: { type: 'pip', name: 'missing', version: '2.28.0' },
+        status: 'failed',
+        progress: 0,
+        error: '404 Not Found',
+      },
+    ]],
+    ['full failure', [
+      {
+        id: 'pip-failed-2.28.0',
+        package: { type: 'pip', name: 'missing', version: '2.28.0' },
+        status: 'failed',
+        progress: 0,
+        error: '404 Not Found',
+      },
+    ]],
+  ] as const)('%s sets a nonzero exit code without creating delivery files', async (_label, items) => {
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    startDownload.mockResolvedValueOnce({
+      success: false,
+      totalSize: 0,
+      duration: 100,
+      items,
+    });
+
+    try {
+      await downloadCommand(commandOptions());
+
+      expect(process.exitCode).toBe(1);
+      expect(createArchive).not.toHaveBeenCalled();
+      expect(generateAllScripts).not.toHaveBeenCalled();
+    } finally {
+      process.exitCode = previousExitCode;
+    }
   });
 
   it('deps가 true면 의존성을 해결한 패키지 목록을 큐에 추가한다', async () => {
@@ -201,6 +332,51 @@ describe('downloadCommand', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     errorSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+
+  it.each(['1.5', '0.5', '.5', '.5e-999', '+.5e-999', '1abc', '9007199254740992', '1.0000000000000001'])(
+    '양의 정수가 아닌 동시성 입력은 부작용 전에 실패한다: %j',
+    async (concurrency) => {
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => {
+          throw new Error('process.exit');
+        }) as never);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      try {
+        await expect(downloadCommand(commandOptions({ concurrency }))).rejects.toThrow('process.exit');
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('양의 정수'));
+      } finally {
+        errorSpy.mockRestore();
+        exitSpy.mockRestore();
+      }
+
+      expect(resolveAllDependencies).not.toHaveBeenCalled();
+      expect(addToQueue).not.toHaveBeenCalled();
+      expect(ensureDir).not.toHaveBeenCalled();
+      expect(startDownload).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['2', '3'])('유효한 동시성 입력은 숫자로 downloader에 전달한다: %j', async (concurrency) => {
+    await downloadCommand(commandOptions({ concurrency }));
+
+    expect(startDownload).toHaveBeenCalledWith(expect.objectContaining({
+      concurrency: Number(concurrency),
+    }));
+  });
+
+  it.each([
+    ['0', 0],
+    ['-1', -1],
+    ['abc', Number.NaN],
+  ] as const)('generic legacy 동시성 입력은 기존 결과를 유지한다: %s', async (concurrency, expected) => {
+    await downloadCommand(commandOptions({ concurrency }));
+
+    expect(startDownload).toHaveBeenCalledWith(expect.objectContaining({
+      concurrency: expected,
+    }));
   });
 
   it('명시한 pip 대상 환경을 resolver와 downloader에 전달한다', async () => {
@@ -838,6 +1014,154 @@ describe('downloadCommand', () => {
     ]);
   });
 
+  it('Conda 스크립트에는 완료된 실제 archive 경로만 전달한다', async () => {
+    const outputRoot = path.resolve('tmp', 'conda script output');
+    const condaArchive = path.join(outputRoot, 'nested dir', 'six-1.17.0-py312h06a4308_0.tar.bz2');
+    const condaDependencyArchive = path.join(outputRoot, 'nested dir', 'python_abi-3.12-0.conda');
+    const pipArchive = path.join(outputRoot, 'pip', 'requests-2.32.0.tar.bz2');
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'conda-six-1.17.0',
+          type: 'conda',
+          name: 'six',
+          version: '1.17.0',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [
+        {
+          id: 'conda-six-1.17.0',
+          type: 'conda',
+          name: 'six',
+          version: '1.17.0',
+          architecture: 'x86_64',
+        },
+      ],
+      dependencyTrees: [],
+      failedPackages: [],
+    });
+    startDownload.mockResolvedValueOnce({
+      success: true,
+      totalSize: 1024,
+      duration: 1000,
+      items: [{
+        id: 'conda-six-1.17.0',
+        package: { type: 'conda', name: 'six', version: '1.17.0' },
+        status: 'completed',
+        progress: 100,
+        filePath: condaArchive,
+        filePaths: [condaArchive, condaDependencyArchive, condaDependencyArchive],
+      }, {
+        id: 'pip-requests-2.32.0',
+        package: { type: 'pip', name: 'requests', version: '2.32.0' },
+        status: 'completed',
+        progress: 100,
+        filePath: pipArchive,
+        filePaths: [pipArchive],
+      }],
+    });
+
+    await downloadCommand(commandOptions({
+      type: 'conda',
+      package: 'six',
+      pkgVersion: '1.17.0',
+      deps: false,
+      output: outputRoot,
+    }));
+
+    expect(generateAllScripts).toHaveBeenCalledWith(
+      expect.any(Array),
+      outputRoot,
+      expect.objectContaining({
+        condaPackageFiles: [
+          { relativePath: 'nested dir/six-1.17.0-py312h06a4308_0.tar.bz2' },
+          { relativePath: 'nested dir/python_abi-3.12-0.conda' },
+        ],
+      }),
+    );
+    expect(generateAllScripts.mock.calls[0][2].condaPackageFiles).not.toContainEqual({
+      relativePath: 'pip/requests-2.32.0.tar.bz2',
+    });
+  });
+
+  it('기본 Maven --no-deps의 latest는 concrete root artifact를 resolver로 검증한다', async () => {
+    const concreteRoot = {
+      id: 'maven-org.example:demo-3.0.2',
+      type: 'maven' as const,
+      name: 'org.example:demo',
+      version: '3.0.2',
+      architecture: 'x86_64' as const,
+      metadata: {
+        groupId: 'org.example',
+        artifactId: 'demo',
+        type: 'jar',
+        filename: 'demo-3.0.2.jar',
+      },
+    };
+    vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
+      originalPackages: [
+        {
+          id: 'maven-org.example:demo-latest',
+          type: 'maven',
+          name: 'org.example:demo',
+          version: 'latest',
+          architecture: 'x86_64',
+        },
+      ],
+      allPackages: [concreteRoot],
+      successfulPackages: [concreteRoot],
+      dependencyTrees: [],
+      failedPackages: [],
+    });
+
+    await downloadCommand(commandOptions({
+      type: 'maven',
+      package: 'org.example:demo',
+      pkgVersion: 'latest',
+      deps: false,
+    }));
+
+    expect(resolveAllDependencies).toHaveBeenCalledWith(
+      [expect.objectContaining({
+        type: 'maven',
+        name: 'org.example:demo',
+        version: 'latest',
+      })],
+      expect.objectContaining({
+        includeDependencies: true,
+        maxDepth: 0,
+        resolveRootArtifactsOnly: true,
+      }),
+    );
+    expect(addToQueue).toHaveBeenCalledWith([
+      expect.objectContaining({
+        type: 'maven',
+        name: 'org.example:demo',
+        version: '3.0.2',
+        metadata: expect.objectContaining({ filename: 'demo-3.0.2.jar' }),
+      }),
+    ]);
+  });
+
+  it('기본 Maven --no-deps의 명시 버전은 latest resolver 조회를 추가하지 않는다', async () => {
+    await downloadCommand(commandOptions({
+      type: 'maven',
+      package: 'org.example:demo',
+      pkgVersion: '3.0.1',
+      deps: false,
+    }));
+
+    expect(resolveAllDependencies).not.toHaveBeenCalled();
+    expect(addToQueue).toHaveBeenCalledWith([
+      expect.objectContaining({
+        type: 'maven',
+        name: 'org.example:demo',
+        version: '3.0.1',
+      }),
+    ]);
+  });
+
   it('--file 입력 패키지에도 선택한 아키텍처를 적용한다', async () => {
     readFile.mockResolvedValueOnce('requests==2.28.0');
     vi.mocked(resolveAllDependencies).mockResolvedValueOnce({
@@ -996,4 +1320,35 @@ describe('downloadCommand', () => {
       }),
     ]);
   });
+
+  it.each([
+    ['빈 파일', ''],
+    ['공백만 있는 파일', '\n \n\t'],
+    ['주석만 있는 파일', '# comment only\n\n  # another comment\n'],
+  ])('%s는 resolver와 출력 부수 효과 전에 입력 오류로 거부한다', async (_name, content) => {
+    readFile.mockResolvedValueOnce(content);
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => {
+        throw new Error('process.exit');
+      }) as never);
+
+    try {
+      await expect(downloadCommand(commandOptions({
+        file: 'empty-packages.txt',
+        package: undefined,
+        deps: false,
+      }))).rejects.toThrow('process.exit');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(resolveAllDependencies).not.toHaveBeenCalled();
+      expect(ensureDir).not.toHaveBeenCalled();
+      expect(addToQueue).not.toHaveBeenCalled();
+      expect(startDownload).not.toHaveBeenCalled();
+      expect(createArchive).not.toHaveBeenCalled();
+      expect(generateAllScripts).not.toHaveBeenCalled();
+    } finally {
+      exitSpy.mockRestore();
+    }
+  });
+
 });

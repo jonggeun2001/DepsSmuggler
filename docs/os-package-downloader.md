@@ -145,6 +145,8 @@ interface OSPackageInfo {
   obsoletes?: string[];
   suggests?: string[];           // DEB: Suggests
   recommends?: string[];         // DEB: Recommends
+  aptControlFields?: Record<string, string>; // APT 원본 Control 필드 (JSON 캐시 가능)
+  apkIndexFields?: Record<string, string>;   // APK 원본 인덱스 필드 (JSON 캐시 가능)
 }
 ```
 
@@ -300,6 +302,14 @@ console.log(downloadResult.downloadedFiles);
 
 #### 메타데이터 파싱 (YumMetadataParser)
 
+Rocky의 큰 primary XML에 포함된 표준 엔티티를 처리하도록 `fast-xml-parser`의 엔티티 처리를 유지하면서 파서가 집계하는 치환 횟수를 100,000회로 제한합니다. DTD 선언 수 100개, 단일 엔티티 크기 10,000, DTD 치환에 따른 누적 확장 길이 100,000의 기존 제한도 명시적으로 유지합니다. `&amp;` 같은 표준 XML 값은 디코딩되며, 제한을 넘는 입력은 파싱 오류로 보고합니다. 이 값은 전체 XML이나 압축 해제 크기의 상한이 아닙니다.
+
+XML 속성을 일괄 숫자 변환하지 않으므로 RPM 버전·release·의존성 버전의 `1.0`, `01`, `1.0.0~rc1` 같은 문자열을 그대로 보존합니다. 숫자 계약인 epoch·패키지 크기·설치 크기는 명시적으로 변환합니다. RPM 버전 비교나 의존성 선택 정책은 이 문자열 보존과 별개입니다.
+
+`YumDependencyResolver`는 모든 활성 저장소의 로딩이 성공한 뒤 패키지·provides 인덱스를 반영합니다. primary 누락이나 조회·파싱 실패를 빈 검색 결과로 숨기지 않으며, 실패한 시도의 일부 목록은 다음 재시도에서 사용하지 않습니다. 정상적으로 저장한 저장소별 디스크 캐시는 재사용합니다.
+
+YUM 파싱 결과는 `{ schemaVersion: 1, packages }` 캐시로 저장합니다. 이전 배열 형식, 알 수 없는 스키마와 잘못된 버전 타입은 다시 파싱해 같은 키에 저장하며, 현재 형식은 JSON 저장·복원 뒤에도 버전·release·의존성 버전 문자열을 유지합니다.
+
 ```typescript
 interface RepomdInfo {
   revision: string;
@@ -359,6 +369,10 @@ ${baseUrl}/pool/${component}/${prefix}/${name}/${filename}.deb
 
 #### 메타데이터 파싱 (ApkMetadataParser)
 
+`D:`의 `so:`, `cmd:`, `pc:` 항목을 시스템에 이미 설치된 것으로 간주해 버리지 않고 의존성으로 보존합니다. Resolver는 호환 아키텍처의 `p:` provides에서 제공자를 찾아 전이 목록에 포함합니다. 버전 조건이 있으면 제공 APK 자체의 버전 대신 같은 capability의 제공 버전을 비교하며, 버전 없는 제공은 버전 조건을 충족한 것으로 간주하지 않습니다. 제공자가 없거나 버전이 맞지 않으면 기존 unresolved/warning 결과에 남깁니다.
+
+서로 다른 APK가 같은 capability나 `/bin/sh` 같은 경로를 제공하면 기존 최선 후보 선택 규칙으로 하나의 제공 패키지 이름을 선택하며, 이를 같은 패키지의 여러 버전과 구분합니다. APKINDEX 파싱 결과는 `apkIndexFields`에 원본 필드도 유지합니다. 스키마 2 캐시가 아닌 이전 결과는 다시 파싱하고 이후 요청부터 원본 필드를 포함한 새 결과를 재사용합니다.
+
 APK INDEX 형식:
 
 ```
@@ -377,6 +391,7 @@ D:pcre2 zlib
 - `S`: Size
 - `T`: Description
 - `C`: Checksum
+- `p`: Provides (버전이 있는 capability 포함)
 
 ---
 
@@ -393,12 +408,14 @@ D:pcre2 zlib
 > 기존 재귀적 의존성 해결에서 BFS 큐 기반으로 변경하여 순환 의존성을 안전하게 처리하고 깊은 의존성 트리에서도 call stack overflow가 발생하지 않습니다.
 
 1. **BFS 큐**로 의존성 그래프 구성 (순환 의존성 방지)
-2. **processing Set**으로 현재 처리 중인 패키지 추적
+2. **이름·버전·RPM release·아키텍처 키**로 큐 중복과 이미 처리한 패키지의 재방문 차단. 릴리스가 다른 후보는 각각 탐색합니다.
 3. **provides/virtual 패키지** 해결
 4. **버전 제약 조건** 확인
 5. **위상 정렬 (Topological Sort)**로 설치 순서 결정
-6. **충돌 감지**: 여러 호환 버전을 conflict에 기록하고 최신 후보를 그래프에 선택; CLI backend는 conflict 후보도 다운로드 목록에 병합
-7. **MAX_ITERATIONS (10000)** 제한으로 무한 루프 방지
+6. **충돌 감지**: 기존 후보 선택 정책이 유지한 여러 버전을 conflict에 기록합니다. 최선 후보를 부모의 의존성 엣지로 연결하고, 다운로드에 포함될 충돌 버전도 같은 큐에서 처리해 각 버전의 하위 의존성·추가 충돌·미해결 항목을 결과에 반영합니다.
+7. **MAX_ITERATIONS (10000)**: 단일 루트 탐색에서 새로 처리하는 고유 패키지 수를 제한합니다. 정확히 10,000개로 작업이 끝나면 정상 반환하고, 그 뒤에도 처리할 패키지가 남으면 오류로 종료합니다. 중복 엣지가 처리 횟수를 소모하거나 부분 결과가 성공으로 반환되지 않도록 합니다.
+
+버전·아키텍처 필터링 후 `selectCandidatesForDependency` 확장 지점을 거칩니다. 기본 구현은 후보를 그대로 유지하고, APK 구현은 서로 다른 제공 패키지 이름 중 하나를 선택한 뒤 그 패키지의 버전 충돌을 계산합니다.
 
 #### DependencyResolutionResult
 
@@ -430,6 +447,8 @@ class OSDependencyTree {
 }
 ```
 
+노드 ID와 엣지의 source/target은 `getDownloadedFileKey(pkg)`와 같은 `[name, version, release 또는 빈 문자열, architecture]`의 JSON 문자열입니다. ID를 하이픈으로 분해하지 않고 연결용 식별자로 사용합니다. 같은 버전의 RPM도 release가 다르면 별도 노드와 충돌 후보로 유지됩니다.
+
 ---
 
 ## 유틸리티 모듈
@@ -443,7 +462,7 @@ class OSDependencyTree {
 interface OSCacheConfig {
   type: CacheMode;               // 'session' | 'persistent' | 'none'
   ttl: number;                   // TTL (초, 기본 3600)
-  maxSize: number;               // 최대 크기 (바이트, 기본 500MB)
+  maxSize: number;               // 추정 데이터 크기 한도 (바이트, 생성자 기본 500MiB)
   directory?: string;            // persistent 모드 저장 경로
 }
 
@@ -455,6 +474,16 @@ class OsPackageCache {
   // 전체 삭제는 invalidate() 호출
 }
 ```
+
+`searchOSPackages`와 `downloadOSPackages`는 선택적인 `cacheMaxSize`를 `OsPackageCache.maxSize`에 전달합니다. 직접 호출하면서 생략하면 생성자의 500MiB 기본값을 유지합니다. CLI는 설정한 `maxCacheSize` 또는 CLI 기본값 10GiB를 명시적으로 전달합니다. `cacheEnabled=false`이면 캐시 모드는 `none`이며 새 메타데이터 파일을 저장하지 않습니다.
+
+크기는 기존 `JSON.stringify(data).length * 2` 추정값으로 계산하므로 실제 JSON 파일 크기와 다를 수 있습니다. 저장하거나 기존 캐시를 다시 읽을 때 한도를 넘으면 오래 접근하지 않은 항목부터 제거합니다. 새 항목 하나가 한도보다 크면 다른 항목을 제거하지 않고 저장을 생략합니다. 같은 키의 이전 값이 있다면 그 값은 제거해 오래된 데이터가 다시 조회되지 않도록 합니다.
+
+persistent 캐시 조회 시 최근 접근 시각을 JSON 파일에도 기록해 다음 실행의 LRU 정리에 반영합니다. 이 기록은 기존 캐시 파일을 다시 쓰며, TTL 기준인 최초 저장 시각은 갱신하지 않습니다. 접근 시각 저장에 실패해도 캐시에서 읽은 데이터는 반환하고 경고를 기록합니다.
+
+캐시 키는 패키지 관리자·저장소 URL 토큰·아키텍처·데이터 종류로 구성하고 전체 키를 Base64url 파일명으로 저장합니다. 다시 읽을 때 첫 관리자와 마지막 아키텍처·데이터 종류를 기준으로 구분하므로 저장소 토큰 안의 포트·IPv6 콜론은 유지됩니다. 기존 키와 파일명을 그대로 사용하며, 관리자·아키텍처·데이터 종류가 유효하지 않거나 저장소 토큰이 비어 있는 파일과 이전 손실 파일명 형식은 계속 제거합니다.
+
+APT resolver는 원본 Control 필드를 함께 보존하는 `{ schemaVersion: 1, packages }` 값을 저장합니다. 이전 배열 캐시나 알 수 없는 스키마는 다시 파싱해 같은 키에 저장하고, 현재 스키마는 재사용합니다. 원본 필드는 JSON 객체이므로 persistent 캐시를 거쳐도 의존성 연산자·대안·여러 줄 설명이 유지됩니다.
 
 ### GPGVerifier
 
@@ -598,9 +627,19 @@ class OSRepoPackager {
 |----|-----------------|-----------|
 | YUM | `repodata/repomd.xml`, `primary.xml.gz`, `filelists.xml.gz`, `other.xml.gz` | TypeScript XML 생성 + gzip |
 | APT | `Packages`, `Packages.gz`, `Release` | TypeScript Control 텍스트 생성 + gzip |
-| APK | `APKINDEX.tar.gz` | 인덱스 텍스트를 gzip으로 저장하는 간소화 구현 |
+| APK | `APKINDEX.tar.gz` | `APKINDEX` 항목 하나를 담은 gzip tar 아카이브를 Node `tar`로 생성 |
 
-현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. APK 출력은 파일 이름과 달리 tar 컨테이너 없이 gzip한 인덱스이므로 정식 Alpine 저장소와의 완전한 호환성을 보장하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다.
+현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다.
+
+APT는 수신한 `Packages`의 `aptControlFields`에서 의존성 조건과 대안, `Pre-Depends`, `Provides`, `Conflicts`, `Breaks`, `Replaces`, `Multi-Arch`, `Installed-Size` 등 Control 필드를 보존합니다. 여러 줄 값이 있으면 Debian continuation 문법으로 출력하므로 설명의 들여쓰기와 빈 문단 표기도 유지됩니다. 상위 저장소가 짧은 설명과 `Description-md5`만 제공하면 그 값을 유지하며, 별도 Translation 파일을 받거나 DEB의 긴 설명을 추출하지는 않습니다. `Packages.gz`에는 같은 `Packages` 내용을 압축합니다.
+
+`Package`·`Version`·`Architecture`는 선택한 패키지에서, `Filename`·`Size`·`SHA256`은 실제 복사한 파일에서 생성합니다. 상위 저장소의 경로나 오래된 체크섬을 그대로 전달하지 않으며, 필요한 로컬 파일이 없으면 저장소 생성에 실패합니다. API 호출자가 원본 필드를 제공하지 않으면 공통 패키지 정보로 생성하되 의존성 연산자와 제공·충돌 정보를 반영하고, 설치 크기는 `installedSize`가 있을 때 사용합니다. 공통 연산자 `<`·`>`는 같은 경계 조건을 뜻하는 Debian 표기 `<<`·`>>`로 변환합니다. 원본 필드 보존은 전달 저장소의 정보 보존이며, 앱 resolver가 모든 Debian 의존성 표현을 해결한다는 뜻은 아닙니다.
+
+APK는 `apkIndexFields`의 의존성 조건(`D`), 버전이 있는 provides(`p`), 패키지 식별 체크섬(`C`), 설치 크기(`I`)와 나머지 원본 메타데이터를 보존합니다. `P`·`V`·`A`는 선택한 패키지 정보로, `S`는 실제 복사한 APK 파일 크기로 생성합니다. APK 전체 파일의 SHA256으로 패키지 식별 체크섬을 대체하지 않습니다.
+
+원본 필드가 없는 API 입력은 공통 의존성 연산자·버전과 provides를 사용합니다. 의존성에 연산자와 버전이 모두 있을 때만 조건을 붙이며, 하나라도 없으면 패키지 이름만 기록합니다. SHA1 Base64는 `Q1` 접두사를 붙이고 SHA1 40자리 hex는 Base64로 변환하며, 유효한 원본 `Q1`·`X1` 또는 MD5 표기도 지원합니다. 설치 크기는 유효한 원본 `I` 또는 `installedSize`를 사용하며 명시된 0도 보존합니다. 필요한 로컬 파일, 지원하는 체크섬, 알려진 설치 크기가 없으면 오류로 종료합니다. 알 수 없는 설치 크기를 APK 파일 크기나 0으로 대신하지 않습니다.
+
+APK 인덱스는 별도 임시 디렉터리에서 아카이브를 완성한 뒤 최종 `APKINDEX.tar.gz`로 교체합니다. 아카이브 생성 중 오류가 발생하면 기존 인덱스를 유지하고 오류를 전달하며, 사용자가 미리 둔 평문 `APKINDEX`를 임시 파일로 사용하거나 삭제하지 않습니다. [테스트](testing.md#apk-저장소-인덱스-구조-검증)는 앱 파서의 소비와 별도 Alpine 컨테이너의 `apk update`·정확한 패키지 검색을 구분합니다. 네이티브 검증 범위에 패키지 설치나 저장소 설정 스크립트 실행은 포함되지 않습니다.
 
 ---
 

@@ -3,6 +3,7 @@
  * 의존성 트리 구조 및 설치 순서 계산
  */
 
+import { getDownloadedFileKey } from './package-file-utils';
 import type { OSPackageInfo, PackageDependency } from './types';
 
 /**
@@ -90,7 +91,7 @@ export class OSDependencyTree {
    * 패키지 키 생성
    */
   private getPackageKey(pkg: OSPackageInfo): string {
-    return `${pkg.name}-${pkg.version}-${pkg.architecture}`;
+    return getDownloadedFileKey(pkg);
   }
 
   /**
@@ -173,7 +174,7 @@ export class OSDependencyTree {
     if (existing) {
       // 기존 충돌에 버전 추가
       for (const ver of versions) {
-        if (!existing.versions.find((v) => v.version === ver.version)) {
+        if (!existing.versions.find((v) => getDownloadedFileKey(v) === getDownloadedFileKey(ver))) {
           existing.versions.push(ver);
         }
       }

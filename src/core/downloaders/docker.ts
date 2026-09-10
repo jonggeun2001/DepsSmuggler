@@ -23,7 +23,7 @@ import {
 import logger from '../../utils/logger';
 import { sanitizeDockerTag } from '../shared/filename-utils';
 import { sanitizePath } from '../shared/path-utils';
-import { ARCH_MAP, extractRegistry, parseImageName } from './docker-utils';
+import { ARCH_MAP, buildDockerArchiveFilename, extractRegistry, parseImageName } from './docker-utils';
 import { DockerAuthClient } from './docker-auth-client';
 import { DockerCatalogCache, CatalogCacheStatus } from './docker-catalog-cache';
 import { DockerManifestService } from './docker-manifest-service';
@@ -339,7 +339,7 @@ export class DockerDownloader implements IDownloader {
     await fs.writeJson(path.join(ctx.imageDir, 'manifest.json'), manifestJson);
 
     // tar 파일로 패키징
-    const tarPath = path.join(destPath, `${ctx.safeRepo}-${ctx.safeTag}.tar`);
+    const tarPath = path.join(destPath, buildDockerArchiveFilename(ctx.repository, ctx.tag));
     await this.blobDownloader.createImageTar(ctx.imageDir, tarPath);
 
     // 임시 디렉토리 삭제

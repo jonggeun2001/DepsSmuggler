@@ -2,14 +2,19 @@ import * as path from 'path';
 import chalk from 'chalk';
 import cliProgress from 'cli-progress';
 import * as fs from 'fs-extra';
+import { parseConcurrency } from './concurrency';
 import {
   hasExplicitTargetEnvironment,
   validateDownloadEnvironmentOptions,
   type CliDownloadEnvironmentOptions,
 } from './download-environment';
 import { DownloadManager, OverallProgress } from './download-runner';
-import { getArchivePackager, ArchiveFormat } from '../../core/packager/archive-packager';
-import { getScriptGenerator } from '../../core/packager/script-generator';
+import {
+  assertArchiveFormat,
+  getArchivePackager,
+  ArchiveFormat,
+} from '../../core/packager/archive-packager';
+import { getScriptGenerator, type ScriptOptions } from '../../core/packager/script-generator';
 import { DownloadPackage, resolveAllDependencies } from '../../core/shared';
 import { PackageInfo, PackageType, Architecture } from '../../types';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
@@ -29,6 +34,7 @@ interface DownloadCommandOptions extends CliDownloadEnvironmentOptions {
 
 interface PreparedPackagesResult {
   packages: PackageInfo[];
+  npmRootPackages?: PackageInfo[];
   dependencyResolutionApplied: boolean;
   warning?: string;
 }
@@ -81,6 +87,33 @@ function getPipTargetPlatform(
     arch,
     pythonVersion: options.pythonVersion,
   };
+}
+
+function getArchiveRelativePath(filePath: string, outputPath: string): string {
+  const archiveBasePath = path.resolve(outputPath);
+  const sourcePath = path.resolve(filePath);
+  const relativePath = path.relative(archiveBasePath, sourcePath);
+  const isContained =
+    relativePath.length > 0 &&
+    relativePath !== '..' &&
+    !relativePath.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relativePath);
+
+  return (isContained ? relativePath : path.basename(filePath)).split(path.sep).join('/');
+}
+
+function getCondaPackageFiles(
+  items: Array<{ package: PackageInfo; status: string; filePath?: string; filePaths?: string[] }>,
+  outputPath: string,
+): Array<{ relativePath: string }> {
+  const relativePaths = new Set<string>();
+  for (const item of items) {
+    if (item.status !== 'completed' || item.package.type !== 'conda' || !item.filePath) continue;
+    for (const filePath of item.filePaths ?? [item.filePath]) {
+      relativePaths.add(getArchiveRelativePath(filePath, outputPath));
+    }
+  }
+  return [...relativePaths].map(relativePath => ({ relativePath }));
 }
 
 function toDownloadPackage(pkg: PackageInfo): DownloadPackage {
@@ -160,12 +193,14 @@ async function preparePackagesForDownload(
   const shouldResolveTargetedRoots =
     !options.deps &&
     (CLI_ROOT_ARTIFACT_RESOLUTION_TYPES.has(options.type) ||
+      (options.type === 'maven' && packages.some((pkg) => pkg.version === 'latest')) ||
       (CLI_TARGET_ENVIRONMENT_TYPES.has(options.type) &&
         hasExplicitTargetEnvironment(options)));
 
   if (!options.deps && !shouldResolveTargetedRoots) {
     return {
       packages,
+      npmRootPackages: packages.filter(pkg => pkg.type === 'npm'),
       dependencyResolutionApplied: false,
     };
   }
@@ -193,6 +228,9 @@ async function preparePackagesForDownload(
       ? { maxDepth: 0, resolveRootArtifactsOnly: true }
       : {}),
   });
+  const npmRootPackages = (resolved.dependencyTrees ?? [])
+    .map(tree => tree.root.package)
+    .filter(pkg => pkg.type === 'npm');
 
   if (resolved.failedPackages.length > 0) {
     const failedList = resolved.failedPackages
@@ -222,6 +260,7 @@ async function preparePackagesForDownload(
 
     return {
       packages: resolvedPackages.map(toPackageInfo),
+      npmRootPackages,
       dependencyResolutionApplied: true,
       warning: `의존성 해결에 실패한 직접 패키지 ${skippedRoots.length}개를 건너뜁니다: ${failedList}`,
     };
@@ -235,6 +274,7 @@ async function preparePackagesForDownload(
             (pkg) => requestedPackageIds.has(pkg.id),
           )
     ).map(toPackageInfo),
+    npmRootPackages,
     dependencyResolutionApplied: true,
   };
 }
@@ -252,6 +292,8 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
   console.log(chalk.cyan('다운로드 준비 중...'));
 
   try {
+    assertArchiveFormat(options.format);
+    const concurrency = parseConcurrency(options.concurrency);
     validateDownloadEnvironmentOptions(options);
     const maxDepth = parseMaxDepth(options.maxDepth ?? '5');
 
@@ -261,6 +303,9 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
     if (options.file) {
       // 파일에서 패키지 목록 읽기
       packages = await parsePackageFile(options.file, options.type);
+      if (packages.length === 0) {
+        throw new Error('--file에 다운로드할 패키지가 없습니다.');
+      }
       console.log(chalk.green(`${packages.length}개 패키지를 파일에서 로드했습니다`));
     } else if (options.package) {
       // 단일 패키지
@@ -326,7 +371,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
 
     console.log(chalk.cyan(`\n출력 경로: ${outputPath}`));
     console.log(chalk.cyan(`출력 형식: ${options.format}`));
-    console.log(chalk.cyan(`동시 다운로드: ${options.concurrency}개\n`));
+    console.log(chalk.cyan(`동시 다운로드: ${concurrency}개\n`));
 
     // 다운로드 매니저 설정
     const downloadManager = new DownloadManager();
@@ -369,7 +414,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
     // 다운로드 시작
     const result = await downloadManager.startDownload({
       outputPath,
-      concurrency: parseInt(options.concurrency, 10),
+      concurrency,
       maxRetries: 3,
       pipTargetPlatform,
     });
@@ -385,10 +430,11 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       console.log(chalk.gray(`  소요 시간: ${formatDuration(result.duration)}`));
 
       // 패키징 처리
-      const files = result.items
-        .flatMap((item) => (
-          item.status === 'completed' && item.filePath ? [item.filePath] : []
-        ));
+      const files = [...new Set(result.items.flatMap((item) => (
+        item.status === 'completed' && item.filePath
+          ? item.filePaths ?? [item.filePath]
+          : []
+      )))];
 
       // 압축 파일 생성
       console.log(chalk.cyan('\n압축 파일 생성 중...'));
@@ -408,7 +454,15 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       // 설치 스크립트 생성
       console.log(chalk.cyan('\n설치 스크립트 생성 중...'));
       const scriptGenerator = getScriptGenerator();
-      await scriptGenerator.generateAllScripts(packages, outputPath);
+      const scriptOptions: ScriptOptions = {};
+      if (packages.some(pkg => pkg.type === 'npm')) {
+        scriptOptions.npmPackageFiles = files.map(filePath => ({ filePath, relativePath: path.basename(filePath) }));
+        scriptOptions.npmRootPackages = prepared.npmRootPackages;
+      }
+      if (packages.some(pkg => pkg.type === 'conda')) {
+        scriptOptions.condaPackageFiles = getCondaPackageFiles(result.items, outputPath);
+      }
+      await scriptGenerator.generateAllScripts(packages, outputPath, scriptOptions);
       console.log(chalk.green('✓ 설치 스크립트 생성 완료'));
     } else {
       console.log(chalk.yellow('⚠ 다운로드 완료 (일부 실패)'));
@@ -420,6 +474,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
           console.log(chalk.red(`  - ${item.package.name}@${item.package.version}: ${item.error}`));
         }
       }
+      process.exitCode = 1;
     }
   } catch (error) {
     console.log(chalk.red('✗ 다운로드 실패'));

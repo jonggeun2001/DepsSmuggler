@@ -4,11 +4,13 @@ import path from 'node:path';
 const {
   copyMock,
   downloadMavenPackageMock,
+  downloadFileMock,
   ensureDirMock,
   pathExistsMock,
 } = vi.hoisted(() => ({
   copyMock: vi.fn(),
   downloadMavenPackageMock: vi.fn(),
+  downloadFileMock: vi.fn(),
   ensureDirMock: vi.fn(),
   pathExistsMock: vi.fn(),
 }));
@@ -27,7 +29,7 @@ vi.mock('../../src/core', () => ({
 }));
 
 vi.mock('../../src/core/shared', () => ({
-  downloadFile: vi.fn(),
+  downloadFile: downloadFileMock,
   getPyPIDownloadUrl: vi.fn(),
 }));
 
@@ -70,6 +72,33 @@ describe('createDownloadPackageRouter Maven 처리', () => {
     ensureDirMock.mockResolvedValue(undefined);
     pathExistsMock.mockResolvedValue(true);
     copyMock.mockResolvedValue(undefined);
+    downloadFileMock.mockResolvedValue(undefined);
+  });
+
+  it('uses the canonical defaults repository in the metadata fallback', async () => {
+    const router = createDownloadPackageRouter();
+    const pkg = {
+      id: 'conda-six',
+      type: 'conda' as const,
+      name: 'six',
+      version: '1.16.0',
+      metadata: {
+        repository: 'defaults/six',
+        subdir: 'noarch',
+        filename: 'six-1.16.0-pyhd3eb1b0_1.conda',
+      },
+    };
+
+    const result = await router.downloadPackage(pkg, createContext() as never);
+
+    expect(result.success).toBe(true);
+    expect(downloadFileMock).toHaveBeenCalledWith(
+      'https://repo.anaconda.com/pkgs/main/noarch/six-1.16.0-pyhd3eb1b0_1.conda',
+      expect.any(String),
+      expect.any(Function),
+      expect.any(Object)
+    );
+    expect(downloadFileMock.mock.calls[0][0]).not.toContain('conda.anaconda.org/defaults');
   });
 
   it('같은 GAV는 복사까지 직렬화하고 다른 GAV는 동시에 다운로드한다', async () => {
