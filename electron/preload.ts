@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { UpdateReleaseNotes } from '../src/types/updater';
 
 // 렌더러 프로세스에 노출할 API 정의
 const electronAPI = {
@@ -208,8 +209,11 @@ const electronAPI = {
       downloading: boolean;
       error: string | null;
       progress: { percent: number; bytesPerSecond: number; total: number; transferred: number } | null;
-      updateInfo: { version: string; releaseDate: string; releaseNotes?: string } | null;
+      updateInfo: { version: string; releaseDate: string; releaseNotes?: UpdateReleaseNotes } | null;
     }> => ipcRenderer.invoke('updater:status'),
+    // 릴리즈 노트 링크는 메인 프로세스에서 http(s)만 검증해 시스템 브라우저로 연다.
+    openReleaseNotesLink: (url: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('updater:open-release-notes-link', url),
     // 자동 다운로드 설정
     setAutoDownload: (enabled: boolean): Promise<{ success: boolean }> =>
       ipcRenderer.invoke('updater:set-auto-download', enabled),
