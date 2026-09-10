@@ -461,6 +461,58 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
     );
   });
 
+  it('공유 순환 edge는 생략하면서 양쪽 branch의 자손은 보존한다', async () => {
+    serveModels({
+      'root:1.0': {
+        dependencies: { dependency: [coordinate('A'), coordinate('B')] },
+      },
+      'A:1.0': {
+        dependencies: { dependency: [coordinate('B'), coordinate('C')] },
+      },
+      'B:1.0': {
+        dependencies: { dependency: [coordinate('A'), coordinate('D')] },
+      },
+      'C:1.0': {},
+      'D:1.0': {},
+    });
+
+    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
+    const active = new Set<DependencyNode>();
+    const visited = new Set<DependencyNode>();
+    const pending: Array<{ node: DependencyNode; leaving: boolean }> = [
+      { node: result.root, leaving: false },
+    ];
+    let hasCycle = false;
+
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (current.leaving) {
+        active.delete(current.node);
+        continue;
+      }
+      if (active.has(current.node)) {
+        hasCycle = true;
+        break;
+      }
+      if (visited.has(current.node)) continue;
+      visited.add(current.node);
+      active.add(current.node);
+      pending.push({ node: current.node, leaving: true });
+      for (let index = current.node.dependencies.length - 1; index >= 0; index--) {
+        pending.push({ node: current.node.dependencies[index], leaving: false });
+      }
+    }
+
+    expect(hasCycle).toBe(false);
+    expect(result.flatList.map((pkg) => pkg.name).sort()).toEqual([
+      'org.example:A',
+      'org.example:B',
+      'org.example:C',
+      'org.example:D',
+      'org.example:root',
+    ]);
+  });
+
   it('모든 버전 탐색도 maxDepth를 넘는 자손을 확장하지 않는다', async () => {
     serveModels({
       'root:1.0': {

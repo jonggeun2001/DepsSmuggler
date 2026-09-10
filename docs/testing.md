@@ -121,7 +121,7 @@ Parent POM과 import BOM이 조회 캐시에만 남아 오프라인 출력에서
 |--------|-----------|
 | `src/core/shared/maven-effective-dependencies.test.ts` | 부모 일반 의존성 상속, 자식 필드·제외 목록 병합, 3단계 속성 해석, 공유 부모의 자식 문맥 격리, import BOM 일반 의존성 미확장 |
 | `src/core/shared/maven-bom-processor.test.ts` | 전체 GAV로 모델 POM 중복 제거, 깊은 부모/BOM 체인, Parent/BOM/혼합 순환, 공유 BOM 그래프의 반복 처리 제한, 문맥별 부모 속성 상속과 import 순서, 필수 모델 누락·미해결 좌표, 호출 간 상태 초기화 |
-| `src/core/resolver/maven-model-resolution.test.ts` | 전이 패키지의 BOM 버전 적용과 모델 POM 포함, Parent 일반 dependencies 상속, 형제 간 관리 버전 격리와 루트 관리 우선순위, 같은 부모의 여러 버전, 깊이 경계의 부모 수집, POM 조회 실패, 깊은 그래프 평탄화 및 순환·공유 노드 종료, 같은 GAV의 JAR/POM 구분, 충돌로 제외된 모든 실제 버전의 아티팩트·하위 descriptor closure 보존 |
+| `src/core/resolver/maven-model-resolution.test.ts` | 전이 패키지의 BOM 버전 적용과 모델 POM 포함, Parent 일반 dependencies 상속, 형제 간 관리 버전 격리와 루트 관리 우선순위, 같은 부모의 여러 버전, 깊이 경계의 부모 수집, POM 조회 실패, 깊은 그래프 평탄화 및 순환·공유 노드 종료, 공유 노드 간 교차 순환 간선 차단과 자손 보존, 같은 GAV의 JAR/POM 구분, 충돌로 제외된 모든 실제 버전의 아티팩트·하위 descriptor closure 보존 |
 | `src/core/shared/maven-parent-pom-download.test.ts` | Flink 전이 체인 fixture의 부모/BOM POM 및 compile/runtime JAR·부속 POM·SHA1 실제 파일, 미사용 관리 항목 631개와 optional/test 제외, JAR/POM 동시 보존, 필수 부모 404 및 모델 조회 후 POM 파일 저장 실패 |
 
 다운로드 회귀는 Axios adapter의 HTTP 응답만 XML/JAR/SHA1 fixture로 대체합니다. `resolveAllDependencies()`부터 실제 resolver·POM 파싱·캐시·`MavenDownloader`와 임시 디렉터리 파일 쓰기를 실행합니다. Electron 라우터의 같은 GAV 직렬화와 최상위 복사본은 기존 `electron/services/download-package-router.test.ts`에서 별도로 검증합니다.

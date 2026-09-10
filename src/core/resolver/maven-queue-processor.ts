@@ -168,9 +168,33 @@ export class MavenQueueProcessor {
     const parentKey = parentPath[parentPath.length - 1];
     const parentNode = ctx.nodeMap.get(parentKey);
 
-    if (parentNode && !parentNode.dependencies.includes(node)) {
+    if (
+      parentNode &&
+      !parentNode.dependencies.includes(node) &&
+      !this.wouldCreateCycle(parentNode, node)
+    ) {
       parentNode.dependencies.push(node);
     }
+  }
+
+  /**
+   * Shared nodes can be reached through multiple paths. Check only the new
+   * edge, keeping the node's own dependency traversal intact for closure.
+   */
+  private wouldCreateCycle(parent: DependencyNode, child: DependencyNode): boolean {
+    if (parent === child) return true;
+    if (child.dependencies.length === 0) return false;
+
+    const pending: DependencyNode[] = [child];
+    const visited = new Set<DependencyNode>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (current === parent) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      pending.push(...current.dependencies);
+    }
+    return false;
   }
 
   /**
