@@ -1,7 +1,7 @@
 /**
  * Maven Dependency Resolver
  *
- * BF(Breadth-First) + Skipper 알고리즘 기반 의존성 해결
+ * BF(Breadth-First) 기반 모든 버전 의존성 수집
  * 문서 참고: docs/maven-dependency-resolution.md
  */
 
@@ -24,6 +24,7 @@ import {
   MavenCoordinate,
   coordinateToString,
   coordinateToKey,
+  dependencyManagementKey,
 } from '../shared/maven-types';
 import {
   MavenQueueProcessor,
@@ -38,9 +39,7 @@ import {
 } from '../shared/maven-cache';
 
 // 분리된 유틸리티 모듈
-import {
-  resolveProperty,
-} from '../shared/maven-pom-utils';
+import { resolveProperty } from '../shared/maven-pom-utils';
 import { MavenBomProcessor } from '../shared/maven-bom-processor';
 import { getPackageArtifactKey } from '../shared/dependency-tree-utils';
 import { MAVEN_CONSTANTS } from '../constants/maven';
@@ -140,11 +139,8 @@ export class MavenResolver implements IResolver {
       shouldIncludeDependency: (dep, includeOptional) =>
         this.shouldIncludeDependency(dep, includeOptional),
       createDependencyNode: (coord, scope) => this.createDependencyNode(coord, scope),
-      recordConflict: (coord, winnerVersion) =>
-        this.recordConflict(coord, winnerVersion),
+      recordConflict: (coord, winnerVersion) => this.recordConflict(coord, winnerVersion),
       skipper: {
-        skipResolution: (coord, depth, parentPath) =>
-          this.skipper.skipResolution(coord, depth, parentPath),
         recordResolved: (coord) => this.skipper.recordResolved(coord),
         getResolvedVersion: (groupId, artifactId) =>
           this.skipper.getResolvedVersion(groupId, artifactId),
@@ -211,10 +207,7 @@ export class MavenResolver implements IResolver {
 
       const resolution = await this.resolveBF(rootCoordinate, opts);
       const root = resolution.root;
-      const flatList = this.includeRequiredPoms(
-        this.flattenDependencies(root),
-        resolution.descriptorCoordinates,
-      );
+      const flatList = this.includeRequiredPoms(this.flattenDependencies(root));
 
       // 패키지 크기 조회 (병렬 HEAD 요청)
       const flatListWithSizes = await this.fetchPackageSizes(flatList);
@@ -254,22 +247,24 @@ export class MavenResolver implements IResolver {
     options: MavenResolverOptions
   ): Promise<{
     root: DependencyNode;
-    descriptorCoordinates: Map<string, MavenCoordinate>;
   }> {
     // 컨텍스트 초기화
     const ctx = this.initializeResolutionContext(rootCoordinate, options);
 
     // 루트 POM 처리 및 의존성 큐잉
-    const resolvedProperties = await this.processRootPom(rootCoordinate, ctx);
-    await this.queueProcessor.enqueueRootDependencies(rootCoordinate, resolvedProperties, ctx);
+    const model = await this.processRootPom(rootCoordinate, ctx);
+    await this.queueProcessor.enqueueRootDependencies(
+      rootCoordinate,
+      model.properties,
+      model.dependencies,
+      ctx
+    );
 
     // BFS 큐 처리 (큐 프로세서에 위임)
     await this.queueProcessor.processQueue(ctx);
-    await this.queueProcessor.processDescriptorQueue(ctx);
 
     return {
       root: ctx.rootNode,
-      descriptorCoordinates: ctx.descriptorCoordinates,
     };
   }
 
@@ -283,17 +278,15 @@ export class MavenResolver implements IResolver {
     options: MavenResolverOptions
   ): MavenResolutionContext {
     const rootNode = this.createDependencyNode(rootCoordinate, 'compile');
-    const rootKey = coordinateToString(rootCoordinate);
+    const rootKey = this.queueProcessor.artifactKey(rootCoordinate);
     const nodeMap = new Map<string, DependencyNode>();
     nodeMap.set(rootKey, rootNode);
 
     return {
       nodeMap,
       queue: [],
-      descriptorQueue: [],
-      descriptorContextDepths: new Map(),
-      descriptorCoordinates: new Map(),
-      descriptorWorkCount: 0,
+      contextDepths: new Map(),
+      workCount: 0,
       maxDepth: options.maxDepth ?? MAVEN_CONSTANTS.DEFAULT_MAX_DEPTH,
       includeOptional: options.includeOptionalDependencies ?? false,
       dependencyManagement: this.bomProcessor.getDependencyManagement(),
@@ -310,25 +303,21 @@ export class MavenResolver implements IResolver {
   private async processRootPom(
     rootCoordinate: MavenCoordinate,
     ctx: MavenResolutionContext
-  ): Promise<Record<string, string>> {
+  ): Promise<{ properties: Record<string, string>; dependencies: PomDependency[] }> {
     const rootPom = await this.fetchPomWithCache(rootCoordinate);
 
     // 명시한 artifact type은 유지하고, 미지정인 경우에만 packaging으로 보완한다.
     if (!rootCoordinate.type && rootPom.packaging) {
-      rootCoordinate.type = rootPom.packaging;
       ctx.rootNode.package.metadata = {
         ...ctx.rootNode.package.metadata,
-        ...this.createDependencyNode(rootCoordinate, 'compile').package.metadata,
+        ...this.createDependencyNode({ ...rootCoordinate, type: rootPom.packaging }, 'compile')
+          .package.metadata,
       };
     }
 
-    // Parent POM 처리 및 properties 체인 구축
-    const resolvedProperties = await this.bomProcessor.processParentPom(rootPom, rootCoordinate);
-
-    // dependencyManagement 처리
-    await this.bomProcessor.processDependencyManagement(rootPom, resolvedProperties);
-
-    return resolvedProperties;
+    const model = await this.bomProcessor.processModel(rootPom, rootCoordinate, new Map());
+    ctx.dependencyManagement = model.dependencyManagement;
+    return model;
   }
 
   // 큐 처리 로직은 MavenQueueProcessor로 분리됨 (maven-queue-processor.ts)
@@ -386,27 +375,18 @@ export class MavenResolver implements IResolver {
   /**
    * 충돌 기록
    */
-  private recordConflict(
-    coordinate: MavenCoordinate,
-    winnerVersion: string
-  ): void {
+  private recordConflict(coordinate: MavenCoordinate, winnerVersion: string): void {
     const packageName = coordinateToKey(coordinate);
 
-    // 이미 기록된 충돌인지 확인
-    const existing = this.conflicts.find(
-      (c) => c.packageName === packageName && c.versions.includes(coordinate.version)
-    );
-
+    const existing = this.conflicts.find((c) => c.packageName === packageName);
     if (existing) {
-      if (!existing.versions.includes(coordinate.version)) {
+      if (!existing.versions.includes(coordinate.version))
         existing.versions.push(coordinate.version);
-      }
     } else {
       this.conflicts.push({
         type: 'version',
         packageName,
-        versions: [coordinate.version, winnerVersion].filter((v) => v),
-        resolvedVersion: winnerVersion,
+        versions: [winnerVersion, coordinate.version].filter(Boolean),
       });
     }
   }
@@ -424,7 +404,7 @@ export class MavenResolver implements IResolver {
         artifactId: coordinate.artifactId,
         version: coordinate.version,
       },
-      () => fetchPomFromCache(coordinate, this.getPomCacheOptions()),
+      () => fetchPomFromCache(coordinate, this.getPomCacheOptions())
     );
   }
 
@@ -436,7 +416,10 @@ export class MavenResolver implements IResolver {
 
     for (const coordinate of coordinates) {
       void limit(() => this.fetchPomWithCache(coordinate)).catch((error) => {
-        logger.debug('Maven POM 프리페치 실패', { coordinate: coordinateToString(coordinate), error });
+        logger.debug('Maven POM 프리페치 실패', {
+          coordinate: coordinateToString(coordinate),
+          error,
+        });
       });
     }
   }
@@ -450,14 +433,14 @@ export class MavenResolver implements IResolver {
       'latest-version',
       { repoUrl: effectiveRepoUrl, groupId, artifactId },
       () => this.getLatestVersionUncached(groupId, artifactId, effectiveRepoUrl),
-      Boolean,
+      Boolean
     );
   }
 
   private async getLatestVersionUncached(
     groupId: string,
     artifactId: string,
-    effectiveRepoUrl: string,
+    effectiveRepoUrl: string
   ): Promise<string> {
     const groupPath = groupId.replace(/\./g, '/');
     const url = `${effectiveRepoUrl}/${groupPath}/${artifactId}/maven-metadata.xml`;
@@ -494,7 +477,7 @@ export class MavenResolver implements IResolver {
     operation: 'pom' | 'latest-version',
     context: Record<string, string>,
     producer: () => Promise<T>,
-    isCacheable?: (value: T) => boolean,
+    isCacheable?: (value: T) => boolean
   ): Promise<T> {
     const session = getAttachedResolutionSession(this);
     if (!session) {
@@ -506,7 +489,7 @@ export class MavenResolver implements IResolver {
       operation,
       context,
       producer,
-      isCacheable ? { isCacheable } : undefined,
+      isCacheable ? { isCacheable } : undefined
     );
   }
 
@@ -535,35 +518,13 @@ export class MavenResolver implements IResolver {
   }
 
   /** 해석에 사용한 모델 POM도 오프라인 저장소에 반입한다. 관리 라이브러리는 확장하지 않는다. */
-  private includeRequiredPoms(
-    packages: PackageInfo[],
-    descriptorCoordinates?: Map<string, MavenCoordinate>,
-  ): PackageInfo[] {
-    const artifacts = new Map(packages.map(pkg => [getPackageArtifactKey(pkg), pkg]));
-    const selectedGavs = new Set(
-      packages
-        .filter(pkg => pkg.type === 'maven')
-        .map(pkg => {
-          const metadata = pkg.metadata as Record<string, unknown> | undefined;
-          const groupId = typeof metadata?.groupId === 'string'
-            ? metadata.groupId
-            : pkg.name.split(':')[0];
-          const artifactId = typeof metadata?.artifactId === 'string'
-            ? metadata.artifactId
-            : pkg.name.split(':')[1];
-          return `${groupId}:${artifactId}:${pkg.version}`;
-        }),
-    );
-
-    for (const coordinate of descriptorCoordinates?.values() || []) {
-      const gav = `${coordinate.groupId}:${coordinate.artifactId}:${coordinate.version}`;
-      if (selectedGavs.has(gav)) continue;
-      const pomPackage = this.createDependencyNode({ ...coordinate, type: 'pom' }, 'compile').package;
-      artifacts.set(getPackageArtifactKey(pomPackage), pomPackage);
-    }
-
+  private includeRequiredPoms(packages: PackageInfo[]): PackageInfo[] {
+    const artifacts = new Map(packages.map((pkg) => [getPackageArtifactKey(pkg), pkg]));
     for (const coordinate of this.bomProcessor.getRequiredPoms()) {
-      const pomPackage = this.createDependencyNode({ ...coordinate, type: 'pom' }, 'compile').package;
+      const pomPackage = this.createDependencyNode(
+        { ...coordinate, type: 'pom' },
+        'compile'
+      ).package;
       const key = getPackageArtifactKey(pomPackage);
       if (!artifacts.has(key)) artifacts.set(key, pomPackage);
     }
@@ -593,7 +554,9 @@ export class MavenResolver implements IResolver {
             const fileName = `${artifactId}-${version}.${extension}`;
             const url = `${this.repoUrl}/${groupPath}/${artifactId}/${version}/${fileName}`;
 
-            const response = await this.axiosInstance.head(url, { timeout: MAVEN_CONSTANTS.HEAD_REQUEST_TIMEOUT_MS });
+            const response = await this.axiosInstance.head(url, {
+              timeout: MAVEN_CONSTANTS.HEAD_REQUEST_TIMEOUT_MS,
+            });
             const size = parseInt(response.headers['content-length'] || '0', 10);
 
             return {
@@ -618,10 +581,7 @@ export class MavenResolver implements IResolver {
     );
 
     const elapsed = Date.now() - startTime;
-    const totalSize = results.reduce(
-      (sum, pkg) => sum + ((pkg.metadata?.size as number) || 0),
-      0
-    );
+    const totalSize = results.reduce((sum, pkg) => sum + ((pkg.metadata?.size as number) || 0), 0);
     logger.debug('Maven 패키지 크기 조회 완료', {
       count: packages.length,
       totalSize,
@@ -673,7 +633,7 @@ export class MavenResolver implements IResolver {
 
           let version = resolveProperty(dep.version || '', pom.properties);
           if (!version) {
-            version = dependencyManagement.get(`${dep.groupId}:${dep.artifactId}`) || 'LATEST';
+            version = dependencyManagement.get(dependencyManagementKey(dep)) || 'LATEST';
           }
 
           packages.push({
@@ -737,9 +697,7 @@ export function getMavenResolver(): MavenResolver {
 }
 
 /** @internal */
-export function createRequestMavenResolver(
-  session: ResolutionSession,
-): MavenResolver {
+export function createRequestMavenResolver(session: ResolutionSession): MavenResolver {
   const resolver = new MavenResolver();
   resolver.setCacheOptions(getMavenResolver().getCacheOptions());
   attachResolutionSession(resolver, session);

@@ -8,20 +8,18 @@ import {
 import { MavenResolver } from './maven-resolver';
 import { DependencyNode, PackageInfo } from '../../types';
 import { fetchPom } from '../shared/maven-cache';
-import {
-  DependencyProcessingContext,
-  MavenCoordinate,
-  PomProject,
-} from '../shared/maven-types';
+import { DependencyProcessingContext, MavenCoordinate, PomProject } from '../shared/maven-types';
 
 vi.mock('../shared/maven-cache', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../shared/maven-cache')>(),
+  ...(await importOriginal<typeof import('../shared/maven-cache')>()),
   fetchPom: vi.fn(),
 }));
 
 const fetchPomMock = vi.mocked(fetchPom);
 const coordinate = (artifactId: string, version = '1.0'): MavenCoordinate => ({
-  groupId: 'org.example', artifactId, version,
+  groupId: 'org.example',
+  artifactId,
+  version,
 });
 
 function serveModels(models: Record<string, PomProject>): void {
@@ -33,9 +31,11 @@ function serveModels(models: Record<string, PomProject>): void {
 }
 
 function flatten(resolver: MavenResolver, root: DependencyNode): PackageInfo[] {
-  return (resolver as unknown as {
-    flattenDependencies(node: DependencyNode): PackageInfo[];
-  }).flattenDependencies(root);
+  return (
+    resolver as unknown as {
+      flattenDependencies(node: DependencyNode): PackageInfo[];
+    }
+  ).flattenDependencies(root);
 }
 
 function node(name: string, type = 'jar'): DependencyNode {
@@ -64,9 +64,15 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
       'root:1.0': { dependencies: { dependency: coordinate('child') } },
       'child:1.0': {
         parent: coordinate('parent'),
-        dependencyManagement: { dependencies: { dependency: {
-          ...coordinate('bom'), type: 'pom', scope: 'import',
-        } } },
+        dependencyManagement: {
+          dependencies: {
+            dependency: {
+              ...coordinate('bom'),
+              type: 'pom',
+              scope: 'import',
+            },
+          },
+        },
         dependencies: { dependency: { groupId: 'org.example', artifactId: 'library' } },
       },
       'parent:1.0': { packaging: 'pom' },
@@ -80,17 +86,27 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
     });
 
     const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
-    expect(result.flatList.map(p => `${p.name}@${p.version}`).sort()).toEqual([
-      'org.example:bom-parent@1.0', 'org.example:bom@1.0', 'org.example:child@1.0',
-      'org.example:library@2.0', 'org.example:parent@1.0', 'org.example:root@1.0',
+    expect(result.flatList.map((p) => `${p.name}@${p.version}`).sort()).toEqual([
+      'org.example:bom-parent@1.0',
+      'org.example:bom@1.0',
+      'org.example:child@1.0',
+      'org.example:library@2.0',
+      'org.example:parent@1.0',
+      'org.example:root@1.0',
     ]);
-    expect(result.flatList.filter(p => p.metadata?.type === 'pom').map(p => p.metadata?.filename).sort())
-      .toEqual(['bom-1.0.pom', 'bom-parent-1.0.pom', 'parent-1.0.pom']);
+    expect(
+      result.flatList
+        .filter((p) => p.metadata?.type === 'pom')
+        .map((p) => p.metadata?.filename)
+        .sort()
+    ).toEqual(['bom-1.0.pom', 'bom-parent-1.0.pom', 'parent-1.0.pom']);
   });
 
   it('형제 패키지의 미사용 관리 버전이 다른 패키지의 부모 관리 버전을 오염시키지 않는다', async () => {
     serveModels({
-      'root:1.0': { dependencies: { dependency: [coordinate('unused-manager'), coordinate('consumer')] } },
+      'root:1.0': {
+        dependencies: { dependency: [coordinate('unused-manager'), coordinate('consumer')] },
+      },
       'unused-manager:1.0': {
         dependencyManagement: { dependencies: { dependency: coordinate('library', '1.0') } },
       },
@@ -107,15 +123,20 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
     });
 
     const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
-    expect(result.flatList.filter(pkg => pkg.name === 'org.example:library').map(pkg => pkg.version))
-      .toEqual(['2.0']);
-    expect(result.flatList.find(pkg => pkg.name === 'org.example:consumer-parent')?.metadata?.type)
-      .toBe('pom');
-    expect(fetchPomMock.mock.calls.some(([coord]) => coord.artifactId === 'library' && coord.version === '1.0'))
-      .toBe(false);
+    expect(
+      result.flatList.filter((pkg) => pkg.name === 'org.example:library').map((pkg) => pkg.version)
+    ).toEqual(['2.0']);
+    expect(
+      result.flatList.find((pkg) => pkg.name === 'org.example:consumer-parent')?.metadata?.type
+    ).toBe('pom');
+    expect(
+      fetchPomMock.mock.calls.some(
+        ([coord]) => coord.artifactId === 'library' && coord.version === '1.0'
+      )
+    ).toBe(false);
   });
 
-  it('루트의 관리 버전이 자식의 부모 및 import BOM 관리 버전보다 우선한다', async () => {
+  it('자식 모델 버전과 해당 의존성에 적용되는 루트 관리 버전을 함께 반입한다', async () => {
     serveModels({
       'root:1.0': {
         dependencyManagement: { dependencies: { dependency: coordinate('library', '3.0') } },
@@ -123,9 +144,15 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
       },
       'consumer:1.0': {
         parent: coordinate('consumer-parent'),
-        dependencyManagement: { dependencies: { dependency: {
-          ...coordinate('consumer-bom'), type: 'pom', scope: 'import',
-        } } },
+        dependencyManagement: {
+          dependencies: {
+            dependency: {
+              ...coordinate('consumer-bom'),
+              type: 'pom',
+              scope: 'import',
+            },
+          },
+        },
         dependencies: { dependency: { groupId: 'org.example', artifactId: 'library' } },
       },
       'consumer-parent:1.0': {
@@ -142,12 +169,70 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
     });
 
     const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
-    expect(result.flatList.filter(pkg => pkg.name === 'org.example:library').map(pkg => pkg.version))
-      .toEqual(['3.0']);
-    expect(result.flatList.filter(pkg => pkg.metadata?.type === 'pom').map(pkg => pkg.name).sort())
-      .toEqual(['org.example:consumer-bom', 'org.example:consumer-parent']);
-    expect(fetchPomMock.mock.calls.filter(([coord]) => coord.artifactId === 'library')
-      .every(([coord]) => coord.version === '3.0')).toBe(true);
+    expect(
+      result.flatList.filter((pkg) => pkg.name === 'org.example:library').map((pkg) => pkg.version)
+    ).toEqual(['2.0', '3.0']);
+    expect(
+      result.flatList
+        .filter((pkg) => pkg.metadata?.type === 'pom')
+        .map((pkg) => pkg.name)
+        .sort()
+    ).toEqual(['org.example:consumer-bom', 'org.example:consumer-parent']);
+    expect(
+      fetchPomMock.mock.calls
+        .filter(([coord]) => coord.artifactId === 'library')
+        .some(([coord]) => coord.version === '4.0')
+    ).toBe(false);
+  });
+
+  it('자식에 버전이 없고 루트에만 관리 버전이 있으면 해당 버전도 반입한다', async () => {
+    serveModels({
+      'root:1.0': {
+        dependencyManagement: { dependencies: { dependency: coordinate('library', '3.0') } },
+        dependencies: { dependency: coordinate('consumer') },
+      },
+      'consumer:1.0': {
+        dependencies: { dependency: { groupId: 'org.example', artifactId: 'library' } },
+      },
+      'library:3.0': {},
+    });
+    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
+    expect(
+      result.flatList.some((p) => p.name === 'org.example:library' && p.version === '3.0')
+    ).toBe(true);
+  });
+
+  it('일반 JAR 관리 버전을 다른 type/classifier에 적용하지 않는다', async () => {
+    serveModels({
+      'root:1.0': {
+        dependencyManagement: { dependencies: { dependency: coordinate('library', '2.0') } },
+        dependencies: { dependency: coordinate('consumer') },
+      },
+      'consumer:1.0': { dependencies: { dependency: [
+        { ...coordinate('library'), classifier: 'linux' },
+        { ...coordinate('library'), type: 'pom' },
+      ] } },
+      'library:1.0': {},
+    });
+    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
+    expect(result.flatList.filter(p => p.name === 'org.example:library').map(p => p.metadata?.filename).sort())
+      .toEqual(['library-1.0-linux.jar', 'library-1.0.pom']);
+    expect(fetchPomMock.mock.calls.some(([coord]) => coord.artifactId === 'library' && coord.version === '2.0')).toBe(false);
+  });
+
+  it('일치하는 classifier 관리 버전과 선언 버전은 함께 보존한다', async () => {
+    serveModels({
+      'root:1.0': {
+        dependencyManagement: { dependencies: { dependency: { ...coordinate('library', '2.0'), classifier: 'linux' } } },
+        dependencies: { dependency: coordinate('consumer') },
+      },
+      'consumer:1.0': { dependencies: { dependency: { ...coordinate('library'), classifier: 'linux' } } },
+      'library:1.0': {},
+      'library:2.0': {},
+    });
+    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
+    expect(result.flatList.filter(p => p.name === 'org.example:library').map(p => p.metadata?.filename).sort())
+      .toEqual(['library-1.0-linux.jar', 'library-2.0-linux.jar']);
   });
 
   it('같은 부모의 여러 버전을 모두 보존하고 다음 요청에는 이전 모델을 남기지 않는다', async () => {
@@ -161,16 +246,21 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
     });
     const resolver = new MavenResolver();
     const result = await resolver.resolveDependencies('org.example:root', '1.0');
-    expect(result.flatList.filter(p => p.name === 'org.example:parent').map(p => p.version).sort())
-      .toEqual(['1.0', '2.0']);
+    expect(
+      result.flatList
+        .filter((p) => p.name === 'org.example:parent')
+        .map((p) => p.version)
+        .sort()
+    ).toEqual(['1.0', '2.0']);
     const next = await resolver.resolveDependencies('org.example:standalone', '1.0');
-    expect(next.flatList.map(p => p.name)).toEqual(['org.example:standalone']);
+    expect(next.flatList.map((p) => p.name)).toEqual(['org.example:standalone']);
   });
 
   it('전이 POM 조회 실패를 의존성 없는 성공으로 처리하지 않는다', async () => {
     serveModels({ 'root:1.0': { dependencies: { dependency: coordinate('missing') } } });
-    await expect(new MavenResolver().resolveDependencies('org.example:root', '1.0'))
-      .rejects.toThrow(/missing/);
+    await expect(
+      new MavenResolver().resolveDependencies('org.example:root', '1.0')
+    ).rejects.toThrow(/missing/);
   });
 
   it('깊이 제한의 마지막 포함 아티팩트도 부모 POM을 가져온다', async () => {
@@ -183,35 +273,54 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
       'parent:1.0': { packaging: 'pom' },
       'grandchild:1.0': {},
     });
-    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0', { maxDepth: 1 });
-    expect(result.flatList.map(p => p.name).sort())
-      .toEqual(['org.example:child', 'org.example:parent', 'org.example:root']);
+    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0', {
+      maxDepth: 1,
+    });
+    expect(result.flatList.map((p) => p.name).sort()).toEqual([
+      'org.example:child',
+      'org.example:parent',
+      'org.example:root',
+    ]);
   });
 
-  it('충돌로 생략된 버전의 descriptor와 그 하위 descriptor를 보존한다', async () => {
+  it('충돌하는 모든 버전과 하위 의존성의 JAR 및 필수 모델 POM을 보존한다', async () => {
     serveModels({
       'root:1.0': {
         dependencies: { dependency: [coordinate('winner'), coordinate('loser')] },
       },
       'winner:1.0': {
-        dependencies: { dependency: {
-          groupId: 'org.example', artifactId: 'shared', version: '2.0',
-        } },
+        dependencies: {
+          dependency: {
+            groupId: 'org.example',
+            artifactId: 'shared',
+            version: '2.0',
+          },
+        },
       },
       'loser:1.0': {
         dependencies: { dependency: coordinate('loser-parent') },
       },
       'loser-parent:1.0': {
-        dependencies: { dependency: {
-          groupId: 'org.example', artifactId: 'shared', version: '1.0',
-        } },
+        dependencies: {
+          dependency: {
+            groupId: 'org.example',
+            artifactId: 'shared',
+            version: '1.0',
+          },
+        },
       },
       'shared:2.0': {},
       'shared:1.0': {
         parent: coordinate('descriptor-parent'),
-        dependencyManagement: { dependencies: { dependency: {
-          ...coordinate('descriptor-bom'), type: 'pom', scope: 'import',
-        } } },
+        dependencyManagement: {
+          dependencies: {
+            dependency: {
+              ...coordinate('descriptor-bom'),
+              type: 'pom',
+              scope: 'import',
+            },
+          },
+        },
         dependencies: { dependency: coordinate('loser-leaf') },
       },
       'descriptor-parent:1.0': { packaging: 'pom' },
@@ -224,29 +333,32 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
 
     const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
     const sharedVersions = result.flatList
-      .filter(pkg => pkg.name === 'org.example:shared')
-      .map(pkg => ({ version: pkg.version, type: pkg.metadata?.type }));
+      .filter((pkg) => pkg.name === 'org.example:shared')
+      .map((pkg) => ({ version: pkg.version, type: pkg.metadata?.type }));
 
     expect(sharedVersions).toEqual([
       { version: '2.0', type: undefined },
-      { version: '1.0', type: 'pom' },
+      { version: '1.0', type: undefined },
     ]);
-    expect(result.flatList).toContainEqual(expect.objectContaining({
-      name: 'org.example:loser-leaf',
-      version: '1.0',
-      metadata: expect.objectContaining({ type: 'pom' }),
-    }));
-    expect(result.flatList.filter(pkg => pkg.metadata?.type === 'pom').map(pkg => pkg.name).sort())
-      .toEqual([
-        'org.example:descriptor-bom',
-        'org.example:descriptor-parent',
-        'org.example:loser-leaf',
-        'org.example:shared',
-      ]);
-    expect(result.conflicts).toContainEqual(expect.objectContaining({
-      packageName: 'org.example:shared',
-      versions: expect.arrayContaining(['1.0', '2.0']),
-    }));
+    expect(result.flatList).toContainEqual(
+      expect.objectContaining({
+        name: 'org.example:loser-leaf',
+        version: '1.0',
+        metadata: expect.objectContaining({ filename: expect.stringMatching(/\.jar$/) }),
+      })
+    );
+    expect(
+      result.flatList
+        .filter((pkg) => pkg.metadata?.type === 'pom')
+        .map((pkg) => pkg.name)
+        .sort()
+    ).toEqual(['org.example:descriptor-bom', 'org.example:descriptor-parent']);
+    expect(result.conflicts).toContainEqual(
+      expect.objectContaining({
+        packageName: 'org.example:shared',
+        versions: expect.arrayContaining(['1.0', '2.0']),
+      })
+    );
   });
 
   it('충돌로 생략된 descriptor를 조회할 수 없으면 해결에 실패한다', async () => {
@@ -255,44 +367,65 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
         dependencies: { dependency: [coordinate('winner'), coordinate('loser')] },
       },
       'winner:1.0': {
-        dependencies: { dependency: {
-          groupId: 'org.example', artifactId: 'shared', version: '2.0',
-        } },
+        dependencies: {
+          dependency: {
+            groupId: 'org.example',
+            artifactId: 'shared',
+            version: '2.0',
+          },
+        },
       },
       'loser:1.0': {
-        dependencies: { dependency: {
-          groupId: 'org.example', artifactId: 'shared', version: '1.0',
-        } },
+        dependencies: {
+          dependency: {
+            groupId: 'org.example',
+            artifactId: 'shared',
+            version: '1.0',
+          },
+        },
       },
       'shared:2.0': {},
     });
 
-    await expect(new MavenResolver().resolveDependencies('org.example:root', '1.0'))
-      .rejects.toThrow('shared:1.0');
+    await expect(
+      new MavenResolver().resolveDependencies('org.example:root', '1.0')
+    ).rejects.toThrow('shared:1.0');
   });
 
-  it('같은 생략 POM을 제한된 경로와 전체 경로에서 만나면 descriptor 자손의 합집합을 보존한다', async () => {
+  it('같은 버전을 제한된 경로와 전체 경로에서 만나면 자손 JAR의 합집합을 보존한다', async () => {
     serveModels({
       'root:1.0': {
-        dependencies: { dependency: [
-          coordinate('winner'), coordinate('restricted'), coordinate('open'),
-        ] },
+        dependencies: {
+          dependency: [coordinate('winner'), coordinate('restricted'), coordinate('open')],
+        },
       },
       'winner:1.0': {
-        dependencies: { dependency: {
-          groupId: 'org.example', artifactId: 'shared', version: '2.0',
-        } },
+        dependencies: {
+          dependency: {
+            groupId: 'org.example',
+            artifactId: 'shared',
+            version: '2.0',
+          },
+        },
       },
       'restricted:1.0': {
-        dependencies: { dependency: {
-          groupId: 'org.example', artifactId: 'shared', version: '1.0',
-          exclusions: { exclusion: { groupId: 'org.example', artifactId: 'leaf' } },
-        } },
+        dependencies: {
+          dependency: {
+            groupId: 'org.example',
+            artifactId: 'shared',
+            version: '1.0',
+            exclusions: { exclusion: { groupId: 'org.example', artifactId: 'leaf' } },
+          },
+        },
       },
       'open:1.0': {
-        dependencies: { dependency: {
-          groupId: 'org.example', artifactId: 'shared', version: '1.0',
-        } },
+        dependencies: {
+          dependency: {
+            groupId: 'org.example',
+            artifactId: 'shared',
+            version: '1.0',
+          },
+        },
       },
       'shared:2.0': {},
       'shared:1.0': {
@@ -300,41 +433,108 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
       },
       'leaf:1.0': {},
       'cycle:1.0': {
-        dependencies: { dependency: {
-          groupId: 'org.example', artifactId: 'shared', version: '1.0',
-        } },
+        dependencies: {
+          dependency: {
+            groupId: 'org.example',
+            artifactId: 'shared',
+            version: '1.0',
+          },
+        },
       },
     });
 
     const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
-    expect(result.flatList).toContainEqual(expect.objectContaining({
-      name: 'org.example:leaf',
-      version: '1.0',
-      metadata: expect.objectContaining({ type: 'pom' }),
-    }));
-    expect(result.flatList.filter(pkg => pkg.name === 'org.example:shared'))
-      .toHaveLength(2);
-    expect(result.flatList).toContainEqual(expect.objectContaining({
-      name: 'org.example:cycle',
-      version: '1.0',
-      metadata: expect.objectContaining({ type: 'pom' }),
-    }));
+    expect(result.flatList).toContainEqual(
+      expect.objectContaining({
+        name: 'org.example:leaf',
+        version: '1.0',
+        metadata: expect.objectContaining({ filename: expect.stringMatching(/\.jar$/) }),
+      })
+    );
+    expect(result.flatList.filter((pkg) => pkg.name === 'org.example:shared')).toHaveLength(2);
+    expect(result.flatList).toContainEqual(
+      expect.objectContaining({
+        name: 'org.example:cycle',
+        version: '1.0',
+        metadata: expect.objectContaining({ filename: expect.stringMatching(/\.jar$/) }),
+      })
+    );
   });
 
-  it('descriptor 큐도 maxDepth를 넘는 자손을 확장하지 않는다', async () => {
+  it('공유 순환 edge는 생략하면서 양쪽 branch의 자손은 보존한다', async () => {
+    serveModels({
+      'root:1.0': {
+        dependencies: { dependency: [coordinate('A'), coordinate('B')] },
+      },
+      'A:1.0': {
+        dependencies: { dependency: [coordinate('B'), coordinate('C')] },
+      },
+      'B:1.0': {
+        dependencies: { dependency: [coordinate('A'), coordinate('D')] },
+      },
+      'C:1.0': {},
+      'D:1.0': {},
+    });
+
+    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
+    const active = new Set<DependencyNode>();
+    const visited = new Set<DependencyNode>();
+    const pending: Array<{ node: DependencyNode; leaving: boolean }> = [
+      { node: result.root, leaving: false },
+    ];
+    let hasCycle = false;
+
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (current.leaving) {
+        active.delete(current.node);
+        continue;
+      }
+      if (active.has(current.node)) {
+        hasCycle = true;
+        break;
+      }
+      if (visited.has(current.node)) continue;
+      visited.add(current.node);
+      active.add(current.node);
+      pending.push({ node: current.node, leaving: true });
+      for (let index = current.node.dependencies.length - 1; index >= 0; index--) {
+        pending.push({ node: current.node.dependencies[index], leaving: false });
+      }
+    }
+
+    expect(hasCycle).toBe(false);
+    expect(result.flatList.map((pkg) => pkg.name).sort()).toEqual([
+      'org.example:A',
+      'org.example:B',
+      'org.example:C',
+      'org.example:D',
+      'org.example:root',
+    ]);
+  });
+
+  it('모든 버전 탐색도 maxDepth를 넘는 자손을 확장하지 않는다', async () => {
     serveModels({
       'root:1.0': {
         dependencies: { dependency: [coordinate('winner'), coordinate('loser')] },
       },
       'winner:1.0': {
-        dependencies: { dependency: {
-          groupId: 'org.example', artifactId: 'shared', version: '2.0',
-        } },
+        dependencies: {
+          dependency: {
+            groupId: 'org.example',
+            artifactId: 'shared',
+            version: '2.0',
+          },
+        },
       },
       'loser:1.0': {
-        dependencies: { dependency: {
-          groupId: 'org.example', artifactId: 'shared', version: '1.0',
-        } },
+        dependencies: {
+          dependency: {
+            groupId: 'org.example',
+            artifactId: 'shared',
+            version: '1.0',
+          },
+        },
       },
       'shared:2.0': {},
       'shared:1.0': { dependencies: { dependency: coordinate('leaf') } },
@@ -344,14 +544,56 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
     const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0', {
       maxDepth: 2,
     });
-    expect(result.flatList).toContainEqual(expect.objectContaining({
-      name: 'org.example:shared', version: '1.0',
-      metadata: expect.objectContaining({ type: 'pom' }),
-    }));
-    expect(result.flatList.some(pkg => pkg.name === 'org.example:leaf')).toBe(false);
+    expect(result.flatList).toContainEqual(
+      expect.objectContaining({
+        name: 'org.example:shared',
+        version: '1.0',
+        metadata: expect.objectContaining({ filename: expect.stringMatching(/\.jar$/) }),
+      })
+    );
+    expect(result.flatList.some((pkg) => pkg.name === 'org.example:leaf')).toBe(false);
   });
 
-  it('descriptor 수집 상태를 다음 해석 요청으로 누출하지 않는다', async () => {
+  it('엣지의 wildcard exclusion은 선택한 JAR를 보존하고 그 자손만 제외한다', async () => {
+    serveModels({
+      'root:1.0': {
+        dependencies: {
+          dependency: {
+            ...coordinate('library'),
+            exclusions: { exclusion: { groupId: '*', artifactId: '*' } },
+          },
+        },
+      },
+      'library:1.0': { dependencies: { dependency: coordinate('leaf') } },
+      'leaf:1.0': {},
+    });
+    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
+    expect(result.flatList.map((p) => p.name)).toEqual(['org.example:root', 'org.example:library']);
+  });
+
+  it('같은 GAV의 일반 JAR, classifier JAR, 명시적 POM을 트리와 목록에 각각 보존한다', async () => {
+    serveModels({
+      'root:1.0': {
+        dependencies: {
+          dependency: [
+            coordinate('shared'),
+            { ...coordinate('shared'), classifier: 'tests' },
+            { ...coordinate('shared'), type: 'pom' },
+          ],
+        },
+      },
+      'shared:1.0': {},
+    });
+    const result = await new MavenResolver().resolveDependencies('org.example:root', '1.0');
+    const filenames = result.flatList
+      .filter((p) => p.name === 'org.example:shared')
+      .map((p) => p.metadata?.filename)
+      .sort();
+    expect(filenames).toEqual(['shared-1.0-tests.jar', 'shared-1.0.jar', 'shared-1.0.pom']);
+    expect(result.root.dependencies).toHaveLength(3);
+  });
+
+  it('아티팩트 수집 상태를 다음 해석 요청으로 누출하지 않는다', async () => {
     serveModels({
       'root:1.0': {
         dependencies: { dependency: [coordinate('winner'), coordinate('loser')] },
@@ -366,35 +608,37 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
 
     const resolver = new MavenResolver();
     const first = await resolver.resolveDependencies('org.example:root', '1.0');
-    expect(first.flatList).toContainEqual(expect.objectContaining({
-      name: 'org.example:loser-leaf',
-      metadata: expect.objectContaining({ type: 'pom' }),
-    }));
+    expect(first.flatList).toContainEqual(
+      expect.objectContaining({
+        name: 'org.example:loser-leaf',
+        metadata: expect.objectContaining({ filename: expect.stringMatching(/\.jar$/) }),
+      })
+    );
 
     const second = await resolver.resolveDependencies('org.example:standalone', '1.0');
-    expect(second.flatList.map(pkg => pkg.name)).toEqual(['org.example:standalone']);
+    expect(second.flatList.map((pkg) => pkg.name)).toEqual(['org.example:standalone']);
   });
 
-  it('descriptor 컨텍스트 작업 수를 제한해 과도한 loser 확장을 실패시킨다', async () => {
+  it('의존성 컨텍스트 작업 수를 제한해 과도한 확장을 실패시킨다', async () => {
     const versions = Array.from({ length: 10002 }, (_, index) => `${index + 1}.0`);
     serveModels({
       'root:1.0': {
         dependencies: {
-          dependency: versions.map(version => coordinate('shared', version)),
+          dependency: versions.map((version) => coordinate(`library-${version}`)),
         },
       },
-      ...Object.fromEntries(versions.map(version => [`shared:${version}`, {}])),
+      ...Object.fromEntries(versions.map((version) => [`library-${version}:1.0`, {}])),
     });
 
-    await expect(new MavenResolver().resolveDependencies('org.example:root', '1.0'))
-      .rejects.toThrow('descriptor 의존성 해결 작업 수가 제한을 초과했습니다');
+    await expect(
+      new MavenResolver().resolveDependencies('org.example:root', '1.0')
+    ).rejects.toThrow('의존성 해결 작업 수가 제한을 초과했습니다');
   });
 
-  it('더 깊은 descriptor context가 먼저 와도 얕은 재방문에서 남은 자손을 확장한다', async () => {
+  it('더 깊은 context가 먼저 와도 얕은 재방문에서 남은 자손을 확장한다', async () => {
     const deps: QueueProcessorDependencies = {
-      fetchPomWithCache: async (coord) => coord.artifactId === 'shared'
-        ? { dependencies: { dependency: coordinate('leaf') } }
-        : {},
+      fetchPomWithCache: async (coord) =>
+        coord.artifactId === 'shared' ? { dependencies: { dependency: coordinate('leaf') } } : {},
       prefetchPomsParallel: () => undefined,
       shouldIncludeDependency: () => true,
       createDependencyNode: (coord, scope) => ({
@@ -409,15 +653,15 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
       }),
       recordConflict: vi.fn(),
       skipper: {
-        skipResolution: () => ({ skip: true, reason: 'version_conflict' }),
         recordResolved: vi.fn(),
         getResolvedVersion: () => '2.0',
         getCoordinateManager: () => ({ createCoordinate: vi.fn() }),
       },
       bomProcessor: {
-        processModel: async () => ({
+        processModel: async (pom) => ({
           properties: {},
           dependencyManagement: new Map(),
+          dependencies: pom.dependencies ? [pom.dependencies.dependency].flat() : [],
         }),
       },
     };
@@ -436,10 +680,8 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
     const ctx: MavenResolutionContext = {
       nodeMap: new Map(),
       queue: [item(3, 'deep'), item(2, 'shallow')],
-      descriptorQueue: [],
-      descriptorContextDepths: new Map(),
-      descriptorCoordinates: new Map(),
-      descriptorWorkCount: 0,
+      contextDepths: new Map(),
+      workCount: 0,
       maxDepth: 3,
       includeOptional: false,
       dependencyManagement: new Map(),
@@ -448,9 +690,8 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
     };
 
     await processor.processQueue(ctx);
-    await processor.processDescriptorQueue(ctx);
 
-    expect(ctx.descriptorCoordinates.has('org.example:leaf:1.0')).toBe(true);
+    expect([...ctx.nodeMap.values()].some((n) => n.package.name === 'org.example:leaf')).toBe(true);
   });
 });
 
@@ -474,8 +715,11 @@ describe('Maven 의존성 그래프 평탄화 안전성', () => {
     root.dependencies.push(left, right);
     left.dependencies.push(root);
     right.dependencies.push(extra, left);
-    expect(flatten(new MavenResolver(), root).map(p => p.name))
-      .toEqual(['org.example:root', 'org.example:same', 'org.example:extra']);
+    expect(flatten(new MavenResolver(), root).map((p) => p.name)).toEqual([
+      'org.example:root',
+      'org.example:same',
+      'org.example:extra',
+    ]);
   });
 
   it('같은 GAV의 JAR와 POM 아티팩트를 각각 보존한다', () => {
