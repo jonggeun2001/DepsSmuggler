@@ -1,5 +1,5 @@
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { autoUpdater, UpdateInfo, ProgressInfo } from 'electron-updater';
-import { app, BrowserWindow, ipcMain } from 'electron';
 import { createScopedLogger } from './utils/logger';
 
 const log = createScopedLogger('Updater');
@@ -169,6 +169,33 @@ function registerIpcHandlers() {
     log.info(`Auto download ${enabled ? 'enabled' : 'disabled'}`);
     return { success: true };
   });
+
+  ipcMain.handle('updater:open-release-notes-link', (_, url: unknown) =>
+    openReleaseNotesLink(url));
+}
+
+export async function openReleaseNotesLink(
+  url: unknown,
+): Promise<{ success: boolean; error?: string }> {
+  const invalidUrlError = '릴리즈 노트 링크는 http 또는 https 주소만 열 수 있습니다.';
+  if (typeof url !== 'string') {
+    return { success: false, error: invalidUrlError };
+  }
+
+  try {
+    if (!/^https?:\/\//i.test(url)) {
+      return { success: false, error: invalidUrlError };
+    }
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { success: false, error: invalidUrlError };
+    }
+    await shell.openExternal(parsed.toString());
+    return { success: true };
+  } catch (error) {
+    log.warn('Release notes link could not be opened:', error);
+    return { success: false, error: '릴리즈 노트 링크를 열 수 없습니다.' };
+  }
 }
 
 /**
@@ -201,6 +228,9 @@ export function registerDevModeHandlers() {
   ipcMain.handle('updater:set-auto-download', () => {
     return { success: true };
   });
+
+  ipcMain.handle('updater:open-release-notes-link', (_, url: unknown) =>
+    openReleaseNotesLink(url));
 }
 
 /**

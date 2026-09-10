@@ -202,9 +202,13 @@ OS 전용 흐름의 전달 방식은 로컬 저장이며, 일반 다운로드의
 
 - `UpdateNotification.tsx`가 `updater:status` 이벤트를 구독합니다.
 - 새 버전 발견, 다운로드 진행률, 설치 준비 완료를 모달로 노출합니다.
+- 패치 노트는 GitHub updater가 전달하는 HTML의 제목·목록·강조·코드·표를 서식에 맞게 표시합니다. 일반 텍스트는 줄바꿈을 유지하며, 버전별 노트 배열은 버전과 함께 표시하고 빈 노트는 생략합니다. Markdown을 직접 파싱하는 화면은 아닙니다.
+- 외부 HTML은 DOMPurify의 태그·속성 허용 목록으로 정제합니다. 스크립트, 이벤트 속성, 스타일, 이미지와 iframe은 표시하지 않습니다. HTTP(S) 링크는 updater IPC에서 주소를 다시 검증한 뒤 시스템 브라우저로 열며 앱 화면은 이동하지 않습니다.
 - 패키징된 앱은 시작 후 약 3초 뒤 업데이트를 확인합니다. 자동 다운로드 기본값은 `false`이며, 사용자가 다운로드와 설치/재시작을 선택할 수 있고 내려받은 업데이트는 앱 종료 시 설치하도록 설정되어 있습니다.
 - 설정 화면의 `autoUpdate`/`autoDownloadUpdate` 값은 저장·복원되지만 현재 updater 동작과 연결되어 있지 않습니다. 시작 검사에서는 `autoUpdate`를 읽지 않으며, 설정 저장은 `updater.setAutoDownload`를 호출하지 않습니다. `지금 확인` 버튼은 실제 `updater.check`를 호출합니다.
-- 개발 모드에서는 updater가 no-op 응답을 반환합니다.
+- 개발 모드에서는 업데이트 확인·다운로드·설치가 no-op 응답을 반환합니다. 패치 노트 링크 열기는 배포 앱과 같은 주소 검증을 사용합니다.
+
+검증: `bash scripts/verify-worktree.sh src/renderer/components/ReleaseNotes.test.tsx src/renderer/components/UpdateNotification.test.tsx electron/updater.test.ts`와 `npm run test:e2e -- tests/e2e/updater-release-notes.spec.ts`로 서식·유해 HTML 제거·노트 형식·링크 및 모달 상태 전환을 확인합니다. 브라우저 E2E는 실제 GitHub Atom 노트 형식과 모의 Electron bridge를 사용하며 업데이트 파일을 설치하지 않습니다.
 
 ## 버전 선택의 현재 방식
 

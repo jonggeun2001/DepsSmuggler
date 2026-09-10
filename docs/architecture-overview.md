@@ -166,7 +166,7 @@ OS 전용 흐름은 로컬 저장으로 동작하며, 일반 다운로드의 SMT
 
 Electron의 앱 준비/창 생성과 활성화 시 창 재생성 Promise는 실패를 `Main` 로그에 기록합니다. 처리되지 않은 Promise 예외로 방치하지 않으며, 화면 파일 손상처럼 창을 로드할 수 없는 상황을 성공으로 취급하거나 새 자동 복구 기능을 추가하지는 않습니다. `electron/main-lifecycle.test.ts`로 검증합니다.
 
-- 자동 업데이트는 `electron/updater.ts`와 `src/renderer/components/UpdateNotification.tsx`가 담당합니다.
+- 자동 업데이트는 `electron/updater.ts`와 `src/renderer/components/UpdateNotification.tsx`가 담당합니다. 패치 노트는 DOMPurify로 정제해 제목·목록 등 HTML 서식을 표시하며, HTTP(S) 링크 열기는 updater IPC를 통해 시스템 브라우저에 위임합니다. 문자열·버전별 배열·빈 노트 처리와 검증 방법은 [Electron / Renderer](electron-renderer.md#자동-업데이트)를 참고하세요.
 - 패키징된 앱은 시작 후 업데이트를 확인하고 사용자 선택으로 다운로드·설치합니다. 개발 모드는 더미 IPC를 사용합니다. 설정 UI의 `autoUpdate`/`autoDownloadUpdate`는 저장·복원되지만 현재 시작 검사나 `updater:set-auto-download`와 연결되어 있지 않습니다.
 - 버전 프리로드는 `electron/version-handlers.ts`와 `src/core/shared/version-preloader.ts`가 담당합니다.
 - 현재 IPC 기반 런타임 버전 로딩은 Python/CUDA에 집중되어 있고 Java/Node 런타임 선택 단계는 없습니다. 라이브러리와 컨테이너 패키지 자체의 버전 목록은 검색/버전 조회 API로 가져옵니다.

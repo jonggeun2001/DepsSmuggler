@@ -1,5 +1,7 @@
 // Electron API 타입 정의 (렌더러 프로세스용)
 
+import type { UpdateReleaseNotes } from './updater';
+
 export interface DownloadProgressData {
   sessionId?: number;
   packageId: string;
@@ -222,7 +224,7 @@ export interface UpdaterStatus {
   downloading: boolean;
   error: string | null;
   progress: { percent: number; bytesPerSecond: number; total: number; transferred: number } | null;
-  updateInfo: { version: string; releaseDate: string; releaseNotes?: string } | null;
+  updateInfo: { version: string; releaseDate: string; releaseNotes?: UpdateReleaseNotes } | null;
 }
 
 export interface UpdaterAPI {
@@ -230,6 +232,7 @@ export interface UpdaterAPI {
   download: () => Promise<{ success: boolean; error?: string }>;
   install: () => Promise<{ success: boolean }>;
   getStatus: () => Promise<UpdaterStatus>;
+  openReleaseNotesLink?: (url: string) => Promise<{ success: boolean; error?: string }>;
   setAutoDownload: (enabled: boolean) => Promise<{ success: boolean }>;
   onStatusChange: (callback: (status: UpdaterStatus) => void) => () => void;
 }
