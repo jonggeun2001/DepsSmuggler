@@ -24,6 +24,8 @@ export interface TokenResponse {
 export interface AuthResult {
   token: string;
   expiresIn: number; // 초 단위
+  /** Timestamp captured when the response (or anonymous decision) was received. */
+  receivedAt?: number;
 }
 
 /**
@@ -54,11 +56,13 @@ export class DockerHubAuthStrategy implements RegistryAuthStrategy {
       },
       ...(options?.signal ? { signal: options.signal } : {}),
     });
+    const receivedAt = Date.now();
     await waitForDownloadResume(options);
 
     return {
       token: response.data.token,
       expiresIn: response.data.expires_in || 300,
+      receivedAt,
     };
   }
 }
@@ -80,11 +84,13 @@ export class GHCRAuthStrategy implements RegistryAuthStrategy {
       },
       ...(options?.signal ? { signal: options.signal } : {}),
     });
+    const receivedAt = Date.now();
     await waitForDownloadResume(options);
 
     return {
       token: response.data.token,
       expiresIn: response.data.expires_in || 300,
+      receivedAt,
     };
   }
 }
@@ -106,11 +112,13 @@ export class ECRAuthStrategy implements RegistryAuthStrategy {
       },
       ...(options?.signal ? { signal: options.signal } : {}),
     });
+    const receivedAt = Date.now();
     await waitForDownloadResume(options);
 
     return {
       token: response.data.token,
       expiresIn: response.data.expires_in || 300,
+      receivedAt,
     };
   }
 }
@@ -150,17 +158,19 @@ export class QuayAuthStrategy implements RegistryAuthStrategy {
             },
             ...(options?.signal ? { signal: options.signal } : {}),
           });
+          const receivedAt = Date.now();
           await waitForDownloadResume(options);
 
           return {
             token: tokenResponse.data.token,
             expiresIn: tokenResponse.data.expires_in || 300,
+            receivedAt,
           };
         }
       }
 
       // Public 이미지의 경우 토큰 없이 접근 가능
-      return { token: '', expiresIn: 300 };
+      return { token: '', expiresIn: 300, receivedAt: Date.now() };
     } catch (error) {
       if (options?.signal?.aborted) throw error;
       logger.debug('Quay.io 토큰 획득 실패, anonymous 접근 시도', { error });
@@ -187,17 +197,19 @@ export class CustomRegistryAuthStrategy implements RegistryAuthStrategy {
         },
         ...(options?.signal ? { signal: options.signal } : {}),
       });
+      const receivedAt = Date.now();
       await waitForDownloadResume(options);
 
       return {
         token: response.data.token,
         expiresIn: response.data.expires_in || 300,
+        receivedAt,
       };
     } catch (error) {
       if (options?.signal?.aborted) throw error;
       // 인증 없이 접근 시도 (private registry에서 anonymous 허용 시)
       logger.debug('커스텀 레지스트리 토큰 획득 실패, anonymous 접근 시도', { error });
-      return { token: '', expiresIn: 300 };
+      return { token: '', expiresIn: 300, receivedAt: Date.now() };
     }
   }
 }

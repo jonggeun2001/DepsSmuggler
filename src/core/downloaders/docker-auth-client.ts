@@ -75,9 +75,11 @@ export class DockerAuthClient {
     const cacheKey = `${registry}:${repository}`;
     const cached = this.tokenCache.get(cacheKey);
 
-    if (cached && cached.expires > Date.now()) {
+    if (cached && cached.expires - DOCKER_CONSTANTS.TOKEN_REFRESH_BUFFER_SEC * 1000 > Date.now()) {
       await waitForDownloadResume(options);
-      return cached.token;
+      if (cached.expires - DOCKER_CONSTANTS.TOKEN_REFRESH_BUFFER_SEC * 1000 > Date.now()) {
+        return cached.token;
+      }
     }
 
     const config = this.getRegistryConfig(registry);
@@ -86,17 +88,26 @@ export class DockerAuthClient {
     try {
       // Strategy Pattern: 레지스트리 타입에 맞는 전략 선택 및 실행
       const strategy = this.strategyRegistry.getStrategy(registryType);
-      await waitForDownloadResume(options);
-      const result = options
-        ? await strategy.getToken(config, repository, options)
-        : await strategy.getToken(config, repository);
-      await waitForDownloadResume(options);
-
-      const expires = Date.now() + (result.expiresIn - DOCKER_CONSTANTS.TOKEN_REFRESH_BUFFER_SEC) * 1000;
-      await waitForDownloadResume(options);
-      this.tokenCache.set(cacheKey, { token: result.token, expires });
-
-      return result.token;
+      let refreshedAfterPause = false;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await waitForDownloadResume(options);
+        const result = options
+          ? await strategy.getToken(config, repository, options)
+          : await strategy.getToken(config, repository);
+        const receivedAt = result.receivedAt ?? Date.now();
+        const expires = receivedAt + result.expiresIn * 1000;
+        await waitForDownloadResume(options);
+        if (expires <= Date.now()) {
+          if (!refreshedAfterPause) {
+            refreshedAfterPause = true;
+            continue;
+          }
+          throw new Error('Docker token expired before it could be cached');
+        }
+        this.tokenCache.set(cacheKey, { token: result.token, expires });
+        return result.token;
+      }
+      throw new Error('Docker token refresh attempts exhausted');
     } catch (error) {
       logger.error('Docker 토큰 획득 실패', { registry, repository, error });
       throw error;

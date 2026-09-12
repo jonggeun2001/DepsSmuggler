@@ -57,7 +57,7 @@ describe('Docker registry authentication strategies', () => {
     async ({ strategy, config, url, type }) => {
       get.mockResolvedValue({ data: { token: 'pull-token', expires_in: 900 } });
 
-      await expect(strategy.getToken(config, 'team/image')).resolves.toEqual({
+      await expect(strategy.getToken(config, 'team/image')).resolves.toMatchObject({
         token: 'pull-token',
         expiresIn: 900,
       });
@@ -74,7 +74,7 @@ describe('Docker registry authentication strategies', () => {
     async ({ strategy, config }) => {
       get.mockResolvedValue({ data: { token: 'catalog-token' } });
 
-      await expect(strategy.getToken(config, '')).resolves.toEqual({
+      await expect(strategy.getToken(config, '')).resolves.toMatchObject({
         token: 'catalog-token',
         expiresIn: 300,
       });
@@ -103,7 +103,7 @@ describe('Docker registry authentication strategies', () => {
         createCustomRegistryConfig('registry.example.test'),
         'public/image'
       )
-    ).resolves.toEqual({ token: '', expiresIn: 300 });
+    ).resolves.toMatchObject({ token: '', expiresIn: 300 });
   });
 
   it('Quay discovers the token realm and service from a 401 challenge', async () => {
@@ -117,7 +117,7 @@ describe('Docker registry authentication strategies', () => {
       .mockResolvedValueOnce({ data: { token: 'quay-token', expires_in: 600 } });
     const strategy = new QuayAuthStrategy();
 
-    await expect(strategy.getToken(REGISTRY_CONFIGS['quay.io'], 'org/image')).resolves.toEqual({
+    await expect(strategy.getToken(REGISTRY_CONFIGS['quay.io'], 'org/image')).resolves.toMatchObject({
       token: 'quay-token',
       expiresIn: 600,
     });
@@ -139,7 +139,7 @@ describe('Docker registry authentication strategies', () => {
       })
       .mockResolvedValueOnce({ data: { token: 'catalog-token' } });
 
-    await expect(new QuayAuthStrategy().getToken(REGISTRY_CONFIGS['quay.io'], '')).resolves.toEqual(
+    await expect(new QuayAuthStrategy().getToken(REGISTRY_CONFIGS['quay.io'], '')).resolves.toMatchObject(
       { token: 'catalog-token', expiresIn: 300 }
     );
     expect(get).toHaveBeenLastCalledWith('https://auth.example.test/token', {
@@ -153,7 +153,7 @@ describe('Docker registry authentication strategies', () => {
       get.mockResolvedValue({ headers });
       await expect(
         new QuayAuthStrategy().getToken(REGISTRY_CONFIGS['quay.io'], 'public/image')
-      ).resolves.toEqual({ token: '', expiresIn: 300 });
+      ).resolves.toMatchObject({ token: '', expiresIn: 300 });
       expect(get).toHaveBeenCalledTimes(1);
     }
   );
@@ -170,7 +170,7 @@ describe('Docker registry authentication strategies', () => {
 
       await expect(
         new QuayAuthStrategy().getToken(REGISTRY_CONFIGS['quay.io'], 'public/image')
-      ).resolves.toEqual({ token: '', expiresIn: 300 });
+      ).resolves.toMatchObject({ token: '', expiresIn: 300 });
       expect(get).toHaveBeenCalledTimes(stage === 'token' ? 2 : 1);
     }
   );
@@ -182,6 +182,7 @@ describe('Docker registry authentication strategies', () => {
     await strategy.getToken(config, 'team/image', { signal: controller.signal });
 
     expect(get.mock.calls[0][1]).toMatchObject({ signal: controller.signal });
+    expect((await strategy.getToken(config, 'team/image')).receivedAt).toEqual(expect.any(Number));
   });
 
   it('Quay rethrows cancellation instead of anonymous fallback', async () => {
@@ -349,7 +350,7 @@ describe('DockerAuthClient token lifecycle', () => {
 
   it('waits before caching and returning a token while paused, then resumes normally', async () => {
     const { client, getToken } = setup();
-    let paused = false;
+    const paused = false;
     let pauseAfterStrategy = false;
     getToken.mockImplementation(async () => {
       pauseAfterStrategy = true;
@@ -368,5 +369,116 @@ describe('DockerAuthClient token lifecycle', () => {
     await expect(pending).resolves.toBe('resumed-token');
     await expect(client.getToken('library/paused')).resolves.toBe('resumed-token');
     expect(getToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes a token whose response expired while paused', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const { client, getToken } = setup();
+    let paused = false;
+    getToken.mockImplementation(async () => {
+      const receivedAt = Date.now();
+      paused = getToken.mock.calls.length === 1;
+      return {
+        token: getToken.mock.calls.length === 1 ? 'expired-after-pause' : 'fresh-token',
+        expiresIn: 300,
+        receivedAt,
+      };
+    });
+    const pending = client.getToken('library/expiring', { shouldPause: () => paused });
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(100);
+    vi.setSystemTime(new Date('2026-01-01T00:05:01Z'));
+    paused = false;
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(pending).resolves.toBe('fresh-token');
+    expect(getToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails after one retry when both token responses are already expired', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const { client, getToken } = setup();
+    getToken.mockImplementation(async () => ({
+      token: `expired-${getToken.mock.calls.length}`,
+      expiresIn: 0,
+      receivedAt: Date.now() - 1,
+    }));
+
+    await expect(client.getToken('library/always-expired')).rejects.toThrow('expired before it could be cached');
+    expect(getToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('captures Docker Hub response time before pause and refreshes after expiry', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    let paused = false;
+    get
+      .mockImplementationOnce(async () => {
+        paused = true;
+        return { data: { token: 'paused-token', expires_in: 300 } };
+      })
+      .mockResolvedValueOnce({ data: { token: 'fresh-token', expires_in: 300 } });
+    const strategy = new DockerHubAuthStrategy();
+    const registry = new AuthStrategyRegistry([{ isApplicable: () => true, getToken: strategy.getToken.bind(strategy) }]);
+    const client = new DockerAuthClient(registry);
+    const pending = client.getToken('library/nginx', { shouldPause: () => paused });
+    await vi.advanceTimersByTimeAsync(100);
+    vi.setSystemTime(new Date('2026-01-01T00:05:01Z'));
+    paused = false;
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(pending).resolves.toBe('fresh-token');
+    expect(get).toHaveBeenCalledTimes(2);
+    expect((get.mock.calls[0][1] as { signal?: AbortSignal }).signal).toBeUndefined();
+    await expect(client.getToken('library/nginx')).resolves.toBe('fresh-token');
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it('rechecks cache expiry after a cache-hit pause before returning', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const { client, getToken } = setup();
+    getToken
+      .mockResolvedValueOnce({ token: 'old-token', expiresIn: 300, receivedAt: Date.now() })
+      .mockImplementationOnce(async () => ({ token: 'new-token', expiresIn: 300, receivedAt: Date.now() }));
+    await expect(client.getToken('library/cache-pause')).resolves.toBe('old-token');
+    let paused = true;
+    const pending = client.getToken('library/cache-pause', { shouldPause: () => paused });
+    await vi.advanceTimersByTimeAsync(100);
+    vi.setSystemTime(new Date('2026-01-01T00:05:01Z'));
+    paused = false;
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(pending).resolves.toBe('new-token');
+    expect(getToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps token expiry anchored to response time across a valid pause', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    let paused = false;
+    get.mockResolvedValue({ data: { token: 'unexpected-refresh', expires_in: 300 } });
+    get.mockImplementationOnce(async () => {
+      paused = true;
+      return { data: { token: 'paused-valid-token', expires_in: 300 } };
+    });
+    const strategy = new DockerHubAuthStrategy();
+    const registry = new AuthStrategyRegistry([{ isApplicable: () => true, getToken: strategy.getToken.bind(strategy) }]);
+    const client = new DockerAuthClient(registry);
+    const pending = client.getToken('library/valid-pause', { shouldPause: () => paused });
+    await vi.advanceTimersByTimeAsync(100);
+    vi.setSystemTime(new Date('2026-01-01T00:01:40Z'));
+    paused = false;
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(pending).resolves.toBe('paused-valid-token');
+    await vi.advanceTimersByTimeAsync(100_000);
+    await expect(client.getToken('library/valid-pause')).resolves.toBe('paused-valid-token');
+    expect(get).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(40_001);
+    await expect(client.getToken('library/valid-pause')).resolves.toBe('unexpected-refresh');
+    expect(get).toHaveBeenCalledTimes(2);
   });
 });
