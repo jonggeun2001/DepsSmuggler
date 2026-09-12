@@ -98,6 +98,24 @@ describe('project POM package collection', () => {
     );
   });
 
+  it('preserves managed artifact type and classifier when adding transport coordinates', async () => {
+    vi.mocked(collectMavenManagedPackages).mockResolvedValue([
+      { type: 'maven', name: 'lib:used', version: '2', metadata: { type: 'jar', origin: 'project-managed-dependency' } },
+      { type: 'maven', name: 'lib:used', version: '2', metadata: { type: 'jar', classifier: 'tests', origin: 'project-managed-dependency' } },
+      { type: 'maven', name: 'lib:used', version: '2', metadata: { type: 'pom', origin: 'project-managed-dependency' } },
+    ]);
+    const result = await collectMavenProjectPackages(project(
+      '<dependencies><dependency><groupId>lib</groupId><artifactId>root</artifactId><version>1</version></dependency></dependencies>',
+    ));
+    const managed = result.filter(pkg => pkg.name === 'lib:used');
+    expect(managed).toHaveLength(3);
+    expect(managed.map(pkg => ({ type: pkg.metadata?.type, classifier: pkg.metadata?.classifier }))).toEqual([
+      { type: 'jar', classifier: undefined },
+      { type: 'jar', classifier: 'tests' },
+      { type: 'pom', classifier: undefined },
+    ]);
+  });
+
   it('honors an explicit plugin version over pluginManagement and the target lifecycle version', async () => {
     const result = await collectMavenProjectPackages(project(`<build>
       <pluginManagement><plugins>${plugin('maven-compiler-plugin', '<version>3.10.1</version>')}</plugins></pluginManagement>

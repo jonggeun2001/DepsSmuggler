@@ -160,7 +160,7 @@
 
 전체 `<project>` POM의 파일/텍스트 입력은 `maven:parseProject` IPC로 프로젝트 모델과 package 플러그인을 함께 수집합니다. 대상 Maven 버전 입력은 파일/텍스트 양쪽에서 공유하며 기본값은 3.9.11입니다. 처리 중 중복 입력을 막고 실패하면 오류와 원본 입력을 유지합니다. preload API가 없는 환경에서는 전체 POM을 부분 파싱해서 성공으로 처리하지 않습니다.
 
-`<dependency>` 조각은 기존 동기 파서로 처리합니다. 전체 POM의 `dependencyManagement`에 있는 import BOM 선언도 모델 POM으로 가져옵니다. 장바구니 의존성 트리 미리보기와 실제 의존성 포함 다운로드 모두 선택한 type을 resolver에 전달하며, 원격 packaging보다 명시한 type을 우선합니다.
+`<dependency>` 조각은 기존 동기 파서로 처리합니다. 전체 POM의 `dependencyManagement`에 있는 import BOM 선언도 모델 POM으로 가져옵니다. 부모 관리 속성은 자식 POM의 최종 property/project.version 문맥으로 해석하고, 자식의 직접 관리 선언 및 child import를 우선합니다. 부모의 직접 관리 선언은 child import보다 우선하며, 같은 BOM GA의 다른 버전 import는 child 선언을 사용합니다. 장바구니 의존성 트리 미리보기와 실제 의존성 포함 다운로드 모두 선택한 type을 resolver에 전달하며, 원격 packaging보다 명시한 type을 우선합니다.
 
 Maven 해결 결과의 `root`는 실행 의존성 그래프이고, `flatList`에는 그 그래프에 없는 부모 POM과 import BOM도 포함될 수 있습니다. 장바구니 미리보기의 `함께 다운로드할 POM` 목록을 펼치면 그래프 밖 모델의 좌표·버전·파일 상세를 확인할 수 있습니다. 그래프에 이미 있는 POM은 이 목록에 중복 표시하지 않으며, 같은 GAV의 JAR와 POM, 서로 다른 classifier를 구분합니다.
 

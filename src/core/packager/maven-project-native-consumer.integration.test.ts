@@ -67,7 +67,7 @@ function managedProjectPom(): string {
   <properties><maven.compiler.source>1.8</maven.compiler.source><maven.compiler.target>1.8</maven.compiler.target><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties>
   <dependencyManagement><dependencies>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter-api</artifactId><version>5.10.1</version></dependency>
-    <dependency><groupId>org.junit.platform</groupId><artifactId>junit-platform-commons</artifactId><version>1.10.1</version></dependency>
+    <dependency><groupId>org.junit.platform</groupId><artifactId>junit-platform-commons</artifactId><version>1.10.2</version></dependency>
     <dependency><groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId><version>3.17.0</version></dependency>
   </dependencies></dependencyManagement>
   <dependencies>

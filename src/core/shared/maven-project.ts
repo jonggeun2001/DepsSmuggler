@@ -97,7 +97,15 @@ export async function collectMavenProjectPackages(
   for (const dependency of effective.dependencies) addDependency(dependency, 'project-dependency');
   for (const managed of await collectMavenManagedPackages([...packages.values()], effective.dependencyManagement)) {
     const [groupId, artifactId] = managed.name.split(':');
-    add({ groupId, artifactId, version: managed.version }, managed.metadata);
+    const managedType = typeof managed.metadata?.type === 'string' ? managed.metadata.type : undefined;
+    const managedClassifier = typeof managed.metadata?.classifier === 'string' ? managed.metadata.classifier : undefined;
+    add({
+      groupId,
+      artifactId,
+      version: managed.version,
+      ...(managedType ? { type: managedType } : {}),
+      ...(managedClassifier ? { classifier: managedClassifier } : {}),
+    }, managed.metadata);
   }
   for (const model of processor.getRequiredPoms()) add({ ...model, type: 'pom' }, { origin: 'project-model' });
 

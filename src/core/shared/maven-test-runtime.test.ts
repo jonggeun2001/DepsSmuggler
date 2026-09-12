@@ -96,6 +96,23 @@ describe('Maven 테스트 런타임 동반자 수집', () => {
     await expect(collectMavenTestRuntimePackages([maven('app:legacy', '1')], resolver)).resolves.toEqual([]);
   });
 
+  it('Platform Commons의 각 버전에도 대응하는 Launcher를 추가한다', async () => {
+    const resolver = vi.fn(async (pkg: PackageInfo) => {
+      if (pkg.name === 'app:commons') {
+        return [pkg, maven('org.junit.jupiter:junit-jupiter-api', '5.10.1'), maven('org.junit.platform:junit-platform-engine', '1.10.1'), maven('org.junit.platform:junit-platform-commons', '1.10.2')];
+      }
+      if (pkg.name === 'org.junit.jupiter:junit-jupiter-engine') return [pkg, maven('org.junit.platform:junit-platform-engine', '1.10.1')];
+      return [pkg];
+    });
+
+    const result = await collectMavenTestRuntimePackages([maven('app:commons', '1')], resolver);
+    expect(result.map((pkg) => `${pkg.name}:${pkg.version}`)).toEqual([
+      'org.junit.jupiter:junit-jupiter-engine:5.10.1',
+      'org.junit.platform:junit-platform-launcher:1.10.1',
+      'org.junit.platform:junit-platform-launcher:1.10.2',
+    ]);
+  });
+
   it('JUnit이 없으면 빈 결과를 반환하고 POM 루트와 provider 루트는 제외한다', async () => {
     const resolver = vi.fn(async (pkg: PackageInfo) => [pkg]);
     const result = await collectMavenTestRuntimePackages([

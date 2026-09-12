@@ -7,6 +7,7 @@ const JUNIT_ENGINE = 'org.junit.jupiter:junit-jupiter-engine';
 const VINTAGE_ENGINE = 'org.junit.vintage:junit-vintage-engine';
 const JUNIT4 = 'junit:junit';
 const PLATFORM_ENGINE = 'org.junit.platform:junit-platform-engine';
+const PLATFORM_COMMONS = 'org.junit.platform:junit-platform-commons';
 const PLATFORM_LAUNCHER = 'org.junit.platform:junit-platform-launcher';
 const MAX_CONCURRENCY = 4;
 
@@ -80,6 +81,7 @@ export async function collectMavenTestRuntimePackages(
   const resolvedRuntime = new Set<string>();
   const engineQueue: PackageInfo[] = [];
   const directPlatformVersions = new Set<string>();
+  const platformCommonsVersions = new Set<string>();
 
   const add = (pkg: PackageInfo): void => {
     const artifactKey = key(pkg);
@@ -101,6 +103,7 @@ export async function collectMavenTestRuntimePackages(
     if (coordinate(pkg) === JUNIT_API) apiVersions.add(pkg.version);
     if (coordinate(pkg) === JUNIT4) hasJunit4 = true;
     if (coordinate(pkg) === PLATFORM_ENGINE) directPlatformVersions.add(pkg.version);
+    if (coordinate(pkg) === PLATFORM_COMMONS) platformCommonsVersions.add(pkg.version);
   }
   for (const version of apiVersions) queueEngine(JUNIT_ENGINE, version);
   if (hasJunit4 && apiVersions.size > 0) {
@@ -114,10 +117,14 @@ export async function collectMavenTestRuntimePackages(
       if (pkg.type === 'maven' && pkg.metadata?.type !== 'pom' && coordinate(pkg) === PLATFORM_ENGINE) {
         add(runtimePackage(PLATFORM_LAUNCHER, pkg.version));
       }
+      if (pkg.type === 'maven' && pkg.metadata?.type !== 'pom' && coordinate(pkg) === PLATFORM_COMMONS) {
+        platformCommonsVersions.add(pkg.version);
+      }
     }
   }
 
   for (const version of directPlatformVersions) add(runtimePackage(PLATFORM_LAUNCHER, version));
+  for (const version of platformCommonsVersions) add(runtimePackage(PLATFORM_LAUNCHER, version));
 
   return [...added.values()];
 }
