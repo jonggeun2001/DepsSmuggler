@@ -10,7 +10,7 @@ import { isArchitectureCompatible } from '../downloaders/os-shared/repositories'
 import { YumMetadataParser } from '../shared/yum-metadata-parser';
 import type { OSPackageInfo, PackageDependency, OSPackageSearchResult } from '../downloaders/os-shared/types';
 
-const YUM_CACHE_SCHEMA_VERSION = 1;
+const YUM_CACHE_SCHEMA_VERSION = 2;
 
 function isYumCachePackage(value: unknown): value is OSPackageInfo {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
