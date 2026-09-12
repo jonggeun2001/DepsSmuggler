@@ -83,7 +83,7 @@ depssmuggler/
 - `main.ts`가 BrowserWindow 생성, 개발 서버 대기, 기본 다이얼로그 IPC, 버전 프리로드, updater 초기화를 담당합니다.
 - `config-handlers.ts`, `cache-handlers.ts`, `history-handlers.ts`, `search-handlers.ts`, `download-handlers.ts`, `version-handlers.ts`, `updater.ts`가 기능별 IPC를 등록합니다.
 - `electron/services/`는 메인 프로세스용 orchestration 계층입니다. download/search handler는 채널 등록만 하고, package type 분기, resolver 선택, progress emit, 패키징, OS 전용 흐름은 service/helper 모듈로 위임합니다.
-- SSL 검증은 기본적으로 완화되며 `DEPSSMUGGLER_STRICT_SSL=true`일 때만 엄격 모드로 전환됩니다.
+- 기본 실행은 Node/axios의 TLS 인증서 검증을 유지합니다. `DEPSSMUGGLER_STRICT_SSL=false`를 명시한 경우에만 기존 전역 완화 동작을 적용하며, 미지정·`true`·알 수 없는 값은 검증을 끄지 않습니다.
 
 ### 4. Core (`src/core`)
 
