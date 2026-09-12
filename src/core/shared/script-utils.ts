@@ -3,21 +3,49 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { DownloadPackage } from './types';
 import { isWindows } from './path-utils';
+import type { PackageInfo } from '../../types';
+import { createNpmInstallPlan, type NpmInstallPlan, type NpmPackageFile } from '../packager/npm-install-plan';
+import { buildNpmBashInstallLines, buildNpmPowerShellInstallLines } from '../packager/npm-install-script';
+
+export interface InstallScriptOptions {
+  npmRootPackages?: PackageInfo[];
+  npmPackageFiles?: NpmPackageFile[];
+}
 
 /**
  * 설치 스크립트 생성 (Bash + PowerShell)
  */
-export function generateInstallScripts(
+export async function generateInstallScripts(
   outputDir: string,
-  packages: DownloadPackage[]
-): void {
-  const bashScript = generateBashScript(packages);
-  const psScript = generatePowerShellScript(packages);
+  packages: DownloadPackage[],
+  options: InstallScriptOptions = {},
+): Promise<void> {
+  for (const root of options.npmRootPackages ?? []) {
+    if (root.type === 'npm' && !packages.some(pkg =>
+      pkg.type === 'npm' && pkg.name === root.name && pkg.version === root.version)) {
+      throw new Error(`직접 npm 패키지 다운로드가 누락되었습니다: ${root.name}@${root.version}`);
+    }
+  }
+  const npmPlan = packages.some(pkg => pkg.type === 'npm')
+    ? await createNpmInstallPlan(
+        packages.map(pkg => ({ ...pkg, type: pkg.type as PackageInfo['type'] })),
+        path.join(outputDir, 'install.sh'),
+        './packages',
+        options.npmPackageFiles,
+        options.npmRootPackages,
+      )
+    : undefined;
+  const bashScript = generateBashScript(packages, npmPlan);
+  const psScript = generatePowerShellScript(packages, npmPlan);
 
   // Windows에서는 mode 옵션이 무시되므로 조건부 처리
   const bashWriteOptions = isWindows ? {} : { mode: 0o755 };
   fs.writeFileSync(path.join(outputDir, 'install.sh'), bashScript, bashWriteOptions);
-  fs.writeFileSync(path.join(outputDir, 'install.ps1'), psScript);
+  // Windows PowerShell 5.1 needs the UTF-8 BOM to decode Korean diagnostics correctly.
+  fs.writeFileSync(
+    path.join(outputDir, 'install.ps1'),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(psScript, 'utf8')]),
+  );
 
   // Docker 이미지가 포함된 경우 docker-load 스크립트 생성
   const dockerPackages = packages.filter((p) => p.type === 'docker');
@@ -34,7 +62,7 @@ export function generateInstallScripts(
 /**
  * Bash 설치 스크립트 생성
  */
-function generateBashScript(packages: DownloadPackage[]): string {
+function generateBashScript(packages: DownloadPackage[], npmPlan?: NpmInstallPlan): string {
   const pipPackages = packages.filter((p) => p.type === 'pip');
   const condaPackages = packages.filter((p) => p.type === 'conda');
   const mavenPackages = packages.filter((p) => p.type === 'maven');
@@ -51,6 +79,12 @@ echo "Installing packages..."
 
 SCRIPT_DIR="$( cd "$( dirname "\${BASH_SOURCE[0]}" )" && pwd )"
 
+${npmPlan ? `PACKAGE_DIR="$SCRIPT_DIR/packages"
+log_info() { echo "$@"; }
+log_error() { echo "$@" >&2; }
+${buildNpmBashInstallLines(npmPlan).join('\n')}
+` : ''}
+
 ${hasPythonPackages ? `PIP_FIND_LINK_ARGS=()
 while IFS= read -r -d '' directory; do
     PIP_FIND_LINK_ARGS+=(--find-links="$directory")
@@ -66,6 +100,7 @@ ${condaPackages.map((p) => `pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" $
 ${mavenPackages.length > 0 ? `# Maven 아티팩트 복사
 echo "Maven artifacts are in packages/ directory"
 ` : ''}
+${npmPlan ? 'install_npm_packages || exit 1' : ''}
 echo "Installation complete!"
 `;
 }
@@ -73,7 +108,7 @@ echo "Installation complete!"
 /**
  * PowerShell 설치 스크립트 생성
  */
-function generatePowerShellScript(packages: DownloadPackage[]): string {
+function generatePowerShellScript(packages: DownloadPackage[], npmPlan?: NpmInstallPlan): string {
   const pipPackages = packages.filter((p) => p.type === 'pip');
   const condaPackages = packages.filter((p) => p.type === 'conda');
   const mavenPackages = packages.filter((p) => p.type === 'maven');
@@ -91,6 +126,11 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $PackagesDir = Join-Path -Path $ScriptDir -ChildPath 'packages'
 
+${npmPlan ? `$PackageDir = $PackagesDir
+function Write-Info { param([string]$Message) Write-Host $Message }
+${buildNpmPowerShellInstallLines(npmPlan).join('\n')}
+` : ''}
+
 ${hasPythonPackages ? `$PipFindLinkArgs = @("--find-links=$PackagesDir")
 $PipFindLinkArgs += @(
     Get-ChildItem -Path $PackagesDir -Directory -Recurse |
@@ -99,7 +139,8 @@ $PipFindLinkArgs += @(
 
 ` : ''}
 ${pipPackages.length > 0 ? `# pip 패키지 설치
-${pipPackages.map((p) => `pip install --no-index @PipFindLinkArgs ${p.name}==${p.version}`).join('\n')}
+${pipPackages.map((p) => `pip install --no-index @PipFindLinkArgs ${p.name}==${p.version}
+if ($LASTEXITCODE -ne 0) { throw "pip 패키지 설치에 실패했습니다: 종료 코드 $LASTEXITCODE" }`).join('\n')}
 ` : ''}
 ${condaPackages.length > 0 ? `# conda 패키지 설치
 ${condaPackages.map((p) => `pip install --no-index @PipFindLinkArgs ${p.name}==${p.version}`).join('\n')}
@@ -107,6 +148,7 @@ ${condaPackages.map((p) => `pip install --no-index @PipFindLinkArgs ${p.name}==$
 ${mavenPackages.length > 0 ? `# Maven 아티팩트 복사
 Write-Host "Maven artifacts are in packages/ directory"
 ` : ''}
+${npmPlan ? 'Install-NpmPackages' : ''}
 Write-Host "Installation complete!"
 `;
 }

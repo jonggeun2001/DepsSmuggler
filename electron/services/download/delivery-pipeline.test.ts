@@ -45,6 +45,57 @@ const createBaseParams = () => ({
 });
 
 describe('createDeliveryPipeline', () => {
+  it('설치 스크립트 준비를 기다리고 비동기 실패 시 압축하지 않는다', async () => {
+    const scriptDeferred = createDeferred<void>();
+    const createArchiveFromDirectory = vi.fn();
+    const generateInstallScripts = vi.fn(() => scriptDeferred.promise);
+    const pipeline = createDeliveryPipeline({
+      archivePackager: { createArchiveFromDirectory } as never,
+      generateInstallScripts,
+      initializeEmailSender: vi.fn() as never,
+      getFileSplitter: vi.fn() as never,
+      stat: vi.fn() as never,
+    });
+    const base = createBaseParams();
+    const result = pipeline.finalizeDownload({
+      ...base,
+      options: { ...base.options, includeScripts: true },
+      progressEmitter: { emitDownloadStatus: vi.fn() } as never,
+      isCancelled: () => false,
+    });
+    await Promise.resolve();
+    expect(createArchiveFromDirectory).not.toHaveBeenCalled();
+    scriptDeferred.reject(new Error('missing npm tarball'));
+    expect(await result).toMatchObject({ success: false, error: 'missing npm tarball' });
+    expect(createArchiveFromDirectory).not.toHaveBeenCalled();
+  });
+
+  it('npm 결과 파일 경로와 다운로드 전 루트 선택을 스크립트 생성기로 전달한다', async () => {
+    const generateInstallScripts = vi.fn().mockResolvedValue(undefined);
+    const pipeline = createDeliveryPipeline({
+      archivePackager: { createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.zip') } as never,
+      generateInstallScripts,
+      initializeEmailSender: vi.fn() as never,
+      getFileSplitter: vi.fn() as never,
+      stat: vi.fn() as never,
+    });
+    const base = createBaseParams();
+    const npm = { id: 'npm-is-number', type: 'npm', name: 'is-number', version: '6.0.0' };
+    const roots = [{ type: 'npm' as const, name: 'is-odd', version: '3.0.1' }];
+    await pipeline.finalizeDownload({
+      ...base,
+      deliveredPackages: [...base.deliveredPackages, npm],
+      results: [...base.results, { id: npm.id, success: true, filePath: '/tmp/out/packages/npm/custom-name.tgz' }],
+      options: { ...base.options, includeScripts: true, npmRootPackages: roots },
+      progressEmitter: { emitDownloadStatus: vi.fn() } as never,
+      isCancelled: () => false,
+    });
+    expect(generateInstallScripts).toHaveBeenCalledWith('/tmp/out', [...base.deliveredPackages, npm], {
+      npmRootPackages: roots,
+      npmPackageFiles: [{ filePath: '/tmp/out/packages/npm/custom-name.tgz', relativePath: 'npm/custom-name.tgz' }],
+    });
+  });
+
   it('지원하지 않는 출력 형식이면 실패 payload를 반환해야 함', async () => {
     const archivePackager = {
       createArchiveFromDirectory: vi.fn(),

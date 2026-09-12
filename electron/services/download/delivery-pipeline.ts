@@ -1,4 +1,5 @@
 import * as fse from 'fs-extra';
+import * as path from 'path';
 import { initializeEmailSender } from '../../../src/core/mailer/email-sender';
 import { getArchivePackager } from '../../../src/core/packager/archive-packager';
 import { getFileSplitter } from '../../../src/core/packager/file-splitter';
@@ -57,7 +58,20 @@ export function createDeliveryPipeline(deps: DeliveryPipelineDeps): DeliveryPipe
 
       if (includeScripts) {
         try {
-          deps.generateInstallScripts(outputDir, deliveredPackages);
+          const npmPackageFiles = deliveredPackages.filter(pkg => pkg.type === 'npm').map(pkg => {
+            const filePath = results.find(result => result.id === pkg.id && result.success)?.filePath;
+            if (!filePath) {
+              throw new Error(`npm 패키지 파일 경로가 없습니다: ${pkg.name}@${pkg.version}`);
+            }
+            return {
+              filePath,
+              relativePath: path.relative(path.join(outputDir, 'packages'), filePath).split(path.sep).join('/'),
+            };
+          });
+          await deps.generateInstallScripts(outputDir, deliveredPackages, {
+            npmPackageFiles,
+            npmRootPackages: options.npmRootPackages,
+          });
         } catch (error) {
           return {
             success: false,

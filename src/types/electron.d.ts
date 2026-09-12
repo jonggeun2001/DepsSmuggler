@@ -82,6 +82,8 @@ export interface DownloadStartOptions {
     from?: string;
     secure?: boolean;
   };
+  /** Directly requested npm roots, distinct from resolved dependency packages. */
+  npmRootPackages?: PackageInfo[];
 }
 
 export interface SmtpConnectionConfig {

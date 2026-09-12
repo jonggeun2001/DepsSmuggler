@@ -288,7 +288,7 @@ describe('createDownloadOrchestrator', () => {
         id: 'pip-requests-2.28.0',
         name: 'requests',
       }),
-    ]);
+    ], { npmPackageFiles: [], npmRootPackages: undefined });
     expect(archivePackager.createArchiveFromDirectory).toHaveBeenCalledWith(
       '/tmp/out',
       '/tmp/out.tar.gz',

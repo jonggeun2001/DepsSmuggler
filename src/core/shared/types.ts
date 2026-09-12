@@ -46,6 +46,8 @@ export interface DownloadPackageResult {
   id: string;
   success: boolean;
   error?: string;
+  /** 실제로 저장된 파일 경로 (일반 파일 다운로드 성공 시) */
+  filePath?: string;
 }
 
 export type DownloadResult = DownloadPackageResult;

@@ -5,12 +5,14 @@ const {
   copyMock,
   downloadMavenPackageMock,
   downloadFileMock,
+  getNpmDownloaderMock,
   ensureDirMock,
   pathExistsMock,
 } = vi.hoisted(() => ({
   copyMock: vi.fn(),
   downloadMavenPackageMock: vi.fn(),
   downloadFileMock: vi.fn(),
+  getNpmDownloaderMock: vi.fn(),
   ensureDirMock: vi.fn(),
   pathExistsMock: vi.fn(),
 }));
@@ -25,7 +27,7 @@ vi.mock('../../src/core', () => ({
   getCondaDownloader: vi.fn(),
   getDockerDownloader: vi.fn(),
   getMavenDownloader: () => ({ downloadPackage: downloadMavenPackageMock }),
-  getNpmDownloader: vi.fn(),
+  getNpmDownloader: getNpmDownloaderMock,
 }));
 
 vi.mock('../../src/core/shared', () => ({
@@ -73,6 +75,26 @@ describe('createDownloadPackageRouter Maven 처리', () => {
     pathExistsMock.mockResolvedValue(true);
     copyMock.mockResolvedValue(undefined);
     downloadFileMock.mockResolvedValue(undefined);
+    getNpmDownloaderMock.mockReturnValue({
+      getPackageMetadata: vi.fn().mockResolvedValue({
+        metadata: { downloadUrl: 'https://registry.example/is-odd/-/is-odd-3.0.1.tgz' },
+      }),
+    });
+  });
+
+  it('성공한 npm 다운로드 결과에 실제 packages 경로를 반환한다', async () => {
+    const router = createDownloadPackageRouter();
+    const result = await router.downloadPackage(
+      { id: 'npm-is-odd', type: 'npm', name: 'is-odd', version: '3.0.1' },
+      createContext() as never,
+    );
+
+    expect(result).toMatchObject({
+      id: 'npm-is-odd',
+      success: true,
+      filePath: path.join(packagesDir, 'is-odd-3.0.1.tgz'),
+    });
+    expect(downloadFileMock.mock.calls[0][1]).toBe(result.filePath);
   });
 
   it('uses the canonical defaults repository in the metadata fallback', async () => {
