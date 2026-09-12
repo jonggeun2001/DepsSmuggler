@@ -308,11 +308,13 @@ XML 속성을 일괄 숫자 변환하지 않으므로 RPM 버전·release·의�
 
 `YumDependencyResolver`는 모든 활성 저장소의 로딩이 성공한 뒤 패키지·provides 인덱스를 반영합니다. primary 누락이나 조회·파싱 실패를 빈 검색 결과로 숨기지 않으며, 실패한 시도의 일부 목록은 다음 재시도에서 사용하지 않습니다. 정상적으로 저장한 저장소별 디스크 캐시는 재사용합니다.
 
-YUM 파싱 결과는 `{ schemaVersion: 2, packages }` 캐시로 저장합니다. 이전 배열 형식과 schema 1, 알 수 없는 스키마와 잘못된 버전 타입은 다시 파싱해 같은 키에 저장하며, 현재 형식은 JSON 저장·복원 뒤에도 버전·release·의존성 버전 문자열을 유지합니다. schema 1에서 `pre=1` 요구 항목을 선택 의존성으로 저장했던 결과도 다시 파싱합니다.
+YUM 파싱 결과는 `{ schemaVersion: 3, packages }` 캐시로 저장합니다. 이전 배열 형식과 schema 1·2, 알 수 없는 스키마와 잘못된 버전·파일 정보 타입은 다시 파싱해 같은 키에 저장합니다. 현재 형식은 JSON 저장·복원 뒤에도 버전·release·의존성 버전 문자열과 primary 파일 정보를 유지합니다. schema 1에서 `pre=1`을 선택 의존성으로 저장했거나 schema 2에서 파일 제공 정보를 누락한 결과도 다시 파싱합니다.
 
 `rpm:requires`의 `pre=1`은 설치 시 필요한 선행 요구 항목이며 선택 의존성이 아닙니다. 일반 requires와 함께 기본 의존성 목록에 포함합니다. 예를 들어 Rocky의 `filesystem → setup → system-release` 관계는 `includeRecommends`를 켜지 않아도 따라가며, `system-release`는 해당 기능을 제공하는 `rocky-release`로 해결합니다. 별도 recommends 항목과 기존 시스템 런타임 필터는 그대로 적용합니다. [RPM Requires 설명](https://rpm.org/docs/4.20.x/manual/spec.html#requires)
 
 YUM `primary.xml.gz`의 `rpm:provides`에는 패키지 자체의 이름을 항상 포함하고, `OSPackageInfo.provides`에 있는 capability 이름을 중복 없이 추가합니다. 이름은 XML 속성으로 escape하므로 `libtinfo.so.6()(64bit)` 같은 라이브러리 capability도 생성 저장소의 DNF 검색에 전달됩니다. 현재 `provides` 타입은 `string[]`이므로 RPM provide의 flags·epoch·ver·rel 속성은 별도로 보존하거나 비교하지 않습니다.
+
+`primary.xml.gz`의 `<format><file>` 항목은 `OSPackageInfo.rpmPrimaryFiles`에 경로와 `file`·`dir`·`ghost` 타입으로 보존합니다. 로컬 저장소의 primary와 filelists 양쪽에 해당 패키지의 파일 정보를 기록하므로 `/usr/bin/sh` 같은 파일 제공 항목을 DNF가 조회할 수 있습니다. 경로는 XML escape하고 중복 항목은 한 번만 출력합니다. 보존 범위는 상위 primary에 실린 파일이며, 상위 filelists 전체를 내려받거나 RPM의 전체 파일 목록을 추출하지는 않습니다.
 
 ```typescript
 interface RepomdInfo {
@@ -637,7 +639,7 @@ class OSRepoPackager {
 
 YUM 저장소를 생성할 때 `primary.xml.gz`의 각 RPM에는 self-provide와 입력 패키지의 distinct `provides` capability 이름이 기록됩니다. 이 정보는 다운로드된 RPM payload에서 새로 추출하지 않고 resolver/parser가 가진 `OSPackageInfo.provides`를 사용합니다. 현재 모델은 capability 이름만 표현하므로 versioned 또는 flags가 붙은 RPM provides의 의미까지 native solver에서 재현한다고 보장하지 않습니다.
 
-Rocky 9 Bash의 기본 CLI 묶음에는 `setup`과 그 하위 의존성이 포함됩니다. 네트워크를 차단한 Rocky 컨테이너에서 생성 저장소만 사용해 `filesystem`과 `setup`을 실제 업그레이드하고 설치 버전을 확인했습니다. 빈 installroot는 기존 필터가 제외하는 libc·loader 런타임 때문에 완전한 OS 설치에 사용할 수 없습니다. 기존 OS에서 Bash까지 업그레이드할 때 나타난 `/usr/bin/sh` 파일 제공 정보 누락은 별도 [#154](https://github.com/jonggeun2001/DepsSmuggler/issues/154)에서 추적합니다.
+Rocky 9 Bash의 기본 CLI 묶음에는 `setup`과 그 하위 의존성이 포함됩니다. 네트워크를 차단한 기존 Rocky 9.3 컨테이너에서 생성 저장소만 사용해 `/usr/bin/sh` 제공 패키지를 조회하고 `bash`·`filesystem`·`setup`을 실제 업그레이드했습니다. 새 컨테이너 두 번에서 Bash `5.1.8-9.el9`, filesystem `3.16-5.el9`, setup `2.13.7-10.el9` 설치와 기존 ca-certificates 유지, 새 Bash 실행을 확인했습니다. 빈 installroot는 기존 필터가 제외하는 libc·loader 런타임 때문에 완전한 OS 설치에 사용할 수 없습니다.
 
 APT는 수신한 `Packages`의 `aptControlFields`에서 의존성 조건과 대안, `Pre-Depends`, `Provides`, `Conflicts`, `Breaks`, `Replaces`, `Multi-Arch`, `Installed-Size` 등 Control 필드를 보존합니다. 여러 줄 값이 있으면 Debian continuation 문법으로 출력하므로 설명의 들여쓰기와 빈 문단 표기도 유지됩니다. 상위 저장소가 짧은 설명과 `Description-md5`만 제공하면 그 값을 유지하며, 별도 Translation 파일을 받거나 DEB의 긴 설명을 추출하지는 않습니다. `Packages.gz`에는 같은 `Packages` 내용을 압축합니다.
 

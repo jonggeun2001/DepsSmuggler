@@ -275,6 +275,7 @@ export class OSRepoPackager {
         lines.push(`      </rpm:requires>`);
       }
 
+      lines.push(...this.generateYumFileEntries(pkg, '      '));
       lines.push(`    </format>`);
       lines.push(`  </package>`);
     }
@@ -295,11 +296,20 @@ export class OSRepoPackager {
       const release = this.escapeXml(pkg.release || '1');
       lines.push(`  <package pkgid="${pkg.checksum?.value || ''}" name="${this.escapeXml(pkg.name)}" arch="${pkg.architecture}">`);
       lines.push(`    <version epoch="0" ver="${this.escapeXml(pkg.version)}" rel="${release}"/>`);
+      lines.push(...this.generateYumFileEntries(pkg, '    '));
       lines.push(`  </package>`);
     }
 
     lines.push('</filelists>');
     return lines.join('\n');
+  }
+
+  /** Retain primary file records in both indexes so native solvers can find file providers. */
+  private generateYumFileEntries(pkg: OSPackageInfo, indent: string): string[] {
+    return [...new Set((pkg.rpmPrimaryFiles ?? []).map((file) => {
+      const type = file.type === 'file' ? '' : ` type="${file.type}"`;
+      return `${indent}<file${type}>${this.escapeXml(file.path)}</file>`;
+    }))];
   }
 
   /**
