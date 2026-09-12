@@ -888,7 +888,8 @@ describe('DockerDownloader 클래스 메서드 테스트', () => {
         'amd64',
         '/dest',
         undefined,
-        'docker.io'
+        'docker.io',
+        undefined
       );
       expect(result).toBe('/path/to/image.tar');
     });
@@ -908,7 +909,8 @@ describe('DockerDownloader 클래스 메서드 테스트', () => {
         'arm64',
         '/dest',
         undefined,
-        'docker.io'
+        'docker.io',
+        undefined
       );
     });
 
@@ -932,7 +934,26 @@ describe('DockerDownloader 클래스 메서드 테스트', () => {
         'amd64',
         '/dest',
         undefined,
-        'gcr.io'
+        'gcr.io',
+        undefined
+      );
+    });
+
+    it('전달된 download controls를 downloadImage에 전달', async () => {
+      const mockDownloadImage = vi.fn().mockResolvedValue('/path/to/image.tar');
+      (downloader as any).downloadImage = mockDownloadImage;
+      const controller = new AbortController();
+      const controls = { signal: controller.signal, shouldPause: () => false };
+
+      await downloader.downloadPackage(
+        { name: 'nginx', version: 'latest', type: 'docker' },
+        '/dest',
+        undefined,
+        controls
+      );
+
+      expect(mockDownloadImage).toHaveBeenCalledWith(
+        'nginx', 'latest', 'amd64', '/dest', undefined, 'docker.io', controls
       );
     });
   });

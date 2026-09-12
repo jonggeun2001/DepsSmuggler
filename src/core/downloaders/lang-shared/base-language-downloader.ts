@@ -1,10 +1,10 @@
 import * as path from 'path';
 import axios from 'axios';
 import * as fs from 'fs-extra';
-import { Transform, type Readable } from 'stream';
+import type { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { sanitizePath } from '../../shared/path-utils';
-import { waitForDownloadResume, type DownloadControlOptions } from '../../shared/download-control';
+import { createDownloadGate, waitForDownloadResume, type DownloadControlOptions } from '../../shared/download-control';
 import type { DownloadProgressEvent } from '../../../types';
 
 export interface LanguageArtifactDownloadPlan extends DownloadControlOptions {
@@ -32,6 +32,7 @@ export abstract class BaseLanguageDownloader {
     if (plan.signal?.aborted) onAbort();
     const controls = { signal: controller.signal, shouldPause: plan.shouldPause };
     let source: Readable | undefined;
+    let gate: Transform | undefined;
     let ownsFile = false;
     try {
       await waitForDownloadResume(controls);
@@ -53,33 +54,22 @@ export abstract class BaseLanguageDownloader {
       let currentSpeed = 0;
 
       // A transform enforces the pause even when pipe resumes its source on drain.
-      const gate = new Transform({
-        transform(chunk: Buffer, _encoding, callback) {
-          void (async () => {
-            await waitForDownloadResume(controls);
-            downloadedBytes += chunk.length;
-            const now = Date.now();
-            const elapsed = (now - lastTime) / 1000;
-            if (elapsed >= 0.3) {
-              currentSpeed = (downloadedBytes - lastBytes) / elapsed;
-              lastBytes = downloadedBytes;
-              lastTime = now;
-            }
-            onProgress?.({
-              itemId: plan.itemId,
-              progress: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0,
-              downloadedBytes,
-              totalBytes,
-              speed: currentSpeed,
-            });
-            await waitForDownloadResume(controls);
-            callback(null, chunk);
-          })().catch((error: Error) => callback(error));
-        },
-        destroy(error, callback) {
-          if (error) controller.abort(error);
-          callback(error);
-        },
+      gate = createDownloadGate(controls, chunk => {
+        downloadedBytes += chunk.length;
+        const now = Date.now();
+        const elapsed = (now - lastTime) / 1000;
+        if (elapsed >= 0.3) {
+          currentSpeed = (downloadedBytes - lastBytes) / elapsed;
+          lastBytes = downloadedBytes;
+          lastTime = now;
+        }
+        onProgress?.({
+          itemId: plan.itemId,
+          progress: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0,
+          downloadedBytes,
+          totalBytes,
+          speed: currentSpeed,
+        });
       });
       const writer = fs.createWriteStream(filePath);
       // A failed open must not unlink an untouched existing file or directory.
@@ -96,6 +86,7 @@ export abstract class BaseLanguageDownloader {
       if (ownsFile) await fs.remove(filePath);
       throw error;
     } finally {
+      gate?.destroy();
       controller.abort();
       plan.signal?.removeEventListener('abort', onAbort);
     }

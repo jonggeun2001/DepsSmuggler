@@ -8,8 +8,12 @@ import axios from 'axios';
 import * as fsNative from 'fs';
 import * as fs from 'fs-extra';
 import * as tar from 'tar';
+import { pipeline } from 'stream/promises';
+import type { Readable, Transform } from 'stream';
 import { DockerAuthClient } from './docker-auth-client';
+import type { DockerRequestControls } from './docker-types';
 import { calculateSha256 } from './docker-utils';
+import { createDownloadGate, waitForDownloadResume } from '../shared/download-control';
 
 /**
  * Blob 다운로드 진행률 콜백
@@ -40,42 +44,47 @@ export class DockerBlobDownloader {
     destPath: string,
     token: string,
     registry: string = 'docker.io',
-    onChunk?: BlobProgressCallback
+    onChunk?: BlobProgressCallback,
+    options: DockerRequestControls = {}
   ): Promise<void> {
+    await waitForDownloadResume(options);
+    const activeToken = options.getAuthToken ? await options.getAuthToken() : token;
     const config = this.authClient.getRegistryConfig(registry);
     const headers: Record<string, string> = {};
 
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    if (activeToken) {
+      headers.Authorization = `Bearer ${activeToken}`;
     }
 
-    const response = await axios({
-      method: 'GET',
-      url: `${config.registryUrl}/${repository}/blobs/${digest}`,
-      responseType: 'stream',
-      headers,
-    });
-
-    const writer = fsNative.createWriteStream(destPath);
-
-    response.data.on('data', (chunk: Buffer) => {
-      if (onChunk) onChunk(chunk.length);
-    });
-
-    response.data.pipe(writer);
-
-    await new Promise<void>((resolve, reject) => {
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
-
-    // 체크섬 검증
-    const expectedHash = digest.replace('sha256:', '');
-    const isValid = await this.verifyChecksum(destPath, expectedHash);
-
-    if (!isValid) {
-      await fs.remove(destPath);
-      throw new Error(`Blob 체크섬 검증 실패: ${digest}`);
+    let source: Readable | undefined;
+    let gate: Transform | undefined;
+    let ownsFile = false;
+    try {
+      const response = await axios({
+        method: 'GET',
+        url: `${config.registryUrl}/${repository}/blobs/${digest}`,
+        responseType: 'stream',
+        headers,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+      source = response.data as Readable;
+      options.signal?.throwIfAborted();
+      gate = createDownloadGate(options, chunk => onChunk?.(chunk.length));
+      const writer = fsNative.createWriteStream(destPath);
+      writer.once('open', () => { ownsFile = true; });
+      await pipeline(source, gate, writer, { signal: options.signal });
+      await waitForDownloadResume(options);
+      const expectedHash = digest.replace('sha256:', '');
+      if (!(await this.verifyChecksum(destPath, expectedHash))) {
+        throw new Error(`Blob 체크섬 검증 실패: ${digest}`);
+      }
+      await waitForDownloadResume(options);
+    } catch (error) {
+      source?.destroy();
+      if (ownsFile) await fs.remove(destPath);
+      throw error;
+    } finally {
+      gate?.destroy();
     }
   }
 
@@ -124,7 +133,8 @@ export class DockerBlobDownloader {
     destDir: string,
     token: string,
     registry: string,
-    onProgress?: (downloadedBytes: number, totalBytes: number) => void
+    onProgress?: (downloadedBytes: number, totalBytes: number) => void,
+    options?: DockerRequestControls
   ): Promise<string[]> {
     const paths: string[] = [];
 
@@ -135,7 +145,7 @@ export class DockerBlobDownloader {
           // 개별 바이트 단위 진행률은 상위에서 관리
           onProgress(bytes, 0);
         }
-      });
+      }, options);
       paths.push(destPath);
     }
 
