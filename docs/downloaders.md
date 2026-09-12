@@ -742,8 +742,8 @@ if (integrity) await downloader.verifyIntegrity(filePath, integrity);
 | `searchPackages` | query: string, registry?: string | Promise<PackageInfo[]> | 레지스트리에서 이미지 검색 |
 | `getVersions` | imageName: string, registry?: string | Promise<string[]> | 이미지 태그 목록 조회 |
 | `getPackageMetadata` | name: string, version: string | Promise<PackageInfo> | 현재 Docker Hub 경로의 메타데이터 조회 |
-| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | 이미지 다운로드 (레지스트리 자동 추출) |
-| `downloadImage` | name, tag, arch, destDir, onProgress?, registry? | Promise<string> | 이미지 다운로드 (tar 파일 생성) |
+| `downloadPackage` | info: PackageInfo, destPath: string, onProgress?, options? | Promise<string> | 이미지 다운로드 (레지스트리 자동 추출) |
+| `downloadImage` | name, tag, arch, destDir, onProgress?, registry?, options? | Promise<string> | 이미지 다운로드 (tar 파일 생성) |
 
 ### 내부 협력 모듈의 함수
 
@@ -941,6 +941,31 @@ const tarPath = await downloader.downloadImage(
 ```
 
 직접 `downloadImage()`를 호출할 때는 registry 인수를 전달해야 하며, 이름의 레지스트리를 자동 선택하는 것은 `downloadPackage()` 경로입니다. tar 출력 파일명은 `<repo>-<tag>.tar`이고 내부 `manifest.json`에는 원래 registry/namespace 태그를 기록합니다.
+
+### Docker 다운로드 취소·일시정지
+
+`downloadPackage`와 `downloadImage`는 기존 인자 뒤에 선택적인 다운로드 제어 옵션을 받습니다. 기존 진행률 콜백과 registry 인자의 위치는 유지됩니다.
+
+```typescript
+interface DownloadControlOptions {
+  signal?: AbortSignal;
+  shouldPause?: () => boolean;
+}
+
+await downloader.downloadImage(
+  'library/nginx',
+  'latest',
+  'amd64',
+  '/tmp/images',
+  onProgress,
+  'docker.io',
+  { signal: controller.signal, shouldPause: () => isPaused }
+);
+```
+
+제어 옵션은 인증·manifest 조회와 config/blob 전송 경계에 전달됩니다. 일시정지 중에는 네트워크와 stream buffer에 일부 바이트가 도착할 수 있지만, pause gate 뒤의 디스크 쓰기와 진행률 보고는 멈춥니다. 재개하면 현재 blob을 이어서 체크섬 검증합니다. 취소·전송 오류가 발생하면 활성 HTTP 요청과 writer를 정리하고 writer가 실제로 열린 경우에만 진행 중인 부분 파일을 삭제합니다. 열리지 않은 기존 대상 파일은 삭제하지 않습니다. config와 layer는 순서대로 처리하며 취소 뒤 다음 blob이나 최종 tar 패키징으로 진행하지 않습니다.
+
+이미지 작업 디렉터리와 tar 임시 파일은 다운로드별로 고유하게 생성됩니다. tar 생성이 시작된 뒤 취소되면 native tar 작업이 정리될 때까지 기다린 후 완료 전 publish를 막고 임시 파일을 정리합니다. tar 쓰기 자체가 즉시 중단된다고 가정하지 않습니다.
 
 ### 기술적 주의사항
 

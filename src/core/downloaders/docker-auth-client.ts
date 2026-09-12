@@ -7,6 +7,7 @@ import {
 } from './docker-utils';
 import { AuthStrategyRegistry, defaultAuthStrategyRegistry } from './docker-auth-strategies';
 import { DOCKER_CONSTANTS } from '../constants/docker';
+import { waitForDownloadResume, type DownloadControlOptions } from '../shared/download-control';
 
 /**
  * 캐시된 토큰 정보
@@ -56,8 +57,8 @@ export class DockerAuthClient {
   /**
    * Docker Hub용 토큰 획득 (편의 메서드)
    */
-  async getToken(repository: string): Promise<string> {
-    return this.getTokenForRegistry('docker.io', repository);
+  async getToken(repository: string, options?: DownloadControlOptions): Promise<string> {
+    return this.getTokenForRegistry('docker.io', repository, options);
   }
 
   /**
@@ -65,11 +66,17 @@ export class DockerAuthClient {
    *
    * Strategy Pattern을 사용하여 레지스트리 타입에 맞는 인증 전략 선택
    */
-  async getTokenForRegistry(registry: string, repository: string): Promise<string> {
+  async getTokenForRegistry(
+    registry: string,
+    repository: string,
+    options?: DownloadControlOptions
+  ): Promise<string> {
+    await waitForDownloadResume(options);
     const cacheKey = `${registry}:${repository}`;
     const cached = this.tokenCache.get(cacheKey);
 
     if (cached && cached.expires > Date.now()) {
+      await waitForDownloadResume(options);
       return cached.token;
     }
 
@@ -79,9 +86,14 @@ export class DockerAuthClient {
     try {
       // Strategy Pattern: 레지스트리 타입에 맞는 전략 선택 및 실행
       const strategy = this.strategyRegistry.getStrategy(registryType);
-      const result = await strategy.getToken(config, repository);
+      await waitForDownloadResume(options);
+      const result = options
+        ? await strategy.getToken(config, repository, options)
+        : await strategy.getToken(config, repository);
+      await waitForDownloadResume(options);
 
       const expires = Date.now() + (result.expiresIn - DOCKER_CONSTANTS.TOKEN_REFRESH_BUFFER_SEC) * 1000;
+      await waitForDownloadResume(options);
       this.tokenCache.set(cacheKey, { token: result.token, expires });
 
       return result.token;

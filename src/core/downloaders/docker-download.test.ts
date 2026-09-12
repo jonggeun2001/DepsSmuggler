@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // vi.hoisted()로 모킹 함수들을 먼저 정의
 const {
   mockEnsureDir,
+  mockMkdtemp,
+  mockRename,
   mockWriteJson,
   mockRemove,
   mockGetTokenForRegistry,
@@ -20,6 +22,8 @@ const {
 } = vi.hoisted(() => {
   return {
     mockEnsureDir: vi.fn().mockResolvedValue(undefined),
+    mockMkdtemp: vi.fn().mockImplementation(async (prefix: string) => `${prefix}test`),
+    mockRename: vi.fn().mockResolvedValue(undefined),
     mockWriteJson: vi.fn().mockResolvedValue(undefined),
     mockRemove: vi.fn().mockResolvedValue(undefined),
     mockGetTokenForRegistry: vi.fn().mockResolvedValue('mock-token'),
@@ -43,10 +47,14 @@ vi.mock('fs-extra', async () => {
     default: {
       ...actual,
       ensureDir: mockEnsureDir,
+      mkdtemp: mockMkdtemp,
+      rename: mockRename,
       writeJson: mockWriteJson,
       remove: mockRemove,
     },
     ensureDir: mockEnsureDir,
+    mkdtemp: mockMkdtemp,
+    rename: mockRename,
     writeJson: mockWriteJson,
     remove: mockRemove,
   };
@@ -134,6 +142,10 @@ describe('DockerDownloader - Download Methods', () => {
     mockCreateImageTar.mockResolvedValue(undefined);
     mockEnsureDir.mockReset();
     mockEnsureDir.mockResolvedValue(undefined);
+    mockMkdtemp.mockReset();
+    mockMkdtemp.mockImplementation(async (prefix: string) => `${prefix}test`);
+    mockRename.mockReset();
+    mockRename.mockResolvedValue(undefined);
     mockWriteJson.mockReset();
     mockWriteJson.mockResolvedValue(undefined);
     mockRemove.mockReset();
@@ -192,28 +204,33 @@ describe('DockerDownloader - Download Methods', () => {
       );
 
       // 토큰 획득 확인
-      expect(mockGetTokenForRegistry).toHaveBeenCalledWith(
+      expect(mockGetTokenForRegistry.mock.calls[0]?.slice(0, 2)).toEqual([
         'docker.io',
         'library/nginx'
-      );
+      ]);
 
       // 매니페스트 조회 확인
       expect(mockGetManifestForArchitecture).toHaveBeenCalled();
 
       // Config 다운로드 확인
-      expect(mockDownloadBlob).toHaveBeenCalledWith(
+      expect(mockDownloadBlob.mock.calls[0]?.slice(0, 5)).toEqual([
         'library/nginx',
         'sha256:config123',
         expect.stringContaining('config.json'),
         'mock-token',
-        'docker.io'
-      );
+        'docker.io',
+      ]);
 
       // 레이어 다운로드 확인 (2개)
       expect(mockDownloadBlob).toHaveBeenCalledTimes(3); // config + 2 layers
 
       // tar 패키징 확인
       expect(mockCreateImageTar).toHaveBeenCalled();
+      expect(mockMkdtemp).toHaveBeenCalledWith(path.join(tmpDir, 'nginx-latest-'));
+      expect(mockRename).toHaveBeenCalledWith(
+        expect.stringMatching(/\.partial$/),
+        path.join(tmpDir, 'nginx-latest.tar')
+      );
 
       // 임시 디렉토리 정리 확인
       expect(mockRemove).toHaveBeenCalled();
@@ -239,10 +256,10 @@ describe('DockerDownloader - Download Methods', () => {
       );
 
       // 커스텀 레지스트리로 토큰 획득 확인
-      expect(mockGetTokenForRegistry).toHaveBeenCalledWith(
+      expect(mockGetTokenForRegistry.mock.calls[0]?.slice(0, 2)).toEqual([
         'ghcr.io',
         expect.any(String)
-      );
+      ]);
     });
 
     it('should call onProgress callback during download', async () => {
@@ -388,10 +405,10 @@ describe('DockerDownloader - Download Methods', () => {
         tmpDir
       );
 
-      expect(mockGetTokenForRegistry).toHaveBeenCalledWith(
+      expect(mockGetTokenForRegistry.mock.calls[0]?.slice(0, 2)).toEqual([
         'ghcr.io',
         expect.any(String)
-      );
+      ]);
       expect(typeof result).toBe('string');
     });
 
@@ -422,14 +439,14 @@ describe('DockerDownloader - Download Methods', () => {
       await downloader.downloadPackage(packageInfo, tmpDir);
 
       // arch가 없으면 'amd64'가 기본값
-      expect(mockGetManifestForArchitecture).toHaveBeenCalledWith(
+      expect(mockGetManifestForArchitecture.mock.calls[0]?.slice(0, 6)).toEqual([
         expect.any(String),
         expect.any(String),
         expect.any(String),
         expect.any(String),
         'amd64',
         undefined
-      );
+      ]);
     });
   });
 
@@ -540,14 +557,14 @@ describe('DockerDownloader - Download Methods', () => {
       );
 
       // x86_64 -> amd64 매핑 확인
-      expect(mockGetManifestForArchitecture).toHaveBeenCalledWith(
+      expect(mockGetManifestForArchitecture.mock.calls[0]?.slice(0, 6)).toEqual([
         'library/nginx',
         'latest',
         'mock-token',
         'docker.io',
         'amd64',
         undefined
-      );
+      ]);
     });
 
     it('should handle arm64 architecture', async () => {
@@ -559,14 +576,14 @@ describe('DockerDownloader - Download Methods', () => {
       );
 
       // arm64 -> arm64 매핑 확인 (variant 없음)
-      expect(mockGetManifestForArchitecture).toHaveBeenCalledWith(
+      expect(mockGetManifestForArchitecture.mock.calls[0]?.slice(0, 6)).toEqual([
         'library/nginx',
         'latest',
         'mock-token',
         'docker.io',
         'arm64',
         undefined
-      );
+      ]);
     });
 
     it('should handle arm/v7 architecture', async () => {
@@ -578,14 +595,14 @@ describe('DockerDownloader - Download Methods', () => {
       );
 
       // arm/v7 -> arm, v7 매핑 확인
-      expect(mockGetManifestForArchitecture).toHaveBeenCalledWith(
+      expect(mockGetManifestForArchitecture.mock.calls[0]?.slice(0, 6)).toEqual([
         'library/nginx',
         'latest',
         'mock-token',
         'docker.io',
         'arm',
         'v7'
-      );
+      ]);
     });
 
     it('should fallback to amd64 for unknown architecture', async () => {
@@ -597,14 +614,14 @@ describe('DockerDownloader - Download Methods', () => {
       );
 
       // 알 수 없는 아키텍처는 fallback으로 amd64 사용
-      expect(mockGetManifestForArchitecture).toHaveBeenCalledWith(
+      expect(mockGetManifestForArchitecture.mock.calls[0]?.slice(0, 6)).toEqual([
         'library/nginx',
         'latest',
         'mock-token',
         'docker.io',
         'amd64',
         undefined
-      );
+      ]);
     });
   });
 
@@ -617,10 +634,10 @@ describe('DockerDownloader - Download Methods', () => {
         tmpDir
       );
 
-      expect(mockGetTokenForRegistry).toHaveBeenCalledWith(
+      expect(mockGetTokenForRegistry.mock.calls[0]?.slice(0, 2)).toEqual([
         'docker.io',
         'library/nginx'
-      );
+      ]);
     });
 
     it('should handle namespaced images', async () => {
@@ -631,10 +648,10 @@ describe('DockerDownloader - Download Methods', () => {
         tmpDir
       );
 
-      expect(mockGetTokenForRegistry).toHaveBeenCalledWith(
+      expect(mockGetTokenForRegistry.mock.calls[0]?.slice(0, 2)).toEqual([
         'docker.io',
         'myuser/myapp'
-      );
+      ]);
     });
   });
 

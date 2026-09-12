@@ -25,15 +25,28 @@ describe('DockerBlobDownloader', () => {
   let downloader: DockerBlobDownloader;
   const streams: Array<Readable | Writable> = [];
   const request = vi.mocked(axios);
+  let writerCloseCount = 0;
+  let writerChunks: Buffer[] = [];
 
   beforeEach(() => {
     vi.resetAllMocks();
+    writerCloseCount = 0;
+    writerChunks = [];
     downloader = new DockerBlobDownloader(new DockerAuthClient());
     io.checksum.mockResolvedValue('abc123');
     io.remove.mockResolvedValue(undefined);
     io.createTar.mockResolvedValue(undefined);
     io.createWriteStream.mockImplementation(() => {
-      const writer = new PassThrough();
+      const writer = new Writable({
+        write(chunk, _encoding, callback) {
+          writerChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          callback();
+        },
+      });
+      process.nextTick(() => writer.emit('open'));
+      writer.once('close', () => {
+        writerCloseCount += 1;
+      });
       streams.push(writer);
       return writer;
     });
@@ -72,7 +85,37 @@ describe('DockerBlobDownloader', () => {
     expect(progress.mock.calls).toEqual([[3], [5]]);
     expect(io.checksum).toHaveBeenCalledExactlyOnceWith('/download/layer.tar');
     expect(io.remove).not.toHaveBeenCalled();
+    expect(writerCloseCount).toBe(1);
   });
+
+  it('rejects a response stream error after writing a partial blob and removes that blob', async () => {
+    const source = new PassThrough();
+    streams.push(source);
+    request.mockResolvedValue({ data: source });
+    const failure = new Error('connection reset');
+    const controller = new AbortController();
+
+    const pending = downloader.downloadBlob(
+      'team/image',
+      'sha256:abc123',
+      '/download/partial-layer.tar',
+      '',
+      'ghcr.io',
+      undefined,
+      { signal: controller.signal, shouldPause: () => false }
+    );
+    source.write(Buffer.from('partial'));
+    await vi.waitFor(() => expect(writerChunks).toHaveLength(1));
+    source.destroy(failure);
+
+    await expect(pending).rejects.toBe(failure);
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: controller.signal })
+    );
+    expect(io.remove).toHaveBeenCalledExactlyOnceWith('/download/partial-layer.tar');
+    expect(io.checksum).not.toHaveBeenCalled();
+    expect(writerCloseCount).toBe(1);
+  }, 5_000);
 
   it('allows anonymous downloads without a progress callback', async () => {
     response([Buffer.from('layer')]);
@@ -122,10 +165,12 @@ describe('DockerBlobDownloader', () => {
   it('propagates destination permission failure without attempting checksum verification', async () => {
     response();
     const denied = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    const write = vi.fn((_chunk, _encoding, callback) => callback());
     const writer = new Writable({
-      write(_chunk, _encoding, callback) {
+      construct(callback) {
         callback(denied);
       },
+      write,
     });
     streams.push(writer);
     io.createWriteStream.mockReturnValue(writer);
@@ -133,6 +178,7 @@ describe('DockerBlobDownloader', () => {
     await expect(
       downloader.downloadBlob('team/image', 'sha256:abc123', '/restricted/file', '')
     ).rejects.toBe(denied);
+    expect(write).not.toHaveBeenCalled();
     expect(io.checksum).not.toHaveBeenCalled();
     expect(io.remove).not.toHaveBeenCalled();
   });
@@ -144,7 +190,7 @@ describe('DockerBlobDownloader', () => {
     await expect(
       downloader.downloadBlob('team/image', 'sha256:abc123', '/download/file', '')
     ).rejects.toBe(failure);
-    expect(io.remove).not.toHaveBeenCalled();
+    expect(io.remove).toHaveBeenCalledExactlyOnceWith('/download/file');
   });
 
   it.each([

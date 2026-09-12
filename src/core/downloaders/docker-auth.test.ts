@@ -175,6 +175,68 @@ describe('Docker registry authentication strategies', () => {
     }
   );
 
+  it.each(providers)('$type forwards abort signal to its token request', async ({ strategy, config }) => {
+    const controller = new AbortController();
+    get.mockResolvedValue({ data: { token: 'pull-token', expires_in: 900 } });
+
+    await strategy.getToken(config, 'team/image', { signal: controller.signal });
+
+    expect(get.mock.calls[0][1]).toMatchObject({ signal: controller.signal });
+  });
+
+  it('Quay rethrows cancellation instead of anonymous fallback', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      new QuayAuthStrategy().getToken(REGISTRY_CONFIGS['quay.io'], 'public/image', {
+        signal: controller.signal,
+      })
+    ).rejects.toBeDefined();
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ...providers.map(({ type, strategy, config }) => ({ type, strategy, config })),
+    { type: 'quay.io', strategy: new QuayAuthStrategy(), config: REGISTRY_CONFIGS['quay.io'] },
+  ])('$type rejects a pending token request when its signal aborts', async ({ type, strategy, config }) => {
+    const controller = new AbortController();
+    let calls = 0;
+    get.mockImplementation((_url, options: { signal?: AbortSignal }) => {
+      calls += 1;
+      if (type === 'quay.io' && calls === 1) {
+        return Promise.resolve({
+          headers: { 'www-authenticate': 'Bearer realm="https://auth.example.test/token"' },
+        });
+      }
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => reject(new Error('request aborted')), { once: true });
+      });
+    });
+    const pending = strategy.getToken(config, 'team/image', { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+
+    await expect(pending).rejects.toThrow('request aborted');
+    expect(get).toHaveBeenCalledTimes(type === 'quay.io' ? 2 : 1);
+  });
+
+  it('Quay aborts the pending initial challenge without anonymous fallback', async () => {
+    const controller = new AbortController();
+    get
+      .mockImplementationOnce((_url, options: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => reject(new Error('challenge aborted')), { once: true });
+      }));
+    const pending = new QuayAuthStrategy().getToken(REGISTRY_CONFIGS['quay.io'], 'team/image', {
+      signal: controller.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+
+    await expect(pending).rejects.toThrow('challenge aborted');
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
   it('selects each built-in strategy and gives newly registered strategies priority', () => {
     const registry = new AuthStrategyRegistry();
     for (const type of ['docker.io', 'ghcr.io', 'ecr', 'quay.io', 'custom'] as RegistryType[]) {
@@ -274,5 +336,37 @@ describe('DockerAuthClient token lifecycle', () => {
     expect(new DockerAuthClient().getStrategyRegistry()).toBe(defaultAuthStrategyRegistry);
     await expect(client.getTokenForRegistry('http://[invalid', 'image')).rejects.toThrow();
     expect(getToken).not.toHaveBeenCalled();
+  });
+
+  it('does not return a cached token when the control signal is already aborted', async () => {
+    const { client } = setup();
+    await client.getToken('library/nginx');
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(client.getToken('library/nginx', { signal: controller.signal })).rejects.toBeDefined();
+  });
+
+  it('waits before caching and returning a token while paused, then resumes normally', async () => {
+    const { client, getToken } = setup();
+    let paused = false;
+    let pauseAfterStrategy = false;
+    getToken.mockImplementation(async () => {
+      pauseAfterStrategy = true;
+      return { token: 'resumed-token', expiresIn: 300 };
+    });
+
+    const pending = client.getToken('library/paused', { shouldPause: () => paused || pauseAfterStrategy });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(getToken).toHaveBeenCalledTimes(1);
+    let settled = false;
+    void pending.finally(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(settled).toBe(false);
+    expect(Reflect.get(client, 'tokenCache').size).toBe(0);
+    pauseAfterStrategy = false;
+    await expect(pending).resolves.toBe('resumed-token');
+    await expect(client.getToken('library/paused')).resolves.toBe('resumed-token');
+    expect(getToken).toHaveBeenCalledTimes(1);
   });
 });

@@ -83,7 +83,7 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 | CLI 설정·캐시      | `src/cli/commands/{config,cache}.test.ts`                                                                                               | 값 변환, 조회·초기화, 빈 캐시, 삭제 확인 거부, 디렉토리 소실, EACCES/EPERM, 실패 후 삭제 방지                    |
 | Electron 저장·조회 | `electron/{config,cache,history,version}-handlers.test.ts`                                                                              | JSON 오류, 파일 권한·용량 오류, 히스토리 상한·순서, 빈 결과, 버전 캐시와 재시도                                  |
 | Electron 다운로드  | `electron/services/{dependency-resolve-service,download-progress,os-search-service,os-package-router,os-download-orchestrator}.test.ts` | 미지원 입력, 의존성·검색 실패, 진행률 제한, 취소, 패키징 실패와 임시 파일 정리                                   |
-| Docker             | `src/core/downloaders/docker-{auth,blob-downloader,catalog-cache,manifest-service,search-service}.test.ts`                              | 인증 거부·토큰 만료, 빈 목록, 플랫폼별 manifest 선택, 체크섬 불일치, 파일 권한, 캐시 복구                        |
+| Docker             | `src/core/downloaders/docker-{auth,blob-downloader,catalog-cache,manifest-service,search-service}.test.ts`, `docker-download.test.ts` | 인증 거부·토큰 만료, 빈 목록, 플랫폼별 manifest 선택, 체크섬 불일치, 파일 권한, 캐시 복구, stream writer lifecycle과 control 옵션 전달 |
 | OS 패키지          | `src/core/downloaders/os-shared/{archive-packager,dependency-tree}.test.ts`, `src/core/resolver/os-resolver-utils.test.ts`              | 압축 형식·스크립트, 누락 파일, 순환·중복 의존성, 버전·아키텍처 필터, 요청 간 상태 격리                           |
 | Python             | `src/core/shared/{pip-candidate,pip-tags,pip-provider,pypi-utils}.test.ts`                                                              | ABI·플랫폼, Python/패키지 버전 제약, 철회·시험 배포, 후보 없음, 의존성·캐시·실패 후 재시도                       |
 | Conda·Maven        | `src/core/shared/{conda-utils,conda-validator,maven-utils}.test.ts`                                                                     | 압축 인덱스/일반 인덱스/API fallback, noarch, Python 빌드, 채널 거부, classifier, 잘못된·빈 응답                 |
@@ -308,6 +308,14 @@ DEPS_SMUGGLER_NATIVE_DOCKER=1 bash scripts/verify-worktree.sh \
 ```
 
 실제 CLI 다운로드 검증은 `busybox:1.36`의 `--arch amd64 --format zip`과 `--arch arm64 --format tar.gz` 출력에서 `packages/busybox-1.36.tar`, tar 내부 manifest와 config 아키텍처, 원본 설치 스크립트의 참조 경로를 함께 확인합니다. Docker가 없는 환경의 파일·스크립트 검사와 엔진을 사용한 로드 결과는 구분해 기록합니다.
+
+### Docker 스트림 취소·일시정지 검증
+
+`src/core/downloaders/docker-blob-downloader.test.ts`는 실제 Node `Readable` 응답과 `Writable` writer를 사용해 정상 완료, source stream 오류, writer 오류, checksum 실패를 관찰합니다. writer의 `open`·`close` lifecycle을 확인하고, writer가 열린 뒤 실패한 경우에만 부분 파일 삭제와 checksum 중단을 검사합니다. `src/core/downloaders/docker-download.test.ts`는 다운로드별 `mkdtemp` 작업 디렉터리와 tar의 pending-to-final rename 경계를 fixture로 제공하며, 기존 positional 인자 검사를 유지한 채 control 옵션이 추가될 수 있는 호출을 검증합니다.
+
+`src/core/downloaders/docker-download-controls.integration.test.ts`는 기본 테스트에 포함됩니다. loopback registry에서 실제 Axios·orchestrator·session·progress 경로로 config와 layer를 전송하고, 일시정지·재개, 취소·재시도, 전송 중 연결 끊김을 검사합니다. 디스크 쓰기와 진행률 정지, 취소 후 다음 layer 요청 차단과 임시 파일 정리, 전달 ZIP 내부 이미지 tar의 config·layer SHA256을 확인합니다. `docker-output-controls.test.ts`는 실제 tar 생성 후 취소, 최종 경로 충돌 시 기존 파일 보존, 동일 이미지 동시 요청의 작업 디렉터리 격리를 검사합니다.
+
+이 fixture의 layer는 전송 검증용 합성 바이트입니다. 이 테스트 결과는 실제 Electron 서비스 경로의 검증이며, packaged GUI 조작이나 Docker engine load 검증을 뜻하지 않습니다.
 
 ### Conda 설치 스크립트 오프라인 검증
 

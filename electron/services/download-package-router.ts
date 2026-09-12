@@ -371,7 +371,8 @@ async function downloadDockerImage(
   pkg: DownloadPackage,
   context: DownloadPackageContext
 ): Promise<DownloadPackageResult> {
-  const { packagesDir, progressEmitter } = context;
+  const { packagesDir, progressEmitter, state } = context;
+  const controls = { signal: state.signal, shouldPause: () => state.isPaused() };
   const dockerDownloader = getDockerDownloader();
   const registry = (pkg.metadata?.registry as string) || 'docker.io';
   const architecture = (pkg.architecture || 'amd64') as Architecture;
@@ -392,8 +393,12 @@ async function downloadDockerImage(
         speed: progress.speed,
       });
     },
-    registry
+    registry,
+    controls
   );
+
+  await waitForDownloadResume(controls);
+  if (state.isCancelled()) return { id: pkg.id, success: false, error: 'cancelled' };
 
   progressEmitter.emitPackageProgress(
     pkg.id,

@@ -8,6 +8,7 @@
 import axios from 'axios';
 import logger from '../../utils/logger';
 import { RegistryConfig, RegistryType } from './docker-utils';
+import { waitForDownloadResume, type DownloadControlOptions } from '../shared/download-control';
 
 /**
  * 토큰 응답 인터페이스
@@ -33,7 +34,7 @@ export interface RegistryAuthStrategy {
   isApplicable(registryType: RegistryType): boolean;
 
   /** 토큰 획득 */
-  getToken(config: RegistryConfig, repository: string): Promise<AuthResult>;
+  getToken(config: RegistryConfig, repository: string, options?: DownloadControlOptions): Promise<AuthResult>;
 }
 
 /**
@@ -44,13 +45,16 @@ export class DockerHubAuthStrategy implements RegistryAuthStrategy {
     return registryType === 'docker.io';
   }
 
-  async getToken(config: RegistryConfig, repository: string): Promise<AuthResult> {
+  async getToken(config: RegistryConfig, repository: string, options?: DownloadControlOptions): Promise<AuthResult> {
+    await waitForDownloadResume(options);
     const response = await axios.get<TokenResponse>(`${config.authUrl}/token`, {
       params: {
         service: config.service,
         scope: repository ? `repository:${repository}:pull` : '',
       },
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
+    await waitForDownloadResume(options);
 
     return {
       token: response.data.token,
@@ -67,13 +71,16 @@ export class GHCRAuthStrategy implements RegistryAuthStrategy {
     return registryType === 'ghcr.io';
   }
 
-  async getToken(config: RegistryConfig, repository: string): Promise<AuthResult> {
+  async getToken(config: RegistryConfig, repository: string, options?: DownloadControlOptions): Promise<AuthResult> {
+    await waitForDownloadResume(options);
     const response = await axios.get<TokenResponse>(config.authUrl, {
       params: {
         service: config.service,
         scope: repository ? `repository:${repository}:pull` : '',
       },
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
+    await waitForDownloadResume(options);
 
     return {
       token: response.data.token,
@@ -90,13 +97,16 @@ export class ECRAuthStrategy implements RegistryAuthStrategy {
     return registryType === 'ecr';
   }
 
-  async getToken(config: RegistryConfig, repository: string): Promise<AuthResult> {
+  async getToken(config: RegistryConfig, repository: string, options?: DownloadControlOptions): Promise<AuthResult> {
+    await waitForDownloadResume(options);
     const response = await axios.get<TokenResponse>(config.authUrl, {
       params: {
         service: config.service,
         scope: repository ? `repository:${repository}:pull` : '',
       },
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
+    await waitForDownloadResume(options);
 
     return {
       token: response.data.token,
@@ -114,12 +124,15 @@ export class QuayAuthStrategy implements RegistryAuthStrategy {
     return registryType === 'quay.io';
   }
 
-  async getToken(config: RegistryConfig, repository: string): Promise<AuthResult> {
+  async getToken(config: RegistryConfig, repository: string, options?: DownloadControlOptions): Promise<AuthResult> {
     try {
+      await waitForDownloadResume(options);
       // 401 응답에서 WWW-Authenticate 헤더 파싱
       const authResponse = await axios.get(`${config.registryUrl}/`, {
         validateStatus: (status) => status === 401,
+        ...(options?.signal ? { signal: options.signal } : {}),
       });
+      await waitForDownloadResume(options);
 
       const wwwAuth = authResponse.headers['www-authenticate'];
       if (wwwAuth) {
@@ -135,7 +148,9 @@ export class QuayAuthStrategy implements RegistryAuthStrategy {
               service,
               scope: repository ? `repository:${repository}:pull` : '',
             },
+            ...(options?.signal ? { signal: options.signal } : {}),
           });
+          await waitForDownloadResume(options);
 
           return {
             token: tokenResponse.data.token,
@@ -147,6 +162,7 @@ export class QuayAuthStrategy implements RegistryAuthStrategy {
       // Public 이미지의 경우 토큰 없이 접근 가능
       return { token: '', expiresIn: 300 };
     } catch (error) {
+      if (options?.signal?.aborted) throw error;
       logger.debug('Quay.io 토큰 획득 실패, anonymous 접근 시도', { error });
       return { token: '', expiresIn: 300 };
     }
@@ -161,20 +177,24 @@ export class CustomRegistryAuthStrategy implements RegistryAuthStrategy {
     return registryType === 'custom';
   }
 
-  async getToken(config: RegistryConfig, repository: string): Promise<AuthResult> {
+  async getToken(config: RegistryConfig, repository: string, options?: DownloadControlOptions): Promise<AuthResult> {
     try {
+      await waitForDownloadResume(options);
       const response = await axios.get<TokenResponse>(config.authUrl, {
         params: {
           service: config.service,
           scope: repository ? `repository:${repository}:pull` : '',
         },
+        ...(options?.signal ? { signal: options.signal } : {}),
       });
+      await waitForDownloadResume(options);
 
       return {
         token: response.data.token,
         expiresIn: response.data.expires_in || 300,
       };
     } catch (error) {
+      if (options?.signal?.aborted) throw error;
       // 인증 없이 접근 시도 (private registry에서 anonymous 허용 시)
       logger.debug('커스텀 레지스트리 토큰 획득 실패, anonymous 접근 시도', { error });
       return { token: '', expiresIn: 300 };
