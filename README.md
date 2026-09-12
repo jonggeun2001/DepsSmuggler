@@ -149,8 +149,8 @@ depssmuggler os cache clear
 
 | 항목 | 현재 동작 |
 |------|-----------|
-| 압축·설치 스크립트 | 일반 GUI와 CLI에서 ZIP/tar.gz 지원. 일반 GUI는 설치 스크립트 포함 여부를 선택하고 OS 출력에는 전용 스크립트 생성기가 있습니다. |
-| 설치 스크립트 범위 | CLI의 npm 스크립트는 전달된 `.tgz`를 오프라인으로 설치해 스크립트 폴더의 `npm-project/node_modules`에 배치하며, 전이 의존성의 여러 버전을 함께 보존합니다. Conda 항목은 아직 pip 명령으로 처리하므로 Conda 오프라인 설치를 보장하지 않습니다. 생성기별 범위는 [Packagers](docs/packagers.md)를 참고하세요. |
+| 압축·설치 스크립트 | 일반 GUI와 CLI에서 ZIP/tar.gz 지원. 일반 GUI는 설치 스크립트 포함 여부를 선택하고, CLI는 생성한 `install.sh`·`install.ps1`을 출력 폴더와 아카이브 최상위에 포함합니다. OS 출력에는 전용 스크립트 생성기가 있습니다. |
+| 설치 스크립트 범위 | CLI의 npm 스크립트는 전달된 `.tgz`를 오프라인으로 설치해 스크립트 폴더의 `npm-project/node_modules`에 배치하며, 전이 의존성의 여러 버전을 함께 보존합니다. CLI의 Conda 스크립트는 전달된 Conda 아카이브를 오프라인으로 설치합니다. GUI의 Conda 항목은 아직 pip 명령으로 처리하므로 Conda 오프라인 설치를 보장하지 않습니다. 생성기별 범위는 [Packagers](docs/packagers.md)를 참고하세요. |
 | 파일 분할 | 일반 GUI의 이메일 전달 중 첨부 한도를 초과하고 분할 설정이 켜진 경우 적용합니다. 로컬 저장 경로에서 자동 분할하지 않습니다. |
 | SMTP 테스트 | Electron IPC로 실제 연결을 테스트합니다. 브라우저 개발 환경에서는 시뮬레이션이며, Electron API가 일부 누락되면 안내 후 비활성화됩니다. |
 | 업데이트 | 배포 앱에서 시작 후 확인하고 사용자가 다운로드·설치할 수 있습니다. 개발 환경은 모의 동작입니다. `autoUpdate`·`autoDownloadUpdate` 설정은 저장되지만 updater 동작을 제어하는 연결은 아직 없습니다. |
