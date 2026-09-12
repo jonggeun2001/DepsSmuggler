@@ -306,6 +306,10 @@ Python 검증 환경은 runner의 base 환경에 설치된 Python과 전이 의�
 
 위 npm 소비자 테스트는 bundle 루트에 사용자 `package.json`이 있는 경우와 없는 경우를 모두 실행합니다. 사용자 manifest가 있으면 바이트를 보존하고 해당 프로젝트를 추가 패키지로 설치하지 않아야 하며, 없으면 새로 만들지 않아야 합니다. 이는 Windows npm 10에서 `--prefix` 때문에 현재 bundle 폴더가 추가 설치 대상이 되어 발생했던 오류를 검출합니다.
 
+`src/core/packager/gui-mixed-native-consumer.integration.test.ts`는 실제 `createDeliveryPipeline`, shared script generator, archive packager를 실행해 local fixture 기반 pip·npm 묶음을 ZIP으로 만든다. router 자체는 `electron/services/download-package-router.test.ts`에서 실제 destination을 성공 결과에 넣는지 별도로 검증한다. consumer는 생성된 ZIP만 새 디렉터리에 풀고 독립 Python venv·npm cache·loopback registry 차단 환경에서 `install.sh`를 실행한다. 직접 npm root와 전이 모듈의 `require`가 모두 성공하고 pip와 npm 설치가 모두 성공한 경우에만 완료 메시지와 종료 코드 `0`을 허용한다. npm 실패나 파일 경로 누락은 전체 성공으로 바꾸지 않는다. Windows PowerShell 실행은 해당 CI 환경에서 확인하며, 이 local fixture 테스트는 실제 공개 패키지 배포물이나 Conda native 설치를 주장하지 않는다.
+
+별도 수동 검증에서는 이전 GUI 산출물의 공개 패키지를 수정된 delivery pipeline으로 다시 묶었다. 원본 출력 디렉터리를 지우고 ZIP만 새 환경에 전달한 두 번의 실행에서 `colorama 0.4.6`, `is-odd 3.0.1`, `is-number 6.0.0` 로딩과 npm 레지스트리 요청 0건을 확인했다. 이는 위 로컬 fixture 검사와 별도이며, 수정된 pipeline 산출물 검증이지 새로 빌드한 GUI 앱 자체의 실행 검증이나 Conda 설치 검증은 아니다.
+
 ### Maven 설치 스크립트 canonical 저장소 검증
 
 `src/core/packager/script-generator.test.ts`의 canonical tree 회귀는 Maven 없이도 실행할 수 있습니다. 공백이 포함된 임시 추출 경로에서 실제 Bash subprocess(Windows에서는 native PowerShell)를 생성·실행하고, CLI `packages/<m2path>`와 GUI `packages/m2repo/<m2path>`의 JAR-only·companion POM·parent/BOM POM-only·classifier·checksum을 `MAVEN_REPO_LOCAL`에 경로·바이트 그대로 복사하는지 검사합니다. pip 파일과 flat 파일은 대상 저장소에 복사되지 않습니다. Maven native offline consumer 검증과 macOS에서 PowerShell이 없는 경우는 별도 환경 제한으로 기록합니다.

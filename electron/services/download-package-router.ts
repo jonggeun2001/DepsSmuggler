@@ -172,7 +172,7 @@ export function createDownloadPackageRouter(): DownloadPackageRouter {
           true
         );
         progressEmitter.clearPackageProgress(pkg.id);
-        return { id: pkg.id, success: true };
+        return { id: pkg.id, success: true, filePath: destinationPath };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         log.error(`Download failed for ${pkg.name}:`, errorMessage);

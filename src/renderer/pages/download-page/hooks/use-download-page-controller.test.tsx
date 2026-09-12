@@ -366,6 +366,59 @@ describe('useDownloadPageController', () => {
     expect(rendered.result.current.isDownloading).toBe(true);
   });
 
+  it('start 시 npm 직접 요청만 npmRootPackages로 전달하고 dependency는 제외한다', async () => {
+    const { electronAPI, rendered, stores } = await loadController({
+      cartItems: [{ id: 'npm-root', type: 'npm', name: 'is-odd', version: '3.0.1', addedAt: Date.now() }],
+    });
+    act(() => {
+      stores.useDownloadStore.setState({
+        items: [
+          {
+            id: 'npm-root', name: 'is-odd', version: '3.0.1', type: 'npm', isDependency: false,
+            status: 'pending', progress: 0, downloadedBytes: 0, totalBytes: 0, speed: 0,
+          },
+          {
+            id: 'npm-dependency', name: 'is-number', version: '6.0.0', type: 'npm', isDependency: true,
+            status: 'pending', progress: 0, downloadedBytes: 0, totalBytes: 0, speed: 0,
+          },
+        ],
+      });
+    });
+    await waitFor(() => expect(rendered.result.current.downloadItems).toHaveLength(2));
+
+    await act(async () => {
+      await rendered.result.current.handleStartDownload();
+    });
+
+    expect(electronAPI.download.start).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({
+        npmRootPackages: [{ type: 'npm', name: 'is-odd', version: '3.0.1', metadata: undefined }],
+      }),
+    }));
+  });
+
+  it('npm 항목이 dependency만이어도 npmRootPackages를 빈 배열로 전달한다', async () => {
+    const { electronAPI, rendered } = await loadController({
+      cartItems: [{ id: 'npm-root', type: 'npm', name: 'is-odd', version: '3.0.1', addedAt: Date.now() }],
+      includeDependencies: true,
+      downloadState: {
+        depsResolved: true,
+        items: [{
+          id: 'npm-dependency', name: 'is-number', version: '6.0.0', type: 'npm', isDependency: true,
+          status: 'pending', progress: 0, downloadedBytes: 0, totalBytes: 0, speed: 0,
+        }],
+      },
+    });
+
+    await act(async () => {
+      await rendered.result.current.handleStartDownload();
+    });
+
+    expect(electronAPI.download.start).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ npmRootPackages: [] }),
+    }));
+  });
+
   it('pause 시 상태와 IPC 호출을 일시정지로 바꾼다', async () => {
     const { electronAPI, rendered, stores } = await loadController({
       downloadState: {
