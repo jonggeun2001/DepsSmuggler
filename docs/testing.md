@@ -247,6 +247,8 @@ DEPS_SMUGGLER_NATIVE_APK=1 bash scripts/verify-worktree.sh \
 
 `src/cli/download-failure-exit.integration.test.ts`는 별도 Node.js 프로세스에서 실제 CLI 엔트리포인트와 Commander 인자를 실행합니다. 부모 프로세스의 로컬 HTTP 서버가 404를 반환하고, 자식의 테스트 전용 설정이 실제 `MavenDownloader`의 저장소 주소만 이 서버로 연결합니다. 실제 다운로드 매니저가 실패 결과를 반환한 뒤 CLI가 종료 코드 `1`과 실패 원인을 남기고, 새 아카이브와 설치 스크립트를 생성하지 않는지 확인합니다. 설정·로그·출력은 임시 디렉터리로 격리하며 외부 레지스트리에 연결하지 않습니다.
 
+`src/cli/commands/download-archive-integration.test.ts`는 다운로드 매니저와 스크립트 생성기를 경계에서 대체하고, 실제 CLI 명령 함수와 압축기를 실행합니다. ZIP/TAR.GZ 최상위의 `install.sh`·`install.ps1`, Maven 파일 상대 경로, 이전 파일 제외, 스크립트 생성 실패 시 압축물 미생성을 검사합니다.
+
 `src/cli/commands/download.test.ts`는 전체·일부 항목 실패 분기를 빠르게 검증합니다. 다운로드 전 의존성 해결의 기본 건너뛰기 정책은 별도 동작으로 유지합니다. 실제 레지스트리 검증에는 존재하지 않는 Maven classifier와 Docker 태그의 HTTP 404, 정상 패키지 다운로드의 종료 코드와 산출물을 함께 기록합니다.
 
 ```bash
@@ -296,7 +298,7 @@ Python 검증 환경은 runner의 base 환경에 설치된 Python과 전이 의�
 
 ### npm 설치 스크립트 오프라인 검증
 
-`src/cli/npm-root-resolution.integration.test.ts`는 로컬 레지스트리와 실제 tarball로 의존성 포함 CLI를 실행합니다. 버전을 생략한 직접 패키지와 전이 의존성이 모두 실제 버전으로 아카이브·manifest에 포함돼야 합니다. 이어서 원본 설치 스크립트를 격리된 npm 캐시·설정으로 실행하고 직접 모듈과 그 의존성을 실제로 불러옵니다. 단위 테스트도 npm `flatList`가 루트를 제외하는 실제 반환 형식을 사용하며, 버전 선택자와 요청 ID·아키텍처·메타데이터 보존을 검사합니다.
+`src/cli/npm-root-resolution.integration.test.ts`는 로컬 레지스트리와 실제 tarball로 의존성 포함 CLI를 실행합니다. 버전을 생략한 직접 패키지와 전이 의존성이 모두 실제 버전으로 아카이브·manifest에 포함돼야 합니다. ZIP과 TAR.GZ를 각각 새 디렉터리에 풀고, 아카이브에 포함된 설치 스크립트만 격리된 npm 캐시·설정으로 실행해 직접 모듈과 그 의존성을 실제로 불러옵니다. 압축 외부의 스크립트는 복사하지 않으며 설치 중 레지스트리 접근이 없는지도 검사합니다. 단위 테스트도 npm `flatList`가 루트를 제외하는 실제 반환 형식을 사용하며, 버전 선택자와 요청 ID·아키텍처·메타데이터 보존을 검사합니다.
 
 `src/cli/npm-manifest.integration.test.ts`는 로컬 레지스트리와 실제 tarball을 제공하고 별도 CLI 프로세스에서 `--no-deps` 다운로드를 실행합니다. `latest`와 고정 버전 요청 모두 ZIP의 manifest 버전이 tarball 내부 `package/package.json`의 버전과 일치하는지 확인합니다. 이 검증은 npm 설치를 실행하지 않습니다. npm 다운로더 단위 테스트는 성공 후 버전·메타데이터 갱신과 기존 입력 정보 보존, 실패 시 입력 미변경을 검증합니다.
 

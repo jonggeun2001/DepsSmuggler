@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { downloadCommand } from './download';
@@ -112,7 +113,10 @@ describe('downloadCommand', () => {
       items: [],
     });
     createArchive.mockResolvedValue(undefined);
-    generateAllScripts.mockResolvedValue(undefined);
+    generateAllScripts.mockImplementation(async (_packages, outputDir) => [
+      { type: 'bash', path: path.join(outputDir, 'install.sh'), content: '#!/bin/sh' },
+      { type: 'powershell', path: path.join(outputDir, 'install.ps1'), content: '# install' },
+    ]);
     vi.mocked(resolveAllDependencies).mockResolvedValue({
       originalPackages: [
         {

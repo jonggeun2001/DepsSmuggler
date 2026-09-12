@@ -97,6 +97,7 @@ async function runChild(
   registryUrl: string,
   output: string,
   externalRequestMarker: string,
+  archiveFormat: 'zip' | 'tar.gz',
 ): Promise<ChildResult> {
   try {
     const result = await execFileAsync(process.execPath, [harnessPath], {
@@ -108,7 +109,7 @@ async function runChild(
         DEPS_SMUGGLER_EXTERNAL_REQUEST_MARKER: externalRequestMarker,
         DEPS_SMUGGLER_NPM_ARGS: JSON.stringify([
           'download', '--type', 'npm', '--package', 'fixture-root',
-          '--output', output, '--format', 'zip', '--concurrency', '1',
+          '--output', output, '--format', archiveFormat, '--concurrency', '1',
         ]),
         DEPS_SMUGGLER_TEST_USER_DIR: isolatedHome,
         NODE_OPTIONS: `--require ${JSON.stringify(isolateHomeScript)}`,
@@ -189,6 +190,12 @@ async function readZipEntries(filePath: string): Promise<Map<string, Buffer>> {
   });
 }
 
+async function readTarEntries(filePath: string): Promise<string[]> {
+  const entries: string[] = [];
+  await tar.t({ file: filePath, onentry: (entry) => entries.push(entry.path) });
+  return entries;
+}
+
 async function extractZip(entries: Map<string, Buffer>, destination: string): Promise<void> {
   for (const [entryName, bytes] of entries) {
     if (entryName.endsWith('/')) {
@@ -219,7 +226,7 @@ describe('npm CLI resolved root install integration', () => {
     tempRoot = undefined;
   });
 
-  it('uses the resolved root version for the offline installer when version is omitted', async () => {
+  it.each(['zip', 'tar.gz'] as const)('includes native installer scripts in the %s archive', async (archiveFormat) => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-npm-root-'));
     const rootTgz = await createPackageTarball(tempRoot, 'fixture-root', '3.0.1', {
       'fixture-dependency': '1.0.0',
@@ -279,7 +286,7 @@ describe('npm CLI resolved root install integration', () => {
     await fs.writeFile(harnessPath, childHarness);
 
     const externalRequestMarker = path.join(tempRoot, 'external-request-count.txt');
-    const child = await runChild(harnessPath, isolatedHome, registryUrl, output, externalRequestMarker);
+    const child = await runChild(harnessPath, isolatedHome, registryUrl, output, externalRequestMarker, archiveFormat);
     expect(child.code, child.stderr).toBe(0);
     expect(child.signal).toBeNull();
     expect(child.killed).toBe(false);
@@ -291,30 +298,32 @@ describe('npm CLI resolved root install integration', () => {
       '/fixture-dependency/-/fixture-dependency-1.0.0.tgz',
     ]));
 
-    const archiveName = (await fs.readdir(output)).find(name => /^packages-.*\.zip$/.test(name));
+    const archiveName = (await fs.readdir(output)).find(name => new RegExp(`^packages-.*\\.${archiveFormat === 'zip' ? 'zip' : 'tar\\.gz'}$`).test(name));
     expect(archiveName).toBeDefined();
     const archivePath = path.join(output, archiveName as string);
-    const entries = await readZipEntries(archivePath);
-    const manifest = JSON.parse(entries.get('manifest.json')?.toString('utf8') ?? '{}') as {
+    const bundle = path.join(tempRoot, `bundle extracted with spaces ${archiveFormat}`);
+    await fs.ensureDir(bundle);
+    const zipEntries = archiveFormat === 'zip' ? await readZipEntries(archivePath) : undefined;
+    const entryNames = zipEntries ? [...zipEntries.keys()] : await readTarEntries(archivePath);
+    if (archiveFormat === 'zip') {
+      await extractZip(zipEntries!, bundle);
+    } else {
+      await tar.x({ file: archivePath, cwd: bundle });
+    }
+    const manifest = JSON.parse(await fs.readFile(path.join(bundle, 'manifest.json'), 'utf8')) as {
       packages?: Array<{ name: string; version: string }>;
     };
     const manifestIdentity = (manifest.packages ?? [])
       .map(({ name, version }) => `${name}@${version}`)
       .sort();
     expect(manifestIdentity).toEqual(['fixture-dependency@1.0.0', 'fixture-root@3.0.1']);
-    const packageEntries = [...entries.keys()].filter(name => name.startsWith('packages/') && name.endsWith('.tgz'));
+    const packageEntries = entryNames.filter(name => name.startsWith('packages/') && name.endsWith('.tgz'));
     expect(packageEntries).toHaveLength(2);
-    expect(entries.has('install.sh')).toBe(false);
-    expect(entries.has('install.ps1')).toBe(false);
-
-    const bundle = path.join(tempRoot, 'bundle extracted with spaces');
-    await extractZip(entries, bundle);
+    expect(entryNames).toContain('install.sh');
+    expect(entryNames).toContain('install.ps1');
     const scriptNames = ['install.sh', 'install.ps1'] as const;
     for (const scriptName of scriptNames) {
-      const sourcePath = path.join(output, scriptName);
-      const bytes = await fs.readFile(sourcePath);
-      await fs.writeFile(path.join(bundle, scriptName), bytes);
-      expect(await fs.readFile(path.join(bundle, scriptName))).toEqual(bytes);
+      expect(await fs.pathExists(path.join(bundle, scriptName))).toBe(true);
     }
 
     if (server?.listening) {

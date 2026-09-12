@@ -436,21 +436,6 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
           : []
       )))];
 
-      // 압축 파일 생성
-      console.log(chalk.cyan('\n압축 파일 생성 중...'));
-
-      const archivePackager = getArchivePackager();
-      const archiveName = `packages-${Date.now()}.${options.format === 'zip' ? 'zip' : 'tar.gz'}`;
-      const archivePath = path.join(outputPath, archiveName);
-
-      await archivePackager.createArchive(files, archivePath, packages, {
-        format: options.format,
-        includeManifest: true,
-        includeReadme: true,
-      });
-
-      console.log(chalk.green(`✓ 압축 파일 생성 완료: ${archivePath}`));
-
       // 설치 스크립트 생성
       console.log(chalk.cyan('\n설치 스크립트 생성 중...'));
       const scriptGenerator = getScriptGenerator();
@@ -462,8 +447,25 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
       if (packages.some(pkg => pkg.type === 'conda')) {
         scriptOptions.condaPackageFiles = getCondaPackageFiles(result.items, outputPath);
       }
-      await scriptGenerator.generateAllScripts(packages, outputPath, scriptOptions);
+      const scripts = await scriptGenerator.generateAllScripts(packages, outputPath, scriptOptions);
       console.log(chalk.green('✓ 설치 스크립트 생성 완료'));
+
+      // 압축 파일 생성
+      console.log(chalk.cyan('\n압축 파일 생성 중...'));
+
+      const archivePackager = getArchivePackager();
+      const archiveName = `packages-${Date.now()}.${options.format === 'zip' ? 'zip' : 'tar.gz'}`;
+      const archivePath = path.join(outputPath, archiveName);
+
+      await archivePackager.createArchive(files, archivePath, packages, {
+        format: options.format,
+        includeManifest: true,
+        includeReadme: true,
+        rootFiles: scripts.map((script) => script.path),
+      });
+
+      console.log(chalk.green(`✓ 압축 파일 생성 완료: ${archivePath}`));
+
     } else {
       console.log(chalk.yellow('⚠ 다운로드 완료 (일부 실패)'));
 

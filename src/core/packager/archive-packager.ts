@@ -32,6 +32,7 @@ export interface ArchiveOptions {
   compressionLevel?: number; // 0-9
   includeManifest?: boolean;
   includeReadme?: boolean;
+  rootFiles?: string[]; // createArchive 전용: packages/ 밖에 파일명으로 포함할 파일
   onProgress?: (progress: ArchiveProgress) => void;
 }
 
@@ -77,6 +78,23 @@ export class ArchivePackager {
         ),
       };
     });
+
+    const rootNames = new Set(['packages']);
+    if (options.includeManifest !== false) rootNames.add('manifest.json');
+    if (options.includeReadme !== false) rootNames.add('readme.txt');
+    for (const file of options.rootFiles || []) {
+      const sourcePath = resolvePath(file);
+      const archivePath = path.posix.basename(toUnixPath(sourcePath));
+      const portableName = archivePath.toLowerCase();
+      if (!archivePath || archivePath === '.' || archivePath === '..' || rootNames.has(portableName)) {
+        throw new Error(`압축 루트 파일 이름이 중복됩니다: ${archivePath}`);
+      }
+      if (!(await fs.stat(sourcePath)).isFile()) {
+        throw new Error(`압축 루트 항목은 파일이어야 합니다: ${sourcePath}`);
+      }
+      rootNames.add(portableName);
+      fileEntries.push({ sourcePath, archivePath });
+    }
 
     return this.createArchiveFromFileEntries(fileEntries, outputPath, packages, options);
   }

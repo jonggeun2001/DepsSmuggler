@@ -16,7 +16,7 @@
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `createArchive` | files, outputPath, packages, options | Promise<string> | 파일 목록을 `packages/` 아래로 묶어 압축 |
+| `createArchive` | files, outputPath, packages, options | Promise<string> | 파일 목록을 `packages/` 아래로 묶고 `options.rootFiles`를 아카이브 root에 추가 |
 | `createArchiveFromDirectory` | sourceDir, outputPath, packages, options | Promise<string> | 준비된 디렉터리 구조를 유지한 채 압축 |
 | `getArchiveInfo` | archivePath: string | Promise<{ format, size, fileCount }> | 압축 파일 정보 조회 |
 | `verifyArchive` | archivePath: string | Promise<boolean> | 파일 존재 및 크기 > 0 확인 |
@@ -42,6 +42,7 @@ interface ArchiveOptions {
   compressionLevel?: number;   // 압축 레벨 (0-9, 기본 6)
   includeReadme?: boolean;     // README 포함 여부 (기본 true)
   includeManifest?: boolean;   // manifest.json 포함 여부 (기본 true)
+  rootFiles?: string[];        // createArchive 전용: 최상위에 파일명으로 포함할 파일
   onProgress?: (progress: ArchiveProgress) => void;
 }
 
@@ -86,7 +87,7 @@ const result = await packager.createArchiveFromDirectory(
 
 GUI 다운로드 경로에서는 `electron/download-handlers.ts`가 `createArchiveFromDirectory(...)`를 사용합니다. 그래서 `outputDir` 아래에 만들어 둔 `packages/`, `install.sh`, `install.ps1` 같은 파일이 그대로 아카이브에 포함되고, 최종 완료 이벤트는 실제 `.zip` 또는 `.tar.gz` 파일 경로를 반환합니다.
 
-CLI는 완료된 다운로드 항목이 반환한 파일 목록으로 `createArchive(...)`를 호출합니다. Maven 항목은 주 아티팩트와 부속 POM, 저장에 성공한 체크섬을 모두 포함하며 중복 경로는 제거합니다. 출력 디렉터리를 통째로 검색하지 않으므로 이전 압축물이나 다른 파일은 추가하지 않습니다. ZIP과 TAR.GZ 모두 동일한 목록과 Maven 상대 경로를 사용합니다.
+CLI는 완료된 다운로드 항목이 반환한 파일 목록으로 `createArchive(...)`를 호출하고, 생성한 `install.sh`·`install.ps1`을 `options.rootFiles`로 명시해 아카이브 최상위에 추가합니다. Maven 항목은 주 아티팩트와 부속 POM, 저장에 성공한 체크섬을 모두 포함하며 중복 경로는 제거합니다. 출력 디렉터리를 통째로 검색하지 않으므로 이전 압축물이나 다른 파일은 추가하지 않습니다. ZIP과 TAR.GZ 모두 동일한 목록과 Maven 상대 경로를 사용합니다. `rootFiles`의 파일 누락·디렉터리 입력·중복 이름·기본 메타데이터 경로 충돌은 압축 생성 전에 거부합니다.
 
 Maven에서 발견된 여러 버전의 JAR 등 아티팩트, 부속 POM 및 하위 의존성은 모두 반출 대상입니다. 압축기와 설치 스크립트는 각 type/classifier의 원본 경로와 체크섬을 보존합니다. 빌드에 사용할 버전을 하나로 줄여 파일 목록을 재구성하지 않습니다.
 
