@@ -4,6 +4,8 @@ type ResolvePackage = (pkg: PackageInfo) => Promise<PackageInfo[]>;
 
 const JUNIT_API = 'org.junit.jupiter:junit-jupiter-api';
 const JUNIT_ENGINE = 'org.junit.jupiter:junit-jupiter-engine';
+const VINTAGE_ENGINE = 'org.junit.vintage:junit-vintage-engine';
+const JUNIT4 = 'junit:junit';
 const PLATFORM_ENGINE = 'org.junit.platform:junit-platform-engine';
 const PLATFORM_LAUNCHER = 'org.junit.platform:junit-platform-launcher';
 const MAX_CONCURRENCY = 4;
@@ -77,13 +79,14 @@ export async function collectMavenTestRuntimePackages(
   const added = new Map<string, PackageInfo>();
   const resolvedRuntime = new Set<string>();
   const engineQueue: PackageInfo[] = [];
+  const directPlatformVersions = new Set<string>();
 
   const add = (pkg: PackageInfo): void => {
     const artifactKey = key(pkg);
     if (!added.has(artifactKey)) added.set(artifactKey, pkg);
   };
-  const queueEngine = (version: string): void => {
-    const engine = runtimePackage(JUNIT_ENGINE, version);
+  const queueEngine = (name: string, version: string): void => {
+    const engine = runtimePackage(name, version);
     add(engine);
     if (!resolvedRuntime.has(key(engine))) {
       resolvedRuntime.add(key(engine));
@@ -91,19 +94,30 @@ export async function collectMavenTestRuntimePackages(
     }
   };
 
+  const apiVersions = new Set<string>();
+  let hasJunit4 = false;
   for (const pkg of discovered) {
     if (pkg.type !== 'maven' || pkg.metadata?.type === 'pom') continue;
-    if (coordinate(pkg) === JUNIT_API) queueEngine(pkg.version);
-    if (coordinate(pkg) === PLATFORM_ENGINE) add(runtimePackage(PLATFORM_LAUNCHER, pkg.version));
+    if (coordinate(pkg) === JUNIT_API) apiVersions.add(pkg.version);
+    if (coordinate(pkg) === JUNIT4) hasJunit4 = true;
+    if (coordinate(pkg) === PLATFORM_ENGINE) directPlatformVersions.add(pkg.version);
+  }
+  for (const version of apiVersions) queueEngine(JUNIT_ENGINE, version);
+  if (hasJunit4 && apiVersions.size > 0) {
+    for (const version of apiVersions) queueEngine(VINTAGE_ENGINE, version);
   }
 
   while (engineQueue.length > 0) {
     const batch = engineQueue.splice(0, MAX_CONCURRENCY);
     const engineTrees = await mapLimited(batch, MAX_CONCURRENCY, resolvePackage);
     for (const pkg of engineTrees.flat()) {
-      if (coordinate(pkg) === PLATFORM_ENGINE) add(runtimePackage(PLATFORM_LAUNCHER, pkg.version));
+      if (pkg.type === 'maven' && pkg.metadata?.type !== 'pom' && coordinate(pkg) === PLATFORM_ENGINE) {
+        add(runtimePackage(PLATFORM_LAUNCHER, pkg.version));
+      }
     }
   }
+
+  for (const version of directPlatformVersions) add(runtimePackage(PLATFORM_LAUNCHER, version));
 
   return [...added.values()];
 }

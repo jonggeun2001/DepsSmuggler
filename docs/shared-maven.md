@@ -359,10 +359,10 @@ const version = managedVersions.get('org.springframework:spring-core');
 
 `collectMavenProjectPackages(content, { mavenVersion? })`는 전체 `<project>` XML을 받아 `PackageInfo[]`를 반환합니다. `MavenResolver.parseFromText()`와 Electron `maven:parseProject`가 같은 함수를 사용합니다. 제품 실행에 Java 또는 Maven 설치는 필요하지 않습니다.
 
-- 프로젝트 속성, 부모의 일반 의존성, dependencyManagement/import BOM을 해석하고 test/provided 직접 의존성도 유지합니다. 로컬 프로젝트 자체의 JAR를 원격 패키지로 추가하지 않습니다.
+- 프로젝트 속성, 부모의 일반 의존성, dependencyManagement/import BOM을 해석하고 test/provided 직접 의존성도 유지합니다. 자식의 직접 관리 선언은 부모 선언보다 우선합니다. 실제 라이브러리 전이 경로에서 쓰이는 프로젝트 관리 버전과 그 하위 경로도 추가 수집하며 원래 버전을 유지합니다. 미사용 관리 목록 전체를 펼치거나 로컬 프로젝트 자체의 JAR를 원격 패키지로 추가하지 않습니다.
 - 프로젝트와 부모의 `build/plugins`를 상속하고 `inherited=false`를 반영합니다. 명시 버전, 사용되는 pluginManagement 버전, 기본 lifecycle 버전 순으로 선택합니다. 사용하지 않는 pluginManagement 항목은 수집하지 않습니다.
 - Maven 버전 기본값은 `3.9.11`입니다. 숫자 형식 `3.x.y`의 공식 Maven Git 태그에서 `default-bindings.xml`을 조회해 packaging별 `validate`부터 `package`까지의 플러그인을 읽습니다. 조회 실패나 지원되지 않는 packaging은 오류이며 다른 버전이나 최신 플러그인으로 대체하지 않습니다. plugin metadata에 대상 버전·packaging·phase·원본 URL·SHA-256을 기록합니다.
-- Surefire/Failsafe의 실행용 provider는 일반 플러그인 의존성에 모두 선언되어 있지 않습니다. 선택된 플러그인 버전의 공개 `surefire-providers` POM에서 JUnit 3/4/4.7/Platform/TestNG provider 중 실제 배포된 모듈을 확인해 추가합니다. 다른 버전의 provider를 추정해 요청하지 않습니다. Platform provider가 있는 경우 프로젝트 라이브러리와 명시 plugin dependency의 전이 트리도 조회해 발견한 Jupiter API 버전에 맞는 engine, Platform engine 버전에 맞는 launcher를 추가합니다. 모든 발견 버전을 유지하므로 Surefire 자체가 선언한 launcher와 프로젝트 실행 시 요구되는 launcher가 달라도 함께 반출합니다.
+- Surefire/Failsafe의 실행용 provider는 일반 플러그인 의존성에 모두 선언되어 있지 않습니다. 선택된 플러그인 버전의 공개 `surefire-providers` POM에서 JUnit 3/4/4.7/Platform/TestNG provider 중 실제 배포된 모듈을 확인해 추가합니다. 다른 버전의 provider를 추정해 요청하지 않습니다. Platform provider가 있는 경우 프로젝트 라이브러리와 명시 plugin dependency의 전이 트리도 조회해 발견한 Jupiter API 버전에 맞는 engine, Platform engine 버전에 맞는 launcher를 추가합니다. JUnit 4와 Jupiter API가 함께 있으면 대응하는 Vintage engine도 준비합니다. 모든 발견 버전을 유지하므로 Surefire 자체가 선언한 launcher와 프로젝트 실행 시 요구되는 launcher가 달라도 함께 반출합니다.
 - 플러그인의 명시 dependencies와 부모/BOM POM도 장바구니 root가 됩니다. 이후 기존 의존성 포함 다운로드로 각 root의 JAR/POM 및 모든 발견 버전의 전이 의존성을 수집합니다. 다운로드한 일반 라이브러리 POM의 build plugin까지 재귀적으로 확장하지 않습니다.
 
 범위는 단일 프로젝트의 `package`입니다. `clean`, `install`, `deploy`, `site`는 별도 플러그인 준비가 필요합니다. 프로필·다중 모듈·build extensions가 있는 입력/부모 모델, system 파일 의존성, 미해결 속성·범위·버전 미지정 좌표는 부분 성공 대신 오류로 반환합니다. 프로필/모듈은 대상 환경의 단일 모듈 effective POM에서 해당 선언을 제거해 입력하고 확장은 별도로 준비해야 합니다. 임의 플러그인의 실행 중 외부 다운로드와 사용자 정의 저장소까지 보장하지는 않습니다.

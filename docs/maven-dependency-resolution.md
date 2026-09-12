@@ -977,3 +977,5 @@ dependencyManagement 적용과 각 루트의 dependency tree는 재사용하지 
 전체 POM 입력은 `maven-project.ts`에서 프로젝트/부모의 effective 의존성, 실제 적용되는 build plugin, 대상 Maven의 package lifecycle plugin을 root 목록으로 변환합니다. 동기식 dependency 태그 파싱만으로는 기본 resources/compiler/surefire/jar plugin을 찾을 수 없어 이 단계를 비동기 프로젝트 입력 경로로 분리했습니다. 이후 BFS는 기존과 같이 각 root의 모든 발견 버전과 필요한 모델 POM을 수집합니다. 일반 라이브러리의 빌드 플러그인 전체를 BFS에 추가하지 않습니다.
 
 대상 Maven 버전과 packaging을 반영한 기본 플러그인 표의 출처/해시를 plugin metadata로 보존합니다. 미사용 관리 항목의 전수 다운로드나 Maven 충돌 승자 중재는 추가하지 않습니다. API·상속 규칙·지원 제한은 [shared Maven](shared-maven.md#프로젝트-pom과-package-플러그인-수집)에 정리되어 있습니다.
+
+프로젝트 관리 버전은 `maven-project-managed.ts`에서 일반 라이브러리 의존성 경로에 한정해 추가 수집합니다. 최초 root의 명시 버전은 그대로 두고 실제 자손의 G:A:type:classifier에 대응하는 관리 버전과 그 자손을 반복 탐색합니다. model POM만 조회됐다는 이유로 관리 항목을 실제 의존성으로 확장하지 않으며 plugin dependency에는 프로젝트의 라이브러리 관리 버전을 적용하지 않습니다.

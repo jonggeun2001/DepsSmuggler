@@ -4,10 +4,12 @@ import { fetchPom } from './maven-cache';
 import { loadMavenLifecyclePlugins } from './maven-lifecycle';
 import { loadMavenSurefireProviders } from './maven-surefire';
 import { collectMavenTestRuntimePackages } from './maven-test-runtime';
+import { collectMavenManagedPackages } from './maven-project-managed';
 
 vi.mock('./maven-cache', () => ({ fetchPom: vi.fn() }));
 vi.mock('./maven-surefire', () => ({ loadMavenSurefireProviders: vi.fn() }));
 vi.mock('./maven-test-runtime', () => ({ collectMavenTestRuntimePackages: vi.fn() }));
+vi.mock('./maven-project-managed', () => ({ collectMavenManagedPackages: vi.fn() }));
 vi.mock('./maven-lifecycle', () => ({
   DEFAULT_MAVEN_BUILD_VERSION: '3.9.11',
   loadMavenLifecyclePlugins: vi.fn(),
@@ -29,6 +31,7 @@ describe('project POM package collection', () => {
     });
     vi.mocked(fetchPom).mockRejectedValue(new Error('unexpected model fetch'));
     vi.mocked(collectMavenTestRuntimePackages).mockResolvedValue([]);
+    vi.mocked(collectMavenManagedPackages).mockResolvedValue([]);
   });
 
   it('resolves properties and retains provided/test roots alongside package lifecycle plugins, without downloading the local project', async () => {
@@ -89,6 +92,10 @@ describe('project POM package collection', () => {
       expect.objectContaining({ name: 'lib:bom', version: '1', metadata: expect.objectContaining({ type: 'pom' }) }),
     ]));
     expect(result.some(p => p.name === 'lib:unused')).toBe(false);
+    expect(collectMavenManagedPackages).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ name: 'lib:used', version: '2' })]),
+      new Map([['lib:used', '2'], ['lib:unused', '9']]),
+    );
   });
 
   it('honors an explicit plugin version over pluginManagement and the target lifecycle version', async () => {

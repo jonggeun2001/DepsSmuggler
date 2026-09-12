@@ -30,6 +30,7 @@ interface ModelFrame {
   parentResult?: ModelResult;
   isParent: boolean;
   isImport: boolean;
+  protectedManagementKeys: Set<string>;
 }
 
 interface ModelResult {
@@ -91,8 +92,7 @@ export class MavenBomProcessor {
     const previousManagement = this.dependencyManagement;
     this.setDependencyManagement(new Map(rootManagement));
     try {
-      const model = await this.walkModels(this.frame(pom, coordinate, undefined, false));
-      await this.processDependencyManagement(pom, model.properties);
+      const model = await this.walkModels(this.frame(pom, coordinate, undefined, true));
       return {
         properties: model.properties,
         dependencyManagement: this.dependencyManagement,
@@ -168,6 +168,7 @@ export class MavenBomProcessor {
       importIndex: 0,
       isParent,
       isImport,
+      protectedManagementKeys: new Set(this.dependencyManagement.keys()),
     };
   }
 
@@ -424,8 +425,10 @@ export class MavenBomProcessor {
             } else {
               const version = resolved.version || '';
               const key = dependencyManagementKey(resolved);
-              // Preserve first registration; BOMs are visited in declaration order.
-              if (version && !this.dependencyManagement.has(key)) {
+              // Preserve entries inherited before this model frame (root/parent
+              // management, or an earlier import), while allowing this model's
+              // own declaration to override a parent declaration.
+              if (version && !current.protectedManagementKeys.has(key)) {
                 this.dependencyManagement.set(key, version);
               }
             }

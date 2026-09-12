@@ -9,6 +9,7 @@ import { DEFAULT_MAVEN_BUILD_VERSION, loadMavenLifecyclePlugins } from './maven-
 import { resolveProperty } from './maven-pom-utils';
 import { loadMavenSurefireProviders } from './maven-surefire';
 import { collectMavenTestRuntimePackages } from './maven-test-runtime';
+import { collectMavenManagedPackages } from './maven-project-managed';
 import type { MavenCoordinate, PomDependency, PomPlugin, PomProject } from './maven-types';
 
 export interface MavenProjectOptions { mavenVersion?: string }
@@ -94,6 +95,10 @@ export async function collectMavenProjectPackages(
     }, { scope, origin });
   };
   for (const dependency of effective.dependencies) addDependency(dependency, 'project-dependency');
+  for (const managed of await collectMavenManagedPackages([...packages.values()], effective.dependencyManagement)) {
+    const [groupId, artifactId] = managed.name.split(':');
+    add({ groupId, artifactId, version: managed.version }, managed.metadata);
+  }
   for (const model of processor.getRequiredPoms()) add({ ...model, type: 'pom' }, { origin: 'project-model' });
 
   // Only the submitted project's parent chain contributes build declarations.
@@ -162,7 +167,7 @@ export async function collectMavenProjectPackages(
   }
   if (usesJUnitPlatformProvider) {
     const projectInputs = [...packages.values()].filter(pkg =>
-      ['project-dependency', 'project-plugin-dependency'].includes(String(pkg.metadata?.origin)),
+      ['project-dependency', 'project-managed-dependency', 'project-plugin-dependency'].includes(String(pkg.metadata?.origin)),
     );
     for (const runtime of await collectMavenTestRuntimePackages(projectInputs)) {
       const [groupId, artifactId] = runtime.name.split(':');

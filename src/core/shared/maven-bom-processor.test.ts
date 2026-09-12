@@ -62,6 +62,28 @@ describe('Maven required parent and imported BOM models', () => {
     expect([...rootManagement]).toEqual([['test:library', '5']]);
   });
 
+  it('allows a child direct management entry to override every parent level', async () => {
+    const { processor } = fixture({
+      'parent:1': { parent: parent('grandparent'), dependencyManagement: managed(coord('library', '2')) },
+      'grandparent:1': { dependencyManagement: managed(coord('library', '1')) },
+    });
+    const result = await processor.processModel({
+      parent: parent('parent'), dependencyManagement: managed(coord('library', '3')),
+    }, coord('child'), new Map());
+    expect(result.dependencyManagement.get('test:library')).toBe('3');
+  });
+
+  it('keeps parent management ahead of a child imported BOM', async () => {
+    const { processor } = fixture({
+      'parent:1': { dependencyManagement: managed(coord('library', '1')) },
+      'bom:1': { dependencyManagement: managed(coord('library', '2')) },
+    });
+    const result = await processor.processModel({
+      parent: parent('parent'), dependencyManagement: managed(bom('bom')),
+    }, coord('child'), new Map());
+    expect(result.dependencyManagement.get('test:library')).toBe('1');
+  });
+
   it('restores the previous management map after a required model failure', async () => {
     const { processor } = fixture({});
     const original = new Map([['test:existing', '9']]);
