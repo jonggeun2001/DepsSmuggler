@@ -6,10 +6,17 @@ import { isWindows } from './path-utils';
 import type { PackageInfo } from '../../types';
 import { createNpmInstallPlan, type NpmInstallPlan, type NpmPackageFile } from '../packager/npm-install-plan';
 import { buildNpmBashInstallLines, buildNpmPowerShellInstallLines } from '../packager/npm-install-script';
+import {
+  getCondaArchivePaths,
+  buildCondaBashInstallLines,
+  buildCondaPowerShellInstallLines,
+  type CondaPackageFile,
+} from '../packager/conda-install-script';
 
 export interface InstallScriptOptions {
   npmRootPackages?: PackageInfo[];
   npmPackageFiles?: NpmPackageFile[];
+  condaPackageFiles?: CondaPackageFile[];
 }
 
 /**
@@ -35,8 +42,15 @@ export async function generateInstallScripts(
         options.npmRootPackages,
       )
     : undefined;
-  const bashScript = generateBashScript(packages, npmPlan);
-  const psScript = generatePowerShellScript(packages, npmPlan);
+  const condaPackages = packages.filter(pkg => pkg.type === 'conda');
+  const condaArchivePaths = condaPackages.length > 0
+    ? getCondaArchivePaths(
+        condaPackages.map(pkg => ({ ...pkg, type: 'conda' as const })),
+        options.condaPackageFiles,
+      )
+    : undefined;
+  const bashScript = generateBashScript(packages, npmPlan, condaArchivePaths);
+  const psScript = generatePowerShellScript(packages, npmPlan, condaArchivePaths);
 
   // Windows에서는 mode 옵션이 무시되므로 조건부 처리
   const bashWriteOptions = isWindows ? {} : { mode: 0o755 };
@@ -62,12 +76,11 @@ export async function generateInstallScripts(
 /**
  * Bash 설치 스크립트 생성
  */
-function generateBashScript(packages: DownloadPackage[], npmPlan?: NpmInstallPlan): string {
+function generateBashScript(
+  packages: DownloadPackage[], npmPlan?: NpmInstallPlan, condaArchivePaths?: string[],
+): string {
   const pipPackages = packages.filter((p) => p.type === 'pip');
-  const condaPackages = packages.filter((p) => p.type === 'conda');
   const mavenPackages = packages.filter((p) => p.type === 'maven');
-  const hasPythonPackages =
-    pipPackages.length > 0 || condaPackages.length > 0;
 
   return `#!/bin/bash
 # DepsSmuggler 설치 스크립트
@@ -79,13 +92,14 @@ echo "Installing packages..."
 
 SCRIPT_DIR="$( cd "$( dirname "\${BASH_SOURCE[0]}" )" && pwd )"
 
-${npmPlan ? `PACKAGE_DIR="$SCRIPT_DIR/packages"
+${npmPlan || condaArchivePaths ? `PACKAGE_DIR="./packages"
 log_info() { echo "$@"; }
 log_error() { echo "$@" >&2; }
-${buildNpmBashInstallLines(npmPlan).join('\n')}
+${npmPlan ? buildNpmBashInstallLines(npmPlan).join('\n') : ''}
+${condaArchivePaths ? buildCondaBashInstallLines(condaArchivePaths).join('\n') : ''}
 ` : ''}
 
-${hasPythonPackages ? `PIP_FIND_LINK_ARGS=()
+${pipPackages.length > 0 ? `PIP_FIND_LINK_ARGS=()
 while IFS= read -r -d '' directory; do
     PIP_FIND_LINK_ARGS+=(--find-links="$directory")
 done < <(find "$SCRIPT_DIR/packages" -type d -print0)
@@ -94,9 +108,7 @@ done < <(find "$SCRIPT_DIR/packages" -type d -print0)
 ${pipPackages.length > 0 ? `# pip 패키지 설치
 ${pipPackages.map((p) => `pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" ${p.name}==${p.version}`).join('\n')}
 ` : ''}
-${condaPackages.length > 0 ? `# conda 패키지 설치
-${condaPackages.map((p) => `pip install --no-index "\${PIP_FIND_LINK_ARGS[@]}" ${p.name}==${p.version}`).join('\n')}
-` : ''}
+${condaArchivePaths ? 'install_conda_packages || exit 1' : ''}
 ${mavenPackages.length > 0 ? `# Maven 아티팩트 복사
 echo "Maven artifacts are in packages/ directory"
 ` : ''}
@@ -108,12 +120,11 @@ echo "Installation complete!"
 /**
  * PowerShell 설치 스크립트 생성
  */
-function generatePowerShellScript(packages: DownloadPackage[], npmPlan?: NpmInstallPlan): string {
+function generatePowerShellScript(
+  packages: DownloadPackage[], npmPlan?: NpmInstallPlan, condaArchivePaths?: string[],
+): string {
   const pipPackages = packages.filter((p) => p.type === 'pip');
-  const condaPackages = packages.filter((p) => p.type === 'conda');
   const mavenPackages = packages.filter((p) => p.type === 'maven');
-  const hasPythonPackages =
-    pipPackages.length > 0 || condaPackages.length > 0;
 
   return `# DepsSmuggler 설치 스크립트
 # 생성일: ${new Date().toISOString()}
@@ -126,12 +137,13 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $PackagesDir = Join-Path -Path $ScriptDir -ChildPath 'packages'
 
-${npmPlan ? `$PackageDir = $PackagesDir
+${npmPlan || condaArchivePaths ? `$PackageDir = $PackagesDir
 function Write-Info { param([string]$Message) Write-Host $Message }
-${buildNpmPowerShellInstallLines(npmPlan).join('\n')}
+${npmPlan ? buildNpmPowerShellInstallLines(npmPlan).join('\n') : ''}
+${condaArchivePaths ? buildCondaPowerShellInstallLines(condaArchivePaths).join('\n') : ''}
 ` : ''}
 
-${hasPythonPackages ? `$PipFindLinkArgs = @("--find-links=$PackagesDir")
+${pipPackages.length > 0 ? `$PipFindLinkArgs = @("--find-links=$PackagesDir")
 $PipFindLinkArgs += @(
     Get-ChildItem -Path $PackagesDir -Directory -Recurse |
         ForEach-Object { "--find-links=$($_.FullName)" }
@@ -142,9 +154,7 @@ ${pipPackages.length > 0 ? `# pip 패키지 설치
 ${pipPackages.map((p) => `pip install --no-index @PipFindLinkArgs ${p.name}==${p.version}
 if ($LASTEXITCODE -ne 0) { throw "pip 패키지 설치에 실패했습니다: 종료 코드 $LASTEXITCODE" }`).join('\n')}
 ` : ''}
-${condaPackages.length > 0 ? `# conda 패키지 설치
-${condaPackages.map((p) => `pip install --no-index @PipFindLinkArgs ${p.name}==${p.version}`).join('\n')}
-` : ''}
+${condaArchivePaths ? 'Install-CondaPackages' : ''}
 ${mavenPackages.length > 0 ? `# Maven 아티팩트 복사
 Write-Host "Maven artifacts are in packages/ directory"
 ` : ''}

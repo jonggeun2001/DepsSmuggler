@@ -129,7 +129,7 @@ const archive = archiver('zip', { zlib: { level: 9 } });
 | `generatePowerShellScript` | packages, outputPath, options? | Promise<string> | PowerShell 스크립트 생성 |
 | `generateAllScripts` | packages, outputDir, options? | Promise<GeneratedScript[]> | 모든 형식 스크립트 생성 |
 
-Electron GUI의 shared `generateInstallScripts`도 비동기 생성기이며, npm 패키지가 포함된 경우 공통 `ScriptGenerator`의 npm plan/runtime section을 재사용합니다. delivery pipeline은 실제 다운로드가 끝난 뒤 생성기를 기다린 다음 아카이브를 만듭니다. npm을 포함하지 않는 GUI 묶음은 기존 non-npm 설치기 분기를 계속 사용합니다.
+Electron GUI의 shared `generateInstallScripts`도 비동기 생성기이며, npm 또는 Conda 패키지가 포함된 경우 공통 `ScriptGenerator`의 해당 설치 section을 재사용합니다. delivery pipeline은 실제 다운로드가 끝난 뒤 생성기를 기다린 다음 아카이브를 만듭니다. 성공 결과의 실제 파일 경로를 Conda·npm mapping으로 전달하므로 metadata filename이나 다른 패키지의 파일을 추측하지 않습니다. 두 패키지 타입이 없는 GUI 묶음은 기존 non-npm 설치기 분기를 계속 사용합니다.
 
 ### 내부 메서드
 
@@ -207,11 +207,11 @@ CLI와 GUI는 `npmRootPackages`에 직접 요청 목록과 해결된 확정 버�
 
 상위 폴더의 사용자 `package.json`은 변경하지 않습니다. `npm-project`는 비어 있거나 이 스크립트가 생성한 프로젝트여야 하며, 소유 표시가 없는 기존 프로젝트나 심볼릭 링크 대상은 오류로 처리합니다. 설치용 manifest는 유지하지만 프로젝트 루트의 lockfile은 생성하지 않으며 npm 자체 업데이트 확인도 끕니다. Node.js와 npm이 필요하며, 도구 부재·빈 파일 목록·의존성 누락·손상된 tarball·설치 명령 실패는 오류 종료로 이어집니다. npm의 일반 설치 lifecycle은 유지합니다. 이 스크립트는 의존성을 전달된 파일에 연결하며, OS·아키텍처 간 네이티브 패키지 변환이나 설치 lifecycle의 외부 다운로드 대체는 수행하지 않습니다.
 
-Conda는 pip와 별도의 설치 블록을 생성합니다. CLI는 완료된 Conda 다운로드 항목의 실제 파일 경로를 `condaPackageFiles`로 전달하므로 `--no-deps` 입력의 메타데이터에 파일명이 없어도 다운로드한 파일을 참조합니다. 이 옵션을 생략한 API 호출은 각 Conda 항목의 정확한 `metadata.filename`을 사용합니다. 파일명 누락·빈 명시 목록·잘못된 상대 경로·지원하지 않는 확장자는 생성 오류이며, 다른 패키지의 `.tar.bz2`를 함께 설치하지 않도록 폴더 전체를 확장자로 탐색하지 않습니다. 실행 시에는 선언된 파일의 존재를 확인합니다.
+Conda는 pip와 별도의 설치 블록을 생성합니다. CLI와 GUI는 완료된 Conda 다운로드 항목의 실제 파일 경로를 `condaPackageFiles`로 전달하므로 `--no-deps` 입력의 메타데이터에 파일명이 없어도 다운로드한 파일을 참조합니다. 이 옵션을 생략한 API 호출은 각 Conda 항목의 정확한 `metadata.filename`을 사용합니다. 파일명 누락·빈 명시 목록·잘못된 상대 경로·지원하지 않는 확장자는 생성 오류이며, 다른 패키지의 `.tar.bz2`를 함께 설치하지 않도록 폴더 전체를 확장자로 탐색하지 않습니다. 실행 시에는 선언된 파일의 존재를 확인합니다.
 
 Conda 블록은 [명시적 로컬 아카이브 설치](https://docs.conda.io/projects/conda/en/stable/commands/install.html)를 사용합니다. 기본 대상 `SCRIPT_DIR/conda-env`가 없으면 `conda create --offline --yes --no-default-packages --prefix ...`를, 기존 Conda 환경이면 `conda install --offline --yes --prefix ...`를 실행합니다. `DEPS_SMUGGLER_CONDA_PREFIX`로 대상을 지정할 수 있고 상대 경로는 스크립트 폴더 기준입니다. 일반 파일·디렉터리를 기존 환경으로 덮어쓰지 않으며, 필수 파일이나 Conda가 없거나 명령이 실패하면 Bash·PowerShell 모두 non-zero로 종료합니다. `includeErrorHandling: false`여도 Conda 실패를 성공으로 처리하지 않습니다.
 
-명시적 파일 설치는 전달된 파일 집합을 설치하며 의존성·버전·아키텍처 호환성을 다시 해결하지 않습니다. Python noarch 패키지는 대상 환경에 호환되는 Python이 필요하므로, `--no-deps` 묶음은 기존 환경을 지정하거나 런타임을 별도로 준비해야 합니다. GUI와 CLI는 npm 설치 계획과 runtime을 공유하지만, GUI의 현재 Conda `pip install` 동작 변경은 이 문서 범위가 아니며 #137에서 별도로 다룹니다.
+명시적 파일 설치는 전달된 파일 집합을 설치하며 의존성·버전·아키텍처 호환성을 다시 해결하지 않습니다. Python noarch 패키지는 대상 환경에 호환되는 Python이 필요하므로, `--no-deps` 묶음은 기존 환경을 지정하거나 런타임을 별도로 준비해야 합니다. 기본 환경 경로는 `SCRIPT_DIR/conda-env`이고 `DEPS_SMUGGLER_CONDA_PREFIX`에 절대 경로나 스크립트 기준 상대 경로를 지정할 수 있습니다. GUI와 CLI는 npm·Conda 설치 section을 공유하며, Conda가 포함된 묶음은 Conda 명령이 성공해야 전체 성공으로 처리합니다.
 
 일반 `ScriptGenerator`에는 APT·APK 전용 설치 블록이 없습니다. OS 다운로드 전용 스크립트는 별도의 `OSScriptGenerator`가 제공합니다. `includeVerification`/`mirrorPath` 옵션은 이 클래스에 없습니다.
 

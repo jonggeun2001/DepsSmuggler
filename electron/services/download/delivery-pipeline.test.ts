@@ -93,7 +93,61 @@ describe('createDeliveryPipeline', () => {
     expect(generateInstallScripts).toHaveBeenCalledWith('/tmp/out', [...base.deliveredPackages, npm], {
       npmRootPackages: roots,
       npmPackageFiles: [{ filePath: '/tmp/out/packages/npm/custom-name.tgz', relativePath: 'npm/custom-name.tgz' }],
+      condaPackageFiles: [],
     });
+  });
+
+  it('Conda 결과의 실제 파일 경로를 packages 기준 상대 경로로 스크립트 생성기에 전달한다', async () => {
+    const generateInstallScripts = vi.fn().mockResolvedValue(undefined);
+    const pipeline = createDeliveryPipeline({
+      archivePackager: { createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.zip') } as never,
+      generateInstallScripts,
+      initializeEmailSender: vi.fn() as never,
+      getFileSplitter: vi.fn() as never,
+      stat: vi.fn() as never,
+    });
+    const base = createBaseParams();
+    const conda = { id: 'conda-six', type: 'conda', name: 'six', version: '1.16.0' };
+    await pipeline.finalizeDownload({
+      ...base,
+      deliveredPackages: [...base.deliveredPackages, conda],
+      results: [...base.results, { id: conda.id, success: true, filePath: '/tmp/out/packages/conda/six-1.16.0-0.tar.bz2' }],
+      options: { ...base.options, includeScripts: true },
+      progressEmitter: { emitDownloadStatus: vi.fn() } as never,
+      isCancelled: () => false,
+    });
+
+    expect(generateInstallScripts).toHaveBeenCalledWith('/tmp/out', [...base.deliveredPackages, conda], {
+      npmPackageFiles: [],
+      npmRootPackages: undefined,
+      condaPackageFiles: [{ relativePath: 'conda/six-1.16.0-0.tar.bz2' }],
+    });
+  });
+
+  it('Conda 성공 결과에 실제 파일 경로가 없으면 스크립트와 아카이브를 만들지 않는다', async () => {
+    const generateInstallScripts = vi.fn().mockResolvedValue(undefined);
+    const createArchiveFromDirectory = vi.fn().mockResolvedValue('/tmp/out.zip');
+    const pipeline = createDeliveryPipeline({
+      archivePackager: { createArchiveFromDirectory } as never,
+      generateInstallScripts,
+      initializeEmailSender: vi.fn() as never,
+      getFileSplitter: vi.fn() as never,
+      stat: vi.fn() as never,
+    });
+    const base = createBaseParams();
+    const conda = { id: 'conda-six', type: 'conda', name: 'six', version: '1.16.0' };
+    const result = await pipeline.finalizeDownload({
+      ...base,
+      deliveredPackages: [...base.deliveredPackages, conda],
+      results: [...base.results, { id: conda.id, success: true }],
+      options: { ...base.options, includeScripts: true },
+      progressEmitter: { emitDownloadStatus: vi.fn() } as never,
+      isCancelled: () => false,
+    });
+
+    expect(result).toMatchObject({ success: false, error: 'Conda 패키지 파일 경로가 없습니다: six@1.16.0' });
+    expect(generateInstallScripts).not.toHaveBeenCalled();
+    expect(createArchiveFromDirectory).not.toHaveBeenCalled();
   });
 
   it('지원하지 않는 출력 형식이면 실패 payload를 반환해야 함', async () => {
