@@ -592,7 +592,7 @@ Maven 관리 버전은 G:A:type:classifier가 같은 의존성에만 적용합�
 
 `root`의 수집 의존성 그래프와 `flatList`의 다운로드 대상 목록은 같지 않을 수 있습니다. 모델 POM은 `flatList`에만 추가되므로 다운로드 UI는 `root.dependencies`만 다시 펼쳐 전체 파일 목록을 만들지 않습니다. renderer는 루트별 `flatList`로 다운로드 그룹을 연결하고, 장바구니 미리보기는 그래프 밖의 POM을 별도 목록으로 보여줍니다. 이 표시를 위해 모델 POM을 실행 의존성 간선으로 추가하지 않습니다.
 
-실제 라이브러리 의존성은 `<dependencies>`와 기존 scope·optional·최대 깊이 설정에 따라 선택합니다. Parent POM의 일반 `<dependencies>`는 모델 상속에 따라 자식에 적용합니다. `<dependencyManagement>`는 버전 관리 정보이며, 그 안의 사용하지 않는 라이브러리를 전부 펼치지 않습니다. `type=pom`, `scope=import`인 BOM 자체와 모델 해석에 필요한 부모 POM을 모으는 과정은 이 라이브러리 선택과 별개입니다. `dependencies`가 없는 BOM 루트도 자신의 POM과 필요한 모델 POM만 포함합니다.
+실제 라이브러리 의존성은 `<dependencies>`와 기존 scope·optional·최대 깊이 설정에 따라 선택합니다. Parent POM의 일반 `<dependencies>`는 모델 상속에 따라 자식에 적용합니다. 부모 `dependencyManagement`의 속성·`project.version` 표현식은 자식 문맥으로 해석합니다. 직접 관리 선언은 자식, 부모 순으로 우선하고, 그 뒤 자식의 import BOM, 상속된 import BOM 순으로 관리 값을 채웁니다. 같은 BOM GA의 다른 버전 import는 자식 선언을 사용합니다. `<dependencyManagement>`는 버전 관리 정보이며, 그 안의 사용하지 않는 라이브러리를 전부 펼치지 않습니다. `type=pom`, `scope=import`인 BOM 자체와 모델 해석에 필요한 부모 POM을 모으는 과정은 이 라이브러리 선택과 별개입니다. `dependencies`가 없는 BOM 루트도 자신의 POM과 필요한 모델 POM만 포함합니다.
 
 전이 패키지의 부모/BOM 관리 맵은 모델별로 분리합니다. 한 형제의 미사용 관리 항목이 다른 형제의 버전을 바꾸지 않으며, 필요한 모델 POM의 수집과 조회 캐시는 요청 전체에서 공유합니다.
 
@@ -655,7 +655,9 @@ const deps = await resolver.parseFromText(`
 
 ### 텍스트 입력의 의존성 type 보존
 
-`MavenResolver.parseFromText()`는 각 `<dependency>`의 `<type>` 값을 다운로드 메타데이터에 보존합니다. `CartPage`의 POM 파일/텍스트 입력도 같은 artifact type을 장바구니 metadata로 유지하며, Maven의 장바구니 중복 판정은 type까지 비교합니다. 따라서 같은 GAV의 기본 JAR과 `<type>pom</type>` 의존성이 함께 있어도 둘 다 유지됩니다. Electron 다운로드 라우터는 이 metadata를 `MavenDownloader`에 전달하므로 `org.apache.flink:flink-metrics:1.20.5`처럼 POM으로 선언된 의존성은 JAR 기본값으로 바뀌지 않고 `.pom` 및 해당 체크섬 파일로 다운로드되며, 평탄화된 복사본도 `.pom` 확장자를 사용합니다.
+`MavenResolver.parseFromText(content, { mavenVersion? })`는 전체 프로젝트 POM에서 의존성·부모/BOM·package 플러그인을 수집합니다. 기본 Maven 버전은 3.9.11이며 원격의 공식 버전별 lifecycle 표를 조회합니다. 프로젝트 자체는 다운로드 대상에서 제외하고 test 의존성도 유지합니다. 구체적인 버전을 해석할 수 없으면 실패합니다. 상세 계약과 제한은 [프로젝트 POM 수집](shared-maven.md#프로젝트-pom과-package-플러그인-수집)을 참고하세요.
+
+각 `<dependency>`의 `<type>` 값은 다운로드 메타데이터에 보존합니다. `CartPage`의 POM 파일/텍스트 입력도 같은 artifact type을 장바구니 metadata로 유지하며, Maven의 장바구니 중복 판정은 type까지 비교합니다. 따라서 같은 GAV의 기본 JAR과 `<type>pom</type>` 의존성이 함께 있어도 둘 다 유지됩니다. Electron 다운로드 라우터는 이 metadata를 `MavenDownloader`에 전달하므로 `org.apache.flink:flink-metrics:1.20.5`처럼 POM으로 선언된 의존성은 JAR 기본값으로 바뀌지 않고 `.pom` 및 해당 체크섬 파일로 다운로드되며, 평탄화된 복사본도 `.pom` 확장자를 사용합니다.
 
 장바구니 파서는 기존 입력 호환성을 위해 `dependencyManagement`의 BOM을 포함한 모든 `<dependency>` 선언을 수집합니다.
 

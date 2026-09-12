@@ -24,7 +24,6 @@ import {
   MavenCoordinate,
   coordinateToString,
   coordinateToKey,
-  dependencyManagementKey,
 } from '../shared/maven-types';
 import {
   MavenQueueProcessor,
@@ -39,7 +38,7 @@ import {
 } from '../shared/maven-cache';
 
 // 분리된 유틸리티 모듈
-import { resolveProperty } from '../shared/maven-pom-utils';
+import { collectMavenProjectPackages, type MavenProjectOptions } from '../shared/maven-project';
 import { MavenBomProcessor } from '../shared/maven-bom-processor';
 import { getPackageArtifactKey } from '../shared/dependency-tree-utils';
 import { MAVEN_CONSTANTS } from '../constants/maven';
@@ -591,70 +590,9 @@ export class MavenResolver implements IResolver {
     return results;
   }
 
-  /**
-   * pom.xml 텍스트 파싱
-   */
-  async parseFromText(content: string): Promise<PackageInfo[]> {
-    try {
-      const parsed = this.parser.parse(content);
-      const pom = parsed.project as PomProject;
-      const packages: PackageInfo[] = [];
-
-      // dependencyManagement 처리
-      this.bomProcessor.clearDependencyManagement();
-      await this.bomProcessor.processDependencyManagement(pom, pom.properties);
-
-      const dependencyManagement = this.bomProcessor.getDependencyManagement();
-
-      // 프로젝트 자체
-      const projectGroupId = pom.groupId || pom.parent?.groupId;
-      const projectVersion = pom.version || pom.parent?.version;
-
-      if (projectGroupId && pom.artifactId && projectVersion) {
-        packages.push({
-          type: 'maven',
-          name: `${projectGroupId}:${pom.artifactId}`,
-          version: projectVersion,
-          metadata: {
-            groupId: projectGroupId,
-            artifactId: pom.artifactId,
-          },
-        });
-      }
-
-      // Dependencies
-      const deps = pom.dependencies?.dependency;
-      if (deps) {
-        const dependencies = Array.isArray(deps) ? deps : [deps];
-
-        for (const dep of dependencies) {
-          const scope = dep.scope as DependencyScope;
-          if (scope === 'test') continue;
-
-          let version = resolveProperty(dep.version || '', pom.properties);
-          if (!version) {
-            version = dependencyManagement.get(dependencyManagementKey(dep)) || 'LATEST';
-          }
-
-          packages.push({
-            type: 'maven',
-            name: `${dep.groupId}:${dep.artifactId}`,
-            version,
-            metadata: {
-              groupId: dep.groupId,
-              artifactId: dep.artifactId,
-              scope: dep.scope,
-              type: dep.type,
-            },
-          });
-        }
-      }
-
-      return packages;
-    } catch (error) {
-      logger.error('pom.xml 파싱 실패', { error });
-      throw error;
-    }
+  /** Collect project dependencies and package lifecycle plugins from a full POM. */
+  async parseFromText(content: string, options?: MavenProjectOptions): Promise<PackageInfo[]> {
+    return collectMavenProjectPackages(content, options);
   }
 
   /**

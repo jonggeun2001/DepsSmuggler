@@ -6,6 +6,12 @@ export interface ParsedMavenPomDependency {
   metadata?: Record<string, unknown>;
 }
 
+/** Identify the XML root without mistaking a comment for a project POM. */
+export function isMavenProjectPom(content: string): boolean {
+  const parsed = new XMLParser({ removeNSPrefix: true, parseTagValue: false }).parse(content);
+  return Object.prototype.hasOwnProperty.call(parsed, 'project');
+}
+
 function collectDependencyEntries(value: unknown): Record<string, unknown>[] {
   if (!value || typeof value !== 'object') return [];
   if (Array.isArray(value)) return value.flatMap(collectDependencyEntries);

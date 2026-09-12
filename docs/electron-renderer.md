@@ -158,7 +158,9 @@
 
 `CartPage`에서 `pom.xml` 파일을 가져오거나 텍스트로 붙여넣을 때는 `<type>pom</type>` 같은 Maven artifact type을 장바구니 metadata로 유지합니다. Maven 장바구니의 중복 판정도 이 artifact type을 포함하므로 같은 GAV라도 기본 JAR과 POM은 각각 보관하고, 같은 type만 중복으로 처리합니다. 이 metadata는 일반 다운로드 IPC를 거쳐 `MavenDownloader`에 전달되므로 POM 전용 의존성은 `.pom` 아티팩트와 체크섬으로 다운로드되고, 최상위 복사본도 `.pom` 확장자를 사용합니다.
 
-Maven 입력의 `dependencyManagement`에 있는 BOM 선언도 가져옵니다. 장바구니 의존성 트리 미리보기와 실제 의존성 포함 다운로드 모두 선택한 type을 resolver에 전달하며, 원격 packaging보다 명시한 type을 우선합니다.
+전체 `<project>` POM의 파일/텍스트 입력은 `maven:parseProject` IPC로 프로젝트 모델과 package 플러그인을 함께 수집합니다. 대상 Maven 버전 입력은 파일/텍스트 양쪽에서 공유하며 기본값은 3.9.11입니다. 파일 읽기와 텍스트 파싱의 전체 진행 작업 수를 추적합니다. 다중 파일 중 일부가 먼저 끝나도 나머지가 완료될 때까지 중복 제출·입력 편집·탭 전환·Esc 및 취소 닫기를 막고, 실패하면 오류와 원본 입력을 유지합니다. preload API가 없는 환경에서는 전체 POM을 부분 파싱해서 성공으로 처리하지 않습니다.
+
+`<dependency>` 조각은 기존 동기 파서로 처리합니다. 전체 POM의 `dependencyManagement`에 있는 import BOM 선언도 모델 POM으로 가져옵니다. 부모 관리 속성은 자식 POM의 최종 property/project.version 문맥으로 해석하고, 자식의 직접 관리 선언 및 child import를 우선합니다. 부모의 직접 관리 선언은 child import보다 우선하며, 같은 BOM GA의 다른 버전 import는 child 선언을 사용합니다. 장바구니 의존성 트리 미리보기와 실제 의존성 포함 다운로드 모두 선택한 type을 resolver에 전달하며, 원격 packaging보다 명시한 type을 우선합니다.
 
 Maven 해결 결과의 `root`는 실행 의존성 그래프이고, `flatList`에는 그 그래프에 없는 부모 POM과 import BOM도 포함될 수 있습니다. 장바구니 미리보기의 `함께 다운로드할 POM` 목록을 펼치면 그래프 밖 모델의 좌표·버전·파일 상세를 확인할 수 있습니다. 그래프에 이미 있는 POM은 이 목록에 중복 표시하지 않으며, 같은 GAV의 JAR와 POM, 서로 다른 classifier를 구분합니다.
 

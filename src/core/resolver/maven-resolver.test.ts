@@ -13,6 +13,7 @@ import {
 import { ResolutionSession } from '../shared/internal/resolution-session';
 import { getAttachedResolutionSession } from '../shared/internal/resolution-session-registry';
 import * as mavenCache from '../shared/maven-cache';
+import { loadMavenLifecyclePlugins } from '../shared/maven-lifecycle';
 import { MavenCoordinate, PomProject } from '../shared/maven-types';
 // 분리된 유틸리티 함수 import
 import {
@@ -33,6 +34,13 @@ vi.mock('../shared/maven-cache', async (importOriginal) => {
 });
 
 const fetchPomFromCacheMock = vi.mocked(mavenCache.fetchPom);
+vi.mock('../shared/maven-lifecycle', () => ({
+  DEFAULT_MAVEN_BUILD_VERSION: '3.9.11',
+  loadMavenLifecyclePlugins: vi.fn().mockResolvedValue({
+    plugins: [{ groupId: 'org.apache.maven.plugins', artifactId: 'maven-compiler-plugin', version: '3.13.0' }],
+    sourceUrl: 'fixture', sha256: 'fixture-hash',
+  }),
+}));
 const defaultRepoUrl = 'https://repo1.maven.org/maven2';
 const sharedCoordinate: MavenCoordinate = {
   groupId: 'org.example',
@@ -770,7 +778,8 @@ describe('MavenResolver 단위 테스트', () => {
 
       expect(result).toBeDefined();
       expect(result.length).toBeGreaterThanOrEqual(1);
-      // test scope는 제외되어야 함
+      expect(result.some(p => p.name === 'junit:junit')).toBe(true);
+      expect(result.some(p => p.name === 'org.example:test-project')).toBe(false);
       const springCore = result.find((p) => p.name.includes('spring-core'));
       expect(springCore).toBeDefined();
     });
@@ -805,7 +814,7 @@ describe('MavenResolver 단위 테스트', () => {
       });
     });
 
-    it('의존성 없는 pom.xml은 프로젝트 자체만 반환', async () => {
+    it('의존성 없는 pom.xml도 package 플러그인을 반환하고 로컬 프로젝트는 제외한다', async () => {
       const pomText = `<?xml version="1.0" encoding="UTF-8"?>
 <project>
   <modelVersion>4.0.0</modelVersion>
@@ -816,10 +825,10 @@ describe('MavenResolver 단위 테스트', () => {
 
       const result = await resolver.parseFromText(pomText);
       expect(result).toBeDefined();
-      // 프로젝트 자체가 포함되므로 1개
       expect(result.length).toBe(1);
-      expect(result[0].name).toBe('org.example:empty-project');
-      expect(result[0].version).toBe('1.0.0');
+      expect(result[0].name).toBe('org.apache.maven.plugins:maven-compiler-plugin');
+      expect(result[0].version).toBe('3.13.0');
+      expect(loadMavenLifecyclePlugins).toHaveBeenCalledWith('3.9.11', 'jar');
     });
 
     it('property가 있는 pom.xml 파싱', async () => {
@@ -843,7 +852,7 @@ describe('MavenResolver 단위 테스트', () => {
 
       const result = await resolver.parseFromText(pomText);
       expect(result).toBeDefined();
-      // 프로젝트 자체 + spring-core 의존성 = 2개
+      // spring-core 의존성 + package 플러그인
       expect(result.length).toBe(2);
       const springCore = result.find((p) => p.name.includes('spring-core'));
       expect(springCore).toBeDefined();

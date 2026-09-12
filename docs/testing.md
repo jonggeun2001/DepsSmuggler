@@ -126,7 +126,7 @@ Parent POM과 import BOM이 조회 캐시에만 남아 오프라인 출력에서
 | 테스트 | 검증 범위 |
 |--------|-----------|
 | `src/core/shared/maven-effective-dependencies.test.ts` | 부모 일반 의존성 상속, 자식 필드·제외 목록 병합, 3단계 속성 해석, 공유 부모의 자식 문맥 격리, import BOM 일반 의존성 미확장 |
-| `src/core/shared/maven-bom-processor.test.ts` | 전체 GAV로 모델 POM 중복 제거, 깊은 부모/BOM 체인, Parent/BOM/혼합 순환, 공유 BOM 그래프의 반복 처리 제한, 문맥별 부모 속성 상속과 import 순서, 필수 모델 누락·미해결 좌표, 호출 간 상태 초기화 |
+| `src/core/shared/maven-bom-processor.test.ts` | 전체 GAV로 모델 POM 중복 제거, 깊은 부모/BOM 체인, Parent/BOM/혼합 순환, 공유 BOM 그래프의 반복 처리 제한, 자식 문맥의 부모 관리 속성 해석, 직접 관리와 같은 BOM GA의 다른 버전 child import 우선순위, parent direct management 우선, imported BOM 독립 속성, 필수 모델 누락·미해결 좌표, 호출 간 상태 초기화 |
 | `src/core/resolver/maven-model-resolution.test.ts` | 전이 패키지의 BOM 버전 적용과 모델 POM 포함, Parent 일반 dependencies 상속, 형제 간 관리 버전 격리와 루트 관리 우선순위, 같은 부모의 여러 버전, 깊이 경계의 부모 수집, POM 조회 실패, 깊은 그래프 평탄화 및 순환·공유 노드 종료, 공유 노드 간 교차 순환 간선 차단과 자손 보존, 같은 GAV의 JAR/POM 구분, 충돌로 제외된 모든 실제 버전의 아티팩트·하위 descriptor closure 보존 |
 | `src/core/shared/maven-parent-pom-download.test.ts` | Flink 전이 체인 fixture의 부모/BOM POM 및 compile/runtime JAR·부속 POM·SHA1 실제 파일, 미사용 관리 항목 631개와 optional/test 제외, JAR/POM 동시 보존, 필수 부모 404 및 모델 조회 후 POM 파일 저장 실패 |
 
@@ -462,3 +462,19 @@ macOS는 DMG와 ZIP을 생성한 뒤 `node scripts/verify-macos-update.mjs build
 - [아키텍처 개요](./architecture-overview.md)
 - [Electron / Renderer](./electron-renderer.md)
 - [IPC 핸들러](./ipc-handlers.md)
+
+
+### Maven 프로젝트와 빌드 플러그인의 빈 저장소 검증
+
+`maven-project.test.ts`, `maven-project-managed.test.ts`, `maven-lifecycle.test.ts`, `maven-surefire.test.ts`, `maven-test-runtime.test.ts`는 전체 POM의 속성·부모·관리 버전·명시/기본 플러그인·런타임 provider·JUnit engine/launcher를 검사합니다. 부모 관리 선언의 자식 속성 치환, 직접 관리·BOM 상속 우선순위, GAV/type/classifier 보존, Platform Commons 버전별 launcher 추가도 포함합니다. provider의 실제 배포 모듈과 Maven 버전별 공식 lifecycle XML을 경계에서 대체하며 네트워크 없이 실행합니다. service/IPC 테스트는 입력 검증과 오류 전달을, `cart-input-regression.spec.ts`는 Chromium에서 대상 버전 전달·플러그인 장바구니 추가·처리 중 Esc/입력 편집 차단·다중 파일의 전체 완료까지 잠금 유지·실패 시 입력 보존·기존 dependency 조각 호환성을 검사합니다.
+
+`maven-project-native-consumer.integration.test.ts`는 `DEPS_SMUGGLER_NATIVE_MAVEN_PROJECT=1`일 때 실제 Maven Central과 설치된 Maven을 사용합니다. 기본 단위 테스트에서는 skip하며, Linux CI 단계에서 별도로 실행합니다. macOS에서도 실행할 수 있고 `MAVEN_BINARY`로 기존 Maven 실행 경로를 지정할 수 있습니다.
+
+```bash
+DEPS_SMUGGLER_NATIVE_MAVEN_PROJECT=1 bash scripts/verify-worktree.sh \
+  src/core/packager/maven-project-native-consumer.integration.test.ts
+```
+
+이 검사는 POM collector → 공통 의존성 resolver → 다운로드 → 압축 → 생성 Bash 설치 스크립트를 실행한 뒤, 새 빈 local-m2를 사용하여 `mvn --offline package`로 Jupiter API와 JUnit 4의 혼합 테스트를 실제 실행합니다. 부모보다 우선하는 자식 관리 선언과 commons-text의 전이 commons-lang3 관리 버전도 별도 native fixture로 확인합니다. Jupiter API 5.10.1과 Platform Commons 1.10.2를 함께 사용해 launcher 1.10.2도 반출되는지 검증합니다. Maven의 온라인 빌드로 플러그인을 미리 준비하지 않고 사용자 `~/.m2`도 복사하지 않습니다. 대상 Maven 버전은 `mvn --version`에서 읽으며, GUI와 같은 기본 의존성 탐색 옵션을 사용합니다. 실패한 native bundle은 경로를 출력해 재현할 수 있게 남깁니다.
+
+기존 `maven-native-consumer.integration.test.ts`는 격리 저장소에 빌드 플러그인을 미리 준비하고 라이브러리의 모든 버전 반출을 검증하는 별도 검사입니다. 새 프로젝트 검사의 빈 저장소 성공을 기존 검사의 성공으로 대체하지 않습니다.

@@ -42,8 +42,10 @@ import type { DependencyAPI } from '../../types/electron';
 import { getPackageArtifactKey } from '../../core/shared/dependency-tree-utils';
 import {
   parseMavenPomDependencies,
+  isMavenProjectPom,
   type ParsedMavenPomDependency,
 } from './cart-page/maven-pom-parser';
+import { DEFAULT_MAVEN_BUILD_VERSION } from '../../types/maven-project';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -87,6 +89,9 @@ const CartPage: React.FC = () => {
   const [textInputModalOpen, setTextInputModalOpen] = useState(false);
   const [textInputValue, setTextInputValue] = useState('');
   const [textInputType, setTextInputType] = useState<'requirements' | 'pom' | 'package'>('requirements');
+  const [pendingPackageParses, setPendingPackageParses] = useState(0);
+  const parsingPackageFile = pendingPackageParses > 0;
+  const [mavenVersion, setMavenVersion] = useState(DEFAULT_MAVEN_BUILD_VERSION);
 
 
   // 의존성 트리 모달
@@ -281,12 +286,17 @@ const CartPage: React.FC = () => {
 
   // 파일 업로드 처리
   const handleFileUpload = async (file: File) => {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const content = e.target?.result as string;
+    // A single selection can start several reads/parses before React renders.
+    // Keep the shared controls locked until every selected file has settled.
+    setPendingPackageParses((count) => count + 1);
+    try {
+      const content = await file.text();
       await parsePackageFile(file.name, content);
-    };
-    reader.readAsText(file);
+    } catch {
+      message.error(`${file.name} 파일을 읽을 수 없습니다`);
+    } finally {
+      setPendingPackageParses((count) => count - 1);
+    }
     return false; // 자동 업로드 방지
   };
 
@@ -294,28 +304,50 @@ const CartPage: React.FC = () => {
   const draggerProps: UploadProps = {
     name: 'file',
     multiple: true,
+    disabled: parsingPackageFile,
     accept: '.txt,.xml,.json',
     beforeUpload: handleFileUpload,
     showUploadList: false,
   };
 
   // 패키지 파일 파싱
+  const parseFullMavenProject = async (content: string): Promise<ParsedPackage[]> => {
+    const targetVersion = mavenVersion.trim();
+    if (!/^3\.\d+\.\d+$/.test(targetVersion)) {
+      throw new Error('Maven 기준 버전은 3.x.y 형식이어야 합니다');
+    }
+    const mavenAPI = window.electronAPI?.maven;
+    if (!mavenAPI?.parseProject) {
+      throw new Error('전체 Maven POM을 처리할 API를 사용할 수 없습니다');
+    }
+    const result = await mavenAPI.parseProject(content, { mavenVersion: targetVersion });
+    if (!result.success) {
+      throw new Error(result.error || 'Maven POM 처리에 실패했습니다');
+    }
+    return result.packages;
+  };
+
   const parsePackageFile = async (filename: string, content: string) => {
     let type: PackageType = 'pip';
     let packages: ParsedPackage[] = [];
 
-    if (filename === 'requirements.txt' || filename.endsWith('.txt')) {
-      type = 'pip';
-      packages = parseRequirementsTxt(content);
-    } else if (filename === 'pom.xml' || filename.endsWith('.xml')) {
-      type = 'maven';
-      packages = parseMavenPomDependencies(content);
-    } else if (filename === 'package.json' || filename.endsWith('.json')) {
-      type = 'npm';
-      packages = parsePackageJson(content);
+    try {
+      if (filename === 'requirements.txt' || filename.endsWith('.txt')) {
+        type = 'pip';
+        packages = parseRequirementsTxt(content);
+      } else if (filename === 'pom.xml' || filename.endsWith('.xml')) {
+        type = 'maven';
+        packages = isMavenProjectPom(content)
+          ? await parseFullMavenProject(content)
+          : parseMavenPomDependencies(content);
+      } else if (filename === 'package.json' || filename.endsWith('.json')) {
+        type = 'npm';
+        packages = parsePackageJson(content);
+      }
+      await addParsedPackages(type, packages);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '파일 처리에 실패했습니다');
     }
-
-    await addParsedPackages(type, packages);
   };
 
   // requirements.txt 파싱
@@ -399,32 +431,40 @@ const CartPage: React.FC = () => {
 
   // 텍스트 입력 처리
   const handleTextInputSubmit = async () => {
+    if (parsingPackageFile) return;
     if (!textInputValue.trim()) {
       message.warning('내용을 입력하세요');
       return;
     }
 
-    let type: PackageType;
-    let packages: ParsedPackage[] = [];
-
-    switch (textInputType) {
-      case 'requirements':
-        type = 'pip';
-        packages = parseRequirementsTxt(textInputValue);
-        break;
-      case 'pom':
-        type = 'maven';
-        packages = parseMavenPomDependencies(textInputValue);
-        break;
-      case 'package':
-        type = 'npm';
-        packages = parsePackageJson(textInputValue);
-        break;
+    setPendingPackageParses((count) => count + 1);
+    try {
+      let type: PackageType;
+      let packages: ParsedPackage[] = [];
+      switch (textInputType) {
+        case 'requirements':
+          type = 'pip';
+          packages = parseRequirementsTxt(textInputValue);
+          break;
+        case 'pom':
+          type = 'maven';
+          packages = isMavenProjectPom(textInputValue)
+            ? await parseFullMavenProject(textInputValue)
+            : parseMavenPomDependencies(textInputValue);
+          break;
+        case 'package':
+          type = 'npm';
+          packages = parsePackageJson(textInputValue);
+          break;
+      }
+      await addParsedPackages(type, packages);
+      setTextInputModalOpen(false);
+      setTextInputValue('');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '입력 처리에 실패했습니다');
+    } finally {
+      setPendingPackageParses((count) => count - 1);
     }
-
-    await addParsedPackages(type, packages);
-    setTextInputModalOpen(false);
-    setTextInputValue('');
   };
 
   // 다운로드 시작
@@ -510,6 +550,7 @@ const CartPage: React.FC = () => {
           </Paragraph>
           <TextArea
             rows={10}
+            disabled={parsingPackageFile}
             placeholder={`requests==2.28.0
 numpy>=1.21.0
 pandas
@@ -529,10 +570,11 @@ flask~=2.0.0`}
       children: (
         <div>
           <Paragraph type="secondary">
-            Maven pom.xml의 &lt;dependencies&gt; 섹션을 붙여넣으세요.
+            전체 &lt;project&gt; POM은 Maven 기준 버전으로 build plugin과 lifecycle을 처리합니다. dependency 조각은 라이브러리 목록으로만 추가합니다.
           </Paragraph>
           <TextArea
             rows={10}
+            disabled={parsingPackageFile}
             placeholder={`<dependency>
   <groupId>org.springframework</groupId>
   <artifactId>spring-core</artifactId>
@@ -557,6 +599,7 @@ flask~=2.0.0`}
           </Paragraph>
           <TextArea
             rows={10}
+            disabled={parsingPackageFile}
             placeholder={`{
   "dependencies": {
     "react": "^18.0.0",
@@ -588,8 +631,18 @@ flask~=2.0.0`}
           장바구니
         </Title>
         <Space>
+          <Text>Maven 기준 버전</Text>
+          <Input
+            aria-label="Maven 기준 버전"
+            value={mavenVersion}
+            onChange={(event) => setMavenVersion(event.target.value)}
+            placeholder={DEFAULT_MAVEN_BUILD_VERSION}
+            style={{ width: 100 }}
+            disabled={parsingPackageFile}
+          />
           <Button
             icon={<FileTextOutlined />}
+            disabled={parsingPackageFile}
             onClick={() => setTextInputModalOpen(true)}
           >
             텍스트로 추가
@@ -598,8 +651,9 @@ flask~=2.0.0`}
             accept=".txt,.xml,.json"
             showUploadList={false}
             beforeUpload={handleFileUpload}
+            disabled={parsingPackageFile}
           >
-            <Button icon={<UploadOutlined />}>파일 가져오기</Button>
+            <Button icon={<UploadOutlined />} disabled={parsingPackageFile}>파일 가져오기</Button>
           </Upload>
           <Button
             icon={<SearchOutlined />}
@@ -713,6 +767,7 @@ flask~=2.0.0`}
                 </Button>
                 <Button
                   icon={<FileTextOutlined />}
+                  disabled={parsingPackageFile}
                   onClick={() => setTextInputModalOpen(true)}
                 >
                   텍스트로 추가하기
@@ -728,18 +783,25 @@ flask~=2.0.0`}
         title="패키지 목록 붙여넣기"
         open={textInputModalOpen}
         onCancel={() => {
+          if (parsingPackageFile) return;
           setTextInputModalOpen(false);
           setTextInputValue('');
         }}
         onOk={handleTextInputSubmit}
+        confirmLoading={parsingPackageFile}
+        cancelButtonProps={{ disabled: parsingPackageFile }}
+        closable={!parsingPackageFile}
+        maskClosable={!parsingPackageFile}
+        keyboard={!parsingPackageFile}
         okText="추가"
         cancelText="취소"
         width={600}
       >
         <Tabs
-          items={textInputTabs}
+          items={textInputTabs.map((tab) => ({ ...tab, disabled: parsingPackageFile }))}
           activeKey={textInputType}
           onChange={(key) => {
+            if (parsingPackageFile) return;
             setTextInputType(key as 'requirements' | 'pom' | 'package');
             setTextInputValue('');
           }}

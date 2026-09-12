@@ -3,10 +3,11 @@
  */
 
 import { ipcMain } from 'electron';
-import { createScopedLogger } from './utils/logger';
-import { createSearchOrchestrator } from './services/search-orchestrator';
 import { createDependencyResolveService } from './services/dependency-resolve-service';
+import { createMavenProjectService } from './services/maven-project-service';
 import { createOSSearchService } from './services/os-search-service';
+import { createSearchOrchestrator } from './services/search-orchestrator';
+import { createScopedLogger } from './utils/logger';
 
 const log = createScopedLogger('Search');
 
@@ -14,6 +15,7 @@ export function registerSearchHandlers(): void {
   const searchOrchestrator = createSearchOrchestrator();
   const dependencyResolveService = createDependencyResolveService();
   const osSearchService = createOSSearchService();
+  const mavenProjectService = createMavenProjectService();
 
   void searchOrchestrator.prime();
 
@@ -66,6 +68,9 @@ export function registerSearchHandlers(): void {
       return searchOrchestrator.getAvailableClassifiers(groupId, artifactId, version);
     }
   );
+
+  ipcMain.handle('maven:parseProject', async (_event, content: unknown, options) =>
+    mavenProjectService.parseProject(content, options));
 
   log.info('검색 핸들러 등록 완료');
 }

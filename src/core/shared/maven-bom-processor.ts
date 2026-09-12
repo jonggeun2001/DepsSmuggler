@@ -30,11 +30,15 @@ interface ModelFrame {
   parentResult?: ModelResult;
   isParent: boolean;
   isImport: boolean;
+  managementDeclarations: PomDependency[];
+  dependencyManagement: Map<string, string>;
 }
 
 interface ModelResult {
   properties: Properties;
   dependencies: PomDependency[];
+  managementDeclarations: PomDependency[];
+  dependencyManagement: Map<string, string>;
 }
 
 /**
@@ -45,7 +49,7 @@ export class MavenBomProcessor {
   private dependencyManagement: Map<string, string>;
   private readonly requiredPoms = new Map<string, MavenCoordinate>();
   private readonly models = new Map<string, Promise<PomProject>>();
-  private readonly completedImports = new Set<string>();
+  private readonly completedImports = new Map<string, ModelResult>();
   private readonly modelReferences = new Map<string, Set<string>>();
 
   constructor(private fetchPom: FetchPomFunction, dependencyManagement?: Map<string, string>) {
@@ -88,23 +92,16 @@ export class MavenBomProcessor {
     dependencyManagement: Map<string, string>;
     dependencies: PomDependency[];
   }> {
-    const previousManagement = this.dependencyManagement;
-    this.setDependencyManagement(new Map(rootManagement));
-    try {
-      const model = await this.walkModels(this.frame(pom, coordinate, undefined, false));
-      await this.processDependencyManagement(pom, model.properties);
-      return {
-        properties: model.properties,
-        dependencyManagement: this.dependencyManagement,
-        dependencies: this.resolveEffectiveDependencies(
-          model.dependencies,
-          model.properties,
-          this.dependencyManagement,
-        ),
-      };
-    } finally {
-      this.setDependencyManagement(previousManagement);
-    }
+    const model = await this.walkModels(this.frame(pom, coordinate, undefined, true));
+    const dependencyManagement = new Map(model.dependencyManagement);
+    for (const [key, version] of rootManagement) dependencyManagement.set(key, version);
+    return {
+      properties: model.properties,
+      dependencyManagement,
+      dependencies: this.resolveEffectiveDependencies(
+        model.dependencies, model.properties, dependencyManagement,
+      ),
+    };
   }
 
   async processParentPom(
@@ -113,6 +110,7 @@ export class MavenBomProcessor {
     inheritedProperties?: Properties
   ): Promise<Properties> {
     const result = await this.walkModels(this.frame(pom, coordinate, inheritedProperties, false));
+    this.mergeMissingManagement(this.dependencyManagement, result.dependencyManagement);
     return result.properties;
   }
 
@@ -123,14 +121,18 @@ export class MavenBomProcessor {
     const frame = this.frame(pom, coordinate, properties, true);
     frame.properties = properties || frame.properties;
     frame.phase = 'management';
-    await this.walkModels(frame);
+    const result = await this.walkModels(frame);
+    this.mergeMissingManagement(this.dependencyManagement, result.dependencyManagement);
   }
 
   async importBom(dep: PomDependency, properties?: Properties): Promise<void> {
     const coordinate = this.requiredCoordinate(dep, properties, 'BOM');
-    if (this.completedImports.has(this.key(coordinate))) return;
-    const pom = await this.loadRequiredPom(coordinate);
-    await this.walkModels(this.frame(pom, coordinate, undefined, true, false, true));
+    let result = this.completedImports.get(this.key(coordinate));
+    if (!result) {
+      const pom = await this.loadRequiredPom(coordinate);
+      result = await this.walkModels(this.frame(pom, coordinate, undefined, true, false, true));
+    }
+    this.mergeMissingManagement(this.dependencyManagement, result.dependencyManagement);
   }
 
   private key(coordinate: MavenCoordinate): string {
@@ -168,6 +170,8 @@ export class MavenBomProcessor {
       importIndex: 0,
       isParent,
       isImport,
+      managementDeclarations: [],
+      dependencyManagement: new Map(),
     };
   }
 
@@ -280,6 +284,33 @@ export class MavenBomProcessor {
     return [...merged.values()];
   }
 
+  private mergeMissingManagement(target: Map<string, string>, source: Map<string, string>): void {
+    for (const [key, version] of source) {
+      if (!target.has(key)) target.set(key, version);
+    }
+  }
+
+  /** Inherit declarations before interpolating them in the child model. */
+  private inheritManagement(
+    inherited: PomDependency[], own: PomDependency[], properties: Properties,
+  ): PomDependency[] {
+    const ownKeys = new Set(own.map((dependency) => this.dependencyIdentity(dependency, properties)));
+    const inheritedByKey = new Map(inherited.map((dependency) => [
+      this.dependencyIdentity(dependency, properties), dependency,
+    ]));
+    return [
+      ...own.map((dependency) => {
+        const parent = inheritedByKey.get(this.dependencyIdentity(dependency, properties));
+        return {
+          ...parent,
+          ...dependency,
+          exclusions: this.mergeExclusions(parent?.exclusions, dependency.exclusions),
+        };
+      }),
+      ...inherited.filter((dependency) => !ownKeys.has(this.dependencyIdentity(dependency, properties))),
+    ].map((dependency) => this.cloneDependency(dependency));
+  }
+
   private resolveEffectiveDependencies(
     dependencies: PomDependency[],
     properties: Properties,
@@ -381,7 +412,11 @@ export class MavenBomProcessor {
       }
       // Only fully processed imports have an importer-independent context.
       // Parent frames are always re-evaluated with the current child's properties.
-      if (!isParent && this.completedImports.has(key) && !this.mayReachAncestor(key, active)) return;
+      const completed = this.completedImports.get(key);
+      if (!isParent && completed && !this.mayReachAncestor(key, active)) {
+        this.mergeMissingManagement(stack[stack.length - 1].dependencyManagement, completed.dependencyManagement);
+        return;
+      }
       const pom = await this.loadRequiredPom(coordinate);
       active.add(key);
       stack.push(this.frame(pom, coordinate, inheritedProperties, true, isParent, !isParent));
@@ -414,21 +449,23 @@ export class MavenBomProcessor {
             current.properties,
           );
         }
+        const managed = current.includeManagement
+          ? current.pom.dependencyManagement?.dependencies?.dependency
+          : undefined;
+        current.managementDeclarations = this.inheritManagement(
+          current.parentResult?.managementDeclarations || [],
+          managed ? (Array.isArray(managed) ? managed : [managed]) : [],
+          current.properties,
+        );
         current.phase = 'imports';
-        if (current.includeManagement) {
-          const managed = current.pom.dependencyManagement?.dependencies?.dependency;
-          for (const dep of managed ? (Array.isArray(managed) ? managed : [managed]) : []) {
-            const resolved = this.resolveDependencyFields(dep, current.properties);
-            if (resolved.scope === 'import' && resolved.type === 'pom') {
-              current.imports.push(dep);
-            } else {
-              const version = resolved.version || '';
-              const key = dependencyManagementKey(resolved);
-              // Preserve first registration; BOMs are visited in declaration order.
-              if (version && !this.dependencyManagement.has(key)) {
-                this.dependencyManagement.set(key, version);
-              }
-            }
+        // Direct declarations (including inherited ones) precede imported BOM
+        // contents. Imports are then merged in declaration order, first wins.
+        for (const dep of current.managementDeclarations) {
+          const resolved = this.resolveDependencyFields(dep, current.properties);
+          if (resolved.scope === 'import' && resolved.type === 'pom') {
+            current.imports.push(dep);
+          } else if (resolved.version) {
+            current.dependencyManagement.set(dependencyManagementKey(resolved), resolved.version);
           }
         }
       }
@@ -443,18 +480,28 @@ export class MavenBomProcessor {
       }
 
       stack.pop();
+      const result: ModelResult = {
+        properties: current.properties,
+        dependencies: current.dependencies,
+        managementDeclarations: current.managementDeclarations,
+        dependencyManagement: current.dependencyManagement,
+      };
       if (current.coordinate) {
         const key = this.key(current.coordinate);
         active.delete(key);
-        if (current.isImport) this.completedImports.add(key);
+        if (current.isImport) this.completedImports.set(key, result);
       }
-      if (current.isParent && stack.length > 0) {
-        stack[stack.length - 1].parentResult = {
-          properties: current.properties,
-          dependencies: current.dependencies,
-        };
+      if (stack.length > 0) {
+        const owner = stack[stack.length - 1];
+        if (current.isParent) owner.parentResult = result;
+        else this.mergeMissingManagement(owner.dependencyManagement, result.dependencyManagement);
       }
     }
-    return { properties: root.properties, dependencies: root.dependencies };
+    return {
+      properties: root.properties,
+      dependencies: root.dependencies,
+      managementDeclarations: root.managementDeclarations,
+      dependencyManagement: root.dependencyManagement,
+    };
   }
 }

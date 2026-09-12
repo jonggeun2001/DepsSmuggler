@@ -80,7 +80,9 @@ depssmuggler --help
 | OS `apk` | 지원 | 지원 | Alpine, APK 다운로드·아카이브·로컬 저장소 출력 |
 | Container `docker` | 지원 | 지원 | Docker Hub 이미지·태그·플랫폼 선택과 이미지 아카이브 |
 
-Maven 반출은 한 BFS에서 실제로 발견된 모든 버전의 원래 아티팩트와 POM·하위 의존성를 보존합니다. Parent POM의 일반 dependencies는 상속하고, BOM의 `dependencyManagement` 전체 라이브러리는 펼치지 않습니다. scope·optional·exclusion·탐색 깊이 제한은 유지됩니다.
+Maven 반출은 한 BFS에서 실제로 발견된 모든 버전의 원래 아티팩트와 POM·하위 의존성를 보존합니다. Parent POM의 일반 dependencies는 상속하고, 자식 문맥의 속성으로 상속된 관리 버전을 해석하며, 자식의 직접 `dependencyManagement` 선언은 부모보다 우선합니다. 같은 BOM GA를 다른 버전으로 자식이 다시 import하면 자식 import를 사용하고, 부모의 직접 관리 선언은 자식 import보다 우선합니다. BOM의 `dependencyManagement` 전체 라이브러리는 펼치지 않습니다. scope·optional·exclusion·탐색 깊이 제한은 유지됩니다.
+
+GUI에서 전체 `<project>` POM을 가져오면 프로젝트 의존성과 `package` 단계의 명시·상속·기본 빌드 플러그인을 함께 담습니다. 장바구니 상단에서 폐쇄망의 Maven 버전을 지정한 뒤 파일을 가져오거나 POM을 입력하세요(기본 `3.9.11`). `<dependency>` 조각은 라이브러리 입력으로 처리합니다. 지원 범위와 오프라인 검증 방법은 [Maven 프로젝트 POM 수집](docs/shared-maven.md#프로젝트-pom과-package-플러그인-수집)을 참고하세요.
 
 OS 패키지 CLI는 `os list-distros/search/download/cache`를 사용합니다. 배포판과 아키텍처 목록은 저장소 프리셋 및 조회 결과에 따라 달라지므로 `depssmuggler os list-distros`로 확인하세요.
 

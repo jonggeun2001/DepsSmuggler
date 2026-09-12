@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerSearchHandlers } from './search-handlers';
 import { resolveAllDependencies } from '../src/core/shared';
 
-const { ipcHandle, senderSend, mavenSearchPackagesMock } = vi.hoisted(() => ({
+const { ipcHandle, senderSend, mavenSearchPackagesMock, parseProjectMock } = vi.hoisted(() => ({
   ipcHandle: vi.fn(),
   senderSend: vi.fn(),
   mavenSearchPackagesMock: vi.fn(),
+  parseProjectMock: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -27,6 +28,9 @@ vi.mock('./utils/logger', () => ({
     warn: vi.fn(),
     error: vi.fn(),
   })),
+}));
+vi.mock('./services/maven-project-service', () => ({
+  createMavenProjectService: () => ({ parseProject: parseProjectMock }),
 }));
 
 vi.mock('../src/core/shared', () => ({
@@ -163,5 +167,15 @@ describe('registerSearchHandlers', () => {
         },
       ],
     });
+  });
+
+  it('maven:parseProject는 서비스에 content와 options를 그대로 전달한다', async () => {
+    parseProjectMock.mockResolvedValueOnce({ success: true, packages: [] });
+    registerSearchHandlers();
+    const handler = ipcHandle.mock.calls.find(([channel]) => channel === 'maven:parseProject')?.[1];
+    expect(handler).toBeTypeOf('function');
+    const result = await handler({}, '<project/>', { mavenVersion: '3.9.9' });
+    expect(result).toEqual({ success: true, packages: [] });
+    expect(parseProjectMock).toHaveBeenCalledWith('<project/>', { mavenVersion: '3.9.9' });
   });
 });

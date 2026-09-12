@@ -7,7 +7,7 @@
 - `MavenResolver`는 BF 탐색을 `MavenQueueProcessor`와 조합하고, `MavenBomProcessor` 및 Maven 공용 캐시를 사용합니다. 기존 Skipper의 버전 충돌 생략은 수집에 적용하지 않습니다. Maven JVM 라이브러리를 직접 실행하지 않습니다.
 - 루트의 `latest`는 저장소 메타데이터의 `latest` 또는 `release` 실제 버전으로 바꾼 뒤 POM을 조회합니다. 두 값이 모두 없으면 실패합니다. CLI의 `--no-deps`에서도 버전 확인은 수행하며 자식 라이브러리 의존성은 펼치지 않습니다.
 - 루트의 명시적 `metadata.type`은 `artifactType`으로 전달되며 원격 POM packaging이 이를 덮어쓰지 않습니다. 아티팩트 키는 type을 포함합니다. classifier는 사용자가 선택하며 OS/아키텍처만으로 자동 생성하지 않습니다.
-- `dependencyManagement`와 BOM은 버전 관리에 사용하고, 그 목록 전체를 실제 다운로드 의존성으로 펼치지 않습니다. `MavenQueueProcessor`는 `processModel()`이 반환한 부모 상속을 포함한 일반 의존성을 탐색합니다.
+- `dependencyManagement`와 BOM은 버전 관리에 사용하고, 그 목록 전체를 실제 다운로드 의존성으로 펼치지 않습니다. 부모 관리 속성은 자식 문맥에서 해석합니다. 직접 관리 선언은 자식, 부모 순으로 우선하고, 그 뒤 자식의 import BOM, 상속된 import BOM 순으로 관리 값을 채웁니다. 같은 BOM GA의 다른 버전 import는 자식 선언을 사용합니다. `MavenQueueProcessor`는 `processModel()`이 반환한 부모 상속을 포함한 일반 의존성을 탐색합니다.
 - 선택된 패키지의 모델 해석에 필요한 Parent POM과 import BOM은 전체 GAV로 중복 제거하여 `metadata.type: 'pom'`인 다운로드 항목으로 포함합니다. Parent/BOM 탐색과 그래프 평탄화는 반복 처리하며, 필수 모델의 누락이나 순환 참조는 해당 루트의 해결 실패로 보고합니다.
 - 하나의 BFS에서 발견된 모든 버전의 JAR 등 원래 아티팩트, POM과 하위 의존성을 수집합니다. scope·optional·exclusion·깊이 제한을 적용하고, type/classifier·scope·exclusion·최소 깊이별 방문을 기록합니다. 의존성 탐색 컨텍스트 10,000개를 넘으면 오류를 반환합니다. `conflicts`는 버전 발견 정보이며 반출 버전을 줄이지 않습니다. 프리페치 캐시와 실제 반출 목록은 별개입니다.
 - `MavenDownloader.downloadPackage()`는 `metadata.packaging` → `metadata.type` → POM의 `<packaging>` → `jar` 순서로 파일 타입을 정합니다. 메인 아티팩트와 POM, 사용 가능한 `.sha1` 파일을 내려받습니다. source/javadoc은 classifier 또는 type으로 선택하며 자동으로 모두 포함하지 않습니다.
@@ -970,3 +970,12 @@ classifier/type 기반 artifact 선택, scope·exclusion, parent/BOM의
 dependencyManagement 적용과 각 루트의 dependency tree는 재사용하지 않습니다.
 따라서 metadata를 절약하면서도 기존 Maven 간선 및 최종 다운로드 선택 규칙을
 유지하며, 요청이 끝나면 세션도 폐기됩니다.
+
+
+## 프로젝트 입력과 플러그인 수집 경계
+
+전체 POM 입력은 `maven-project.ts`에서 프로젝트/부모의 effective 의존성, 실제 적용되는 build plugin, 대상 Maven의 package lifecycle plugin을 root 목록으로 변환합니다. 동기식 dependency 태그 파싱만으로는 기본 resources/compiler/surefire/jar plugin을 찾을 수 없어 이 단계를 비동기 프로젝트 입력 경로로 분리했습니다. 이후 BFS는 기존과 같이 각 root의 모든 발견 버전과 필요한 모델 POM을 수집합니다. 일반 라이브러리의 빌드 플러그인 전체를 BFS에 추가하지 않습니다.
+
+대상 Maven 버전과 packaging을 반영한 기본 플러그인 표의 출처/해시를 plugin metadata로 보존합니다. 미사용 관리 항목의 전수 다운로드나 Maven 충돌 승자 중재는 추가하지 않습니다. API·상속 규칙·지원 제한은 [shared Maven](shared-maven.md#프로젝트-pom과-package-플러그인-수집)에 정리되어 있습니다.
+
+프로젝트 관리 버전은 `maven-project-managed.ts`에서 일반 라이브러리 의존성 경로에 한정해 추가 수집합니다. 최초 root의 명시 버전은 그대로 두고 실제 자손의 G:A:type:classifier에 대응하는 관리 버전과 그 자손을 반복 탐색합니다. model POM만 조회됐다는 이유로 관리 항목을 실제 의존성으로 확장하지 않으며 plugin dependency에는 프로젝트의 라이브러리 관리 버전을 적용하지 않습니다.

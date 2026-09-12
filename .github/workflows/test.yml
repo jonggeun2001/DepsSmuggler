@@ -63,6 +63,12 @@ jobs:
           DEPS_SMUGGLER_NATIVE_MAVEN: '1'
         run: bash scripts/verify-worktree.sh src/core/packager/maven-native-consumer.integration.test.ts
 
+      - name: Test Maven project bundle with native Maven
+        if: runner.os == 'Linux'
+        env:
+          DEPS_SMUGGLER_NATIVE_MAVEN_PROJECT: '1'
+        run: bash scripts/verify-worktree.sh src/core/packager/maven-project-native-consumer.integration.test.ts
+
       - name: Build project
         run: npm run build
 

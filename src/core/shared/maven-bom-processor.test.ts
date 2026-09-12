@@ -6,6 +6,7 @@ const coord = (artifactId: string, version = '1'): MavenCoordinate => ({ groupId
 const parent = (artifactId: string, version = '1') => coord(artifactId, version);
 const bom = (artifactId: string, version = '1'): PomDependency => ({ ...coord(artifactId, version), type: 'pom', scope: 'import' });
 const managed = (...dependency: PomDependency[]) => ({ dependencies: { dependency } });
+const versionless = (artifactId: string): PomDependency => ({ groupId: 'test', artifactId });
 
 function fixture(models: Record<string, PomProject>) {
   let calls = 0;
@@ -60,6 +61,114 @@ describe('Maven required parent and imported BOM models', () => {
     expect(result.dependencyManagement.get('test:library')).toBe('5');
     expect(result.dependencyManagement.get('test:local')).toBe('7');
     expect([...rootManagement]).toEqual([['test:library', '5']]);
+  });
+
+  it('allows a child direct management entry to override every parent level', async () => {
+    const { processor } = fixture({
+      'parent:1': { parent: parent('grandparent'), dependencyManagement: managed(coord('library', '2')) },
+      'grandparent:1': { dependencyManagement: managed(coord('library', '1')) },
+    });
+    const result = await processor.processModel({
+      parent: parent('parent'), dependencyManagement: managed(coord('library', '3')),
+    }, coord('child'), new Map());
+    expect(result.dependencyManagement.get('test:library')).toBe('3');
+  });
+
+  it('inherits an omitted managed version when the child only overrides other fields', async () => {
+    const { processor } = fixture({
+      'parent:1': { dependencyManagement: managed(coord('library', '2')) },
+    });
+    const result = await processor.processModel({
+      parent: parent('parent'),
+      dependencyManagement: managed({ ...versionless('library'), scope: 'test' }),
+      dependencies: { dependency: versionless('library') },
+    }, coord('child'), new Map());
+    expect(result.dependencies[0]?.version).toBe('2');
+  });
+
+  it('keeps parent management ahead of a child imported BOM', async () => {
+    const { processor } = fixture({
+      'parent:1': { dependencyManagement: managed(coord('library', '1')) },
+      'bom:1': { dependencyManagement: managed(coord('library', '2')) },
+    });
+    const result = await processor.processModel({
+      parent: parent('parent'), dependencyManagement: managed(bom('bom')),
+    }, coord('child'), new Map());
+    expect(result.dependencyManagement.get('test:library')).toBe('1');
+  });
+
+  it('resolves a parent management property in the child dependency context', async () => {
+    const { processor } = fixture({
+      'parent:1': {
+        properties: { selectedVersion: '1' },
+        dependencyManagement: managed({ ...versionless('library'), version: '${selectedVersion}' }),
+      },
+    });
+    const result = await processor.processModel({
+      parent: parent('parent'), properties: { selectedVersion: '2' },
+      dependencies: { dependency: versionless('library') },
+    }, coord('child', '2'), new Map());
+    expect(result.dependencies[0]?.version).toBe('2');
+  });
+
+  it('resolves project.version in inherited management against the child project', async () => {
+    const { processor } = fixture({
+      'parent:1': {
+        dependencyManagement: managed({ ...versionless('library'), version: '${project.version}' }),
+      },
+    });
+    const result = await processor.processModel({
+      parent: parent('parent'), dependencies: { dependency: versionless('library') },
+    }, coord('child', '2'), new Map());
+    expect(result.dependencies[0]?.version).toBe('2');
+  });
+
+  it('lets a child import of the same BOM GA replace the parent import', async () => {
+    const { processor } = fixture({
+      'parent:1': { dependencyManagement: managed(bom('bom', '1')) },
+      'bom:1': { dependencyManagement: managed(coord('library', '1')) },
+      'bom:2': { dependencyManagement: managed(coord('library', '2')) },
+    });
+    const result = await processor.processModel({
+      parent: parent('parent'), dependencyManagement: managed(bom('bom', '2')),
+    }, coord('child'), new Map());
+    expect(result.dependencyManagement.get('test:library')).toBe('2');
+  });
+
+  it('processes child BOM imports before different inherited BOM imports', async () => {
+    const { processor } = fixture({
+      'parent:1': { dependencyManagement: managed(bom('parent-bom')) },
+      'parent-bom:1': { dependencyManagement: managed(coord('library', '1')) },
+      'child-bom:1': { dependencyManagement: managed(coord('library', '2')) },
+    });
+    const result = await processor.processModel({
+      parent: parent('parent'), dependencyManagement: managed(bom('child-bom')),
+    }, coord('child'), new Map());
+    expect(result.dependencyManagement.get('test:library')).toBe('2');
+  });
+
+  it('keeps a parent direct management entry ahead of a different child BOM', async () => {
+    const { processor } = fixture({
+      'parent:1': { dependencyManagement: managed(coord('library', '1')) },
+      'bom:2': { dependencyManagement: managed(coord('library', '2')) },
+    });
+    const result = await processor.processModel({
+      parent: parent('parent'), dependencyManagement: managed(bom('bom', '2')),
+    }, coord('child'), new Map());
+    expect(result.dependencyManagement.get('test:library')).toBe('1');
+  });
+
+  it('keeps an imported BOM property context independent from its importer', async () => {
+    const { processor } = fixture({
+      'bom:1': {
+        properties: { selectedVersion: '1' },
+        dependencyManagement: managed({ ...versionless('library'), version: '${selectedVersion}' }),
+      },
+    });
+    const result = await processor.processModel({
+      properties: { selectedVersion: '2' }, dependencyManagement: managed(bom('bom', '1')),
+    }, coord('child'), new Map());
+    expect(result.dependencyManagement.get('test:library')).toBe('1');
   });
 
   it('restores the previous management map after a required model failure', async () => {

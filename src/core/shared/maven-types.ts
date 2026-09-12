@@ -36,6 +36,8 @@ export interface PomPlugin {
   groupId?: string;
   artifactId: string;
   version?: string;
+  inherited?: string | boolean;
+  dependencies?: { dependency: PomDependency | PomDependency[] };
 }
 
 /** POM Parent */
