@@ -82,7 +82,8 @@ export abstract class BaseLanguageDownloader {
         },
       });
       const writer = fs.createWriteStream(filePath);
-      ownsFile = true;
+      // A failed open must not unlink an untouched existing file or directory.
+      writer.once('open', () => { ownsFile = true; });
       await pipeline(source, gate, writer, { signal: controller.signal });
       await waitForDownloadResume(plan);
       if (plan.verifyFile && !(await plan.verifyFile(filePath))) {

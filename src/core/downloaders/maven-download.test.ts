@@ -3,7 +3,7 @@
  * vi.mock()을 사용하여 axios를 모킹
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { PassThrough, Readable, Writable } from 'stream';
+import { PassThrough, Readable } from 'stream';
 import * as path from 'path';
 
 // vi.hoisted를 사용하여 모킹 함수 정의
@@ -46,6 +46,13 @@ vi.mock('fs-extra', async () => {
 
 import * as fs from 'fs-extra';
 import { MavenDownloader } from './maven';
+
+/** Mirror fs.createWriteStream's open lifecycle for the base downloader. */
+const createOpenWriter = (): PassThrough => {
+  const writer = new PassThrough();
+  process.nextTick(() => writer.emit('open'));
+  return writer;
+};
 
 describe('MavenDownloader downloadPackage 테스트', () => {
   let downloader: MavenDownloader;
@@ -93,7 +100,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
       };
     });
 
-    (fs.createWriteStream as any).mockImplementation(() => new PassThrough());
+    (fs.createWriteStream as any).mockImplementation(createOpenWriter);
     (fs.writeFile as any).mockResolvedValue(undefined);
     (downloader as any).verifyChecksum = vi.fn().mockResolvedValue(true);
   };
@@ -123,7 +130,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
       },
     });
     mockAxiosDefault.mockResolvedValue({ data: source, headers: { 'content-length': '131072' } });
-    (fs.createWriteStream as any).mockImplementation(() => new Writable({ write(_chunk, _encoding, callback) { callback(); } }));
+    (fs.createWriteStream as any).mockImplementation(createOpenWriter);
 
     await expect(
       downloader.downloadPackage(
@@ -144,7 +151,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
     mockAxiosGet.mockResolvedValue({ data: '0123456789abcdef0123456789abcdef01234567' });
     const source = Readable.from([Buffer.from('pom-content')]);
     mockAxiosDefault.mockResolvedValue({ data: source, headers: { 'content-length': '11' } });
-    (fs.createWriteStream as any).mockImplementation(() => new Writable({ write(_chunk, _encoding, callback) { callback(); } }));
+    (fs.createWriteStream as any).mockImplementation(createOpenWriter);
     (downloader as any).verifyChecksum = vi.fn().mockResolvedValue(true);
     const promise = downloader.downloadPackage(
       { name: 'com.example:fixture', version: '1.0.0', type: 'maven', metadata: { type: 'pom' } },
@@ -169,7 +176,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         config?.signal?.addEventListener('abort', () => reject(new Error('lookup aborted')), { once: true });
       });
     });
-    (fs.createWriteStream as any).mockImplementation(() => new PassThrough());
+    (fs.createWriteStream as any).mockImplementation(createOpenWriter);
     const info = {
       name: 'com.example:lookup-boundary',
       version: '1.0.0',
@@ -200,7 +207,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new PassThrough();
+      const mockWriter = createOpenWriter();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       // verifyChecksum 모킹
@@ -237,7 +244,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         headers: { 'content-length': '500' },
       });
 
-      const mockWriter = new PassThrough();
+      const mockWriter = createOpenWriter();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const mockVerifyChecksum = vi.fn().mockResolvedValue(true);
@@ -271,7 +278,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new PassThrough();
+      const mockWriter = createOpenWriter();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const downloadPromise = downloader.downloadArtifact(
@@ -303,7 +310,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new PassThrough();
+      const mockWriter = createOpenWriter();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       // verifyChecksum 모킹 - 실패
@@ -336,7 +343,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         headers: { 'content-length': '100' },
       });
 
-      const mockWriter = new PassThrough();
+      const mockWriter = createOpenWriter();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const progressEvents: any[] = [];
@@ -395,7 +402,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         headers: { 'content-length': '100' },
       });
 
-      const mockWriter = new PassThrough();
+      const mockWriter = createOpenWriter();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const downloadPromise = downloader.downloadArtifact(
@@ -423,7 +430,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new PassThrough();
+      const mockWriter = createOpenWriter();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const downloadPromise = downloader.downloadArtifact(
