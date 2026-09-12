@@ -186,9 +186,11 @@ DEPS_SMUGGLER_NATIVE_MAVEN=1 bash scripts/verify-worktree.sh \
 
 `src/core/downloaders/os-metadata-parsers.test.ts`는 실제 gzip XML 파서에 1,001개의 표준 엔티티를 전달해 정상 디코딩을 확인하고, 100,000회 한도 초과 및 취소 오류 전달을 검증합니다. `src/core/resolver/os-resolvers.test.ts`는 primary 누락, 비활성 저장소 제외, 뒤쪽 저장소 실패 후 일부 목록이 남지 않는지와 동일 resolver 재시도를 확인합니다.
 
-같은 파서 테스트는 버전 `1.0`, release `01`, 의존성 버전 `1.0`의 값과 런타임 문자열 타입을 확인합니다. 숫자 모양이 아닌 버전과 숫자형 epoch·파일 크기·설치 크기도 함께 검사합니다. Resolver 테스트는 이전 숫자형 배열 캐시와 스키마 1, 잘못된 스키마를 다시 파싱하고, 스키마 2 결과를 JSON으로 저장·복원한 새 resolver가 문자열과 필수 선행 의존성을 유지하며 캐시를 재사용하는지 확인합니다.
+같은 파서 테스트는 버전 `1.0`, release `01`, 의존성 버전 `1.0`의 값과 런타임 문자열 타입을 확인합니다. 숫자 모양이 아닌 버전과 숫자형 epoch·파일 크기·설치 크기도 함께 검사합니다. Resolver 테스트는 이전 숫자형 배열 캐시와 스키마 1·2, 잘못된 스키마·파일 정보를 다시 파싱하고, 스키마 3 결과를 JSON으로 저장·복원한 새 resolver가 문자열·필수 선행 의존성·primary 파일 정보를 유지하며 캐시를 재사용하는지 확인합니다.
 
 `src/core/downloaders/yum-prerequisites.integration.test.ts`는 loopback 서버의 원본 YUM XML을 parser와 기본 resolver로 읽어 `pre=1` 요구 항목을 필수 의존성으로 포함하는지 확인합니다. 별도 recommends와 순환 관계를 포함한 fixture로 누락이나 무한 탐색을 검사하며, 이 검사는 native RPM 설치를 대신하지 않습니다.
+
+`src/core/downloaders/yum-file-provides.integration.test.ts`는 loopback primary XML의 파일 제공 정보를 실제 parser → JSON 저장·복원 → 저장소 생성 경로로 검증합니다. `/usr/bin/sh`, 단일·복수 파일, dir·ghost 타입, XML 특수문자, 중복과 파일 없는 패키지를 검사하며 생성 primary·filelists의 패키지별 연결을 확인합니다. fixture RPM은 가짜 payload이므로 실제 설치는 별도 native DNF 검증이 필요합니다.
 
 `src/cli/yum-metadata-failure.integration.test.ts`는 로컬 HTTP 서버의 repomd/primary XML을 실제 자식 CLI로 읽습니다. XML 제한 초과 시 저장소·원인과 종료 코드 `1`이 전달되고 빈 검색 성공으로 바뀌지 않아야 합니다. 이 세 파일은 외부 저장소 없이 기본 테스트에서 실행합니다.
 

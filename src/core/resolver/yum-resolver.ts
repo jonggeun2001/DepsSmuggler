@@ -10,7 +10,7 @@ import { isArchitectureCompatible } from '../downloaders/os-shared/repositories'
 import { YumMetadataParser } from '../shared/yum-metadata-parser';
 import type { OSPackageInfo, PackageDependency, OSPackageSearchResult } from '../downloaders/os-shared/types';
 
-const YUM_CACHE_SCHEMA_VERSION = 2;
+const YUM_CACHE_SCHEMA_VERSION = 3;
 
 function isYumCachePackage(value: unknown): value is OSPackageInfo {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -24,6 +24,15 @@ function isYumCachePackage(value: unknown): value is OSPackageInfo {
   ) {
     return false;
   }
+
+  if (pkg.rpmPrimaryFiles !== undefined && (
+    !Array.isArray(pkg.rpmPrimaryFiles) ||
+    !pkg.rpmPrimaryFiles.every((file) => (
+      file && typeof file === 'object' && !Array.isArray(file) &&
+      typeof file.path === 'string' && file.path.length > 0 &&
+      (file.type === 'file' || file.type === 'dir' || file.type === 'ghost')
+    ))
+  )) return false;
 
   return pkg.dependencies.every((dependency) => (
     dependency &&

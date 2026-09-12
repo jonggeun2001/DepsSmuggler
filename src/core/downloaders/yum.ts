@@ -16,6 +16,7 @@ import type {
   VersionOperator,
   Checksum,
   ChecksumType,
+  RpmPrimaryFile,
 } from './os-shared/types';
 import { BaseOSDownloader, type BaseDownloaderOptions } from './os-shared/base-downloader';
 import { resolveRepoUrl } from './os-shared/repositories';
@@ -327,6 +328,7 @@ export class YumMetadataParser {
     const obsoletes = this.parseRpmProvides(formatEl?.['rpm:obsoletes']);
     const suggests = this.parseRpmProvides(formatEl?.['rpm:suggests']);
     const recommends = this.parseRpmProvides(formatEl?.['rpm:recommends']);
+    const rpmPrimaryFiles = this.parseRpmPrimaryFiles(formatEl?.file);
 
     return {
       name,
@@ -344,11 +346,32 @@ export class YumMetadataParser {
       license,
       dependencies,
       provides: provides.length > 0 ? provides : undefined,
+      rpmPrimaryFiles: rpmPrimaryFiles.length > 0 ? rpmPrimaryFiles : undefined,
       conflicts: conflicts.length > 0 ? conflicts : undefined,
       obsoletes: obsoletes.length > 0 ? obsoletes : undefined,
       suggests: suggests.length > 0 ? suggests : undefined,
       recommends: recommends.length > 0 ? recommends : undefined,
     };
+  }
+
+  private parseRpmPrimaryFiles(files: unknown): RpmPrimaryFile[] {
+    const result: RpmPrimaryFile[] = [];
+    const seen = new Set<string>();
+    for (const entry of Array.isArray(files) ? files : [files]) {
+      const record = entry && typeof entry === 'object'
+        ? entry as Record<string, unknown>
+        : undefined;
+      const filePath = typeof entry === 'string' ? entry : record?.['#text'];
+      const type = record?.['@_type'] ?? 'file';
+      if (typeof filePath !== 'string' || !filePath ||
+          (type !== 'file' && type !== 'dir' && type !== 'ghost')) continue;
+      const key = JSON.stringify([filePath, type]);
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push({ path: filePath, type });
+      }
+    }
+    return result;
   }
 
   /**

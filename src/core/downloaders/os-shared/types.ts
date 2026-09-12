@@ -106,6 +106,12 @@ export interface Checksum {
   value: string;
 }
 
+/** File records retained from RPM primary metadata (not the complete RPM file list). */
+export interface RpmPrimaryFile {
+  path: string;
+  type: 'file' | 'dir' | 'ghost';
+}
+
 /**
  * OS 패키지 정보
  */
@@ -140,6 +146,8 @@ export interface OSPackageInfo {
   dependencies: PackageDependency[];
   /** 제공하는 기능/패키지 */
   provides?: string[];
+  /** RPM primary 파일 제공 정보 (JSON 직렬화 가능, 전체 filelists의 부분집합) */
+  rpmPrimaryFiles?: RpmPrimaryFile[];
   /** 충돌하는 패키지 */
   conflicts?: string[];
   /** 대체하는 패키지 */
