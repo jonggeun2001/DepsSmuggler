@@ -68,9 +68,19 @@ export function createDeliveryPipeline(deps: DeliveryPipelineDeps): DeliveryPipe
               relativePath: path.relative(path.join(outputDir, 'packages'), filePath).split(path.sep).join('/'),
             };
           });
+          const condaPackageFiles = deliveredPackages.filter(pkg => pkg.type === 'conda').map(pkg => {
+            const filePath = results.find(result => result.id === pkg.id && result.success)?.filePath;
+            if (!filePath) {
+              throw new Error(`Conda 패키지 파일 경로가 없습니다: ${pkg.name}@${pkg.version}`);
+            }
+            return {
+              relativePath: path.relative(path.join(outputDir, 'packages'), filePath).split(path.sep).join('/'),
+            };
+          });
           await deps.generateInstallScripts(outputDir, deliveredPackages, {
             npmPackageFiles,
             npmRootPackages: options.npmRootPackages,
+            condaPackageFiles,
           });
         } catch (error) {
           return {

@@ -5,7 +5,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import { getArchivePackager } from './archive-packager';
+import { getFileSplitter } from './file-splitter';
 import { getScriptGenerator, type ScriptOptions } from './script-generator';
+import { createDeliveryPipeline } from '../../../electron/services/download/delivery-pipeline';
+import { initializeEmailSender } from '../mailer/email-sender';
+import { generateInstallScripts } from '../shared';
 import type { PackageInfo } from '../../types';
 
 const execFile = promisify(execFileCallback);
@@ -520,6 +525,178 @@ nativeSuite('native Conda offline installer consumer', () => {
     );
     expect(second.code, `${second.stdout}\n${second.stderr}`).toBe(0);
     expect(second.signal).toBeNull();
+    expect(await fs.promises.readFile(sentinel, 'utf8')).toBe('preserve');
+    expect(requests).toBe(0);
+  }, 300_000);
+
+  it('consumes a GUI pipeline ZIP with Conda archives from an isolated fresh prefix', async () => {
+    const setup = await prepareNative();
+    const source = await createPackageSource(
+      setup.tempRoot,
+      'depssmuggler-gui-native-data',
+      '1.0.0'
+    );
+    const fixtureDir = path.join(setup.tempRoot, 'fixtures');
+    await fs.promises.mkdir(fixtureDir, { recursive: true });
+    const archive = await createFixture(
+      setup.python,
+      source,
+      fixtureDir,
+      'depssmuggler-gui-native-data-1.0.0-0.conda'
+    );
+    const outputDir = path.join(setup.tempRoot, 'gui delivery output');
+    const packageDir = path.join(outputDir, 'packages');
+    await fs.promises.mkdir(packageDir, { recursive: true });
+    const deliveredPath = path.join(packageDir, path.basename(archive));
+    await fs.promises.copyFile(archive, deliveredPath);
+    const delivered = [{
+      id: 'conda-gui-native-data',
+      type: 'conda',
+      name: 'depssmuggler-gui-native-data',
+      version: '1.0.0',
+      filename: path.basename(archive),
+      metadata: { filename: path.basename(archive) },
+    }];
+    const pipeline = createDeliveryPipeline({
+      archivePackager: getArchivePackager(),
+      generateInstallScripts,
+      initializeEmailSender,
+      getFileSplitter,
+      stat: fs.promises.stat,
+    });
+    const completion = await pipeline.finalizeDownload({
+      outputDir,
+      options: { outputDir, outputFormat: 'zip', includeScripts: true, deliveryMethod: 'local' },
+      deliveredPackages: delivered,
+      packageInfos: delivered as PackageInfo[],
+      results: [{ id: delivered[0].id, success: true, filePath: deliveredPath }],
+      failedDownloadCount: 0,
+      progressEmitter: { emitDownloadStatus: () => undefined } as never,
+      isCancelled: () => false,
+    });
+    expect(completion.success, JSON.stringify(completion)).toBe(true);
+    const archivePath = String(completion.outputPath);
+    const bundle = path.join(setup.tempRoot, 'gui archive extracted');
+    await fs.promises.mkdir(bundle, { recursive: true });
+    await execFile(
+      setup.python,
+      ['-c', 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])', archivePath, bundle],
+      { env: setup.env, timeout: 30_000 }
+    );
+    expect(fs.existsSync(path.join(bundle, 'install.sh'))).toBe(true);
+    expect(fs.existsSync(path.join(bundle, 'install.ps1'))).toBe(true);
+    await fs.promises.rm(outputDir, { recursive: true, force: true });
+    const env = { ...setup.env, DEPS_SMUGGLER_CONDA_PREFIX: path.join(setup.tempRoot, 'gui conda prefix') };
+    const install = await runBash(path.join(bundle, 'install.sh'), env);
+    expect(install.code, `${install.stdout}\n${install.stderr}`).toBe(0);
+    expect(install.signal).toBeNull();
+    const listed = JSON.parse(
+      (await execFile(setup.executable, ['list', '--json', '--prefix', env.DEPS_SMUGGLER_CONDA_PREFIX], { env, timeout: 30_000 })).stdout
+    ) as Array<{ name: string; version: string }>;
+    expect(listed).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'depssmuggler-gui-native-data', version: '1.0.0' }),
+    ]));
+    expect(
+      await fs.promises.readFile(
+        path.join(env.DEPS_SMUGGLER_CONDA_PREFIX, 'share', 'depssmuggler-gui-native-data.txt'),
+        'utf8'
+      )
+    ).toBe('depssmuggler-gui-native-data-1.0.0\n');
+    expect(requests).toBe(0);
+  }, 300_000);
+
+  it('installs a published six archive delivered through the GUI pipeline', async () => {
+    const setup = await prepareNative();
+    const archive = path.join(setup.tempRoot, 'six-1.16.0-pyhd3eb1b0_1.tar.bz2');
+    const response = await fetch(
+      'https://repo.anaconda.com/pkgs/main/noarch/six-1.16.0-pyhd3eb1b0_1.tar.bz2',
+      { signal: AbortSignal.timeout(60_000) }
+    );
+    expect(response.ok).toBe(true);
+    await fs.promises.writeFile(archive, Buffer.from(await response.arrayBuffer()));
+    const outputDir = path.join(setup.tempRoot, 'published GUI output');
+    const packageDir = path.join(outputDir, 'packages');
+    await fs.promises.mkdir(packageDir, { recursive: true });
+    const deliveredPath = path.join(packageDir, path.basename(archive));
+    await fs.promises.copyFile(archive, deliveredPath);
+    const delivered = [{
+      id: 'conda-published-six',
+      type: 'conda',
+      name: 'six',
+      version: '1.16.0',
+      filename: path.basename(archive),
+      metadata: { filename: path.basename(archive) },
+    }];
+    const completion = await createDeliveryPipeline({
+      archivePackager: getArchivePackager(),
+      generateInstallScripts,
+      initializeEmailSender,
+      getFileSplitter,
+      stat: fs.promises.stat,
+    }).finalizeDownload({
+      outputDir,
+      options: { outputDir, outputFormat: 'zip', includeScripts: true, deliveryMethod: 'local' },
+      deliveredPackages: delivered,
+      packageInfos: delivered as PackageInfo[],
+      results: [{ id: delivered[0].id, success: true, filePath: deliveredPath }],
+      failedDownloadCount: 0,
+      progressEmitter: { emitDownloadStatus: () => undefined } as never,
+      isCancelled: () => false,
+    });
+    expect(completion.success, JSON.stringify(completion)).toBe(true);
+    const bundle = path.join(setup.tempRoot, 'published GUI extracted');
+    await fs.promises.mkdir(bundle, { recursive: true });
+    await execFile(
+      setup.python,
+      ['-c', 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])', String(completion.outputPath), bundle],
+      { env: setup.env, timeout: 30_000 }
+    );
+    expect(fs.existsSync(path.join(bundle, 'install.sh'))).toBe(true);
+    expect(fs.existsSync(path.join(bundle, 'install.ps1'))).toBe(true);
+    await fs.promises.rm(outputDir, { recursive: true, force: true });
+    const prefix = path.join(setup.tempRoot, 'published six prefix');
+    const runtimeArchives = await collectPythonRuntimeArchives(setup);
+    await execFile(
+      setup.executable,
+      [
+        'create',
+        '--offline',
+        '--yes',
+        '--no-default-packages',
+        '--prefix',
+        prefix,
+        ...runtimeArchives.map((runtimeArchive) => runtimeArchive.source),
+      ],
+      { env: setup.env, timeout: 120_000, maxBuffer: 2 * 1024 * 1024 }
+    );
+    const env = { ...setup.env, DEPS_SMUGGLER_CONDA_PREFIX: prefix };
+    const before = await execFile(
+      path.join(prefix, 'bin', 'python'),
+      ['-c', 'import importlib.util; print(importlib.util.find_spec("six") is None)'],
+      { env, timeout: 30_000 }
+    );
+    expect(before.stdout.trim()).toBe('True');
+    const install = await runBash(path.join(bundle, 'install.sh'), env);
+    expect(install.code, `${install.stdout}\n${install.stderr}`).toBe(0);
+    expect(install.signal).toBeNull();
+    const listed = JSON.parse(
+      (await execFile(setup.executable, ['list', '--json', '--prefix', prefix], { env, timeout: 30_000 })).stdout
+    ) as Array<{ name: string; version: string }>;
+    expect(listed.some((entry) => entry.name === 'six' && entry.version === '1.16.0')).toBe(true);
+    const imported = await execFile(
+      path.join(env.DEPS_SMUGGLER_CONDA_PREFIX, 'bin', 'python'),
+      ['-c', 'import json,six,sys; print(json.dumps({"version":six.__version__,"file":six.__file__,"prefix":sys.prefix}))'],
+      { env, timeout: 30_000 }
+    );
+    const module = JSON.parse(imported.stdout.trim()) as { version: string; file: string; prefix: string };
+    expect(module.version).toBe('1.16.0');
+    expect(module.prefix).toBe(prefix);
+    expect(module.file.startsWith(`${prefix}${path.sep}`)).toBe(true);
+    const sentinel = path.join(prefix, 'sentinel');
+    await fs.promises.writeFile(sentinel, 'preserve');
+    const repeat = await runBash(path.join(bundle, 'install.sh'), env);
+    expect(repeat.code, `${repeat.stdout}\n${repeat.stderr}`).toBe(0);
+    expect(repeat.signal).toBeNull();
     expect(await fs.promises.readFile(sentinel, 'utf8')).toBe('preserve');
     expect(requests).toBe(0);
   }, 300_000);

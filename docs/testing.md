@@ -288,17 +288,17 @@ DEPS_SMUGGLER_NATIVE_DOCKER=1 bash scripts/verify-worktree.sh \
 
 ### Conda 설치 스크립트 오프라인 검증
 
-`src/core/packager/conda-install-script.integration.test.ts`는 생성한 Bash와 Windows PowerShell 스크립트를 실제 프로세스로 실행합니다. 기본 회귀는 기록용 실행 파일로 pip·Conda 인자 분리, `.conda`·`.tar.bz2`의 정확한 경로, 공백·인용 문자, 루트만 포함한 목록, 환경 경로 지정, 재실행과 오류 종료를 검사합니다. 기록용 실행 파일의 성공을 실제 Conda 설치 성공으로 간주하지 않습니다. CLI 단위 테스트는 다운로드 항목에 메타데이터 파일명이 없어도 실제 완료 경로를 전달하며 다른 타입의 파일을 Conda 목록에 섞지 않는지 확인합니다.
+`src/core/packager/conda-install-script.integration.test.ts`는 생성한 Bash와 Windows PowerShell 스크립트를 실제 프로세스로 실행합니다. 기본 회귀는 기록용 실행 파일로 pip·Conda 인자 분리, `.conda`·`.tar.bz2`의 정확한 경로, 공백·인용 문자, 루트만 포함한 목록, 환경 경로 지정, 재실행과 오류 종료를 검사합니다. 기록용 실행 파일의 성공을 실제 Conda 설치 성공으로 간주하지 않습니다. CLI와 Electron delivery pipeline 단위 테스트는 다운로드 항목의 실제 완료 경로를 `condaPackageFiles`로 전달하며, metadata filename fallback과 다른 타입의 파일이 Conda 목록에 섞이지 않는지 확인합니다.
 
-`src/core/packager/conda-native-consumer.integration.test.ts`는 Ubuntu CI의 기존 Miniconda를 사용하는 native 검증을 별도로 실행합니다.
+`src/core/packager/conda-native-consumer.integration.test.ts`는 Ubuntu CI에서 이미 제공되는 Conda를 사용하는 native 검증을 별도로 실행합니다. 두 CLI 사례는 canonical Conda 생성기의 `.conda` fixture를 새 prefix에 설치하고 Python noarch `.tar.bz2` fixture를 호환 Python runtime이 준비된 prefix에 설치합니다. 두 GUI 사례는 delivery pipeline이 만든 ZIP에서 generic `.conda`를 새 prefix에 설치하고, 공개 `six 1.16.0` `.tar.bz2`를 준비된 Python prefix에 설치·import한 뒤 반복 실행과 sentinel 보존을 검사합니다. 모든 사례는 임시 prefix·캐시와 channel HTTP trap을 사용해 bundle 밖의 파일과 네트워크 의존을 드러냅니다.
 
 ```bash
 DEPS_SMUGGLER_NATIVE_CONDA=1 bash scripts/verify-worktree.sh src/core/packager/conda-native-consumer.integration.test.ts
 ```
 
-기본 실행에서는 native 검증을 건너뛰며, 명시적으로 opt-in한 환경에서 Linux나 필수 도구 조건이 맞지 않으면 실패합니다. 임시 prefix·캐시·설정과 `CONDA_REGISTER_ENVS=false`로 사용자 환경 등록 파일까지 격리합니다. 실제 Conda로 두 아카이브 형식을 설치하고 패키지 목록과 설치 파일을 검사하며, 설정한 로컬 채널의 HTTP 요청이 없는지 확인합니다. Python noarch 설치는 호환되는 Python이 있는 임시 환경에서 별도로 검사합니다. 일반 noarch 파일의 설치만으로 Python import 성공을 주장하지 않습니다. 도구 설치나 호스트 base 환경 변경은 수행하지 않습니다.
+기본 실행에서는 native 검증을 건너뛰며, 명시적으로 opt-in한 환경에서 필수 Linux·Conda 조건이 맞지 않으면 실패합니다. 임시 prefix·캐시·설정과 `CONDA_REGISTER_ENVS=false`로 환경 등록을 격리하고, `--offline` 설치에서 channel HTTP 요청이 없는지 확인합니다. native 성공 여부는 CI 실행 결과로 판단합니다.
 
-Python 검증 환경은 runner의 base 환경에 설치된 Python과 전이 의존성 기록에 해당하는 캐시 아카이브만 임시 경로로 복사해 준비합니다. 필요한 아카이브가 없으면 구체적인 준비 오류로 실패합니다. 생성 스크립트에는 `CONDA_OFFLINE=false`를 전달해 스크립트 자체의 `--offline` 옵션을 검증하며, 환경 준비·설치·import 단계별 실행 시간을 CI 로그에 남깁니다.
+Python noarch 사례는 호환 runtime archive를 별도 임시 prefix에 준비하며, 필요한 archive가 없으면 구체적인 준비 오류로 실패합니다. 생성 스크립트에는 `CONDA_OFFLINE=false`를 전달해 스크립트 자체의 `--offline` 옵션을 검증하며, 환경 준비·설치·import 단계별 실행 시간을 CI 로그에 남깁니다.
 
 ### npm 설치 스크립트 오프라인 검증
 
@@ -310,7 +310,7 @@ Python 검증 환경은 runner의 base 환경에 설치된 Python과 전이 의�
 
 위 npm 소비자 테스트는 bundle 루트에 사용자 `package.json`이 있는 경우와 없는 경우를 모두 실행합니다. 사용자 manifest가 있으면 바이트를 보존하고 해당 프로젝트를 추가 패키지로 설치하지 않아야 하며, 없으면 새로 만들지 않아야 합니다. 이는 Windows npm 10에서 `--prefix` 때문에 현재 bundle 폴더가 추가 설치 대상이 되어 발생했던 오류를 검출합니다.
 
-`src/core/packager/gui-mixed-native-consumer.integration.test.ts`는 실제 `createDeliveryPipeline`, shared script generator, archive packager를 실행해 local fixture 기반 pip·npm 묶음을 ZIP으로 만든다. router 자체는 `electron/services/download-package-router.test.ts`에서 실제 destination을 성공 결과에 넣는지 별도로 검증한다. consumer는 생성된 ZIP만 새 디렉터리에 풀고 독립 Python venv·npm cache·loopback registry 차단 환경에서 `install.sh`를 실행한다. 직접 npm root와 전이 모듈의 `require`가 모두 성공하고 pip와 npm 설치가 모두 성공한 경우에만 완료 메시지와 종료 코드 `0`을 허용한다. npm 실패나 파일 경로 누락은 전체 성공으로 바꾸지 않는다. Windows PowerShell 실행은 해당 CI 환경에서 확인하며, 이 local fixture 테스트는 실제 공개 패키지 배포물이나 Conda native 설치를 주장하지 않는다.
+`src/core/packager/gui-mixed-native-consumer.integration.test.ts`는 실제 `createDeliveryPipeline`, shared script generator, archive packager를 실행해 local fixture 기반 pip·npm 묶음을 ZIP으로 만든다. router 자체는 `electron/services/download-package-router.test.ts`에서 실제 destination을 성공 결과에 넣는지 별도로 검증한다. consumer는 생성된 ZIP만 새 디렉터리에 풀고 독립 Python venv·npm cache·loopback registry 차단 환경에서 `install.sh`를 실행한다. 직접 npm root와 전이 모듈의 `require`가 모두 성공하고 pip와 npm 설치가 모두 성공한 경우에만 완료 메시지와 종료 코드 `0`을 허용한다. npm 실패나 파일 경로 누락은 전체 성공으로 바꾸지 않는다. Windows PowerShell 실행은 해당 CI 환경에서 확인하며, 이 local fixture 테스트는 실제 공개 패키지 배포물을 사용한 검증과 구분한다.
 
 별도 수동 검증에서는 이전 GUI 산출물의 공개 패키지를 수정된 delivery pipeline으로 다시 묶었다. 원본 출력 디렉터리를 지우고 ZIP만 새 환경에 전달한 두 번의 실행에서 `colorama 0.4.6`, `is-odd 3.0.1`, `is-number 6.0.0` 로딩과 npm 레지스트리 요청 0건을 확인했다. 이는 위 로컬 fixture 검사와 별도이며, 수정된 pipeline 산출물 검증이지 새로 빌드한 GUI 앱 자체의 실행 검증이나 Conda 설치 검증은 아니다.
 
