@@ -462,3 +462,19 @@ macOS는 DMG와 ZIP을 생성한 뒤 `node scripts/verify-macos-update.mjs build
 - [아키텍처 개요](./architecture-overview.md)
 - [Electron / Renderer](./electron-renderer.md)
 - [IPC 핸들러](./ipc-handlers.md)
+
+
+### Maven 프로젝트와 빌드 플러그인의 빈 저장소 검증
+
+`maven-project.test.ts`, `maven-lifecycle.test.ts`, `maven-surefire.test.ts`, `maven-test-runtime.test.ts`는 전체 POM의 속성·부모·관리 버전·명시/기본 플러그인·런타임 provider·JUnit engine/launcher를 검사합니다. provider의 실제 배포 모듈과 Maven 버전별 공식 lifecycle XML을 경계에서 대체하며 네트워크 없이 실행합니다. service/IPC 테스트는 입력 검증과 오류 전달을, `cart-input-regression.spec.ts`는 Chromium에서 대상 버전 전달·플러그인 장바구니 추가·실패 시 입력 보존·기존 dependency 조각 호환성을 검사합니다.
+
+`maven-project-native-consumer.integration.test.ts`는 `DEPS_SMUGGLER_NATIVE_MAVEN_PROJECT=1`일 때 실제 Maven Central과 설치된 Maven을 사용합니다. 기본 단위 테스트에서는 skip하며, Linux CI 단계에서 별도로 실행합니다. macOS에서도 실행할 수 있고 `MAVEN_BINARY`로 기존 Maven 실행 경로를 지정할 수 있습니다.
+
+```bash
+DEPS_SMUGGLER_NATIVE_MAVEN_PROJECT=1 bash scripts/verify-worktree.sh \
+  src/core/packager/maven-project-native-consumer.integration.test.ts
+```
+
+이 검사는 POM collector → 공통 의존성 resolver → 다운로드 → 압축 → 생성 Bash 설치 스크립트를 실행한 뒤, 새 빈 local-m2를 사용하여 `mvn --offline package`로 JUnit 테스트를 실제 실행합니다. Maven의 온라인 빌드로 플러그인을 미리 준비하지 않고 사용자 `~/.m2`도 복사하지 않습니다. 대상 Maven 버전은 `mvn --version`에서 읽으며, GUI와 같은 기본 의존성 탐색 옵션을 사용합니다. 실패한 native bundle은 경로를 출력해 재현할 수 있게 남깁니다.
+
+기존 `maven-native-consumer.integration.test.ts`는 격리 저장소에 빌드 플러그인을 미리 준비하고 라이브러리의 모든 버전 반출을 검증하는 별도 검사입니다. 새 프로젝트 검사의 빈 저장소 성공을 기존 검사의 성공으로 대체하지 않습니다.

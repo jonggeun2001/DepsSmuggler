@@ -970,3 +970,10 @@ classifier/type 기반 artifact 선택, scope·exclusion, parent/BOM의
 dependencyManagement 적용과 각 루트의 dependency tree는 재사용하지 않습니다.
 따라서 metadata를 절약하면서도 기존 Maven 간선 및 최종 다운로드 선택 규칙을
 유지하며, 요청이 끝나면 세션도 폐기됩니다.
+
+
+## 프로젝트 입력과 플러그인 수집 경계
+
+전체 POM 입력은 `maven-project.ts`에서 프로젝트/부모의 effective 의존성, 실제 적용되는 build plugin, 대상 Maven의 package lifecycle plugin을 root 목록으로 변환합니다. 동기식 dependency 태그 파싱만으로는 기본 resources/compiler/surefire/jar plugin을 찾을 수 없어 이 단계를 비동기 프로젝트 입력 경로로 분리했습니다. 이후 BFS는 기존과 같이 각 root의 모든 발견 버전과 필요한 모델 POM을 수집합니다. 일반 라이브러리의 빌드 플러그인 전체를 BFS에 추가하지 않습니다.
+
+대상 Maven 버전과 packaging을 반영한 기본 플러그인 표의 출처/해시를 plugin metadata로 보존합니다. 미사용 관리 항목의 전수 다운로드나 Maven 충돌 승자 중재는 추가하지 않습니다. API·상속 규칙·지원 제한은 [shared Maven](shared-maven.md#프로젝트-pom과-package-플러그인-수집)에 정리되어 있습니다.

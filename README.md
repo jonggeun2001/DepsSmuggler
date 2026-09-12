@@ -82,6 +82,8 @@ depssmuggler --help
 
 Maven 반출은 한 BFS에서 실제로 발견된 모든 버전의 원래 아티팩트와 POM·하위 의존성를 보존합니다. Parent POM의 일반 dependencies는 상속하고, BOM의 `dependencyManagement` 전체 라이브러리는 펼치지 않습니다. scope·optional·exclusion·탐색 깊이 제한은 유지됩니다.
 
+GUI에서 전체 `<project>` POM을 가져오면 프로젝트 의존성과 `package` 단계의 명시·상속·기본 빌드 플러그인을 함께 담습니다. 장바구니 상단에서 폐쇄망의 Maven 버전을 지정한 뒤 파일을 가져오거나 POM을 입력하세요(기본 `3.9.11`). `<dependency>` 조각은 라이브러리 입력으로 처리합니다. 지원 범위와 오프라인 검증 방법은 [Maven 프로젝트 POM 수집](docs/shared-maven.md#프로젝트-pom과-package-플러그인-수집)을 참고하세요.
+
 OS 패키지 CLI는 `os list-distros/search/download/cache`를 사용합니다. 배포판과 아키텍처 목록은 저장소 프리셋 및 조회 결과에 따라 달라지므로 `depssmuggler os list-distros`로 확인하세요.
 
 GUI에는 Docker Hub 외 GHCR, ECR Public, Quay, 사용자 지정 레지스트리 선택도 있습니다. 익명 pull과 검색 전략이 구현되어 있으나 GHCR/ECR Public은 정확한 이미지명을 입력해야 하며, 공통 메타데이터 조회는 Docker Hub 중심입니다. 모든 레지스트리에서 같은 검색·메타데이터 기능을 제공하지는 않습니다. 자세한 범위는 [Docker 아키텍처](docs/docker-architecture.md)를 참고하세요.

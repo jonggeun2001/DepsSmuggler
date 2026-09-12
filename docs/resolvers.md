@@ -655,7 +655,9 @@ const deps = await resolver.parseFromText(`
 
 ### 텍스트 입력의 의존성 type 보존
 
-`MavenResolver.parseFromText()`는 각 `<dependency>`의 `<type>` 값을 다운로드 메타데이터에 보존합니다. `CartPage`의 POM 파일/텍스트 입력도 같은 artifact type을 장바구니 metadata로 유지하며, Maven의 장바구니 중복 판정은 type까지 비교합니다. 따라서 같은 GAV의 기본 JAR과 `<type>pom</type>` 의존성이 함께 있어도 둘 다 유지됩니다. Electron 다운로드 라우터는 이 metadata를 `MavenDownloader`에 전달하므로 `org.apache.flink:flink-metrics:1.20.5`처럼 POM으로 선언된 의존성은 JAR 기본값으로 바뀌지 않고 `.pom` 및 해당 체크섬 파일로 다운로드되며, 평탄화된 복사본도 `.pom` 확장자를 사용합니다.
+`MavenResolver.parseFromText(content, { mavenVersion? })`는 전체 프로젝트 POM에서 의존성·부모/BOM·package 플러그인을 수집합니다. 기본 Maven 버전은 3.9.11이며 원격의 공식 버전별 lifecycle 표를 조회합니다. 프로젝트 자체는 다운로드 대상에서 제외하고 test 의존성도 유지합니다. 구체적인 버전을 해석할 수 없으면 실패합니다. 상세 계약과 제한은 [프로젝트 POM 수집](shared-maven.md#프로젝트-pom과-package-플러그인-수집)을 참고하세요.
+
+각 `<dependency>`의 `<type>` 값은 다운로드 메타데이터에 보존합니다. `CartPage`의 POM 파일/텍스트 입력도 같은 artifact type을 장바구니 metadata로 유지하며, Maven의 장바구니 중복 판정은 type까지 비교합니다. 따라서 같은 GAV의 기본 JAR과 `<type>pom</type>` 의존성이 함께 있어도 둘 다 유지됩니다. Electron 다운로드 라우터는 이 metadata를 `MavenDownloader`에 전달하므로 `org.apache.flink:flink-metrics:1.20.5`처럼 POM으로 선언된 의존성은 JAR 기본값으로 바뀌지 않고 `.pom` 및 해당 체크섬 파일로 다운로드되며, 평탄화된 복사본도 `.pom` 확장자를 사용합니다.
 
 장바구니 파서는 기존 입력 호환성을 위해 `dependencyManagement`의 BOM을 포함한 모든 `<dependency>` 선언을 수집합니다.
 

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { UpdateReleaseNotes } from '../src/types/updater';
+import type { PackageInfo } from '../src/types/package-manager/metadata';
 
 // 렌더러 프로세스에 노출할 API 정의
 const electronAPI = {
@@ -312,6 +313,11 @@ const electronAPI = {
 
   // Maven 관련
   maven: {
+    parseProject: (content: string, options?: { mavenVersion?: string }): Promise<{
+      success: boolean;
+      packages: PackageInfo[];
+      error?: string;
+    }> => ipcRenderer.invoke('maven:parseProject', content, options),
     isNativeArtifact: (groupId: string, artifactId: string, version?: string): Promise<boolean> =>
       ipcRenderer.invoke('maven:isNativeArtifact', groupId, artifactId, version),
     getAvailableClassifiers: (groupId: string, artifactId: string, version?: string): Promise<string[]> =>

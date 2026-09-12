@@ -1,6 +1,7 @@
 // Electron API 타입 정의 (렌더러 프로세스용)
 
 import type { UpdateReleaseNotes } from './updater';
+import type { PackageInfo } from './package-manager/metadata';
 
 export interface DownloadProgressData {
   sessionId?: number;
@@ -246,6 +247,11 @@ export interface HistoryAPI {
 }
 
 export interface MavenAPI {
+  parseProject?: (content: string, options?: { mavenVersion?: string }) => Promise<{
+    success: boolean;
+    packages: PackageInfo[];
+    error?: string;
+  }>;
   isNativeArtifact: (groupId: string, artifactId: string, version?: string) => Promise<boolean>;
   getAvailableClassifiers: (groupId: string, artifactId: string, version?: string) => Promise<string[]>;
 }

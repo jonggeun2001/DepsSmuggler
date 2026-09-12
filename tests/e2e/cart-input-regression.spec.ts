@@ -168,3 +168,54 @@ test('pom.xml 입력은 같은 좌표의 JAR와 POM 아티팩트를 구분해 �
   expect(items[1]).toMatchObject({ type: 'maven', name: 'org.example:platform', version: '1.0' });
   expect(items[1].metadata?.type).toBeUndefined();
 });
+
+test('전체 Maven POM은 입력한 기준 버전을 IPC에 전달하고 build plugin 패키지를 추가한다', async ({ page }) => {
+  await setupMockElectronApp(page);
+  await page.goto('/#/cart');
+  await page.evaluate(() => {
+    const api = window.electronAPI!.maven! as typeof window.electronAPI.maven & {
+      parseProject: (content: string, options?: { mavenVersion?: string }) => Promise<unknown>;
+    };
+    (window as typeof window & { mavenCalls?: unknown[] }).mavenCalls = [];
+    api.parseProject = async (content, options) => {
+      (window as typeof window & { mavenCalls: unknown[] }).mavenCalls.push({ content, options });
+      return {
+        success: true,
+        packages: [{ name: 'org.apache.maven.plugins:maven-compiler-plugin', version: '3.13.0', metadata: { type: 'maven-plugin' } }],
+      };
+    };
+  });
+  await page.getByLabel('Maven 기준 버전').fill('3.8.6');
+  const dialog = await openTextInput(page, 'pom.xml');
+  await dialog.getByRole('textbox').fill(
+    '<project><modelVersion>4.0.0</modelVersion><groupId>demo</groupId><artifactId>app</artifactId><version>1</version><build><plugins><plugin><artifactId>maven-compiler-plugin</artifactId></plugin></plugins></build></project>',
+  );
+  await dialog.getByRole('button', { name: '추가', exact: true }).click();
+  await expect(page.getByText('1개 패키지가 추가되었습니다')).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'org.apache.maven.plugins:maven-compiler-plugin', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as typeof window & { mavenCalls: Array<{ options: unknown }> }).mavenCalls)).toEqual([
+    expect.objectContaining({ options: { mavenVersion: '3.8.6' } }),
+  ]);
+});
+
+test('전체 Maven POM IPC 오류는 입력과 장바구니를 보존하고 fragment는 기존 parser를 사용한다', async ({ page }) => {
+  await setupMockElectronApp(page, {
+    cartItems: [{ id: 'existing', type: 'pip', name: 'requests', version: '2.32.3', addedAt: 1 }],
+  });
+  await page.goto('/#/cart');
+  await page.evaluate(() => {
+    window.electronAPI!.maven!.parseProject = async () => ({ success: false, packages: [], error: 'POM service unavailable' });
+  });
+  const dialog = await openTextInput(page, 'pom.xml');
+  const fullPom = '<project><groupId>demo</groupId><artifactId>app</artifactId><version>1</version></project>';
+  await dialog.getByRole('textbox').fill(fullPom);
+  await dialog.getByRole('button', { name: '추가', exact: true }).click();
+  await expect(page.getByText('POM service unavailable')).toBeVisible();
+  await expect(dialog).toBeVisible();
+  expect((await readMockElectronAppState(page)).cart.items).toHaveLength(1);
+
+  await dialog.getByRole('textbox').fill('<dependencies><dependency><groupId>org.example</groupId><artifactId>fragment</artifactId><version>1</version></dependency></dependencies>');
+  await dialog.getByRole('button', { name: '추가', exact: true }).click();
+  await expect(page.getByText('1개 패키지가 추가되었습니다')).toBeVisible();
+  expect((await readMockElectronAppState(page)).cart.items.some((item) => item.name === 'org.example:fragment')).toBe(true);
+});
