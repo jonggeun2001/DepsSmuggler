@@ -34,11 +34,11 @@ async function downloadFile(
 ```
 
 - HTTP/HTTPS 모두 지원
-- 301/302의 `Location`으로 재귀 다운로드 (상대 URL 해석이나 최대 횟수 제한은 구현하지 않음)
+- 301/302의 `Location`으로 재귀 다운로드 (상대 URL은 현재 URL 기준으로 해석하며 최대 20회)
 - AbortSignal을 통한 다운로드 취소
 - shouldPause 콜백을 통한 일시정지/재개
 
-현재 헬퍼는 대상 디렉토리를 생성하지 않으며 호출 중 발생한 abort 이벤트를 처리합니다. 이미 취소된 signal 검사, HTTP 오류 상태 거부, 재시도·체크섬 검증은 이 함수에 포함되지 않습니다. 진행률의 total은 Content-Length가 없으면 0입니다.
+현재 헬퍼는 대상 디렉토리를 생성하지 않으며 호출 중 발생한 abort 이벤트를 처리합니다. 이미 취소된 signal이면 요청을 시작하지 않습니다. 유효한 301/302 리다이렉트를 처리한 뒤, 2xx 응답만 파일 스트림에 연결하며 그 밖의 상태는 HTTP 상태 코드가 포함된 오류로 거부합니다. 오류 응답은 저장하지 않으며 대상 파일을 닫고 삭제한 뒤 실패를 반환하므로 이전 시도의 정리가 재시도한 파일을 지우지 않습니다. Location이 없는 redirect나 redirect 한도 초과도 실패입니다. 자동 재시도와 체크섬 검증은 이 함수에 포함되지 않습니다. 진행률의 total은 Content-Length가 없으면 0입니다.
 
 ### FileDownloadOptions
 
