@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import * as fs from 'node:fs';
+import * as http from 'node:http';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { groupDownloadItems } from '../utils';
 import type { DownloadStoreItem } from '../../../stores/download-store';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -49,6 +55,10 @@ vi.mock('react-router-dom', () => ({
 
 vi.mock('./use-os-download-flow', () => ({
   useOSDownloadFlow: () => osFlowMock.value,
+}));
+
+vi.mock('../../../../../electron/utils/logger', () => ({
+  createScopedLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
 }));
 
 type DownloadListenerMap = {
@@ -579,4 +589,95 @@ describe('useDownloadPageController', () => {
       ])
     );
   });
+
+  it.each([503, 404])('실제 HTTP %s 실패 후 같은 항목 재시도는 성공 산출물만 기록한다', async (failureStatus) => {
+    const outputDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-http-status-'));
+    const payload = Buffer.from('synthetic transport payload');
+    let requests = 0;
+    const server = http.createServer((_request, response) => {
+      requests += 1;
+      if (requests === 1) {
+        response.writeHead(failureStatus, { 'content-type': 'text/plain' });
+        response.end(`failure-${failureStatus}`);
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': payload.length });
+      response.end(payload);
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('HTTP fixture did not bind');
+
+    try {
+      const packageItem = {
+        id: `conda-http-${failureStatus}`,
+        type: 'conda',
+        name: 'fixture',
+        version: '1.0.0',
+        downloadUrl: `http://127.0.0.1:${address.port}/fixture-1.0.0-0.tar.bz2`,
+        addedAt: Date.now(),
+      };
+      const { electronAPI, listeners, rendered, stores } = await loadController({
+        cartItems: [packageItem],
+        defaultDownloadPath: outputDir,
+      });
+      const { createDownloadOrchestrator } = await import('../../../../../electron/services/download-orchestrator');
+      const dispatch = (channel: string, data: unknown) => {
+        if (channel === 'download:progress') listeners.progress?.(data as Record<string, unknown>);
+        if (channel === 'download:status') listeners.status?.(data as Record<string, unknown>);
+        if (channel === 'download:all-complete') listeners.allComplete?.(data as Record<string, unknown>);
+      };
+      const orchestrator = createDownloadOrchestrator({
+        getMainWindow: () => ({
+          isDestroyed: () => false,
+          webContents: { isDestroyed: () => false, send: dispatch },
+        } as never),
+      });
+      electronAPI.download.start.mockImplementation((data) => orchestrator.startDownload(data as never));
+      await act(async () => { await rendered.result.current.handleStartDownload(); });
+      await waitFor(() => expect(rendered.result.current.packagingStatus).toBe('failed'), { timeout: 10_000 });
+      expect(electronAPI.history.add).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed', outputPath: outputDir })
+      );
+      expect(fs.existsSync(`${outputDir}.zip`)).toBe(false);
+      const packagePath = path.join(outputDir, 'packages', 'fixture-1.0.0-0.tar.bz2');
+      expect(fs.existsSync(packagePath)).toBe(false);
+      const failedHistoryCalls = electronAPI.history.add.mock.calls.length;
+      expect(failedHistoryCalls).toBe(1);
+
+      const failedItem = rendered.result.current.downloadItems[0];
+      expect(failedItem.status).toBe('failed');
+      expect(failedItem.error).toContain(`HTTP ${failureStatus}`);
+      await act(async () => { await rendered.result.current.executeRetryDownload(failedItem); });
+      await waitFor(() => expect(rendered.result.current.packagingStatus).toBe('completed'), { timeout: 10_000 });
+      expect(requests).toBe(2);
+      expect(electronAPI.history.add).toHaveBeenCalledTimes(failedHistoryCalls + 1);
+      expect(electronAPI.history.add).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: 'success', outputPath: `${outputDir}.zip` })
+      );
+      expect(stores.useDownloadStore.getState().isDownloading).toBe(false);
+      const outputPath = rendered.result.current.completedOutputPath;
+      expect(outputPath).toMatch(/\.zip$/);
+      expect(fs.existsSync(outputPath)).toBe(true);
+      expect((await fs.promises.stat(outputPath)).size).toBeGreaterThan(0);
+      expect(await fs.promises.readFile(packagePath)).toEqual(payload);
+      const python = process.platform === 'win32' ? 'py' : 'python3';
+      const args = process.platform === 'win32' ? ['-3', '-c'] : ['-c'];
+      args.push(
+        'import sys,zipfile,base64; z=zipfile.ZipFile(sys.argv[1]); print(base64.b64encode(z.read("packages/fixture-1.0.0-0.tar.bz2")).decode())',
+        outputPath,
+      );
+      const inspected = await promisify(execFile)(python, args, { timeout: 30_000 });
+      expect(inspected.stdout.trim()).toBe(payload.toString('base64'));
+      rendered.unmount();
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await fs.promises.rm(outputDir, { recursive: true, force: true });
+      await fs.promises.rm(`${outputDir}.zip`, { force: true });
+    }
+  }, 30_000);
 });

@@ -14,7 +14,10 @@ vi.mock('archiver', () => ({ default: vi.fn() }));
 vi.mock('../../utils/logger', () => ({ default: { debug: vi.fn() } }));
 
 function transfer(headers: Record<string, string> = { 'content-length': '6' }, statusCode = 200) {
-  const file = Object.assign(new PassThrough(), { close: vi.fn() });
+  const file = Object.assign(new PassThrough(), { close: vi.fn((callback?: () => void) => {
+    file.destroy();
+    callback?.();
+  }) });
   const response = Object.assign(new PassThrough(), { headers, statusCode });
   const request = Object.assign(new EventEmitter(), { destroy: vi.fn() });
   const chunks: Buffer[] = [];
@@ -24,7 +27,10 @@ function transfer(headers: Record<string, string> = { 'content-length': '6' }, s
 }
 
 describe('공유 파일 전송', () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(fs.unlink).mockImplementation((_file, callback) => callback(null));
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -194,7 +200,7 @@ describe('공유 파일 전송', () => {
     second.response.end(Buffer.from('abcdef'));
     await pending;
     expect(first.file.close).toHaveBeenCalledOnce();
-    expect(fs.unlinkSync).toHaveBeenCalledWith('package.bin');
+    expect(fs.unlink).toHaveBeenCalledWith('package.bin', expect.any(Function));
     expect(https.get).toHaveBeenNthCalledWith(
       2,
       'https://cdn.example/package',

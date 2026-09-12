@@ -87,7 +87,7 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 | OS 패키지          | `src/core/downloaders/os-shared/{archive-packager,dependency-tree}.test.ts`, `src/core/resolver/os-resolver-utils.test.ts`              | 압축 형식·스크립트, 누락 파일, 순환·중복 의존성, 버전·아키텍처 필터, 요청 간 상태 격리                           |
 | Python             | `src/core/shared/{pip-candidate,pip-tags,pip-provider,pypi-utils}.test.ts`                                                              | ABI·플랫폼, Python/패키지 버전 제약, 철회·시험 배포, 후보 없음, 의존성·캐시·실패 후 재시도                       |
 | Conda·Maven        | `src/core/shared/{conda-utils,conda-validator,maven-utils}.test.ts`                                                                     | 압축 인덱스/일반 인덱스/API fallback, noarch, Python 빌드, 채널 거부, classifier, 잘못된·빈 응답                 |
-| HTTP·파일·캐시     | `src/core/shared/{axios-http-client,file-utils}.test.ts`, `src/core/shared/cache/cache-store.test.ts`                                   | 상태·오류·진행률 전달, 바이트 전송, redirect, pause/cancel 정리, TTL 경계, 동시 실패·재시도, 손상 JSON·권한 오류 |
+| HTTP·파일·캐시     | `src/core/shared/{axios-http-client,file-utils}.test.ts`, `src/core/shared/file-utils-http.integration.test.ts`, `src/core/shared/cache/cache-store.test.ts` | 상태·오류·진행률 전달, non-2xx 응답과 partial 정리, redirect, pause/cancel 정리, TTL 경계, 동시 실패·재시도, 손상 JSON·권한 오류 |
 | 메일               | `src/core/mailer/email-sender-errors.test.ts`                                                                                           | 첨부 제한과 같은 크기/초과, 인증·수신자·파일 접근 오류, 부분 발송 중단, 연결 재시도                              |
 | 렌더러 훅          | `src/renderer/pages/settings/use-settings-form-actions.test.ts`, `src/renderer/pages/download-page/hooks/use-os-download-flow.test.ts`  | 입력 검증·미저장 이동 방지, SMTP·캐시 실패, OS 선택, 늦은 응답, 히스토리·장바구니 보존, 구독 해제                |
 
@@ -98,6 +98,12 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 `bash scripts/verify-worktree.sh electron/main-lifecycle.test.ts src/core/shared/axios-http-client.test.ts`로 앱 시작 경계와 HTTP 어댑터를 검증합니다. 시작 테스트는 Electron 창·핸들러만 대체하고 실제 `main.ts`의 TLS 분기와 loopback HTTPS 서버, axios/Node HTTPS를 실행합니다. 기본값·`true`·잘못된 환경변수 값의 자체 서명 인증서 거부, 신뢰 CA를 명시한 연결 성공, 호스트 이름 불일치 거부, 명시적인 `DEPSSMUGGLER_STRICT_SSL=false` 완화 동작을 구분합니다.
 
 테스트 전용 인증서/키는 `electron/test-fixtures/`에 있고 외부 서버나 개인 인증서는 사용하지 않습니다. 테스트 후 환경변수·axios 기본 agent를 복구하고 연결·서버를 정리합니다. 기존 lifecycle 테스트가 `STRICT_SSL=true`만 지정해 기본값 오류를 놓쳤으므로 미지정 실행을 별도 회귀 사례로 유지합니다. 이 검증은 실제 TLS 연결을 포함하지만 새 packaged 앱의 전체 GUI 실행이나 모든 저장소의 인증서 체인을 검증한 것은 아닙니다.
+
+### HTTP 다운로드 응답 오류 검증
+
+`src/core/shared/file-utils-http.integration.test.ts`는 loopback HTTP 서버의 실제 404·503 응답을 `downloadFile`에 전달합니다. `downloadFile`은 응답을 파일에 연결하기 전에 2xx 여부를 확인하고, 실패 시 상태 코드와 응답 진단을 포함해 reject하며 progress 완료 콜백을 호출하지 않고 destination의 partial 파일을 삭제해야 합니다. 정상 200과 301/302 redirect는 기존 바이트·진행률 동작을 유지하고, 상대 `Location`과 20회 redirect 한도도 검사합니다. 실패한 요청을 downloader 내부에서 자동 성공이나 자동 재시도로 바꾸지 않으며, 명시적인 사용자 재시도만 새 HTTP 요청을 시작합니다.
+
+`use-download-page-controller.test.tsx`의 HTTP 회귀는 실제 orchestrator·router·`downloadFile`·파일 시스템·delivery pipeline을 렌더러 controller에 연결합니다. Conda 항목의 404와 503 요청은 실패 항목·실패 이력만 남기고 파일과 ZIP을 만들지 않아야 합니다. 같은 항목을 같은 경로로 재시도해 200 응답을 받으면 성공 이력과 ZIP을 만들고, ZIP 내부 파일도 전송한 바이트와 일치해야 합니다. 창의 이벤트 전달과 이력 저장 IPC만 테스트 경계로 대체하며 HTTP·파일 저장·압축은 실제로 실행합니다. 입력은 전송 검사용 바이트이므로 이 테스트는 Conda 설치를 검증하지 않습니다.
 
 ### CLI 캐시 설정 검증
 
