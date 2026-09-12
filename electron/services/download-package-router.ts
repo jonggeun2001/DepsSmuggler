@@ -8,6 +8,7 @@ import {
 } from '../../src/core';
 import { getPyPIDownloadUrl, downloadFile } from '../../src/core/shared';
 import { getCondaRepositoryBase } from '../../src/core/shared/conda-channel';
+import { waitForDownloadResume } from '../../src/core/shared/download-control';
 import { createScopedLogger } from '../utils/logger';
 import type { DownloadProgressEmitter } from './download-progress';
 import type {
@@ -286,7 +287,8 @@ async function downloadMavenPackage(
   pkg: DownloadPackage,
   context: DownloadPackageContext
 ): Promise<DownloadPackageResult> {
-  const { packagesDir, options, progressEmitter } = context;
+  const { packagesDir, options, progressEmitter, state } = context;
+  const controls = { signal: state.signal, shouldPause: () => state.isPaused() };
   const mavenDownloader = getMavenDownloader();
   const parts = pkg.name.split(':');
   if (parts.length < 2) {
@@ -326,8 +328,12 @@ async function downloadMavenPackage(
     {
       targetOS: options.targetOS,
       targetArchitecture: options.architecture,
+      ...controls,
     }
   );
+
+  await waitForDownloadResume(controls);
+  if (state.isCancelled()) return { id: pkg.id, success: false, error: 'cancelled' };
 
   const extension = path.extname(artifactPath) || '.jar';
   const flatFileName = classifier
@@ -335,7 +341,15 @@ async function downloadMavenPackage(
     : `${artifactId}-${pkg.version}${extension}`;
   const flatDestinationPath = path.join(packagesDir, flatFileName);
   if (artifactPath && (await fse.pathExists(artifactPath))) {
+    await waitForDownloadResume(controls);
     await fse.copy(artifactPath, flatDestinationPath);
+    try {
+      await waitForDownloadResume(controls);
+      if (state.isCancelled()) throw new Error('cancelled');
+    } catch (error) {
+      await fse.remove(flatDestinationPath);
+      throw error;
+    }
   }
 
   progressEmitter.emitPackageProgress(

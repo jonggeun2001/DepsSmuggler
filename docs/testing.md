@@ -154,6 +154,17 @@ bash scripts/verify-worktree.sh \
 
 이 fixture 검증은 실제 Maven Central의 현재 파일 존재 여부나 외부 Maven 실행의 오프라인 성공을 보장하지 않습니다. 외부 저장소 검증에는 아래 통합 테스트를 별도로 사용하고, 실행 명령·대상 좌표·파일 확인 결과를 해당 작업의 검증 기록에 남깁니다.
 
+### Maven 다운로드 취소·일시정지 검증
+
+`src/core/downloaders/maven-download-controls.integration.test.ts`는 7개 parameterized 사례에서 실제 `DownloadOrchestrator`·session 상태·Electron download router·`MavenDownloader`·Axios stream·파일 시스템·ZIP 패키징을 함께 실행합니다. Maven 저장소만 loopback HTTP fixture로 대체하고, 창의 `webContents.send` 이벤트 수집기와 task scheduler만 테스트 경계로 대체합니다. 큰 JAR가 일부 기록된 뒤 공개 `cancelDownload()`로 취소되면 `AbortSignal`이 요청·응답·writer를 중단하고 부분 파일과 후속 POM/ZIP 산출물을 남기지 않는지 확인합니다. 같은 orchestrator에서 새 session으로 명시적으로 재시도해 완전한 JAR/POM과 checksum-valid ZIP이 생성되고 두 session의 완료 이벤트가 섞이지 않는지도 검사합니다. 일시정지 중에는 wire나 stream buffer에 일부 데이터가 남을 수 있으므로, 전송량 전체가 아니라 pause gate 뒤의 디스크 파일 크기와 progress 이벤트가 안정되는지 검사하고, 공개 `resumeDownload()` 후 같은 파일이 정상 완료되는지 확인합니다. JAR와 POM 본문 일시정지, 일시정지 중 취소, 취소 후 다음 아티팩트 요청 차단을 각각 포함합니다.
+
+이 회귀는 POM packaging 조회와 SHA1 조회·쓰기처럼 본문보다 짧은 단계가 취소 뒤 다음 파일을 시작하지 않는지도 확인합니다. 실행은 실제 Axios 스트림과 파일 시스템을 사용하며, 즉시 완료되는 mock downloader로 제어 전달을 판정하지 않습니다. Electron 창 자체는 실행하지 않고 `webContents.send`만 수집하므로, 이 테스트는 packaged GUI 빌드나 수동 GUI 실행 완료를 의미하지 않습니다. 실제 GUI 버튼·IPC 연결은 별도 opt-in harness에서 구분해 검증합니다.
+
+```bash
+bash scripts/verify-worktree.sh \
+  src/core/downloaders/maven-download-controls.integration.test.ts
+```
+
 ### Maven 모든 버전 반출의 오프라인 소비자 검증
 
 충돌로 선택하지 않은 버전의 원래 아티팩트 또는 POM·하위 closure가 캐시에만 있고 반출 목록에는 없는 경우를 별도로 검증합니다. 실제 Flink 1.20.5 CLI 실행에서는 `flink-core`가 요구하는 Kryo 2.24.0 JAR와 `chill-java:0.7.6`이 참조하는 Kryo 2.21 경로의 실제 아티팩트·POM·부모/하위 descriptor가 발견된 형태로 압축물·manifest 및 생성 설치 스크립트의 대상 저장소에 반영되는지 확인합니다. 단순 종료 코드나 캐시 파일 존재만으로 성공을 판정하지 않습니다.
