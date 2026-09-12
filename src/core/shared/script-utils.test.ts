@@ -36,6 +36,9 @@ describe('generateInstallScripts', () => {
       path.join(outputDir, 'install.ps1'),
       'utf8',
     );
+    const powerShellBytes = fs.readFileSync(path.join(outputDir, 'install.ps1'));
+
+    expect(powerShellBytes.subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
 
     expect(bashScript).toContain(
       'find "$SCRIPT_DIR/packages" -type d -print0',

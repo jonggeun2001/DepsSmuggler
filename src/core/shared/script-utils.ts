@@ -41,7 +41,11 @@ export async function generateInstallScripts(
   // Windows에서는 mode 옵션이 무시되므로 조건부 처리
   const bashWriteOptions = isWindows ? {} : { mode: 0o755 };
   fs.writeFileSync(path.join(outputDir, 'install.sh'), bashScript, bashWriteOptions);
-  fs.writeFileSync(path.join(outputDir, 'install.ps1'), psScript);
+  // Windows PowerShell 5.1 needs the UTF-8 BOM to decode Korean diagnostics correctly.
+  fs.writeFileSync(
+    path.join(outputDir, 'install.ps1'),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(psScript, 'utf8')]),
+  );
 
   // Docker 이미지가 포함된 경우 docker-load 스크립트 생성
   const dockerPackages = packages.filter((p) => p.type === 'docker');

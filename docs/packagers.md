@@ -172,6 +172,8 @@ fi
 ```
 
 **PowerShell (install.ps1)의 Python 설치 부분 (핵심 흐름)**
+
+생성되는 `install.ps1`은 Windows PowerShell 5.1에서 한글 오류 메시지를 올바르게 읽도록 UTF-8 BOM을 포함합니다.
 ```powershell
 # $PipFindLinkArgs는 Get-ChildItem -ErrorAction Stop으로 준비합니다.
 try {
