@@ -586,7 +586,7 @@ nativeSuite('native Conda offline installer consumer', () => {
     expect(fs.existsSync(path.join(bundle, 'install.sh'))).toBe(true);
     expect(fs.existsSync(path.join(bundle, 'install.ps1'))).toBe(true);
     await fs.promises.rm(outputDir, { recursive: true, force: true });
-    const env = { ...setup.env, DEPS_SMUGGLER_CONDA_PREFIX: path.join(setup.tempRoot, 'gui conda prefix') };
+    const env = { ...setup.env, DEPS_SMUGGLER_CONDA_PREFIX: path.join(setup.tempRoot, 'gui-conda-prefix') };
     const install = await runBash(path.join(bundle, 'install.sh'), env);
     expect(install.code, `${install.stdout}\n${install.stderr}`).toBe(0);
     expect(install.signal).toBeNull();
@@ -654,7 +654,7 @@ nativeSuite('native Conda offline installer consumer', () => {
     expect(fs.existsSync(path.join(bundle, 'install.sh'))).toBe(true);
     expect(fs.existsSync(path.join(bundle, 'install.ps1'))).toBe(true);
     await fs.promises.rm(outputDir, { recursive: true, force: true });
-    const prefix = path.join(setup.tempRoot, 'published six prefix');
+    const prefix = path.join(setup.tempRoot, 'published-six-prefix');
     const runtimeArchives = await collectPythonRuntimeArchives(setup);
     await execFile(
       setup.executable,

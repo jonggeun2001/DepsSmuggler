@@ -300,6 +300,8 @@ DEPS_SMUGGLER_NATIVE_CONDA=1 bash scripts/verify-worktree.sh src/core/packager/c
 
 Python noarch 사례는 호환 runtime archive를 별도 임시 prefix에 준비하며, 필요한 archive가 없으면 구체적인 준비 오류로 실패합니다. 생성 스크립트에는 `CONDA_OFFLINE=false`를 전달해 스크립트 자체의 `--offline` 옵션을 검증하며, 환경 준비·설치·import 단계별 실행 시간을 CI 로그에 남깁니다.
 
+임시 경로와 GUI ZIP 추출 경로에는 공백을 포함하지만 prefix의 마지막 디렉터리 이름에는 공백을 넣지 않습니다. CI의 Conda 26.7.1은 해당 이름을 환경 이름으로 검증해 공백이 있으면 설치 전에 거부합니다.
+
 ### npm 설치 스크립트 오프라인 검증
 
 `src/cli/npm-root-resolution.integration.test.ts`는 로컬 레지스트리와 실제 tarball로 의존성 포함 CLI를 실행합니다. 버전을 생략한 직접 패키지와 전이 의존성이 모두 실제 버전으로 아카이브·manifest에 포함돼야 합니다. ZIP과 TAR.GZ를 각각 새 디렉터리에 풀고, 아카이브에 포함된 설치 스크립트만 격리된 npm 캐시·설정으로 실행해 직접 모듈과 그 의존성을 실제로 불러옵니다. 압축 외부의 스크립트는 복사하지 않으며 설치 중 레지스트리 접근이 없는지도 검사합니다. 단위 테스트도 npm `flatList`가 루트를 제외하는 실제 반환 형식을 사용하며, 버전 선택자와 요청 ID·아키텍처·메타데이터 보존을 검사합니다.
