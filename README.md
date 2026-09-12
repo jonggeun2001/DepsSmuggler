@@ -75,7 +75,7 @@ depssmuggler --help
 | Python `conda` | 지원 | 지원 | 채널 선택, Python·CUDA·플랫폼을 고려한 빌드 선택 |
 | Java `maven` | 지원 | 지원 | Maven Central, POM·BOM·플러그인, 네이티브 classifier 선택 |
 | Node.js `npm` | 지원 | 지원 | npm Registry 검색·버전 조회·tarball 다운로드 |
-| OS `yum` | 지원 | 지원 | RPM 계열 배포판, 의존성 해결과 로컬 저장소 출력 |
+| OS `yum` | 지원 | 지원 | RPM 계열 배포판, provides capability를 포함한 의존성 해결과 로컬 저장소 출력 |
 | OS `apt` | 지원 | 지원 | Ubuntu/Debian, 의존성 포함 DEB 다운로드 |
 | OS `apk` | 지원 | 지원 | Alpine, APK 다운로드·아카이브·로컬 저장소 출력 |
 | Container `docker` | 지원 | 지원 | Docker Hub 이미지·태그·플랫폼 선택과 이미지 아카이브 |

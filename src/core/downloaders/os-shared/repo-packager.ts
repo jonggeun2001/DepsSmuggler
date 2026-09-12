@@ -256,6 +256,11 @@ export class OSRepoPackager {
       lines.push(`    <format>`);
       lines.push(`      <rpm:provides>`);
       lines.push(`        <rpm:entry name="${this.escapeXml(pkg.name)}" flags="EQ" epoch="0" ver="${this.escapeXml(pkg.version)}" rel="${release}"/>`);
+      for (const provide of [...new Set(pkg.provides ?? [])]) {
+        if (provide && provide !== pkg.name) {
+          lines.push(`        <rpm:entry name="${this.escapeXml(provide)}"/>`);
+        }
+      }
       lines.push(`      </rpm:provides>`);
 
       if (pkg.dependencies.length > 0) {
