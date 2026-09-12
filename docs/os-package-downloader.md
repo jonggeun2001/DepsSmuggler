@@ -310,6 +310,8 @@ XML 속성을 일괄 숫자 변환하지 않으므로 RPM 버전·release·의�
 
 YUM 파싱 결과는 `{ schemaVersion: 1, packages }` 캐시로 저장합니다. 이전 배열 형식, 알 수 없는 스키마와 잘못된 버전 타입은 다시 파싱해 같은 키에 저장하며, 현재 형식은 JSON 저장·복원 뒤에도 버전·release·의존성 버전 문자열을 유지합니다.
 
+YUM `primary.xml.gz`의 `rpm:provides`에는 패키지 자체의 이름을 항상 포함하고, `OSPackageInfo.provides`에 있는 capability 이름을 중복 없이 추가합니다. 이름은 XML 속성으로 escape하므로 `libtinfo.so.6()(64bit)` 같은 라이브러리 capability도 생성 저장소의 DNF 검색에 전달됩니다. 현재 `provides` 타입은 `string[]`이므로 RPM provide의 flags·epoch·ver·rel 속성은 별도로 보존하거나 비교하지 않습니다.
+
 ```typescript
 interface RepomdInfo {
   revision: string;
@@ -630,6 +632,10 @@ class OSRepoPackager {
 | APK | `APKINDEX.tar.gz` | `APKINDEX` 항목 하나를 담은 gzip tar 아카이브를 Node `tar`로 생성 |
 
 현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다.
+
+YUM 저장소를 생성할 때 `primary.xml.gz`의 각 RPM에는 self-provide와 입력 패키지의 distinct `provides` capability 이름이 기록됩니다. 이 정보는 다운로드된 RPM payload에서 새로 추출하지 않고 resolver/parser가 가진 `OSPackageInfo.provides`를 사용합니다. 현재 모델은 capability 이름만 표현하므로 versioned 또는 flags가 붙은 RPM provides의 의미까지 native solver에서 재현한다고 보장하지 않습니다.
+
+Rocky 9 Bash 묶음에서는 `libtinfo.so.6()(64bit)` 조회와 해당 기능의 DNF 의존성 해결을 확인했습니다. 빈 installroot의 전체 Bash 설치는 별도로 누락된 `setup` 패키지 때문에 아직 실패하며 [#147](https://github.com/jonggeun2001/DepsSmuggler/issues/147)에서 추적합니다.
 
 APT는 수신한 `Packages`의 `aptControlFields`에서 의존성 조건과 대안, `Pre-Depends`, `Provides`, `Conflicts`, `Breaks`, `Replaces`, `Multi-Arch`, `Installed-Size` 등 Control 필드를 보존합니다. 여러 줄 값이 있으면 Debian continuation 문법으로 출력하므로 설명의 들여쓰기와 빈 문단 표기도 유지됩니다. 상위 저장소가 짧은 설명과 `Description-md5`만 제공하면 그 값을 유지하며, 별도 Translation 파일을 받거나 DEB의 긴 설명을 추출하지는 않습니다. `Packages.gz`에는 같은 `Packages` 내용을 압축합니다.
 

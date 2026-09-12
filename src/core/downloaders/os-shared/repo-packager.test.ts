@@ -257,6 +257,29 @@ describe('OSRepoPackager', () => {
     expect(content).toContain('rel="3.el9"');
   });
 
+  it('YUM primary.xml은 RPM provides capability를 self-provide와 함께 보존하고 XML을 escape한다', async () => {
+    const packager = new OSRepoPackager();
+    const pkg = {
+      ...createRpmPackage(),
+      provides: ['httpd', 'libtinfo.so.6()(64bit)', 'capability <x>&y', 'libtinfo.so.6()(64bit)', ''],
+    };
+    const downloadedFile = path.join(tempDir, 'httpd-provides.rpm');
+    fs.writeFileSync(downloadedFile, 'rpm');
+
+    const result = await packager.createLocalRepo(
+      [pkg],
+      new Map([[getDownloadedFileKey(pkg), downloadedFile]]),
+      { packageManager: 'yum', outputPath: path.join(tempDir, 'provides-repo'), repoName: 'test-repo' }
+    );
+    const primaryXml = gunzipSync(fs.readFileSync(result.metadataFiles.find((file) => file.endsWith('primary.xml.gz'))!)).toString('utf8');
+
+    expect(primaryXml.match(/<rpm:entry name="httpd"/g)).toHaveLength(1);
+    expect(primaryXml.match(/<rpm:entry name="libtinfo\.so\.6\(\)\(64bit\)"\/>/g)).toHaveLength(1);
+    expect(primaryXml).toContain('<rpm:entry name="capability &lt;x&gt;&amp;y"/>');
+    expect(primaryXml).not.toContain('name=""');
+    expect(primaryXml).not.toContain('name="undefined"');
+  });
+
   it('APK 메타데이터는 APKINDEX 단일 member를 갖는 gzip tar archive를 생성한다', async () => {
     const packager = new OSRepoPackager();
     const pkg = createApkPackage();
