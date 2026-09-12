@@ -89,7 +89,8 @@ const CartPage: React.FC = () => {
   const [textInputModalOpen, setTextInputModalOpen] = useState(false);
   const [textInputValue, setTextInputValue] = useState('');
   const [textInputType, setTextInputType] = useState<'requirements' | 'pom' | 'package'>('requirements');
-  const [parsingPackageFile, setParsingPackageFile] = useState(false);
+  const [pendingPackageParses, setPendingPackageParses] = useState(0);
+  const parsingPackageFile = pendingPackageParses > 0;
   const [mavenVersion, setMavenVersion] = useState(DEFAULT_MAVEN_BUILD_VERSION);
 
 
@@ -284,14 +285,18 @@ const CartPage: React.FC = () => {
   };
 
   // 파일 업로드 처리
-  const handleFileUpload = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-      void parsePackageFile(file.name, content);
-    };
-    reader.onerror = () => message.error(`${file.name} 파일을 읽을 수 없습니다`);
-    reader.readAsText(file);
+  const handleFileUpload = async (file: File) => {
+    // A single selection can start several reads/parses before React renders.
+    // Keep the shared controls locked until every selected file has settled.
+    setPendingPackageParses((count) => count + 1);
+    try {
+      const content = await file.text();
+      await parsePackageFile(file.name, content);
+    } catch {
+      message.error(`${file.name} 파일을 읽을 수 없습니다`);
+    } finally {
+      setPendingPackageParses((count) => count - 1);
+    }
     return false; // 자동 업로드 방지
   };
 
@@ -323,7 +328,6 @@ const CartPage: React.FC = () => {
   };
 
   const parsePackageFile = async (filename: string, content: string) => {
-    setParsingPackageFile(true);
     let type: PackageType = 'pip';
     let packages: ParsedPackage[] = [];
 
@@ -343,8 +347,6 @@ const CartPage: React.FC = () => {
       await addParsedPackages(type, packages);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '파일 처리에 실패했습니다');
-    } finally {
-      setParsingPackageFile(false);
     }
   };
 
@@ -435,7 +437,7 @@ const CartPage: React.FC = () => {
       return;
     }
 
-    setParsingPackageFile(true);
+    setPendingPackageParses((count) => count + 1);
     try {
       let type: PackageType;
       let packages: ParsedPackage[] = [];
@@ -461,7 +463,7 @@ const CartPage: React.FC = () => {
     } catch (error) {
       message.error(error instanceof Error ? error.message : '입력 처리에 실패했습니다');
     } finally {
-      setParsingPackageFile(false);
+      setPendingPackageParses((count) => count - 1);
     }
   };
 
@@ -651,7 +653,7 @@ flask~=2.0.0`}
             beforeUpload={handleFileUpload}
             disabled={parsingPackageFile}
           >
-            <Button icon={<UploadOutlined />}>파일 가져오기</Button>
+            <Button icon={<UploadOutlined />} disabled={parsingPackageFile}>파일 가져오기</Button>
           </Upload>
           <Button
             icon={<SearchOutlined />}
@@ -765,6 +767,7 @@ flask~=2.0.0`}
                 </Button>
                 <Button
                   icon={<FileTextOutlined />}
+                  disabled={parsingPackageFile}
                   onClick={() => setTextInputModalOpen(true)}
                 >
                   텍스트로 추가하기

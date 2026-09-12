@@ -263,3 +263,73 @@ test('전체 Maven POM을 처리하는 동안 Escape와 후속 IPC 오류에도 
   await expect(dialog.getByRole('textbox')).toHaveValue(fullPom);
   expect((await readMockElectronAppState(page)).cart.items).toHaveLength(1);
 });
+
+test('여러 파일의 Maven parse가 모두 끝날 때까지 업로드와 텍스트 입력을 잠근다', async ({ page }) => {
+  await setupMockElectronApp(page);
+  await page.goto('/#/cart');
+  await page.evaluate(() => {
+    (window as typeof window & {
+      pendingParses?: Array<(result: { success: true; packages: Array<{ name: string; version: string }> }) => void>;
+      parseContents?: string[];
+    }).pendingParses = [];
+    (window as typeof window & { parseContents?: string[] }).parseContents = [];
+    window.electronAPI!.maven!.parseProject = async (content) => {
+      const state = window as typeof window & {
+        pendingParses: Array<(result: { success: true; packages: Array<{ name: string; version: string }> }) => void>;
+        parseContents: string[];
+      };
+      state.parseContents.push(content);
+      return new Promise((resolve) => {
+        state.pendingParses.push(resolve as typeof state.pendingParses[number]);
+      });
+    };
+  });
+
+  const uploadInput = page.locator('input[type="file"][multiple]');
+  await uploadInput.setInputFiles([
+    { name: 'first.xml', mimeType: 'application/xml', buffer: Buffer.from('<project><groupId>demo</groupId><artifactId>first</artifactId><version>1</version></project>') },
+    { name: 'second.xml', mimeType: 'application/xml', buffer: Buffer.from('<project><groupId>demo</groupId><artifactId>second</artifactId><version>1</version></project>') },
+  ]);
+  await page.waitForFunction(() => (window as typeof window & { pendingParses?: unknown[] }).pendingParses?.length === 2);
+  await expect(page.getByRole('button', { name: '텍스트로 추가하기' })).toBeDisabled();
+  await expect(uploadInput).toBeDisabled();
+
+  await page.evaluate(() => {
+    const state = window as typeof window & { pendingParses: Array<(result: { success: true; packages: Array<{ name: string; version: string }> }) => void> };
+    state.pendingParses.shift()!({ success: true, packages: [{ name: 'demo:first', version: '1' }] });
+  });
+  await expect(page.getByRole('cell', { name: 'demo:first', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /텍스트로 추가$/ })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '파일 가져오기' })).toBeDisabled();
+
+  await page.evaluate(() => {
+    const state = window as typeof window & { pendingParses: Array<(result: { success: true; packages: Array<{ name: string; version: string }> }) => void> };
+    state.pendingParses.shift()!({ success: true, packages: [{ name: 'demo:second', version: '1' }] });
+  });
+  await expect(page.getByRole('button', { name: /텍스트로 추가$/ })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '파일 가져오기' })).toBeEnabled();
+  const state = await readMockElectronAppState(page);
+  expect(state.cart.items.map(({ name }) => name)).toEqual(['demo:first', 'demo:second']);
+});
+
+test('Maven 파일 읽기 오류 뒤에는 입력 잠금이 해제된다', async ({ page }) => {
+  await setupMockElectronApp(page);
+  await page.goto('/#/cart');
+  await page.evaluate(() => {
+    const originalText = File.prototype.text;
+    File.prototype.text = function () {
+      File.prototype.text = originalText;
+      return Promise.reject(new Error('fixture read failure'));
+    };
+  });
+
+  const uploadInput = page.locator('input[type="file"][multiple]');
+  await uploadInput.setInputFiles({
+    name: 'unreadable.xml',
+    mimeType: 'application/xml',
+    buffer: Buffer.from('<project />'),
+  });
+  await expect(page.getByText('파일을 읽을 수 없습니다')).toBeVisible();
+  await expect(page.getByRole('button', { name: '텍스트로 추가하기' })).toBeEnabled();
+  await expect(uploadInput).toBeEnabled();
+});
