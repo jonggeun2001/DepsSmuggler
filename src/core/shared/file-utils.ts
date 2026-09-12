@@ -128,10 +128,21 @@ export async function downloadFile(
             const totalLength = parseInt(response.headers['content-length'] || '0', 10);
             let downloadedLength = 0;
             let isPaused = false;
+            const interruptedError = () => new Error(
+              `Download interrupted: ${downloadedLength}/${totalLength || 'unknown'} bytes received`
+            );
+
+            response.on('error', fail);
+            response.once('aborted', () => fail(interruptedError()));
+            response.once('close', () => {
+              if (!response.complete) fail(interruptedError());
+            });
 
             response.on('data', (chunk: Buffer) => {
+              if (settled) return;
               downloadedLength += chunk.length;
               onProgress(downloadedLength, totalLength);
+              if (settled) return;
 
               // 일시정지 콜백 체크
               if (options?.shouldPause?.() && !isPaused) {
@@ -158,6 +169,13 @@ export async function downloadFile(
             response.pipe(file);
 
             file.once('finish', () => {
+              if (settled) return;
+              if (!response.complete || (
+                response.headers['content-length'] !== undefined && downloadedLength !== totalLength
+              )) {
+                fail(interruptedError());
+                return;
+              }
               file.close((error?: NodeJS.ErrnoException | null) => {
                 if (error) {
                   fail(error);
