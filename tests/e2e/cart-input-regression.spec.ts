@@ -219,3 +219,47 @@ test('전체 Maven POM IPC 오류는 입력과 장바구니를 보존하고 frag
   await expect(page.getByText('1개 패키지가 추가되었습니다')).toBeVisible();
   expect((await readMockElectronAppState(page)).cart.items.some((item) => item.name === 'org.example:fragment')).toBe(true);
 });
+
+test('전체 Maven POM을 처리하는 동안 Escape와 후속 IPC 오류에도 모달 입력을 보존한다', async ({ page }) => {
+  await setupMockElectronApp(page, {
+    cartItems: [{ id: 'existing', type: 'pip', name: 'requests', version: '2.32.3', addedAt: 1 }],
+  });
+  await page.goto('/#/cart');
+  await page.evaluate(() => {
+    let resolveParse!: (result: { success: false; packages: []; error: string }) => void;
+    (window as typeof window & {
+      parseStarted?: boolean;
+      resolveParse?: typeof resolveParse;
+    }).parseStarted = false;
+    window.electronAPI!.maven!.parseProject = async () => {
+      (window as typeof window & { parseStarted: boolean }).parseStarted = true;
+      return new Promise((resolve) => {
+        resolveParse = resolve as typeof resolveParse;
+        (window as typeof window & { resolveParse: typeof resolveParse }).resolveParse = resolveParse;
+      });
+    };
+  });
+  const dialog = await openTextInput(page, 'pom.xml');
+  const fullPom = '<project><groupId>demo</groupId><artifactId>app</artifactId><version>1</version></project>';
+  await dialog.getByRole('textbox').fill(fullPom);
+  await dialog.getByRole('button', { name: '추가', exact: true }).click();
+  await page.waitForFunction(() => (window as typeof window & { parseStarted?: boolean }).parseStarted === true);
+  await expect(dialog.getByRole('textbox')).toBeDisabled();
+  await expect(dialog.getByRole('tab', { name: 'package.json', exact: true })).toBeDisabled();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('textbox')).toHaveValue(fullPom);
+
+  await page.evaluate(() => {
+    (window as typeof window & { resolveParse: (result: { success: false; packages: []; error: string }) => void }).resolveParse({
+      success: false,
+      packages: [],
+      error: 'POM service unavailable',
+    });
+  });
+  await expect(page.getByText('POM service unavailable')).toBeVisible();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('textbox')).toHaveValue(fullPom);
+  expect((await readMockElectronAppState(page)).cart.items).toHaveLength(1);
+});

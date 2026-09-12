@@ -429,6 +429,7 @@ const CartPage: React.FC = () => {
 
   // 텍스트 입력 처리
   const handleTextInputSubmit = async () => {
+    if (parsingPackageFile) return;
     if (!textInputValue.trim()) {
       message.warning('내용을 입력하세요');
       return;
@@ -547,6 +548,7 @@ const CartPage: React.FC = () => {
           </Paragraph>
           <TextArea
             rows={10}
+            disabled={parsingPackageFile}
             placeholder={`requests==2.28.0
 numpy>=1.21.0
 pandas
@@ -570,6 +572,7 @@ flask~=2.0.0`}
           </Paragraph>
           <TextArea
             rows={10}
+            disabled={parsingPackageFile}
             placeholder={`<dependency>
   <groupId>org.springframework</groupId>
   <artifactId>spring-core</artifactId>
@@ -594,6 +597,7 @@ flask~=2.0.0`}
           </Paragraph>
           <TextArea
             rows={10}
+            disabled={parsingPackageFile}
             placeholder={`{
   "dependencies": {
     "react": "^18.0.0",
@@ -776,6 +780,7 @@ flask~=2.0.0`}
         title="패키지 목록 붙여넣기"
         open={textInputModalOpen}
         onCancel={() => {
+          if (parsingPackageFile) return;
           setTextInputModalOpen(false);
           setTextInputValue('');
         }}
@@ -784,14 +789,16 @@ flask~=2.0.0`}
         cancelButtonProps={{ disabled: parsingPackageFile }}
         closable={!parsingPackageFile}
         maskClosable={!parsingPackageFile}
+        keyboard={!parsingPackageFile}
         okText="추가"
         cancelText="취소"
         width={600}
       >
         <Tabs
-          items={textInputTabs}
+          items={textInputTabs.map((tab) => ({ ...tab, disabled: parsingPackageFile }))}
           activeKey={textInputType}
           onChange={(key) => {
+            if (parsingPackageFile) return;
             setTextInputType(key as 'requirements' | 'pom' | 'package');
             setTextInputValue('');
           }}
