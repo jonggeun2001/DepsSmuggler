@@ -88,6 +88,37 @@ describe('DockerBlobDownloader', () => {
     expect(writerCloseCount).toBe(1);
   });
 
+  it('refreshes the token immediately before the blob request', async () => {
+    response([Buffer.from('layer')]);
+    const getAuthToken = vi.fn().mockResolvedValue('fresh-token');
+    await downloader.downloadBlob(
+      'team/image', 'sha256:abc123', '/download/layer.tar', 'stale-token', 'ghcr.io', undefined,
+      { getAuthToken }
+    );
+
+    expect(getAuthToken).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({
+      headers: { Authorization: 'Bearer fresh-token' },
+    }));
+  });
+
+  it('does not start the blob request when token refresh is aborted', async () => {
+    const controller = new AbortController();
+    const getAuthToken = vi.fn(() => new Promise<string>((_resolve, reject) => {
+      controller.signal.addEventListener('abort', () => reject(new Error('token refresh aborted')), { once: true });
+    }));
+
+    const pending = downloader.downloadBlob(
+      'team/image', 'sha256:abc123', '/download/layer.tar', 'stale-token', 'ghcr.io', undefined,
+      { signal: controller.signal, getAuthToken }
+    );
+    await vi.waitFor(() => expect(getAuthToken).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(pending).rejects.toThrow('token refresh aborted');
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('rejects a response stream error after writing a partial blob and removes that blob', async () => {
     const source = new PassThrough();
     streams.push(source);

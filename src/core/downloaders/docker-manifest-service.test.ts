@@ -154,6 +154,42 @@ describe('DockerManifestService', () => {
     expect(get.mock.calls[1][1]).toMatchObject({ signal: controller.signal });
   });
 
+  it('uses a refreshed token for both index and selected manifest requests', async () => {
+    const selected = entry('amd64');
+    get
+      .mockResolvedValueOnce({ data: index([selected]) })
+      .mockResolvedValueOnce({ data: single });
+    const getAuthToken = vi.fn()
+      .mockResolvedValueOnce('index-token')
+      .mockResolvedValueOnce('selected-token');
+    const options = { getAuthToken };
+
+    await service.getManifestForArchitecture(
+      'team/image', 'v1', 'stale-token', 'ghcr.io', 'amd64', undefined, options
+    );
+
+    expect(getAuthToken).toHaveBeenCalledTimes(2);
+    expect(get.mock.calls[0][1]).toMatchObject({ headers: { Authorization: 'Bearer index-token' } });
+    expect(get.mock.calls[1][1]).toMatchObject({ headers: { Authorization: 'Bearer selected-token' } });
+  });
+
+  it('does not start the manifest request when token refresh is aborted', async () => {
+    const controller = new AbortController();
+    const getAuthToken = vi.fn(() => new Promise<string>((_resolve, reject) => {
+      controller.signal.addEventListener('abort', () => reject(new Error('token refresh aborted')), { once: true });
+    }));
+    const options = {
+      signal: controller.signal,
+      getAuthToken,
+    };
+    const pending = service.getManifest('team/image', 'v1', 'stale-token', 'ghcr.io', options);
+    await vi.waitFor(() => expect(getAuthToken).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(pending).rejects.toThrow('token refresh aborted');
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it('does not request the selected digest after aborting the index request', async () => {
     const controller = new AbortController();
     get.mockImplementationOnce(async (_url, options?: { signal?: AbortSignal }) => {

@@ -25,6 +25,7 @@ import logger from '../../utils/logger';
 import { sanitizeDockerTag } from '../shared/filename-utils';
 import { sanitizePath } from '../shared/path-utils';
 import { waitForDownloadResume, type DownloadControlOptions } from '../shared/download-control';
+import type { DockerRequestControls } from './docker-types';
 import { ARCH_MAP, buildDockerArchiveFilename, extractRegistry, parseImageName } from './docker-utils';
 import { DockerAuthClient } from './docker-auth-client';
 import { DockerCatalogCache, CatalogCacheStatus } from './docker-catalog-cache';
@@ -52,7 +53,7 @@ interface ProgressTracker {
  * 다운로드 컨텍스트 (메서드 간 공유 데이터)
  */
 interface DownloadContext {
-  controls?: DownloadControlOptions;
+  controls: DockerRequestControls;
   fullName: string;
   token: string;
   registry: string;
@@ -211,7 +212,10 @@ export class DockerDownloader implements IDownloader {
     const imageDir = await fs.mkdtemp(path.join(destPath, `${safeRepo}-${safeTag}-`));
 
     return {
-      controls,
+      controls: {
+        ...controls,
+        getAuthToken: () => this.authClient.getTokenForRegistry(registry, fullName, controls),
+      },
       fullName,
       token,
       registry,

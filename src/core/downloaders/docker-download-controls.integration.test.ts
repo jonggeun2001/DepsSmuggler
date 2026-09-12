@@ -78,6 +78,9 @@ describe('Docker controls through the real orchestrator, registry and image arch
   let server: http.Server;
   let port: number;
   let requests: string[];
+  let authTokens: string[];
+  let blobAuthorizations: Array<{ path: string; authorization?: string }>;
+  let tokenExpiry: Map<string, number>;
   let producedBytes: number;
   let closedLayers: Set<string>;
   let prematureClose: boolean;
@@ -85,12 +88,16 @@ describe('Docker controls through the real orchestrator, registry and image arch
   let task: Promise<void> | undefined;
   let events: Array<{ channel: string; payload: Record<string, unknown> }>;
   let sessionId: number;
+  let dateNowSpy: ReturnType<typeof vi.spyOn> | undefined;
   let previousConfig: unknown;
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-docker-controls-'));
     output = path.join(root, 'delivery output');
     requests = [];
+    authTokens = [];
+    blobAuthorizations = [];
+    tokenExpiry = new Map();
     producedBytes = 0;
     closedLayers = new Set();
     prematureClose = false;
@@ -101,8 +108,17 @@ describe('Docker controls through the real orchestrator, registry and image arch
       const requestPath = request.url?.split('?')[0] ?? '';
       requests.push(requestPath);
       if (requestPath === '/v2/auth') {
+        const token = `token-${authTokens.length + 1}`;
+        authTokens.push(token);
+        tokenExpiry.set(`Bearer ${token}`, Date.now() + 300_000);
         response.setHeader('content-type', 'application/json');
-        response.end(JSON.stringify({ token: 'fixture-token', expires_in: 3600 }));
+        response.end(JSON.stringify({ token, expires_in: 300 }));
+        return;
+      }
+      const authorization = request.headers.authorization;
+      if ((tokenExpiry.get(authorization ?? '') ?? 0) <= Date.now()) {
+        response.writeHead(401);
+        response.end('expired or unknown token');
         return;
       }
       if (requestPath === `/v2/${repository}/manifests/latest`) {
@@ -124,6 +140,7 @@ describe('Docker controls through the real orchestrator, registry and image arch
       };
       const body = blobs[requestPath];
       if (!body) { response.writeHead(404); response.end(); return; }
+      blobAuthorizations.push({ path: requestPath, authorization });
       response.writeHead(200, { 'content-length': body.length });
       const slow = requestPath.endsWith(layer1Digest);
       let offset = 0;
@@ -177,6 +194,8 @@ describe('Docker controls through the real orchestrator, registry and image arch
     await orchestrator?.cancelDownload();
     server.closeAllConnections();
     await task?.catch(() => undefined);
+    dateNowSpy?.mockRestore();
+    dateNowSpy = undefined;
     await new Promise<void>(resolve => server.close(() => resolve()));
     const docker = getDockerDownloader() as unknown as { authClient: { registryConfigCache: Map<string, unknown>; clearTokenCache: () => void } };
     if (previousConfig === undefined) docker.authClient.registryConfigCache.delete(registryName);
@@ -324,4 +343,22 @@ describe('Docker controls through the real orchestrator, registry and image arch
     expect(await findNamedFile(output, 'manifest.json')).toBeUndefined();
     expect(await exists(`${output}.zip`)).toBe(false);
   }, 10000);
+
+  it('refreshes an expired registry token before the next layer and preserves the image archive', async () => {
+    await start();
+    await orchestrator.pauseDownload();
+    await sleep(50);
+    const realNow = Date.now.bind(Date);
+    dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 301_000);
+    await orchestrator.resumeDownload();
+    await task;
+
+    expect(authTokens).toEqual(['token-1', 'token-2']);
+    expect(requests.filter(request => request === '/v2/auth')).toHaveLength(2);
+    expect(requests).toContain(`/v2/${repository}/blobs/${layer2Digest}`);
+    expect(blobAuthorizations.find(entry => entry.path.endsWith(layer2Digest))?.authorization).toBe('Bearer token-2');
+    expect(completions()).toEqual([expect.objectContaining({ sessionId: 1, success: true })]);
+    expect(await exists(`${output}.zip`)).toBe(true);
+    await assertZipImagePayload();
+  }, 15000);
 });

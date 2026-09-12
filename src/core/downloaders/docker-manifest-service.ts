@@ -5,9 +5,9 @@
  */
 
 import axios from 'axios';
-import { DockerManifest, DockerManifestEntry } from './docker-types';
+import { DockerManifest, DockerManifestEntry, type DockerRequestControls } from './docker-types';
 import { DockerAuthClient } from './docker-auth-client';
-import { waitForDownloadResume, type DownloadControlOptions } from '../shared/download-control';
+import { waitForDownloadResume } from '../shared/download-control';
 
 /**
  * Docker 매니페스트 서비스
@@ -30,9 +30,10 @@ export class DockerManifestService {
     reference: string,
     token: string,
     registry: string = 'docker.io',
-    options?: DownloadControlOptions
+    options?: DockerRequestControls
   ): Promise<DockerManifest> {
     await waitForDownloadResume(options);
+    const activeToken = options?.getAuthToken ? await options.getAuthToken() : token;
     const config = this.authClient.getRegistryConfig(registry);
     const headers: Record<string, string> = {
       Accept: [
@@ -43,8 +44,8 @@ export class DockerManifestService {
       ].join(', '),
     };
 
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    if (activeToken) {
+      headers.Authorization = `Bearer ${activeToken}`;
     }
 
     const response = await axios.get<DockerManifest>(
@@ -97,7 +98,7 @@ export class DockerManifestService {
     registry: string,
     arch: string,
     variant?: string,
-    options?: DownloadControlOptions
+    options?: DockerRequestControls
   ): Promise<DockerManifest> {
     await waitForDownloadResume(options);
     let manifest = await this.getManifest(repository, reference, token, registry, options);

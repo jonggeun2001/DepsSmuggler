@@ -11,8 +11,9 @@ import * as tar from 'tar';
 import { pipeline } from 'stream/promises';
 import type { Readable, Transform } from 'stream';
 import { DockerAuthClient } from './docker-auth-client';
+import type { DockerRequestControls } from './docker-types';
 import { calculateSha256 } from './docker-utils';
-import { createDownloadGate, waitForDownloadResume, type DownloadControlOptions } from '../shared/download-control';
+import { createDownloadGate, waitForDownloadResume } from '../shared/download-control';
 
 /**
  * Blob 다운로드 진행률 콜백
@@ -44,14 +45,15 @@ export class DockerBlobDownloader {
     token: string,
     registry: string = 'docker.io',
     onChunk?: BlobProgressCallback,
-    options: DownloadControlOptions = {}
+    options: DockerRequestControls = {}
   ): Promise<void> {
     await waitForDownloadResume(options);
+    const activeToken = options.getAuthToken ? await options.getAuthToken() : token;
     const config = this.authClient.getRegistryConfig(registry);
     const headers: Record<string, string> = {};
 
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    if (activeToken) {
+      headers.Authorization = `Bearer ${activeToken}`;
     }
 
     let source: Readable | undefined;
@@ -132,7 +134,7 @@ export class DockerBlobDownloader {
     token: string,
     registry: string,
     onProgress?: (downloadedBytes: number, totalBytes: number) => void,
-    options?: DownloadControlOptions
+    options?: DockerRequestControls
   ): Promise<string[]> {
     const paths: string[] = [];
 
