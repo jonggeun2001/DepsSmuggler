@@ -105,6 +105,12 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 
 `use-download-page-controller.test.tsx`의 HTTP 회귀는 실제 orchestrator·router·`downloadFile`·파일 시스템·delivery pipeline을 렌더러 controller에 연결합니다. Conda 항목의 404와 503 요청은 실패 항목·실패 이력만 남기고 파일과 ZIP을 만들지 않아야 합니다. 같은 항목을 같은 경로로 재시도해 200 응답을 받으면 성공 이력과 ZIP을 만들고, ZIP 내부 파일도 전송한 바이트와 일치해야 합니다. 창의 이벤트 전달과 이력 저장 IPC만 테스트 경계로 대체하며 HTTP·파일 저장·압축은 실제로 실행합니다. 입력은 전송 검사용 바이트이므로 이 테스트는 Conda 설치를 검증하지 않습니다.
 
+### HTTP 스트림 중단과 부분 파일 검증
+
+`src/core/shared/file-utils-interrupted.integration.test.ts`는 loopback HTTP 서버가 Content-Length를 선언한 200 응답의 첫 번째 chunk만 보낸 뒤 연결을 끊는 상황을 실제 `downloadFile`에 두 번 전달합니다. 응답의 `error`·`aborted`·정상 완료 전 `close`와 Content-Length 불일치는 성공으로 끝나지 않아야 하며, 이미 전달된 진행률은 남겨도 완료 진행률은 보고하지 않고 destination 부분 파일을 닫아 삭제해야 합니다. Content-Length가 없는 chunked 응답이 정상적으로 끝나는 경우와 헤더 오류, pause/resume, 명시적인 AbortSignal 취소도 같은 파일 경계에서 구분합니다.
+
+`use-download-page-controller.test.tsx`의 전송 회귀는 실제 orchestrator·router·파일 시스템·delivery pipeline에서 200 응답이 중간에 끊긴 항목을 실패 이력으로 남기고 ZIP을 만들지 않는지 확인합니다. 사용자가 같은 항목을 명시적으로 재시도해 완전한 200 응답을 받으면 새 바이트만으로 성공 이력과 ZIP을 만들고, ZIP 내용이 응답 바이트와 일치해야 합니다. 자동 재시도나 수동 취소를 스트림 중단 성공으로 취급하지 않으며, retry/cancel 상태와 HTTP 실패 상태를 구분합니다.
+
 ### CLI 캐시 설정 검증
 
 `src/cli/cache-commands.integration.test.ts`는 실제 파일·디렉터리가 섞인 캐시에서 별도 CLI 프로세스로 `cache list`를 실행합니다. 정상 디렉터리의 패키지 정보와 개수가 표시되고 일반 파일은 목록에서 제외되는지 확인합니다. `commands/cache.test.ts`는 심볼릭 링크 제외, 디렉터리가 없는 경우, manifest 유무에 따른 표시를 검증합니다.

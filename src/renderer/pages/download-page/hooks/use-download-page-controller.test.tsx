@@ -590,15 +590,23 @@ describe('useDownloadPageController', () => {
     );
   });
 
-  it.each([503, 404])('실제 HTTP %s 실패 후 같은 항목 재시도는 성공 산출물만 기록한다', async (failureStatus) => {
+  it.each([503, 404, 'mid-response'] as const)('실제 HTTP %s 실패 후 같은 항목 재시도는 성공 산출물만 기록한다', async (failureMode) => {
     const outputDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-http-status-'));
-    const payload = Buffer.from('synthetic transport payload');
+    const payload = Buffer.alloc(19_160, 0x5a);
     let requests = 0;
+    let unmount: (() => void) | undefined;
+    let cancelOrchestrator: (() => Promise<unknown>) | undefined;
     const server = http.createServer((_request, response) => {
       requests += 1;
       if (requests === 1) {
-        response.writeHead(failureStatus, { 'content-type': 'text/plain' });
-        response.end(`failure-${failureStatus}`);
+        if (failureMode === 'mid-response') {
+          response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': payload.length });
+          response.write(payload.subarray(0, 128));
+          setTimeout(() => response.destroy(), 20);
+        } else {
+          response.writeHead(failureMode, { 'content-type': 'text/plain' });
+          response.end(`failure-${failureMode}`);
+        }
         return;
       }
       response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': payload.length });
@@ -613,7 +621,7 @@ describe('useDownloadPageController', () => {
 
     try {
       const packageItem = {
-        id: `conda-http-${failureStatus}`,
+        id: `conda-http-${failureMode}`,
         type: 'conda',
         name: 'fixture',
         version: '1.0.0',
@@ -636,9 +644,11 @@ describe('useDownloadPageController', () => {
           webContents: { isDestroyed: () => false, send: dispatch },
         } as never),
       });
+      cancelOrchestrator = orchestrator.cancelDownload;
       electronAPI.download.start.mockImplementation((data) => orchestrator.startDownload(data as never));
       await act(async () => { await rendered.result.current.handleStartDownload(); });
-      await waitFor(() => expect(rendered.result.current.packagingStatus).toBe('failed'), { timeout: 10_000 });
+      unmount = rendered.unmount;
+      await waitFor(() => expect(rendered.result.current.packagingStatus).toBe('failed'), { timeout: 3_000 });
       expect(electronAPI.history.add).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'failed', outputPath: outputDir })
       );
@@ -650,7 +660,12 @@ describe('useDownloadPageController', () => {
 
       const failedItem = rendered.result.current.downloadItems[0];
       expect(failedItem.status).toBe('failed');
-      expect(failedItem.error).toContain(`HTTP ${failureStatus}`);
+      if (failureMode === 'mid-response') {
+        expect(failedItem.error).toContain('Download interrupted');
+        expect(failedItem.error).toContain('128/19160');
+      } else {
+        expect(failedItem.error).toContain(`HTTP ${failureMode}`);
+      }
       await act(async () => { await rendered.result.current.executeRetryDownload(failedItem); });
       await waitFor(() => expect(rendered.result.current.packagingStatus).toBe('completed'), { timeout: 10_000 });
       expect(requests).toBe(2);
@@ -672,8 +687,9 @@ describe('useDownloadPageController', () => {
       );
       const inspected = await promisify(execFile)(python, args, { timeout: 30_000 });
       expect(inspected.stdout.trim()).toBe(payload.toString('base64'));
-      rendered.unmount();
     } finally {
+      unmount?.();
+      await cancelOrchestrator?.();
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await fs.promises.rm(outputDir, { recursive: true, force: true });

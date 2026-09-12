@@ -18,7 +18,7 @@ function transfer(headers: Record<string, string> = { 'content-length': '6' }, s
     file.destroy();
     callback?.();
   }) });
-  const response = Object.assign(new PassThrough(), { headers, statusCode });
+  const response = Object.assign(new PassThrough(), { headers, statusCode, complete: true });
   const request = Object.assign(new EventEmitter(), { destroy: vi.fn() });
   const chunks: Buffer[] = [];
   file.on('data', (chunk: Buffer) => chunks.push(chunk));
