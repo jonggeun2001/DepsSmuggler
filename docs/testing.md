@@ -430,6 +430,10 @@ UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
 
 그 후 Windows/macOS/Linux 패키징과 draft release 생성이 이어집니다.
 
+macOS는 DMG와 ZIP을 생성한 뒤 `node scripts/verify-macos-update.mjs build`로 안정 채널의 `latest-mac.yml`과 시험 채널의 `beta-mac.yml` 등 `*-mac.yml`을 검사합니다. ZIP 참조, DMG/ZIP 파일의 존재, 메타데이터의 크기·SHA512와 실제 파일의 일치가 필수입니다. 파일 경로가 출력 폴더를 벗어나거나 메타데이터가 누락·손상되면 실패합니다. macOS 패키징 단계는 `--publish never`를 사용하며, 검증이 끝난 산출물과 `*-mac.yml`, blockmap을 artifact로 넘겨 최종 릴리스 단계에서 게시합니다.
+
+회귀 테스트는 `bash scripts/verify-worktree.sh tests/unit/macos-release-artifacts.test.ts`로 실행합니다. 기존 DMG 단독 설정과 잘못된 feed를 거절하고 실제 임시 파일의 크기·해시를 대조합니다. electron-updater의 ZIP 선택 계약도 확인하며, 서명된 앱의 설치·재시작 성공을 대신하는 검증은 아닙니다. 실제 macOS 다운로드 smoke에서는 격리 프로필의 packaged 앱에 loopback feed를 지정하고 `autoDownload=false`, `autoInstallOnAppQuit=false`로 설정해 다운로드 파일의 해시를 비교합니다. 설치 요청을 호출하지 않고 updater의 임시 서버를 닫습니다.
+
 ## 테스트 작성 원칙
 
 - 단위 테스트는 네트워크/파일 시스템 부작용을 가능한 한 모킹합니다.

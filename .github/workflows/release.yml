@@ -125,7 +125,7 @@ jobs:
         run: npm run build
 
       - name: Package for macOS
-        run: npm run package:mac
+        run: npm run package:mac -- --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 코드 서명 (선택사항 - secrets 설정 필요)
@@ -134,6 +134,9 @@ jobs:
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
 
+      - name: Verify macOS update artifacts
+        run: node scripts/verify-macos-update.mjs build
+
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -141,7 +144,9 @@ jobs:
           path: |
             build/*.dmg
             build/*.zip
-          if-no-files-found: warn
+            build/*-mac.yml
+            build/*.blockmap
+          if-no-files-found: error
 
   # Linux 빌드
   build-linux:
