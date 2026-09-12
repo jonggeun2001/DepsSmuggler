@@ -93,6 +93,12 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 
 커버리지는 `npm run test:coverage`로 확인합니다. 현재 커버리지 집계 대상은 `src/core/**/*.ts`이며 테스트 파일과 index barrel은 제외합니다. 따라서 CLI, Electron, 렌더러, E2E 테스트의 검증 범위와 구분해야 합니다. text 보고서는 콘솔에, JSON/HTML 보고서는 `coverage/`에 생성되며 커버리지 최소 비율은 설정되어 있지 않습니다. 외부 레지스트리 실제 연동 및 OS별 파일시스템 동작 전체를 mock 테스트가 보장하지는 않습니다.
 
+### Electron 기본 TLS 검증
+
+`bash scripts/verify-worktree.sh electron/main-lifecycle.test.ts src/core/shared/axios-http-client.test.ts`로 앱 시작 경계와 HTTP 어댑터를 검증합니다. 시작 테스트는 Electron 창·핸들러만 대체하고 실제 `main.ts`의 TLS 분기와 loopback HTTPS 서버, axios/Node HTTPS를 실행합니다. 기본값·`true`·잘못된 환경변수 값의 자체 서명 인증서 거부, 신뢰 CA를 명시한 연결 성공, 호스트 이름 불일치 거부, 명시적인 `DEPSSMUGGLER_STRICT_SSL=false` 완화 동작을 구분합니다.
+
+테스트 전용 인증서/키는 `electron/test-fixtures/`에 있고 외부 서버나 개인 인증서는 사용하지 않습니다. 테스트 후 환경변수·axios 기본 agent를 복구하고 연결·서버를 정리합니다. 기존 lifecycle 테스트가 `STRICT_SSL=true`만 지정해 기본값 오류를 놓쳤으므로 미지정 실행을 별도 회귀 사례로 유지합니다. 이 검증은 실제 TLS 연결을 포함하지만 새 packaged 앱의 전체 GUI 실행이나 모든 저장소의 인증서 체인을 검증한 것은 아닙니다.
+
 ### CLI 캐시 설정 검증
 
 `src/cli/cache-commands.integration.test.ts`는 실제 파일·디렉터리가 섞인 캐시에서 별도 CLI 프로세스로 `cache list`를 실행합니다. 정상 디렉터리의 패키지 정보와 개수가 표시되고 일반 파일은 목록에서 제외되는지 확인합니다. `commands/cache.test.ts`는 심볼릭 링크 제외, 디렉터리가 없는 경우, manifest 유무에 따른 표시를 검증합니다.

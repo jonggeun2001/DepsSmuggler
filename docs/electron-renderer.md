@@ -81,7 +81,7 @@
 
 추가 특징:
 
-- 기본적으로 SSL 검증을 완화하고 `DEPSSMUGGLER_STRICT_SSL=true`일 때만 엄격 모드로 전환합니다.
+- 기본적으로 Node/axios의 TLS 인증서 검증을 유지해 신뢰되지 않은 인증서를 거부합니다. `DEPSSMUGGLER_STRICT_SSL=false`를 명시했을 때만 `NODE_TLS_REJECT_UNAUTHORIZED=0`과 axios의 `rejectUnauthorized:false`를 설정하는 기존 완화 모드를 사용합니다. 미지정·`true`·잘못된 값은 완화 모드를 켜지 않습니다. 앱 시작 전에 사용자가 별도로 지정한 Node TLS 환경이나 신뢰 CA 설정은 기본 모드에서 덮어쓰지 않습니다.
 - `registerConfigHandlers`, `registerCacheHandlers`, `registerHistoryHandlers`, `registerSearchHandlers`, `registerVersionHandlers`, `registerDownloadHandlers`를 순서대로 등록합니다.
 - 개발 모드에서는 updater 더미 핸들러를 사용합니다.
 

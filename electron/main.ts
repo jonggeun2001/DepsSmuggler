@@ -4,9 +4,9 @@ import * as https from 'https';
 import * as fse from 'fs-extra';
 import axios from 'axios';
 
-// SSL 인증서 검증 비활성화 (기업 프록시/방화벽 환경 지원)
-// 환경변수로 제어 가능: DEPSSMUGGLER_STRICT_SSL=true로 설정하면 검증 활성화
-if (process.env.DEPSSMUGGLER_STRICT_SSL !== 'true') {
+// 기본 TLS 검증을 유지하고, 명시적인 완화 선택에만 기존 호환 모드를 적용한다.
+// 미지정·true·알 수 없는 값은 인증서 검증을 비활성화하지 않는다.
+if (process.env.DEPSSMUGGLER_STRICT_SSL === 'false') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
   // axios 기본 설정에 httpsAgent 추가
