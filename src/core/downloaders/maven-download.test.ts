@@ -3,7 +3,7 @@
  * vi.mock()을 사용하여 axios를 모킹
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
+import { PassThrough, Readable, Writable } from 'stream';
 import * as path from 'path';
 
 // vi.hoisted를 사용하여 모킹 함수 정의
@@ -82,16 +82,10 @@ describe('MavenDownloader downloadPackage 테스트', () => {
     });
 
     mockAxiosDefault.mockImplementation(async () => {
-      const stream = new EventEmitter() as EventEmitter & {
-        pipe: (writer: EventEmitter) => EventEmitter;
-      };
-      stream.pipe = (writer) => {
-        process.nextTick(() => {
-          stream.emit('data', Buffer.from('artifact'));
-          writer.emit('finish');
-        });
-        return writer;
-      };
+      const stream = new PassThrough();
+      process.nextTick(() => {
+        stream.end(Buffer.from('artifact'));
+      });
 
       return {
         data: stream,
@@ -99,7 +93,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
       };
     });
 
-    (fs.createWriteStream as any).mockImplementation(() => new EventEmitter());
+    (fs.createWriteStream as any).mockImplementation(() => new PassThrough());
     (fs.writeFile as any).mockResolvedValue(undefined);
     (downloader as any).verifyChecksum = vi.fn().mockResolvedValue(true);
   };
@@ -113,6 +107,84 @@ describe('MavenDownloader downloadPackage 테스트', () => {
     vi.restoreAllMocks();
   });
 
+  it('POM-only stream은 abort 시 다음 단계 없이 실패한다', async () => {
+    const controller = new AbortController();
+    mockAxiosGet.mockImplementation(async (url: string) => {
+      if (url.endsWith('.sha1')) return { data: '0123456789abcdef0123456789abcdef01234567' };
+      throw new Error('unexpected metadata lookup');
+    });
+    let pushed = false;
+    const source = new Readable({
+      read() {
+        if (pushed) return;
+        pushed = true;
+        this.push(Buffer.alloc(64 * 1024));
+        setTimeout(() => controller.abort(), 10);
+      },
+    });
+    mockAxiosDefault.mockResolvedValue({ data: source, headers: { 'content-length': '131072' } });
+    (fs.createWriteStream as any).mockImplementation(() => new Writable({ write(_chunk, _encoding, callback) { callback(); } }));
+
+    await expect(
+      downloader.downloadPackage(
+        { name: 'com.example:fixture', version: '1.0.0', type: 'maven', metadata: { type: 'pom' } },
+        '/tmp/pom-only',
+        undefined,
+        { signal: controller.signal }
+      )
+    ).rejects.toThrow();
+    expect(mockAxiosDefault).toHaveBeenCalledTimes(1);
+    expect(controller.signal.aborted).toBe(true);
+    expect(mockAxiosGet).toHaveBeenCalledTimes(1);
+    expect(fs.remove).toHaveBeenCalledWith(expect.stringContaining('fixture-1.0.0.pom'));
+  });
+
+  it('처음부터 일시정지된 POM-only 요청은 조회와 쓰기를 시작하지 않는다', async () => {
+    let paused = true;
+    mockAxiosGet.mockResolvedValue({ data: '0123456789abcdef0123456789abcdef01234567' });
+    const source = Readable.from([Buffer.from('pom-content')]);
+    mockAxiosDefault.mockResolvedValue({ data: source, headers: { 'content-length': '11' } });
+    (fs.createWriteStream as any).mockImplementation(() => new Writable({ write(_chunk, _encoding, callback) { callback(); } }));
+    (downloader as any).verifyChecksum = vi.fn().mockResolvedValue(true);
+    const promise = downloader.downloadPackage(
+      { name: 'com.example:fixture', version: '1.0.0', type: 'maven', metadata: { type: 'pom' } },
+      '/tmp/pom-only',
+      undefined,
+      { shouldPause: () => paused }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(mockAxiosGet).not.toHaveBeenCalled();
+    expect(mockAxiosDefault).not.toHaveBeenCalled();
+    expect(fs.createWriteStream).not.toHaveBeenCalled();
+    paused = false;
+    await expect(promise).resolves.toContain('fixture-1.0.0.pom');
+  });
+
+  it.each(['packaging', 'sha1'] as const)('%s 조회 중 abort는 fallback/아티팩트 요청으로 진행하지 않는다', async (boundary) => {
+    const controller = new AbortController();
+    let lookupCalls = 0;
+    mockAxiosGet.mockImplementation((_url: string, config?: { signal?: AbortSignal }) => {
+      lookupCalls += 1;
+      return new Promise((_resolve, reject) => {
+        config?.signal?.addEventListener('abort', () => reject(new Error('lookup aborted')), { once: true });
+      });
+    });
+    (fs.createWriteStream as any).mockImplementation(() => new PassThrough());
+    const info = {
+      name: 'com.example:lookup-boundary',
+      version: '1.0.0',
+      type: 'maven' as const,
+      metadata: boundary === 'sha1' ? { packaging: 'jar' } : undefined,
+    };
+    const promise = downloader.downloadPackage(info, '/tmp/lookup-boundary', undefined, {
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 10);
+    await expect(promise).rejects.toThrow(/aborted/);
+    expect(lookupCalls).toBe(1);
+    expect(mockAxiosDefault).not.toHaveBeenCalled();
+  });
+
   describe('downloadArtifact', () => {
     it('JAR 다운로드 성공', async () => {
       // SHA1 체크섬 응답 모킹
@@ -121,15 +193,14 @@ describe('MavenDownloader downloadPackage 테스트', () => {
       });
 
       // 파일 다운로드 스트림 모킹
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new PassThrough();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       // verifyChecksum 모킹
@@ -146,7 +217,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
 
       setTimeout(() => {
         mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
@@ -159,15 +230,14 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         data: 'sha1hash123',
       });
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '500' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new PassThrough();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const mockVerifyChecksum = vi.fn().mockResolvedValue(true);
@@ -183,7 +253,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
 
       setTimeout(() => {
         mockStream.emit('data', Buffer.from('pom content'));
-        mockWriter.emit('finish');
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
@@ -194,15 +264,14 @@ describe('MavenDownloader downloadPackage 테스트', () => {
       // SHA1 조회 실패
       mockAxiosGet.mockRejectedValue(new Error('Not found'));
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new PassThrough();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const downloadPromise = downloader.downloadArtifact(
@@ -215,7 +284,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
 
       setTimeout(() => {
         mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
@@ -227,15 +296,14 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         data: 'expectedsha1',
       });
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new PassThrough();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       // verifyChecksum 모킹 - 실패
@@ -252,7 +320,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
 
       setTimeout(() => {
         mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.end();
       }, 10);
 
       await expect(downloadPromise).rejects.toThrow('체크섬 검증 실패');
@@ -261,15 +329,14 @@ describe('MavenDownloader downloadPackage 테스트', () => {
     it('progress 콜백 호출', async () => {
       mockAxiosGet.mockRejectedValue(new Error('Not found'));
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '100' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new PassThrough();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const progressEvents: any[] = [];
@@ -287,7 +354,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
       setTimeout(() => {
         mockStream.emit('data', Buffer.from('1234567890'));
         mockStream.emit('data', Buffer.from('1234567890'));
-        mockWriter.emit('finish');
+        mockStream.end();
       }, 10);
 
       await downloadPromise;
@@ -321,15 +388,14 @@ describe('MavenDownloader downloadPackage 테스트', () => {
     it('writer 오류 처리', async () => {
       mockAxiosGet.mockRejectedValue(new Error('Not found'));
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '100' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new PassThrough();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const downloadPromise = downloader.downloadArtifact(
@@ -350,15 +416,14 @@ describe('MavenDownloader downloadPackage 테스트', () => {
     it('classifier가 있는 경우', async () => {
       mockAxiosGet.mockRejectedValue(new Error('Not found'));
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new PassThrough();
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const downloadPromise = downloader.downloadArtifact(
@@ -373,7 +438,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
 
       setTimeout(() => {
         mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
@@ -517,6 +582,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         'jar',
         undefined,
         'natives',
+        undefined,
       );
     });
 
@@ -549,6 +615,7 @@ describe('MavenDownloader downloadPackage 테스트', () => {
         '/tmp/test',
         'jar',
         onProgress,
+        undefined,
         undefined
       );
     });

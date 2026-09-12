@@ -309,6 +309,23 @@ POM 파일은 모든 아티팩트에서 필수입니다. 일반 JAR를 받은 �
 
 의존성 해결에 필요한 Parent/BOM의 조회 실패는 resolver의 실패로 전달됩니다. 모델 조회가 성공했더라도 이후 실제 POM 파일 저장이 실패하면 다운로드를 성공으로 반환하지 않습니다.
 
+### Maven 다운로드 취소·일시정지
+
+`downloadPackage`와 `downloadPackageFiles`는 선택적인 `MavenDownloadOptions`를 받습니다. Electron 다운로드 라우터는 세션의 `AbortSignal`과 일시정지 상태 콜백을 이 옵션으로 전달합니다.
+
+```typescript
+interface MavenDownloadOptions {
+  signal?: AbortSignal;
+  shouldPause?: () => boolean;
+  targetOS?: string;
+  targetArchitecture?: string;
+}
+```
+
+제어 범위는 packaging 확인용 POM 조회, JAR/POM 본문과 SHA1 companion 조회·저장, 체크섬 검증 및 다음 파일로 넘어가기 전 대기까지입니다. 일시정지 중에도 네트워크·커널 버퍼에 일부 바이트가 도착할 수 있지만, pause gate 뒤의 디스크 쓰기와 진행률 보고는 멈춥니다. 작은 메타데이터 응답은 메모리 수신이 끝날 수 있으나, 다음 단계로 진행하거나 파일에 저장하기 전에는 일시정지 상태를 기다립니다. 재개하면 같은 파일의 전송과 검증을 이어갑니다. 취소·전송 오류가 발생하면 해당 요청과 writer를 정리하고 진행 중인 부분 파일을 삭제하며, 아직 시작하지 않은 다음 아티팩트나 최종 패키징으로 넘어가지 않습니다. 이미 완료된 이전 아티팩트의 보존 여부는 호출자의 작업 정리 정책에 따릅니다.
+
+이 기능은 다운로더 내부에서 자동 재시도를 수행하지 않습니다. 사용자가 재시도를 선택하면 새 다운로드 작업이 시작됩니다. `downloadArtifact`, `downloadPom`, `downloadSources`, `downloadJavadoc`의 기존 호출은 옵션을 생략할 수 있어 기존 동작을 유지합니다.
+
 Resolver는 실제 의존성에서 발견한 모든 버전의 아티팩트와 부속 POM, 전이 의존성 및 필요한 Parent/BOM POM을 전달합니다. 다운로더는 각 type의 파일을 저장합니다. 예를 들어 Kryo 2.24.0과 2.21이 발견되면 두 버전의 JAR·POM과 하위 의존성을 함께 전달합니다. 이 파일들은 조회 캐시에만 남지 않고 압축물과 설치 스크립트의 대상 목록에 포함됩니다.
 
 ### .m2 저장소 구조 지원

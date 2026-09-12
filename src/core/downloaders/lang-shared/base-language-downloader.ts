@@ -1,10 +1,13 @@
 import * as path from 'path';
 import axios from 'axios';
 import * as fs from 'fs-extra';
+import { Transform, type Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { sanitizePath } from '../../shared/path-utils';
+import { waitForDownloadResume, type DownloadControlOptions } from '../../shared/download-control';
 import type { DownloadProgressEvent } from '../../../types';
 
-export interface LanguageArtifactDownloadPlan {
+export interface LanguageArtifactDownloadPlan extends DownloadControlOptions {
   downloadUrl: string;
   itemId: string;
   timeoutMs: number;
@@ -22,59 +25,79 @@ export abstract class BaseLanguageDownloader {
   ): Promise<string> {
     const filePath = this.resolveFilePath(plan, destPath);
 
-    await fs.ensureDir(path.dirname(filePath));
-
-    const response = await axios({
-      method: 'GET',
-      url: plan.downloadUrl,
-      responseType: 'stream',
-      timeout: plan.timeoutMs,
-    });
-
-    const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
-    let downloadedBytes = 0;
-    let lastBytes = 0;
-    let lastTime = Date.now();
-    let currentSpeed = 0;
-
-    const writer = fs.createWriteStream(filePath);
-
-    response.data.on('data', (chunk: Buffer) => {
-      downloadedBytes += chunk.length;
-
-      const now = Date.now();
-      const elapsed = (now - lastTime) / 1000;
-      if (elapsed >= 0.3) {
-        currentSpeed = (downloadedBytes - lastBytes) / elapsed;
-        lastBytes = downloadedBytes;
-        lastTime = now;
-      }
-
-      onProgress?.({
-        itemId: plan.itemId,
-        progress: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0,
-        downloadedBytes,
-        totalBytes,
-        speed: currentSpeed,
+    // The local signal also releases a paused transform if the source/writer fails.
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(plan.signal?.reason);
+    plan.signal?.addEventListener('abort', onAbort, { once: true });
+    if (plan.signal?.aborted) onAbort();
+    const controls = { signal: controller.signal, shouldPause: plan.shouldPause };
+    let source: Readable | undefined;
+    let ownsFile = false;
+    try {
+      await waitForDownloadResume(controls);
+      await fs.ensureDir(path.dirname(filePath));
+      await waitForDownloadResume(controls);
+      const response = await axios({
+        method: 'GET',
+        url: plan.downloadUrl,
+        responseType: 'stream',
+        timeout: plan.timeoutMs,
+        ...(plan.signal ? { signal: controller.signal } : {}),
       });
-    });
+      source = response.data as Readable;
+      controller.signal.throwIfAborted();
+      const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
+      let downloadedBytes = 0;
+      let lastBytes = 0;
+      let lastTime = Date.now();
+      let currentSpeed = 0;
 
-    response.data.pipe(writer);
-
-    await new Promise<void>((resolve, reject) => {
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
-
-    if (plan.verifyFile) {
-      const isValid = await plan.verifyFile(filePath);
-      if (!isValid) {
-        await fs.remove(filePath);
+      // A transform enforces the pause even when pipe resumes its source on drain.
+      const gate = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          void (async () => {
+            await waitForDownloadResume(controls);
+            downloadedBytes += chunk.length;
+            const now = Date.now();
+            const elapsed = (now - lastTime) / 1000;
+            if (elapsed >= 0.3) {
+              currentSpeed = (downloadedBytes - lastBytes) / elapsed;
+              lastBytes = downloadedBytes;
+              lastTime = now;
+            }
+            onProgress?.({
+              itemId: plan.itemId,
+              progress: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0,
+              downloadedBytes,
+              totalBytes,
+              speed: currentSpeed,
+            });
+            await waitForDownloadResume(controls);
+            callback(null, chunk);
+          })().catch((error: Error) => callback(error));
+        },
+        destroy(error, callback) {
+          if (error) controller.abort(error);
+          callback(error);
+        },
+      });
+      const writer = fs.createWriteStream(filePath);
+      ownsFile = true;
+      await pipeline(source, gate, writer, { signal: controller.signal });
+      await waitForDownloadResume(plan);
+      if (plan.verifyFile && !(await plan.verifyFile(filePath))) {
         throw new Error(plan.verificationFailureMessage ?? '다운로드 검증 실패');
       }
+      await waitForDownloadResume(plan);
+      return filePath;
+    } catch (error) {
+      source?.destroy();
+      if (ownsFile) await fs.remove(filePath);
+      throw error;
+    } finally {
+      controller.abort();
+      plan.signal?.removeEventListener('abort', onAbort);
     }
-
-    return filePath;
   }
 
   private resolveFilePath(plan: LanguageArtifactDownloadPlan, destPath: string): string {
