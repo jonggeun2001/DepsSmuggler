@@ -304,7 +304,7 @@ describe('OS metadata parsers', () => {
             name: 'openssl',
             operator: '=',
             version: '3.0.0',
-            isOptional: true,
+            isOptional: false,
           }),
         ],
       }),
@@ -363,7 +363,7 @@ describe('OS metadata parsers', () => {
       size: 123,
       installedSize: 456,
       dependencies: expect.arrayContaining([
-        { name: 'fixture-dependency', operator: '=', version: '1.0', isOptional: true },
+        { name: 'fixture-dependency', operator: '=', version: '1.0', isOptional: false },
         { name: 'fixture-rc', operator: '=', version: '1.0.0~rc1', isOptional: false },
       ]),
     }));

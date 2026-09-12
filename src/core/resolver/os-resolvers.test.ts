@@ -651,7 +651,7 @@ describe('OS dependency resolvers', () => {
     expect(parsePrimary).toHaveBeenCalledOnce();
     expect(cacheSet).toHaveBeenCalledWith(
       expect.any(String),
-      { schemaVersion: 1, packages: parsedPackages }
+      { schemaVersion: 2, packages: parsedPackages }
     );
     const writtenEnvelope = cacheSet.mock.calls[0][1];
     cacheGet.mockResolvedValueOnce(JSON.parse(JSON.stringify(writtenEnvelope)));
@@ -662,14 +662,62 @@ describe('OS dependency resolvers', () => {
     expect(parsePrimary).toHaveBeenCalledOnce();
   });
 
+  it('YUM resolver는 schema 1 historical optional dependency cache를 재파싱해 필수 prerequisite를 복원한다', async () => {
+    const historicalPackages = [{
+      ...createPackage('filesystem', '3.16'),
+      release: '5.el9',
+      dependencies: [{ name: 'setup', isOptional: true }],
+    }];
+    const reparsedPackages = [{
+      ...historicalPackages[0],
+      dependencies: [{ name: 'setup', isOptional: false }],
+    }];
+    let storedCache: unknown = { schemaVersion: 1, packages: historicalPackages };
+    const cacheGet = vi.fn().mockImplementation(async () => storedCache);
+    const cacheSet = vi.fn().mockImplementation(async (_key: string, value: unknown) => {
+      storedCache = JSON.parse(JSON.stringify(value));
+    });
+    const parseRepomd = vi.spyOn(YumMetadataParser.prototype, 'parseRepomd').mockResolvedValue({
+      revision: '1',
+      primary: {
+        location: 'repodata/primary.xml.gz',
+        checksum: { type: 'sha256', value: 'deadbeef' },
+      },
+      filelists: null,
+      other: null,
+    });
+    const parsePrimary = vi.spyOn(YumMetadataParser.prototype, 'parsePrimary')
+      .mockResolvedValue(reparsedPackages);
+    const createResolver = () => new YumDependencyResolver({
+      ...createOptions(repo),
+      cacheManager: { get: cacheGet, set: cacheSet },
+    });
+
+    await accessResolverForTest(createResolver()).loadMetadata();
+
+    expect(parseRepomd).toHaveBeenCalledOnce();
+    expect(parsePrimary).toHaveBeenCalledOnce();
+    expect(cacheSet).toHaveBeenCalledWith(
+      expect.any(String),
+      { schemaVersion: 2, packages: reparsedPackages }
+    );
+    expect((cacheSet.mock.calls[0][1] as { packages: OSPackageInfo[] }).packages[0].dependencies)
+      .toEqual([expect.objectContaining({ name: 'setup', isOptional: false })]);
+
+    await accessResolverForTest(createResolver()).loadMetadata();
+
+    expect(parseRepomd).toHaveBeenCalledOnce();
+    expect(parsePrimary).toHaveBeenCalledOnce();
+  });
+
   it.each([
-    ['unknown schema', { schemaVersion: 2, packages: [] }],
-    ['packages object', { schemaVersion: 1, packages: {} }],
-    ['non-object package', { schemaVersion: 1, packages: [null] }],
-    ['numeric package version', { schemaVersion: 1, packages: [{ ...createPackage('fixture', '1.0'), version: 1 }] }],
-    ['numeric package release', { schemaVersion: 1, packages: [{ ...createPackage('fixture', '1.0'), release: 1 }] }],
+    ['unknown schema', { schemaVersion: 3, packages: [] }],
+    ['packages object', { schemaVersion: 2, packages: {} }],
+    ['non-object package', { schemaVersion: 2, packages: [null] }],
+    ['numeric package version', { schemaVersion: 2, packages: [{ ...createPackage('fixture', '1.0'), version: 1 }] }],
+    ['numeric package release', { schemaVersion: 2, packages: [{ ...createPackage('fixture', '1.0'), release: 1 }] }],
     ['numeric dependency version', {
-      schemaVersion: 1,
+      schemaVersion: 2,
       packages: [{
         ...createPackage('fixture', '1.0'),
         dependencies: [{ name: 'dependency', operator: '=', version: 1 }],
@@ -701,7 +749,7 @@ describe('OS dependency resolvers', () => {
     expect(parsePrimary).toHaveBeenCalledOnce();
     expect(cacheSet).toHaveBeenCalledWith(
       expect.any(String),
-      { schemaVersion: 1, packages: parsedPackages }
+      { schemaVersion: 2, packages: parsedPackages }
     );
   });
 

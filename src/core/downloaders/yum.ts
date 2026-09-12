@@ -375,13 +375,13 @@ export class YumMetadataParser {
 
       const flags = entryObj['@_flags'] as string | undefined;
       const ver = entryObj['@_ver'] as string | undefined;
-      const pre = parseNumericAttribute(entryObj['@_pre']);
 
       dependencies.push({
         name,
         version: ver,
         operator: flags ? this.parseRpmFlags(flags) : undefined,
-        isOptional: pre === 1,
+        // pre=1 describes installation ordering, not a weak/optional requirement.
+        isOptional: false,
       });
     }
 
