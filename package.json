@@ -4,6 +4,10 @@
   "type": "module",
   "description": "폐쇄망 환경을 위한 패키지 의존성 다운로드 및 전달 애플리케이션",
   "main": "dist/electron/main.js",
+  "engines": {
+    "node": "^22.13.0 || ^24.0.0"
+  },
+  "packageManager": "npm@11.8.0",
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
@@ -60,7 +64,7 @@
     "@types/cli-progress": "^3.11.6",
     "@types/fs-extra": "^11.0.4",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.0.2",
+    "@types/node": "^22.20.2",
     "@types/nodemailer": "^8.0.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
