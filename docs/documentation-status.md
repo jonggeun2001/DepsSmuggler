@@ -19,6 +19,7 @@
 | 공유 모듈 | [공유 개요](shared-utilities.md), [타입](shared-types.md), [HTTP](shared-http.md), [캐시](shared-cache.md), [의존성](shared-dependency.md), [파일·경로](shared-file-path.md), [기타](shared-misc.md) | `src/core/shared/`, `src/types/`, `src/core/ports/` 및 실제 호출부 |
 | 패키지별 공유 모듈 | [pip](shared-pip.md), [Conda](shared-conda.md), [Maven](shared-maven.md), [npm](shared-npm.md) | 각 shared 모듈의 export·옵션·구현·호출 테스트 |
 | 개발·검증 | [코딩 규칙](coding-conventions.md), [테스트](testing.md) | ESLint/TypeScript 설정, Vitest/Playwright 설정, 테스트 코드, CI |
+| 런타임 지원 | [런타임 지원](runtime-support.md), [보안 의존성](security-dependencies.md) | engines/packageManager, Node 타입, Electron·CI 버전, 최소 OS·갱신 절차 |
 | UI 검증 절차 | [체크리스트](ui-testing-checklist.md), [테스트 케이스](ui-testing-test-cases.md), [Playwright 전환](ui-testing-playwright-conversion.md) | 현재 화면·스토어와 `tests/e2e/`의 자동화 범위 |
 
 이 문서들은 현재 호출 순서·인자·기본값·경로를 설명합니다. 구현에 없는 통합 클래스나 옵션을 실제 API처럼 쓰던 예시를 교체하고, 이해를 위한 축약 코드에는 그 범위를 표시했습니다.
