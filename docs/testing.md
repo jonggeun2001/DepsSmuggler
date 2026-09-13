@@ -74,11 +74,13 @@ fixture는 실제 DTO와 함수 인수를 기준으로 작성하고, 부분 mock
 
 캐시의 오도하는 케이스를 제거한 것을 해당 checksum·LRU 분기의 검증 완료로 해석하지 않습니다. 범위가 다른 `ArtifactCacheManager`, `CacheStore`, OS 메타데이터 캐시의 테스트도 서로 대체하지 않습니다.
 
+제거 대상에 실제 동작을 검증하는 assertion이 섞여 있으면 보존합니다. 캐시 저장 후 항목 수 확인은 기존 `addToCache` 성공 테스트로, pip 테스트에 있던 실제 `sanitizePath`의 금지문자 제거 확인은 `path-utils.test.ts`로 옮겼습니다.
+
 동일한 기능을 다루더라도 실행 경계가 다르면 유지합니다. 실제 handler와 기본 service factory를 함께 호출하는 테스트는 의존성을 주입한 service 단위 테스트와 별개의 보호이며, 브라우저 E2E·실제 파일·loopback HTTP·네이티브 소비자 테스트 역시 단위 테스트와 구분합니다. 테스트 본문이 같은 `it.each`라도 입력 집합이 다르면 중복으로 제거하지 않습니다.
 
 정리 검증은 `bash scripts/verify-worktree.sh --coverage`와 `npm run typecheck:tests`를 사용합니다. 삭제 전후의 테스트 목록과 운영 core의 실행된 statement·function·branch 위치를 대조하며, 커버리지 하한이나 테스트 수집 범위를 낮춰 삭제를 숨기지 않습니다. 커버리지 일치는 실행 경로의 보존을 나타내며 모든 동작의 완전한 검증을 뜻하지는 않습니다.
 
-이번 Node 24 검증에서 기본 테스트는 3,229 passed / 159 skipped에서 2,836 passed / 146 skipped로 순 406개 줄었습니다. core 133개 파일의 실행된 statement·function·branch 위치는 동일했고, 커버리지도 82.61% / 73.35% / 86.07% / 83.62%로 유지되었습니다. 앱·Electron·테스트 TypeScript 검사와 린트도 오류 없이 통과했습니다. 외부 저장소·네이티브 도구·플랫폼 조건으로 남은 skip은 실행 성공으로 계산하지 않습니다.
+이번 Node 24 검증에서 기본 테스트는 3,229 passed / 159 skipped에서 2,837 passed / 146 skipped로 순 405개 줄었습니다. core 133개 파일의 실행된 statement·function·branch 위치는 동일했고, 커버리지도 82.61% / 73.35% / 86.07% / 83.62%로 유지되었습니다. 앱·Electron·테스트 TypeScript 검사와 린트도 오류 없이 통과했습니다. 외부 저장소·네이티브 도구·플랫폼 조건으로 남은 skip은 실행 성공으로 계산하지 않습니다.
 
 ### 1. 단위 테스트
 

@@ -301,6 +301,7 @@ describe('ArtifactCacheManager 매니페스트 및 캐시 조작', () => {
 
       expect(fs.copy).toHaveBeenCalled();
       expect(fs.writeJson).toHaveBeenCalled();
+      expect(await manager.getCacheCount()).toBe(1);
     });
 
     it('매니페스트 저장 실패를 호출자에게 그대로 전달', async () => {
