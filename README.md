@@ -176,6 +176,8 @@ GUI 설정은 전달/출력, 캐시, 업데이트 등의 섹션으로 나뉩니�
 └── logs/             # 애플리케이션 로그
 ```
 
+설정과 히스토리 JSON은 같은 디렉터리의 임시 파일에 저장한 뒤 교체합니다. Electron의 파일별 요청과 비동기 설정 변경은 순서대로 처리하며, 읽기 실패 시 원본 파일을 보존합니다. 보장 범위와 복구 계약은 [파일 저장](docs/shared-file-path.md#설정히스토리-json-저장)을 참고하세요.
+
 Renderer의 Python 버전 캐시, 설정 백업과 브라우저 히스토리는 `localStorage`도 사용합니다. 상세 저장 방식은 [히스토리](docs/download-history.md), [캐시](docs/shared-cache.md), [Electron / Renderer](docs/electron-renderer.md)를 참고하세요.
 
 ## 개발 명령어

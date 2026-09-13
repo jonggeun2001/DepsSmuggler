@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { getConfigManager, ConfigManager, Config } from './config';
+import * as storage from './shared/atomic-json-store';
 
 const testHome = vi.hoisted(() => ({ path: '' }));
 vi.mock('node-machine-id', () => ({ machineIdSync: () => 'config-test-machine-id' }));
@@ -322,8 +323,10 @@ describe('ConfigManager', () => {
     it('최초 기본값 저장 실패에도 설정 읽기는 사용 가능하다', async () => {
       const manager = new ConfigManager();
       await fs.remove(path.join(manager.getConfigDir(), 'settings.json'));
-      vi.spyOn(manager, 'saveConfig').mockRejectedValue(new Error('ENOSPC'));
+      const write = vi.spyOn(storage, 'writeJsonAtomically').mockRejectedValue(new Error('ENOSPC'));
       await expect(manager.loadConfig()).resolves.toMatchObject({ concurrentDownloads: 5 });
+      expect(write).toHaveBeenCalledOnce();
+      expect(await fs.pathExists(path.join(manager.getConfigDir(), 'settings.json'))).toBe(false);
     });
 
     it('손상된 설정을 읽어도 원본 파일을 덮어쓰지 않는다', async () => {

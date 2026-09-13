@@ -22,6 +22,8 @@ src/core/shared/
 ├── conda-utils.ts                # Conda 패키지 URL 조회
 ├── dependency-resolver.ts        # 의존성 해결 유틸리티
 ├── dependency-tree-utils.ts      # 의존성 트리 유틸리티
+├── atomic-json-store.ts          # 설정/히스토리 원자적 저장 및 파일별 큐
+├── settings-validation.ts        # 설정 IPC의 저장 입력 검증
 ├── file-utils.ts                 # 파일 다운로드/압축 유틸리티
 ├── script-utils.ts               # 설치 스크립트 생성
 ├── filename-utils.ts             # 파일명/캐시 키 정리

@@ -141,6 +141,8 @@ main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 
 - Electron 환경에서는 settings store가 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화되며, 레거시 `defaultOutputFormat/defaultArchiveType` 조합은 로드 시 `zip | tar.gz`로 정규화됩니다.
 - 설정 로드 시 잘못된 숫자·불리언·목록·중첩 객체는 기존 기본값으로 복구하며, 파일의 데이터가 스토어 액션 함수를 덮어쓰지 못하게 합니다. 정상 Windows/macOS pip 타겟의 선택적 필드와 알 수 없는 기존 데이터 필드는 유지합니다. 브라우저 백업 저장소의 접근/용량 오류는 메모리 갱신과 Electron 파일 저장을 막지 않으며, `config:set`의 실패 응답도 로그로 남깁니다. `[settings-store:*]` 로그와 `settings-store.test.ts`로 로드/저장 실패를 추적·검증합니다.
 - 초기 설정 로드·정규화와 기본값 대체는 메모리에만 반영합니다. Electron 파일이나 브라우저 백업을 자동으로 덮어쓰지 않고, 사용자의 설정 변경/초기화부터 저장합니다. 정상/손상/읽기 실패 및 브라우저 초기화의 저장 호출 여부를 `settings-store.test.ts`에서 검증합니다.
+- 설정 IPC는 저장 전에 객체 형태와 알려진 필드의 타입/범위를 검증합니다. 잘못된 저장 입력은 전체 거부하고 기존 파일을 보존하며, 레거시 출력 형식·캐시 별칭과 알 수 없는 JSON 데이터 필드는 유지합니다. 함수·순환 참조·비 JSON 객체와 `__proto__`/`constructor` 키는 저장 입력에서 거부합니다. 조회는 잘못된 개별 필드를 renderer의 기존 메모리 보정에 맡깁니다.
+- 설정·히스토리 IPC는 파일별로 조회/변경을 직렬화하고 임시 파일을 완성한 뒤 rename으로 교체합니다. 전체 저장은 전달한 상태로 대체하는 계약이며, 서로 다른 프로세스의 동시 편집 병합은 포함하지 않습니다. [저장 동작과 실패 계약](shared-file-path.md#설정히스토리-json-저장)을 참고하세요.
 - 설정 화면의 캐시 위젯은 현재 `cache:*` IPC 기준 패키지 메타데이터 캐시만 집계/삭제합니다.
 - `src/renderer/pages/settings/` 아래 `DeliverySettingsSection`, `CacheSettingsSection`, `UpdateSettingsSection`, `use-settings-form-actions.ts`가 `SettingsPage`의 세부 책임을 분리합니다.
 - SMTP 테스트 버튼은 `testSmtpConnection` IPC가 있으면 실제 연결 테스트를 실행하고, 브라우저 개발 환경에서는 시뮬레이션, IPC가 빠진 Electron 빌드에서는 경고와 비활성화 상태를 노출합니다.
