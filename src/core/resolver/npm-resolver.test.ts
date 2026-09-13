@@ -474,7 +474,9 @@ describe('NpmResolver 단위 테스트', () => {
       const lodash = result.find((p) => p.name === 'lodash');
 
       expect(lodash).toBeDefined();
-      if (!lodash) return;
+      if (!lodash) {
+        throw new Error('lodash 패키지 정보가 없습니다');
+      }
       expect(lodash.version).toBe('4.17.21');
       expect(lodash.tarball).toContain('lodash');
       expect(lodash.hoistedPath).toBe('node_modules/lodash');
