@@ -637,7 +637,15 @@ class OSRepoPackager {
 | APT | `Packages`, `Packages.gz`, `Release` | TypeScript Control 텍스트 생성 + gzip |
 | APK | `APKINDEX.tar.gz` | `APKINDEX` 항목 하나를 담은 gzip tar 아카이브를 Node `tar`로 생성 |
 
-현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다.
+현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다. APT/APK의 기존 metadata 생성 의미는 유지합니다.
+
+YUM 저장소 생성은 선택된 모든 패키지의 `downloadedFiles` 매핑과 소스 경로를 먼저 확인한 뒤 복사합니다. 소스는 심볼릭 링크를 포함하지 않는 일반 파일이어야 하며, 기존 `Packages` 항목은 일반 디렉터리여야 합니다. 이미 존재하는 목적지 항목도 일반 파일이어야 하고, 실제 basename이 대소문자만 다른 경우까지 포함해 충돌하면 복사 전에 실패합니다. 매핑 누락·소스 오류·목적지 오류는 빈 저장소 성공으로 처리하지 않습니다.
+
+복사 후 YUM 메타데이터의 `location`은 실제 파일명을 URI 경로 한 구간으로 인코딩한 `Packages/<segment>`를 사용하고 XML 특수 문자를 이스케이프합니다. `primary.xml.gz`의 RPM checksum과 `size package`, `filelists.xml.gz`와 `other.xml.gz`의 `pkgid`는 실제 복사한 파일의 바이트 수와 스트림으로 계산한 SHA-256을 사용합니다. 입력 모델의 오래된 크기·체크섬은 사용하지 않습니다. 유효한 `installedSize`는 0을 포함해 보존하고, 알 수 없으면 파일 크기를 대체값으로 기록합니다. 모델에 없는 `size archive`도 파일 크기로 대체하며, 두 대체값은 RPM 헤더에서 추출한 설치·아카이브 크기가 아닙니다.
+
+YUM의 `RepoResult.totalSize`는 복사한 패키지 파일의 바이트 합계이며 메타데이터·스크립트 크기는 제외합니다. APT/APK의 `totalSize`는 기존처럼 입력 모델의 `size` 합계를 반환합니다.
+
+YUM preflight 이후 복사·metadata 생성 중 파일 시스템 오류가 발생하면 오류를 전달합니다. 이 경계는 디렉터리 내구성이나 전체 출력의 rollback을 보장하지 않으므로, 호출자는 실패 결과를 성공 저장소로 사용하지 않아야 합니다.
 
 YUM 저장소를 생성할 때 `primary.xml.gz`의 각 RPM에는 self-provide와 입력 패키지의 distinct `provides` capability 이름이 기록됩니다. 이 정보는 다운로드된 RPM payload에서 새로 추출하지 않고 resolver/parser가 가진 `OSPackageInfo.provides`를 사용합니다. 현재 모델은 capability 이름만 표현하므로 versioned 또는 flags가 붙은 RPM provides의 의미까지 native solver에서 재현한다고 보장하지 않습니다.
 

@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
@@ -152,8 +153,10 @@ describe('YUM primary file metadata survives parser, JSON, and local repository 
 
     const primaryOutput = await fsp.readFile(path.join(repoPath, 'repodata/primary.xml.gz'));
     const filelistsOutput = await fsp.readFile(path.join(repoPath, 'repodata/filelists.xml.gz'));
+    const otherOutput = await fsp.readFile(path.join(repoPath, 'repodata/other.xml.gz'));
     const primaryText = (await import('node:zlib')).gunzipSync(primaryOutput).toString('utf8');
     const filelistsText = (await import('node:zlib')).gunzipSync(filelistsOutput).toString('utf8');
+    const otherText = (await import('node:zlib')).gunzipSync(otherOutput).toString('utf8');
     const block = (content: string, name: string): string => {
       const match = content
         .split('<package ')
@@ -185,18 +188,44 @@ describe('YUM primary file metadata survives parser, JSON, and local repository 
     const xmlParser = new XMLParser({ ignoreAttributes: false, parseAttributeValue: false });
     const primaryPackages = xmlParser.parse(primaryText).metadata.package;
     const filelistsPackages = xmlParser.parse(filelistsText).filelists.package;
+    const otherPackages = xmlParser.parse(otherText).otherdata.package;
+    type XmlRecord = Record<string, unknown>;
+    const asArray = (value: unknown): XmlRecord[] =>
+      value === undefined ? [] : Array.isArray(value) ? value as XmlRecord[] : [value as XmlRecord];
     for (const pkg of roundTripped) {
-      const primaryPkg = primaryPackages.find((entry: Record<string, unknown>) => entry.name === pkg.name);
-      const filelistsPkg = filelistsPackages.find((entry: Record<string, unknown>) => entry['@_name'] === pkg.name);
-      expect(filelistsPkg['@_pkgid']).toBe(primaryPkg.checksum['#text']);
-      expect(filelistsPkg.version).toEqual(primaryPkg.version);
-      expect(filelistsPkg.version['@_ver']).toBe(pkg.version);
-      expect(filelistsPkg.version['@_rel']).toBe(pkg.release);
+      const source = payloads.get(getDownloadedFileKey(pkg));
+      expect(source).toBeDefined();
+      if (!source) throw new Error(`missing fixture source for ${pkg.name}`);
+      const payload = fs.readFileSync(source);
+      const expectedHash = crypto.createHash('sha256').update(payload).digest('hex');
+      const expectedFilename = path.basename(source);
+      const primaryPkg = asArray(primaryPackages).find((entry) => entry.name === pkg.name);
+      const filelistsPkg = asArray(filelistsPackages).find((entry) => entry['@_name'] === pkg.name);
+      const otherPkg = asArray(otherPackages).find((entry) => entry['@_name'] === pkg.name);
+      expect(primaryPkg).toBeDefined();
+      expect(filelistsPkg).toBeDefined();
+      expect(otherPkg).toBeDefined();
+      const primaryLocation = primaryPkg?.location as XmlRecord | undefined;
+      const primaryChecksum = primaryPkg?.checksum as XmlRecord | undefined;
+      const primarySize = primaryPkg?.size as XmlRecord | undefined;
+      expect(primaryLocation?.['@_href']).toBe(`Packages/${expectedFilename}`);
+      expect(primaryChecksum?.['#text']).toBe(expectedHash);
+      expect(primaryChecksum?.['@_pkgid']).toBe('YES');
+      expect(primarySize?.['@_package']).toBe(String(payload.length));
+      expect(filelistsPkg?.['@_pkgid']).toBe(expectedHash);
+      expect(otherPkg?.['@_pkgid']).toBe(expectedHash);
+      expect(filelistsPkg?.['@_pkgid']).toBe(primaryChecksum?.['#text']);
+      expect(otherPkg?.['@_pkgid']).toBe(primaryChecksum?.['#text']);
+      expect(filelistsPkg?.version).toEqual(primaryPkg?.version);
+      const filelistsVersion = filelistsPkg?.version as XmlRecord | undefined;
+      expect(filelistsVersion?.['@_ver']).toBe(pkg.version);
+      expect(filelistsVersion?.['@_rel']).toBe(pkg.release);
       const expectedFiles = pkg.rpmPrimaryFiles?.map((file) => file.type === 'file'
         ? file.path : { '#text': file.path, '@_type': file.type });
       const normalizedFiles = (value: unknown) => value === undefined ? undefined : Array.isArray(value) ? value : [value];
-      expect(normalizedFiles(primaryPkg.format.file)).toEqual(expectedFiles);
-      expect(normalizedFiles(filelistsPkg.file)).toEqual(expectedFiles);
+      const primaryFormat = primaryPkg?.format as XmlRecord | undefined;
+      expect(normalizedFiles(primaryFormat?.file)).toEqual(expectedFiles);
+      expect(normalizedFiles(filelistsPkg?.file)).toEqual(expectedFiles);
     }
     expect(roundTripped.find((pkg) => pkg.name === 'typed-single-fixture')?.rpmPrimaryFiles)
       .toEqual([{ path: '/etc/ghost "entry"', type: 'ghost' }]);

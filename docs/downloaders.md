@@ -512,6 +512,8 @@ const downloadResult = await downloadOSPackages({
 
 YUM XML 파서는 표준 엔티티 디코딩을 유지하며 전체 치환 횟수와 DTD 선언·확장 크기에 유한한 제한을 적용합니다. 큰 Rocky primary XML의 정상 파싱과 한도 초과 오류를 함께 검증합니다. 로딩 실패는 resolver에서 검색·다운로드 호출자에게 전달하며, 상세 제한과 캐시 반영 규칙은 [OS 패키지 문서](os-package-downloader.md#메타데이터-파싱-yummetadataparser)를 참고하세요.
 
+YUM 로컬 저장소는 선택된 모든 패키지의 다운로드 파일 정보와 일반 파일 여부를 복사 전에 확인합니다. `Packages/`가 일반 디렉터리가 아니거나 목적지가 일반 파일이 아닌 경우, 파일명이 충돌하는 경우에는 실패합니다. 생성 `primary`의 파일명·크기와 `primary`·`filelists`·`other`의 패키지 식별 체크섬은 실제 복사 파일을 기준으로 만듭니다. 자세한 실패 조건과 APT/APK 동작은 [OS 패키지 문서](os-package-downloader.md#osrepopackager)를 참고하세요.
+
 ### 타입 정의
 
 | 타입 | 설명 |
