@@ -56,6 +56,32 @@ fixture는 실제 DTO와 함수 인수를 기준으로 작성하고, 부분 mock
 
 ## 테스트 종류
 
+### 실제 구현 검증과 중복 정리
+
+테스트는 운영 코드의 진입점이나 생성된 결과물을 검증합니다. 테스트 파일 안에 버전 비교, 파일명 생성, 캐시 키 계산 등의 로직을 다시 만든 뒤 그 함수만 호출하면 운영 코드가 잘못되어도 통과하므로 제품 회귀 검증으로 취급하지 않습니다. 외부 시스템을 대체하는 mock, 입력 fixture 생성, 결과 파일을 독립적으로 읽는 검증 도구는 이와 구분합니다.
+
+2026-09-13 정리에서 다음과 같은 오래된 검증을 제거했습니다.
+
+| 제거한 검증 | 이유 | 유지한 검증 |
+| --- | --- | --- |
+| Maven·npm·pip·Conda·YUM·Docker의 로컬 파서·버전 비교·패키지 정보 검증 | 테스트 안에서 만든 규칙·문자열·상수만 확인하여 운영 downloader/resolver의 오류를 잡지 못함 | 실제 downloader 메서드, resolver, 메타데이터 파서와 패키지별 통합 테스트 |
+| 언어·YUM·Docker의 영구 `it.skip` 검색·버전 조회 | 실행되지 않는 과거 네트워크 smoke가 별도로 남아 있음 | `INTEGRATION_TEST=true`로 활성화하는 패키지별 통합 테스트 |
+| 공통 resolver의 영구 skip된 YUM 케이스 | OS 패키지 정보 없이 라이브러리 resolver 경로에서 YUM 전이 의존성을 해결한다는 과거 기대값 | 배포판·OS 패키지 정보를 사용하는 OS resolver와 IPC 서비스 테스트 |
+| `packager.test.ts`의 로컬 유틸리티와 singleton 중복 | 실제 구현을 호출하지 않고 지원 압축 형식·분할 파일명·매니페스트를 별도로 정의 | `archive-packager.test.ts`, `file-splitter.test.ts`, `script-generator.test.ts`와 설치 스크립트 통합 테스트 |
+| `src/core/cache-manager.test.ts`의 로컬 캐시 유틸리티 | 운영 artifact cache의 해시 키·매니페스트와 다른 모델을 검증 | 같은 파일의 실제 `ArtifactCacheManager` 호출 테스트와 별도 캐시 모듈 테스트 |
+| 캐시 hit·파일 누락·체크섬 실패·LRU라고 이름 붙인 일부 케이스 | 잘못된 fixture 키로 cache miss만 검증하거나 한도 미만 항목 하나만 저장하여 해당 분기에 진입하지 않음 | 실제로 수행하던 cache miss·항목 저장 경로의 기존 테스트 |
+| `email-sender-mock.test.ts` | mock의 고정 반환값과 방금 호출한 `vi.fn()` 기록만 확인 | mock factory의 `satisfies` 타입 검사, 실제 메일러 및 mock을 사용하는 전달 흐름 테스트 |
+
+캐시의 오도하는 케이스를 제거한 것을 해당 checksum·LRU 분기의 검증 완료로 해석하지 않습니다. 범위가 다른 `ArtifactCacheManager`, `CacheStore`, OS 메타데이터 캐시의 테스트도 서로 대체하지 않습니다.
+
+제거 대상에 실제 동작을 검증하는 assertion이 섞여 있으면 보존합니다. 캐시 저장 후 항목 수 확인은 기존 `addToCache` 성공 테스트로, pip 테스트에 있던 실제 `sanitizePath`의 금지문자 제거 확인은 `path-utils.test.ts`로 옮겼습니다.
+
+동일한 기능을 다루더라도 실행 경계가 다르면 유지합니다. 실제 handler와 기본 service factory를 함께 호출하는 테스트는 의존성을 주입한 service 단위 테스트와 별개의 보호이며, 브라우저 E2E·실제 파일·loopback HTTP·네이티브 소비자 테스트 역시 단위 테스트와 구분합니다. 테스트 본문이 같은 `it.each`라도 입력 집합이 다르면 중복으로 제거하지 않습니다.
+
+정리 검증은 `bash scripts/verify-worktree.sh --coverage`와 `npm run typecheck:tests`를 사용합니다. 삭제 전후의 테스트 목록과 운영 core의 실행된 statement·function·branch 위치를 대조하며, 커버리지 하한이나 테스트 수집 범위를 낮춰 삭제를 숨기지 않습니다. 커버리지 일치는 실행 경로의 보존을 나타내며 모든 동작의 완전한 검증을 뜻하지는 않습니다.
+
+이번 Node 24 검증에서 기본 테스트는 3,229 passed / 159 skipped에서 2,837 passed / 146 skipped로 순 405개 줄었습니다. core 133개 파일의 실행된 statement·function·branch 위치는 동일했고, 커버리지도 82.61% / 73.35% / 86.07% / 83.62%로 유지되었습니다. 앱·Electron·테스트 TypeScript 검사와 린트도 오류 없이 통과했습니다. 외부 저장소·네이티브 도구·플랫폼 조건으로 남은 skip은 실행 성공으로 계산하지 않습니다.
+
 ### 1. 단위 테스트
 
 - 설정 파일: `vitest.config.ts`

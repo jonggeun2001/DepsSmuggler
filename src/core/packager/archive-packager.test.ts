@@ -383,12 +383,3 @@ describe('ArchivePackager', () => {
     });
   });
 });
-
-describe('ArchiveFormat 타입', () => {
-  it('zip과 tar.gz를 지원해야 함', () => {
-    const formats: ArchiveFormat[] = ['zip', 'tar.gz'];
-    expect(formats).toContain('zip');
-    expect(formats).toContain('tar.gz');
-  });
-
-});
