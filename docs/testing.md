@@ -127,6 +127,16 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 
 `use-download-page-controller.test.tsx`의 HTTP 회귀는 실제 orchestrator·router·`downloadFile`·파일 시스템·delivery pipeline을 렌더러 controller에 연결합니다. Conda 항목의 404와 503 요청은 실패 항목·실패 이력만 남기고 파일과 ZIP을 만들지 않아야 합니다. 같은 항목을 같은 경로로 재시도해 200 응답을 받으면 성공 이력과 ZIP을 만들고, ZIP 내부 파일도 전송한 바이트와 일치해야 합니다. 창의 이벤트 전달과 이력 저장 IPC만 테스트 경계로 대체하며 HTTP·파일 저장·압축은 실제로 실행합니다. 입력은 전송 검사용 바이트이므로 이 테스트는 Conda 설치를 검증하지 않습니다.
 
+### 설정·히스토리 저장 동시성과 프로세스 중단
+
+`src/core/shared/atomic-json-store.test.ts`는 실제 임시 디렉터리에서 원자적 교체, 직렬화/rename 실패 시 원본 보존, 임시 파일 정리, 경로별 큐의 순서와 오류 후 재개를 검증합니다. `tests/fixtures/atomic-json-store-child.cjs`는 실제 TypeScript 저장 모듈을 변환해 별도 프로세스에서 실행합니다. rename 경계를 IPC로 통제해 강제 종료하고 새 읽기 프로세스로 기존/새 JSON을 확인합니다. 전원 손실 내구성이나 서로 다른 프로세스의 동시 변경 병합을 검증하는 테스트는 아닙니다.
+
+`electron/history-handlers.test.ts`는 통제된 read/write 지연으로 동시 추가와 혼합 변경의 순서, 실패 후 후속 요청, 최신순/100개 상한, 잘못된 입력·파일 보존 계약을 검사합니다. `electron/config-handlers.test.ts`와 `settings-validation.test.ts`는 GUI/레거시 설정과 미래 데이터 보존, 잘못된 필드 거부, 조회 시 메모리 보정에 넘기는 계약을 검사합니다. `src/core/config-persistence.test.ts`는 같은 파일을 쓰는 두 ConfigManager의 부분 변경을 직렬화하고, 손상 JSON에 대한 업데이트가 원본을 덮어쓰지 않는지 실제 파일로 확인합니다. `electron/history-realfile.test.ts`와 `electron/config-handlers.integration.test.ts`는 실제 파일과 공용 큐/저장 함수를 사용해 IPC 왕복·순서·오류 시 원본 보존을 확인합니다. 기존 `config.test.ts`의 암호화 마이그레이션과 CLI 캐시 설정 integration도 유지합니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/shared/atomic-json-store.test.ts src/core/shared/settings-validation.test.ts src/core/config.test.ts src/core/config-persistence.test.ts electron/history-handlers.test.ts electron/history-realfile.test.ts electron/config-handlers.test.ts electron/config-handlers.integration.test.ts
+```
+
 ### HTTP 스트림 중단과 부분 파일 검증
 
 `src/core/shared/file-utils-interrupted.integration.test.ts`는 loopback HTTP 서버가 Content-Length를 선언한 200 응답의 첫 번째 chunk만 보낸 뒤 연결을 끊는 상황을 실제 `downloadFile`에 두 번 전달합니다. 응답의 `error`·`aborted`·정상 완료 전 `close`와 Content-Length 불일치는 성공으로 끝나지 않아야 하며, 이미 전달된 진행률은 남겨도 완료 진행률은 보고하지 않고 destination 부분 파일을 닫아 삭제해야 합니다. Content-Length가 없는 chunked 응답이 정상적으로 끝나는 경우와 헤더 오류, pause/resume, 명시적인 AbortSignal 취소도 같은 파일 경계에서 구분합니다.

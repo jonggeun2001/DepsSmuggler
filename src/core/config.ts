@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as fs from 'fs-extra';
 import { machineIdSync } from 'node-machine-id';
 import { mask } from '../utils/mask';
+import { withSerializedFile, writeJsonAtomically, writeJsonAtomicallySync } from './shared/atomic-json-store';
 
 // 설정 인터페이스 정의
 export interface Config {
@@ -139,12 +140,21 @@ export class ConfigManager {
    * 설정을 로드합니다. 파일이 없으면 기본값을 생성합니다.
    */
   async loadConfig(): Promise<Config> {
+    return withSerializedFile(this.configPath, () => this.loadConfigUnlocked());
+  }
+
+  // The caller owns the file queue. Migration and initialization must not enqueue recursively.
+  private async loadConfigUnlocked(requireReadable = false): Promise<Config> {
     this.needsEncryptionMigration = false; // 마이그레이션 플래그 초기화
 
     try {
       await this.ensureDirectories();
-      if (await fs.pathExists(this.configPath)) {
-        const rawConfig = readConfigObject(await fs.readJson(this.configPath));
+      const stored: unknown = await fs.readJson(this.configPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+      });
+      if (stored !== undefined) {
+        const rawConfig = readConfigObject(stored);
         // 저장된 설정과 기본값을 병합 (새로운 설정 항목 대응)
         const config: Config = { ...DEFAULT_CONFIG, ...rawConfig };
         const invalidFields: string[] = [];
@@ -182,7 +192,7 @@ export class ConfigManager {
         if (this.needsEncryptionMigration && config.smtpPassword && invalidFields.length === 0) {
           console.info('[config] 암호화 키 마이그레이션을 수행합니다...');
           try {
-            await this.saveConfig(config);
+            await this.saveConfigUnlocked(config);
             this.needsEncryptionMigration = false;
             console.info('[config] 암호화 키 마이그레이션 완료.');
           } catch (error) {
@@ -193,8 +203,10 @@ export class ConfigManager {
         return config;
       }
       // 파일이 없는 경우에만 기본값 저장을 시도한다. 읽기 실패한 원본은 보존한다.
-      await this.saveConfig(DEFAULT_CONFIG);
+      await this.saveConfigUnlocked(DEFAULT_CONFIG);
     } catch (error) {
+      // A partial update cannot reconstruct the fields of a file that could not be read.
+      if (requireReadable) throw error;
       console.error('[config:load] 설정 로드/초기화 실패, 메모리 기본값 사용:', mask(error));
     }
 
@@ -205,6 +217,10 @@ export class ConfigManager {
    * 설정을 저장합니다.
    */
   async saveConfig(config: Config): Promise<void> {
+    return withSerializedFile(this.configPath, () => this.saveConfigUnlocked(config));
+  }
+
+  private async saveConfigUnlocked(config: Config): Promise<void> {
     const configRecord = config as Config & Record<string, unknown>;
     if (typeof config.cachingEnabled !== 'boolean') {
       throw new TypeError('cachingEnabled는 boolean이어야 합니다');
@@ -222,7 +238,7 @@ export class ConfigManager {
       configToSave.smtpPassword = this.encrypt(config.smtpPassword);
     }
 
-    await fs.writeJson(this.configPath, configToSave, { spaces: 2 });
+    await writeJsonAtomically(this.configPath, configToSave);
   }
 
   /**
@@ -237,10 +253,12 @@ export class ConfigManager {
    * 특정 설정값을 업데이트합니다.
    */
   async updateConfig(updates: Partial<Config>): Promise<Config> {
-    const currentConfig = await this.loadConfig();
-    const newConfig = { ...currentConfig, ...updates };
-    await this.saveConfig(newConfig);
-    return newConfig;
+    return withSerializedFile(this.configPath, async () => {
+      const currentConfig = await this.loadConfigUnlocked(true);
+      const newConfig = { ...currentConfig, ...updates };
+      await this.saveConfigUnlocked(newConfig);
+      return newConfig;
+    });
   }
 
   /**
@@ -331,7 +349,7 @@ export class ConfigManager {
 
     config[key] = value;
     const canonicalConfig = canonicalizeCacheAliases(config, isCacheAlias ? value as boolean : undefined);
-    fs.writeJsonSync(this.configPath, canonicalConfig, { spaces: 2 });
+    writeJsonAtomicallySync(this.configPath, canonicalConfig);
   }
 
   /**
@@ -339,7 +357,7 @@ export class ConfigManager {
    */
   reset(): void {
     fs.ensureDirSync(this.configDir);
-    fs.writeJsonSync(this.configPath, canonicalizeCacheAliases({ ...DEFAULT_CONFIG }), { spaces: 2 });
+    writeJsonAtomicallySync(this.configPath, canonicalizeCacheAliases({ ...DEFAULT_CONFIG }));
   }
 
   /**

@@ -283,6 +283,8 @@ depssmuggler config list
 depssmuggler config reset
 ```
 
+동기 `ConfigManager.set/reset`과 비동기 저장은 임시 파일을 완성한 뒤 원자적으로 교체합니다. 비동기 `updateConfig`는 같은 프로세스에서 읽기부터 저장까지 직렬화하며 손상된 파일의 부분 업데이트를 거부합니다. 별도 GUI/CLI 프로세스의 동시 편집 병합은 제공하지 않습니다. [공유 저장 경계](shared-file-path.md#설정히스토리-json-저장)를 참고하세요.
+
 현재 CLI가 직접 다루는 핵심 항목:
 
 - `concurrentDownloads`

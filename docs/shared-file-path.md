@@ -10,6 +10,7 @@
 
 ```
 src/core/shared/
+├── atomic-json-store.ts # 설정/히스토리 원자적 저장 및 파일별 큐
 ├── file-utils.ts      # 파일 다운로드/압축 유틸리티
 ├── path-utils.ts      # 크로스 플랫폼 경로 처리
 ├── script-utils.ts    # 설치 스크립트 생성
@@ -17,6 +18,20 @@ src/core/shared/
 ```
 
 ---
+
+## 설정·히스토리 JSON 저장
+
+`src/core/shared/atomic-json-store.ts`는 Electron 설정·히스토리 IPC와 `ConfigManager`가 직접 import하는 파일 저장 경계입니다.
+
+- `writeJsonAtomically(path, value)`와 동기 버전 `writeJsonAtomicallySync`는 JSON 직렬화 후 대상과 같은 디렉터리의 고유 임시 파일을 배타적으로 생성합니다. 쓰기·파일 sync·close를 마친 뒤 rename으로 대상 파일을 교체합니다. 교체를 위해 기존 대상을 먼저 삭제하지 않습니다.
+- 일반 쓰기/rename 실패는 호출자에게 전파하고 해당 작업의 임시 파일만 정리합니다. rename 이전에 프로세스가 강제 종료되면 기존 JSON이 유지되고, rename 이후에는 새 JSON을 읽습니다. 최초 저장 중단 시에는 대상이 없거나 새 JSON이 존재합니다. 강제 종료로 남은 임시 파일은 정상 파일로 읽지 않습니다.
+- `withSerializedFile(path, operation)`은 정규화한 파일 경로별로 같은 프로세스의 비동기 작업을 순서대로 실행합니다. 읽기→수정→저장 전체를 이 함수로 감싸며 실패한 작업도 다음 작업을 막지 않습니다. writer 자체는 큐에 들어가지 않으므로 큐 내부에서 호출해도 재진입 대기가 생기지 않습니다.
+- 히스토리 IPC의 조회/변경, 설정 IPC의 조회/저장/초기화, `ConfigManager`의 비동기 조회/저장/부분 변경이 이 경계를 사용합니다. `config:set`과 `history:save`는 전체 교체이므로 나중 요청이 앞선 내용을 명시적으로 대체합니다.
+- CLI의 동기 `set/reset`도 동일한 원자적 교체를 사용합니다. 파일별 큐는 프로세스 내부의 비동기 요청에만 적용하며, 별도 GUI/CLI 프로세스가 동시에 같은 설정을 수정할 때의 병합이나 파일 잠금은 제공하지 않습니다. 파일 sync와 프로세스 중단 검증은 전원 손실·파일시스템 장애 후의 영속성 보장과 구분합니다.
+
+읽기와 복구는 호출부가 결정합니다. 설정 IPC는 파일 부재에 `null`, 히스토리는 빈 배열을 사용합니다. 잘못된 JSON/최상위 형태와 I/O 오류는 로그로 구분하고 조회 시 원본을 덮어쓰지 않습니다. 히스토리 추가/삭제와 `ConfigManager.updateConfig`는 읽을 수 없는 기존 파일을 기본값으로 대체하지 않고 실패합니다. 명시적인 전체 저장/초기화로 복구할 수 있습니다. 정상 레거시 설정의 출력 형식 보정과 core SMTP 암호화 마이그레이션은 기존 계약을 유지합니다.
+
+회귀 검증은 [테스트 문서](testing.md)의 저장 동시성·중단/재시작 항목을 참고하세요.
 
 ## 파일 유틸리티 (`file-utils.ts`)
 

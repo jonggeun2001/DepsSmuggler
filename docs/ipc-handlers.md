@@ -41,7 +41,7 @@ electron/
 
 ### `config-handlers.ts`
 
-설정 파일 위치는 `~/.depssmuggler/settings.json`입니다.
+설정 파일 위치는 `~/.depssmuggler/settings.json`입니다. `get/set/reset`은 같은 파일 큐에서 순서대로 실행합니다. `get`은 부재 시 `null`, 손상/읽기 실패 시 로그와 `null`을 반환하고 기존 파일을 보존합니다. `set`은 객체 및 알려진 필드의 타입/범위를 검증하고 전체 상태를 원자적으로 교체하며 `{ success, error? }`로 실패를 알립니다. 레거시 별칭/출력 형식과 알 수 없는 데이터 필드는 유지합니다. [공유 저장 계약](shared-file-path.md#설정히스토리-json-저장)을 참고하세요.
 
 | 채널 | 설명 |
 |------|------|
@@ -65,7 +65,7 @@ electron/
 
 ### `history-handlers.ts`
 
-히스토리 파일 위치는 `~/.depssmuggler/history.json`입니다.
+히스토리 파일 위치는 `~/.depssmuggler/history.json`입니다. 조회부터 변경 저장까지 파일별 큐에서 처리하고 JSON은 원자적으로 교체합니다. 추가는 최신순 100개를 유지하며 전체 저장은 명시적인 교체입니다. 손상 파일 조회는 로그와 빈 배열을 반환하지만 추가/삭제는 원본을 덮어쓰지 않고 실패합니다. 명시적인 전체 저장/전체 삭제로 복구할 수 있습니다. [히스토리 계약](download-history.md)을 참고하세요.
 
 | 채널 | 설명 |
 |------|------|

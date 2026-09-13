@@ -94,7 +94,7 @@ depssmuggler/
 - `resolver/`: 타입별 의존성 계산
 - `packager/`: 일반 패키지용 아카이브/스크립트/분할 처리
 - `mailer/`: SMTP 발송
-- `shared/`: HTTP, 캐시, 버전 비교, 플랫폼 매핑, 버전 프리로드, 마스킹 등 공통 유틸리티
+- `shared/`: HTTP, 캐시, 버전 비교, 플랫폼 매핑, 버전 프리로드, 마스킹 등 공통 유틸리티. `atomic-json-store.ts`는 설정/히스토리 파일의 원자적 교체와 프로세스 내부 파일별 비동기 큐를 제공하며, Electron과 CLI가 공유합니다. [저장 계약](shared-file-path.md#설정히스토리-json-저장)을 참고하세요.
 - 공용 타입은 core 내부가 아닌 `src/types/`에 있습니다. `src/types/index.ts` barrel과 `download/`, `manifest/`, `package-manager/`, `platform/`, `resolver/` 하위 canonical module로 분리되어 있습니다.
   `download/options.ts`, `download/progress.ts`, `download/error.ts`, `platform/os-target.ts`가 Phase 2 기준 canonical entry입니다.
 
