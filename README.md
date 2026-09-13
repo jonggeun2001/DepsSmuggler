@@ -215,6 +215,8 @@ npm run test:e2e:ui
 
 Playwright는 Chromium 설치가 필요합니다. 설치·실행 조건과 테스트 범위는 [테스트 문서](docs/testing.md)를 참고하세요. 기본 E2E는 설정 반영, 장바구니→다운로드, 히스토리 기반 이메일 전달 복원, OS 전용 다운로드 흐름을 검증합니다.
 
+커버리지 수치는 `src/core` 범위입니다. CI는 core 커버리지 하한, 비어 있지 않은 LCOV 생성, Codecov 업로드 성공을 검사합니다. 전체 앱 커버리지와는 구분하며 기준선과 하한은 [테스트 문서](docs/testing.md)에 기록합니다.
+
 ## 프로젝트 구조
 
 ```text

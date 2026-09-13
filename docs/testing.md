@@ -91,7 +91,16 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 | 메일               | `src/core/mailer/email-sender-errors.test.ts`                                                                                           | 첨부 제한과 같은 크기/초과, 인증·수신자·파일 접근 오류, 부분 발송 중단, 연결 재시도                              |
 | 렌더러 훅          | `src/renderer/pages/settings/use-settings-form-actions.test.ts`, `src/renderer/pages/download-page/hooks/use-os-download-flow.test.ts`  | 입력 검증·미저장 이동 방지, SMTP·캐시 실패, OS 선택, 늦은 응답, 히스토리·장바구니 보존, 구독 해제                |
 
-커버리지는 `npm run test:coverage`로 확인합니다. 현재 커버리지 집계 대상은 `src/core/**/*.ts`이며 테스트 파일과 index barrel은 제외합니다. 따라서 CLI, Electron, 렌더러, E2E 테스트의 검증 범위와 구분해야 합니다. text 보고서는 콘솔에, JSON/HTML 보고서는 `coverage/`에 생성되며 커버리지 최소 비율은 설정되어 있지 않습니다. 외부 레지스트리 실제 연동 및 OS별 파일시스템 동작 전체를 mock 테스트가 보장하지는 않습니다.
+커버리지는 `npm run test:coverage` 또는 `bash scripts/verify-worktree.sh --coverage`로 확인합니다. 집계 대상은 `src/core/**/*.ts`이며 테스트 파일과 index barrel은 제외합니다. CLI, Electron, 렌더러를 포함한 전체 앱 수치가 아닙니다. text 보고서는 콘솔에, JSON/HTML 및 `lcov.info`는 `coverage/`에 생성됩니다. 외부 레지스트리 실제 연동 및 OS별 파일시스템 동작 전체를 mock 테스트가 보장하지는 않습니다.
+
+| core 지표 | 2026-09-13 CI 기준선 | 실패 하한 |
+|-----------|--------------------|-----------|
+| statements | 82.29% | 80% |
+| branches | 72.86% | 70% |
+| functions | 85.96% | 83% |
+| lines | 83.25% | 81% |
+
+기준선은 [CI run 34743483729](https://github.com/jonggeun2001/DepsSmuggler/actions/runs/34743483729/job/103687031800)의 `All files` 행입니다. include가 core로 제한돼 있으므로 이 행이 전체 core 집계이며, 바로 아래 `core` 행은 직속 파일 소계입니다. 플랫폼별 실행 차이를 고려해 약 2–3%p의 여유를 둔 하한을 적용합니다. 값 아래로 떨어지면 Vitest가 실패합니다. 실패를 없애기 위해 하한을 낮추지 말고 누락된 회귀 테스트나 변경된 측정 범위를 먼저 확인합니다. 부분 테스트에 coverage를 적용하면 전체 core 기준을 만족하지 못할 수 있으므로 CI 기준선은 전체 suite로 측정합니다. [Vitest coverage 설정](https://vitest.dev/config/coverage)
 
 ### Electron 기본 TLS 검증
 
@@ -471,9 +480,11 @@ UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
 - `lint`: `npm run lint`로 ESLint 실행
 - `typecheck`: `npx tsc --noEmit`과 `npx tsc --noEmit -p tsconfig.electron.json`
 - `e2e`: Chromium 설치 후 `npm run test:e2e`, 실패 시 Playwright 보고서와 결과 artifact 업로드
-- `coverage`: `npm run test:coverage` 후 Codecov 업로드 시도
+- `coverage`: 전체 suite의 core 커버리지 하한 검사, 비어 있지 않은 LCOV 확인, 필수 Codecov 업로드 및 LCOV artifact 보존
 
-현재 coverage 잡은 `./coverage/lcov.info`를 지정하지만 Vitest reporter에는 `lcov`가 없습니다. 기본 설정만으로 해당 파일은 생성되지 않으므로, 이 워크플로 정의를 Codecov 업로드 성공의 근거로 사용하지 않습니다. 업로드 실패는 `fail_ci_if_error: false`로 설정되어 있습니다.
+coverage 잡은 `test -s coverage/lcov.info`로 누락·빈 파일을 거부합니다. Codecov action v7은 이 파일만 검색 없이 업로드하며 `fail_ci_if_error: true`로 전송·인증 실패를 CI에 반영합니다. coverage job에만 `contents: read`, `id-token: write`를 부여하고 OIDC를 사용하므로 별도 업로드 token secret은 넣지 않습니다. 업로드는 `core` flag와 `core-v8` 이름으로 구분합니다. fork PR에서는 action의 tokenless 경로를 따릅니다. [Codecov action 계약](https://github.com/codecov/codecov-action/tree/v7)
+
+LCOV는 `core-coverage-lcov` artifact로 14일간 보존합니다. 측정 성공과 원격 전송 성공은 별개이며, PR 검증 시 파일 생성 결과와 Codecov의 실제 업로드 완료 로그를 함께 확인합니다. 과거 LCOV 미생성·업로드 오류 무시 상태의 초록색 CI를 원격 전송 성공 근거로 사용하지 않습니다.
 
 ### `release.yml`
 
