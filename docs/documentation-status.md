@@ -48,6 +48,7 @@
 - CLI의 실제 옵션, `--file`의 줄 단위 입력, 환경별 아티팩트 선택과 OS 출력 형식의 구분을 반영했습니다.
 - pip/Conda의 대상 파일 선택과 noarch 조건, Maven type/classifier·POM 처리, 캐시·공유 타입·함수 예시를 현재 구현에 맞췄습니다.
 - 테스트 도구와 CI의 범위를 구분했습니다. 특히 브라우저 E2E mock을 실제 Electron·SMTP·외부 저장소 통합 검증으로 설명하지 않습니다. Node 요구사항과 CI 버전, coverage 업로드의 검증 범위도 기록합니다. 보안 의존성 갱신 과정에서 CI는 Node 24로 맞췄습니다.
+- 2026-09-13 #163: YUM 로컬 저장소의 payload 사전 검증, 실제 basename·크기·SHA-256 metadata, 파일명 URI 처리와 실패 경계를 README·OS 패키지·Packagers·테스트 문서에 반영했습니다. APT/APK semantics와 native DNF 설치 범위는 구분해 유지합니다.
 - 2026-09-13 후속 수정으로 core LCOV 생성·최소 비율·필수 업로드 검사를 연결했습니다. 측정 범위를 전체 앱으로 표현하지 않으며, 기준선과 실제 업로드 성공의 구분은 테스트 문서에서 유지합니다.
 - 테스트 전용 `tsconfig.tests.json`과 `typecheck:tests`를 추가해 일반·릴리스 CI에서 mock/fixture 계약을 검사합니다. 운영 빌드 검사, 테스트 정적 검사, 조건부 runtime 실행의 범위는 테스트·런타임 문서에서 구분합니다.
 

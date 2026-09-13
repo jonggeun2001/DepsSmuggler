@@ -1,13 +1,14 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
+import { createServer, type Server } from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createServer, type Server } from 'node:http';
 import { gzipSync, gunzipSync } from 'node:zlib';
+import { XMLParser } from 'fast-xml-parser';
 import { afterEach, describe, expect, it } from 'vitest';
-import { YumMetadataParser } from './yum';
-import { OSRepoPackager } from './os-shared/repo-packager';
 import { getDownloadedFileKey, getPackageFilename } from './os-shared/package-file-utils';
+import { OSRepoPackager } from './os-shared/repo-packager';
+import { YumMetadataParser } from './yum';
 import type { Repository } from './os-shared/types';
 
 const repository: Repository = {
@@ -18,6 +19,12 @@ const repository: Repository = {
   gpgCheck: false,
   isOfficial: false,
 };
+
+type XmlRecord = Record<string, unknown>;
+
+function asArray(value: unknown): XmlRecord[] {
+  return value === undefined ? [] : Array.isArray(value) ? value as XmlRecord[] : [value as XmlRecord];
+}
 
 describe('YUM parser to local repository capability boundary', () => {
   let server: Server | undefined;
@@ -94,7 +101,40 @@ describe('YUM parser to local repository capability boundary', () => {
     });
     const primaryPath = result.metadataFiles.find((file) => file.endsWith('primary.xml.gz'));
     expect(primaryPath).toBeDefined();
-    const generated = gunzipSync(fs.readFileSync(primaryPath!)).toString('utf8');
+    const filelistsPath = result.metadataFiles.find((file) => file.endsWith('filelists.xml.gz'));
+    const otherPath = result.metadataFiles.find((file) => file.endsWith('other.xml.gz'));
+    expect(filelistsPath).toBeDefined();
+    expect(otherPath).toBeDefined();
+    if (!primaryPath || !filelistsPath || !otherPath) {
+      throw new Error('generated YUM metadata files are incomplete');
+    }
+    const generated = gunzipSync(fs.readFileSync(primaryPath)).toString('utf8');
+    const xmlParser = new XMLParser({ ignoreAttributes: false, parseAttributeValue: false });
+    const primaryPackages = asArray(xmlParser.parse(generated).metadata.package);
+    const filelistsPackages = asArray(xmlParser.parse(gunzipSync(fs.readFileSync(filelistsPath)).toString('utf8')).filelists.package);
+    const otherPackages = asArray(xmlParser.parse(gunzipSync(fs.readFileSync(otherPath)).toString('utf8')).otherdata.package);
+    for (const pkg of packages) {
+      const source = downloaded.get(getDownloadedFileKey(pkg));
+      expect(source).toBeDefined();
+      if (!source) throw new Error(`missing fixture source for ${pkg.name}`);
+      const payload = fs.readFileSync(source);
+      const digest = crypto.createHash('sha256').update(payload).digest('hex');
+      const primaryPackage = primaryPackages.find((entry) => (entry.name as string) === pkg.name);
+      const filelistsPackage = filelistsPackages.find((entry) => entry['@_name'] === pkg.name);
+      const otherPackage = otherPackages.find((entry) => entry['@_name'] === pkg.name);
+      expect(primaryPackage).toBeDefined();
+      expect(filelistsPackage).toBeDefined();
+      expect(otherPackage).toBeDefined();
+      const checksum = primaryPackage?.checksum as XmlRecord | undefined;
+      const size = primaryPackage?.size as XmlRecord | undefined;
+      const location = primaryPackage?.location as XmlRecord | undefined;
+      expect(location?.['@_href']).toBe(`Packages/${path.basename(source)}`);
+      expect(checksum?.['#text']).toBe(digest);
+      expect(checksum?.['@_pkgid']).toBe('YES');
+      expect(size?.['@_package']).toBe(String(payload.length));
+      expect(filelistsPackage?.['@_pkgid']).toBe(digest);
+      expect(otherPackage?.['@_pkgid']).toBe(digest);
+    }
     expect(generated).toContain('name="libtinfo.so.6()(64bit)"');
     expect(generated).toContain('name="capability &lt;x&gt;&amp;y"');
     expect((generated.match(/name="libtinfo\.so\.6\(\)\(64bit\)"/g) ?? []).length).toBe(2);

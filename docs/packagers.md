@@ -4,6 +4,24 @@
 - 목적: 다운로드된 패키지를 다양한 출력 형태로 패키징
 - 위치: `src/core/packager/`
 
+## OSRepoPackager
+
+OS 전용 로컬 저장소 출력은 `src/core/downloaders/os-shared/repo-packager.ts`의 `OSRepoPackager`가 담당합니다.
+
+```typescript
+createLocalRepo(
+  packages: OSPackageInfo[],
+  downloadedFiles: Map<string, string>,
+  options: RepoOptions
+): Promise<RepoResult>;
+```
+
+YUM은 선택된 모든 패키지의 다운로드 파일 정보를 먼저 확인합니다. 소스·기존 목적지는 심볼릭 링크가 아닌 일반 파일, 기존 `Packages/`는 일반 디렉터리여야 합니다. 파일명이 같거나 대소문자만 다르면 복사 전에 실패합니다. 실제 파일명을 URI 경로 한 구간으로 인코딩하고 XML 특수 문자를 이스케이프합니다. `primary`의 패키지 크기와 파일 경로, 세 인덱스의 패키지 식별 체크섬은 실제 복사 파일에서 생성합니다. `totalSize`도 메타데이터·스크립트를 제외한 복사 파일의 바이트 합계입니다. SHA-256은 스트림으로 계산합니다.
+
+유효한 `installedSize`는 별도로 보존합니다. 알 수 없는 설치 크기와 모델에 없는 아카이브 크기는 파일 크기로 대체하며 RPM 헤더에서 측정한 값은 아닙니다. APT/APK의 `totalSize`는 기존처럼 입력 `size` 합계를 사용합니다.
+
+YUM의 파일 시스템 오류는 호출자에게 전달됩니다. 이미 복사된 파일을 모두 되돌리는 기능은 없으므로 실패한 출력을 정상 저장소로 사용하면 안 됩니다. APT와 APK의 기존 저장소 출력 동작은 유지합니다.
+
 ---
 
 ## ArchivePackager

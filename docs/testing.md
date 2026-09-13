@@ -228,6 +228,14 @@ DEPS_SMUGGLER_NATIVE_MAVEN=1 bash scripts/verify-worktree.sh \
 
 `src/core/downloaders/os-shared/repo-packager.test.ts`의 YUM 회귀는 생성된 `primary.xml.gz`를 풀어 self-provide와 `OSPackageInfo.provides`의 distinct capability 이름이 함께 기록되는지, XML 특수 문자가 escape되는지 확인합니다. 이 단위 검사는 native RPM 도구나 외부 저장소를 사용하지 않습니다. 별도 Rocky Linux/DNF 검증에서는 새 임시 저장소의 `primary.xml.gz`에 실제 RPM이 제공하는 capability 이름이 들어갔는지 먼저 비교하고, 그 다음 격리 installroot에서 로컬 저장소를 소비합니다. native DNF 결과는 해당 실행의 종료 코드와 로그로 판단하며, 이 문서의 단위 회귀만으로 전체 Rocky 시스템 설치 성공을 의미하지 않습니다.
 
+`src/core/downloaders/os-shared/yum-payload-validation.test.ts`는 실제 임시 fake RPM을 사용해 매핑 누락, 디렉터리·심볼릭 링크 소스와 목적지, `Packages/` 충돌, 대소문자만 다른 basename 충돌을 복사 전에 거부하는지 확인합니다. stale model 크기·체크섬을 사용하지 않고 실제 payload basename·byte size·SHA-256을 `primary`, `filelists`, `other`에 일관되게 기록하는지, 공백·`#`·`&`가 있는 파일명을 URI와 XML 규칙으로 처리하는지도 검사합니다. `yum-file-provides.integration.test.ts`의 loopback metadata 소비와 fake RPM은 파서·패키저 경계만 검증하며 native DNF 설치나 전체 출력 rollback을 의미하지 않습니다.
+
+`yum-delivered-payload.integration.test.ts`는 생성된 repomd → primary → 파일을 로컬 HTTP 서버에서 실제 YUM 파서·다운로더로 읽습니다. 원래 파일명이 `literal space#&%20.rpm`일 때 요청 경로가 `literal%20space%23%26%2520.rpm`이 되고, 받은 바이트와 체크섬이 복사본과 일치해야 합니다. 여러 버전·release·아키텍처의 보존과 `installedSize: 0`도 단위 회귀에서 검사합니다. 심볼릭 링크 파일 테스트는 Windows에서 명시적으로 건너뛰며 일반 파일·디렉터리 검증은 모든 플랫폼에서 실행합니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/downloaders/os-shared/yum-payload-validation.test.ts src/core/downloaders/yum-delivered-payload.integration.test.ts src/core/downloaders/yum-file-provides.integration.test.ts src/core/downloaders/yum-provides-repository.integration.test.ts src/core/downloaders/os-shared/repo-packager.test.ts
+```
+
 `src/core/downloaders/yum-provides-repository.integration.test.ts`는 loopback HTTP 서버의 압축 `primary.xml.gz`를 실제 YUM parser로 읽은 뒤, parser 결과를 `OSRepoPackager.createLocalRepo`에 전달해 생성 metadata의 capability와 XML escape를 확인합니다. RPM payload는 작은 fake 파일이며, local HTTP parser→packager 경계만 검증하므로 native RPM/DNF 설치 성공을 의미하지 않습니다.
 
 `src/core/downloaders/yum.integration.test.ts`는 현재 OS backend API로 실제 Rocky Linux 9 저장소의 `zlib` 검색(limit 3)과 의존성 없는 RPM ZIP 다운로드를 검증합니다. 오래된 다운로더 API와 조용한 조기 성공 처리를 제거했으며, 아래 명령으로 명시적으로 실행합니다. 외부 네트워크를 사용하고 임시 캐시·출력을 정리합니다. 네이티브 Yum/RPM 설치 트랜잭션을 수행하는 테스트는 아닙니다.
