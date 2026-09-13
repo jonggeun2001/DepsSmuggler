@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DockerAuthClient } from './docker-auth-client';
 import { DockerManifestService } from './docker-manifest-service';
@@ -136,6 +136,108 @@ describe('DockerManifestService', () => {
     await expect(
       service.getManifestForArchitecture('team/image', 'v1', '', 'ghcr.io', 'amd64')
     ).rejects.toBe(failure);
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it('forwards signal to both index and selected manifest requests', async () => {
+    const controller = new AbortController();
+    const selected = entry('amd64');
+    get
+      .mockResolvedValueOnce({ data: index([selected]) })
+      .mockResolvedValueOnce({ data: single });
+
+    await service.getManifestForArchitecture(
+      'team/image', 'v1', 'token', 'ghcr.io', 'amd64', undefined, { signal: controller.signal }
+    );
+
+    expect(get.mock.calls[0][1]).toMatchObject({ signal: controller.signal });
+    expect(get.mock.calls[1][1]).toMatchObject({ signal: controller.signal });
+  });
+
+  it('uses a refreshed token for both index and selected manifest requests', async () => {
+    const selected = entry('amd64');
+    get
+      .mockResolvedValueOnce({ data: index([selected]) })
+      .mockResolvedValueOnce({ data: single });
+    const getAuthToken = vi.fn()
+      .mockResolvedValueOnce('index-token')
+      .mockResolvedValueOnce('selected-token');
+    const options = { getAuthToken };
+
+    await service.getManifestForArchitecture(
+      'team/image', 'v1', 'stale-token', 'ghcr.io', 'amd64', undefined, options
+    );
+
+    expect(getAuthToken).toHaveBeenCalledTimes(2);
+    expect(get.mock.calls[0][1]).toMatchObject({ headers: { Authorization: 'Bearer index-token' } });
+    expect(get.mock.calls[1][1]).toMatchObject({ headers: { Authorization: 'Bearer selected-token' } });
+  });
+
+  it('does not start the manifest request when token refresh is aborted', async () => {
+    const controller = new AbortController();
+    const getAuthToken = vi.fn(() => new Promise<string>((_resolve, reject) => {
+      controller.signal.addEventListener('abort', () => reject(new Error('token refresh aborted')), { once: true });
+    }));
+    const options = {
+      signal: controller.signal,
+      getAuthToken,
+    };
+    const pending = service.getManifest('team/image', 'v1', 'stale-token', 'ghcr.io', options);
+    await vi.waitFor(() => expect(getAuthToken).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(pending).rejects.toThrow('token refresh aborted');
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('does not request the selected digest after aborting the index request', async () => {
+    const controller = new AbortController();
+    get.mockImplementationOnce(async (_url: string, options?: AxiosRequestConfig) => {
+      controller.abort();
+      if (options?.signal?.aborted) throw new Error('request aborted');
+      return { data: index([entry('amd64')]) };
+    });
+
+    await expect(
+      service.getManifestForArchitecture(
+        'team/image', 'v1', '', 'ghcr.io', 'amd64', undefined, { signal: controller.signal }
+      )
+    ).rejects.toBeDefined();
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not request the selected digest while paused after the index response', async () => {
+    let paused = false;
+    get
+      .mockImplementationOnce(async () => {
+        paused = true;
+        return { data: index([entry('amd64')]) };
+      })
+      .mockResolvedValueOnce({ data: single });
+    const pending = service.getManifestForArchitecture(
+      'team/image', 'v1', '', 'ghcr.io', 'amd64', undefined, { shouldPause: () => paused }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(get).toHaveBeenCalledTimes(1);
+    paused = false;
+    await expect(pending).resolves.toBe(single);
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates abort from a pending selected manifest request', async () => {
+    const controller = new AbortController();
+    get
+      .mockResolvedValueOnce({ data: index([entry('amd64')]) })
+      .mockImplementationOnce((_url: string, options?: AxiosRequestConfig) => new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener?.('abort', () => reject(new Error('manifest aborted')), { once: true });
+      }));
+    const pending = service.getManifestForArchitecture(
+      'team/image', 'v1', '', 'ghcr.io', 'amd64', undefined, { signal: controller.signal }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+
+    await expect(pending).rejects.toThrow('manifest aborted');
     expect(get).toHaveBeenCalledTimes(2);
   });
 });

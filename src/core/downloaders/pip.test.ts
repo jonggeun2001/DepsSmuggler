@@ -1,6 +1,14 @@
 import axios from 'axios';
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { getPipDownloader, PipDownloader } from './pip';
+import type { PackageInfo } from '../../types';
+
+type PipArtifactDownloader = {
+  downloadArtifactFile: PipDownloader['downloadArtifactFile'];
+};
+
+const asPipArtifactDownloader = (downloader: PipDownloader): PipArtifactDownloader =>
+  downloader as unknown as PipArtifactDownloader;
 
 // axios 모킹
 vi.mock('axios', () => {
@@ -1005,7 +1013,7 @@ describe('PipDownloader downloadPackage', () => {
       .spyOn(downloader, 'verifyChecksum')
       .mockResolvedValue(true);
     const downloadArtifactFile = vi
-      .spyOn(downloader as any, 'downloadArtifactFile')
+      .spyOn(asPipArtifactDownloader(downloader), 'downloadArtifactFile')
       .mockResolvedValue('/tmp/test/demo-cp312.whl');
 
     await downloader.downloadPackage(
@@ -1030,7 +1038,10 @@ describe('PipDownloader downloadPackage', () => {
       undefined,
     );
 
-    const artifactOptions = downloadArtifactFile.mock.calls[0][1];
+    const artifactOptions = downloadArtifactFile.mock.calls[0]?.[1];
+    if (typeof artifactOptions?.verifyFile !== 'function') {
+      throw new Error('downloadArtifactFile 호출에 검증 옵션이 없습니다');
+    }
     await artifactOptions.verifyFile('/tmp/test/demo-cp312.whl');
     expect(verifyChecksum).toHaveBeenCalledWith(
       '/tmp/test/demo-cp312.whl',
@@ -1044,7 +1055,7 @@ describe('PipDownloader downloadPackage', () => {
       .spyOn(downloader, 'verifyChecksum')
       .mockResolvedValue(true);
     const downloadArtifactFile = vi
-      .spyOn(downloader as any, 'downloadArtifactFile')
+      .spyOn(asPipArtifactDownloader(downloader), 'downloadArtifactFile')
       .mockResolvedValue('/tmp/test/demo.whl');
 
     await downloader.downloadPackage(
@@ -1060,7 +1071,10 @@ describe('PipDownloader downloadPackage', () => {
       '/tmp/test',
     );
 
-    const artifactOptions = downloadArtifactFile.mock.calls[0][1];
+    const artifactOptions = downloadArtifactFile.mock.calls[0]?.[1];
+    if (typeof artifactOptions?.verifyFile !== 'function') {
+      throw new Error('downloadArtifactFile 호출에 검증 옵션이 없습니다');
+    }
     await artifactOptions.verifyFile('/tmp/test/demo.whl');
     expect(verifyChecksum).toHaveBeenCalledWith(
       '/tmp/test/demo.whl',
@@ -1074,7 +1088,7 @@ describe('PipDownloader downloadPackage', () => {
       .spyOn(downloader, 'verifyChecksum')
       .mockResolvedValue(true);
     const downloadArtifactFile = vi
-      .spyOn(downloader as any, 'downloadArtifactFile')
+      .spyOn(asPipArtifactDownloader(downloader), 'downloadArtifactFile')
       .mockResolvedValue('/tmp/test/demo.whl');
 
     await downloader.downloadPackage(
@@ -1094,7 +1108,10 @@ describe('PipDownloader downloadPackage', () => {
       '/tmp/test',
     );
 
-    const artifactOptions = downloadArtifactFile.mock.calls[0][1];
+    const artifactOptions = downloadArtifactFile.mock.calls[0]?.[1];
+    if (typeof artifactOptions?.verifyFile !== 'function') {
+      throw new Error('downloadArtifactFile 호출에 검증 옵션이 없습니다');
+    }
     await artifactOptions.verifyFile('/tmp/test/demo.whl');
     expect(verifyChecksum).toHaveBeenCalledWith(
       '/tmp/test/demo.whl',
@@ -1105,7 +1122,7 @@ describe('PipDownloader downloadPackage', () => {
 
   it('같은 파일명의 서로 다른 저장소 아티팩트를 별도 상대 경로에 저장한다', async () => {
     const downloadArtifactFile = vi
-      .spyOn(downloader as any, 'downloadArtifactFile')
+      .spyOn(asPipArtifactDownloader(downloader), 'downloadArtifactFile')
       .mockResolvedValue('/tmp/test/demo.whl');
     const packageInfo = (
       indexUrl: string,
@@ -1140,9 +1157,13 @@ describe('PipDownloader downloadPackage', () => {
       '/tmp/test',
     );
 
-    const relativePaths = downloadArtifactFile.mock.calls.map(
-      (call) => call[1].relativeFilePath,
-    );
+    const relativePaths = downloadArtifactFile.mock.calls.map((call) => {
+      const relativeFilePath = call[1].relativeFilePath;
+      if (typeof relativeFilePath !== 'string') {
+        throw new Error('downloadArtifactFile 호출에 상대 경로가 없습니다');
+      }
+      return relativeFilePath;
+    });
     expect(new Set(relativePaths).size).toBe(2);
     for (const relativePath of relativePaths) {
       expect(relativePath).toMatch(
@@ -1153,7 +1174,7 @@ describe('PipDownloader downloadPackage', () => {
 
   it('제공된 체크섬 알고리즘을 지원하지 않으면 다운로드 전에 실패한다', async () => {
     const downloadArtifactFile = vi
-      .spyOn(downloader as any, 'downloadArtifactFile')
+      .spyOn(asPipArtifactDownloader(downloader), 'downloadArtifactFile')
       .mockResolvedValue('/tmp/test/demo.whl');
 
     await expect(

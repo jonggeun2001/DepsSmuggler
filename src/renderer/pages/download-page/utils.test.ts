@@ -9,6 +9,7 @@ import {
   persistHistoryAndMaybeClearCart,
 } from './utils';
 import type { DownloadStoreItem, DownloadStoreStatus } from '../../stores/download-store';
+import type { CartItem } from '../../stores/cart-store';
 
 describe('download-page/utils', () => {
   it('그룹 인덱스가 입력 순서·상태 집계를 유지하면서 전체 목록의 반복 스캔을 피한다', () => {
@@ -114,7 +115,7 @@ describe('download-page/utils', () => {
   });
 
   it('cart snapshot과 현재 장바구니가 같을 때만 true를 반환한다', () => {
-    const snapshot = [
+    const snapshot: CartItem[] = [
       { id: 'a', name: 'a', version: '1.0.0', type: 'pip', addedAt: 1 },
       { id: 'b', name: 'b', version: '1.0.0', type: 'npm', addedAt: 2 },
     ];
@@ -125,7 +126,7 @@ describe('download-page/utils', () => {
   });
 
   it('활성 다운로드 세션이 바뀌면 같은 cart snapshot이어도 false를 반환한다', () => {
-    const snapshot = [
+    const snapshot: CartItem[] = [
       { id: 'a', name: 'a', version: '1.0.0', type: 'pip', addedAt: 1 },
       { id: 'b', name: 'b', version: '1.0.0', type: 'npm', addedAt: 2 },
     ];

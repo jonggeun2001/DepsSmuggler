@@ -112,7 +112,10 @@ describe('downloadCommand', () => {
       items: [],
     });
     createArchive.mockResolvedValue(undefined);
-    generateAllScripts.mockResolvedValue(undefined);
+    generateAllScripts.mockImplementation(async (_packages, outputDir) => [
+      { type: 'bash', path: path.join(outputDir, 'install.sh'), content: '#!/bin/sh' },
+      { type: 'powershell', path: path.join(outputDir, 'install.ps1'), content: '# install' },
+    ]);
     vi.mocked(resolveAllDependencies).mockResolvedValue({
       originalPackages: [
         {
@@ -568,6 +571,8 @@ describe('downloadCommand', () => {
       type: 'pip',
       pkgVersion: 'latest',
       arch: 'x86_64',
+      targetOS: 'any',
+      condaChannel: 'conda-forge',
       output: './output',
       format: 'zip',
       file: 'requirements.txt',
@@ -656,6 +661,8 @@ describe('downloadCommand', () => {
       type: 'pip',
       pkgVersion: 'latest',
       arch: 'x86_64',
+      targetOS: 'any',
+      condaChannel: 'conda-forge',
       output: './output',
       format: 'zip',
       file: 'requirements.txt',
@@ -728,6 +735,8 @@ describe('downloadCommand', () => {
       type: 'pip',
       pkgVersion: 'latest',
       arch: 'x86_64',
+      targetOS: 'any',
+      condaChannel: 'conda-forge',
       output: './output',
       format: 'zip',
       file: 'requirements.txt',
@@ -807,6 +816,8 @@ describe('downloadCommand', () => {
         package: 'Crypto-Py',
         pkgVersion: '0.0.4',
         arch: 'x86_64',
+        targetOS: 'any',
+        condaChannel: 'conda-forge',
         output: './output',
         format: 'zip',
         deps: true,

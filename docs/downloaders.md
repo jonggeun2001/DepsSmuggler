@@ -309,6 +309,25 @@ POM 파일은 모든 아티팩트에서 필수입니다. 일반 JAR를 받은 �
 
 의존성 해결에 필요한 Parent/BOM의 조회 실패는 resolver의 실패로 전달됩니다. 모델 조회가 성공했더라도 이후 실제 POM 파일 저장이 실패하면 다운로드를 성공으로 반환하지 않습니다.
 
+### Maven 다운로드 취소·일시정지
+
+`downloadPackage`와 `downloadPackageFiles`는 선택적인 `MavenDownloadOptions`를 받습니다. Electron 다운로드 라우터는 세션의 `AbortSignal`과 일시정지 상태 콜백을 이 옵션으로 전달합니다.
+
+```typescript
+interface MavenDownloadOptions {
+  signal?: AbortSignal;
+  shouldPause?: () => boolean;
+  targetOS?: string;
+  targetArchitecture?: string;
+}
+```
+
+제어 범위는 packaging 확인용 POM 조회, JAR/POM 본문과 SHA1 companion 조회·저장, 체크섬 검증 및 다음 파일로 넘어가기 전 대기까지입니다. 일시정지 중에도 네트워크·커널 버퍼에 일부 바이트가 도착할 수 있지만, pause gate 뒤의 디스크 쓰기와 진행률 보고는 멈춥니다. 작은 메타데이터 응답은 메모리 수신이 끝날 수 있으나, 다음 단계로 진행하거나 파일에 저장하기 전에는 일시정지 상태를 기다립니다. 재개하면 같은 파일의 전송과 검증을 이어갑니다. 취소·전송 오류가 발생하면 해당 요청과 writer를 정리하고 진행 중인 부분 파일을 삭제하며, 아직 시작하지 않은 다음 아티팩트나 최종 패키징으로 넘어가지 않습니다. 이미 완료된 이전 아티팩트의 보존 여부는 호출자의 작업 정리 정책에 따릅니다.
+
+이 기능은 다운로더 내부에서 자동 재시도를 수행하지 않습니다. 사용자가 재시도를 선택하면 새 다운로드 작업이 시작됩니다. `downloadArtifact`, `downloadPom`, `downloadSources`, `downloadJavadoc`의 기존 호출은 옵션을 생략할 수 있어 기존 동작을 유지합니다.
+
+부분 파일 정리는 writer가 파일을 연 뒤부터 적용합니다. 응답을 받기 전 실패하거나 쓰기 권한·기존 디렉터리 충돌로 파일을 열지 못한 경우에는 기존 경로의 데이터를 삭제하지 않습니다.
+
 Resolver는 실제 의존성에서 발견한 모든 버전의 아티팩트와 부속 POM, 전이 의존성 및 필요한 Parent/BOM POM을 전달합니다. 다운로더는 각 type의 파일을 저장합니다. 예를 들어 Kryo 2.24.0과 2.21이 발견되면 두 버전의 JAR·POM과 하위 의존성을 함께 전달합니다. 이 파일들은 조회 캐시에만 남지 않고 압축물과 설치 스크립트의 대상 목록에 포함됩니다.
 
 ### .m2 저장소 구조 지원
@@ -492,6 +511,8 @@ const downloadResult = await downloadOSPackages({
 | `getPackageVersions(name)` | 버전 목록 조회 |
 
 YUM XML 파서는 표준 엔티티 디코딩을 유지하며 전체 치환 횟수와 DTD 선언·확장 크기에 유한한 제한을 적용합니다. 큰 Rocky primary XML의 정상 파싱과 한도 초과 오류를 함께 검증합니다. 로딩 실패는 resolver에서 검색·다운로드 호출자에게 전달하며, 상세 제한과 캐시 반영 규칙은 [OS 패키지 문서](os-package-downloader.md#메타데이터-파싱-yummetadataparser)를 참고하세요.
+
+YUM 로컬 저장소는 선택된 모든 패키지의 다운로드 파일 정보와 일반 파일 여부를 복사 전에 확인합니다. `Packages/`가 일반 디렉터리가 아니거나 목적지가 일반 파일이 아닌 경우, 파일명이 충돌하는 경우에는 실패합니다. 생성 `primary`의 파일명·크기와 `primary`·`filelists`·`other`의 패키지 식별 체크섬은 실제 복사 파일을 기준으로 만듭니다. 자세한 실패 조건과 APT/APK 동작은 [OS 패키지 문서](os-package-downloader.md#osrepopackager)를 참고하세요.
 
 ### 타입 정의
 
@@ -723,8 +744,8 @@ if (integrity) await downloader.verifyIntegrity(filePath, integrity);
 | `searchPackages` | query: string, registry?: string | Promise<PackageInfo[]> | 레지스트리에서 이미지 검색 |
 | `getVersions` | imageName: string, registry?: string | Promise<string[]> | 이미지 태그 목록 조회 |
 | `getPackageMetadata` | name: string, version: string | Promise<PackageInfo> | 현재 Docker Hub 경로의 메타데이터 조회 |
-| `downloadPackage` | info: PackageInfo, destPath: string, onProgress? | Promise<string> | 이미지 다운로드 (레지스트리 자동 추출) |
-| `downloadImage` | name, tag, arch, destDir, onProgress?, registry? | Promise<string> | 이미지 다운로드 (tar 파일 생성) |
+| `downloadPackage` | info: PackageInfo, destPath: string, onProgress?, options? | Promise<string> | 이미지 다운로드 (레지스트리 자동 추출) |
+| `downloadImage` | name, tag, arch, destDir, onProgress?, registry?, options? | Promise<string> | 이미지 다운로드 (tar 파일 생성) |
 
 ### 내부 협력 모듈의 함수
 
@@ -922,6 +943,33 @@ const tarPath = await downloader.downloadImage(
 ```
 
 직접 `downloadImage()`를 호출할 때는 registry 인수를 전달해야 하며, 이름의 레지스트리를 자동 선택하는 것은 `downloadPackage()` 경로입니다. tar 출력 파일명은 `<repo>-<tag>.tar`이고 내부 `manifest.json`에는 원래 registry/namespace 태그를 기록합니다.
+
+### Docker 다운로드 취소·일시정지
+
+`downloadPackage`와 `downloadImage`는 기존 인자 뒤에 선택적인 다운로드 제어 옵션을 받습니다. 기존 진행률 콜백과 registry 인자의 위치는 유지됩니다.
+
+```typescript
+interface DownloadControlOptions {
+  signal?: AbortSignal;
+  shouldPause?: () => boolean;
+}
+
+await downloader.downloadImage(
+  'library/nginx',
+  'latest',
+  'amd64',
+  '/tmp/images',
+  onProgress,
+  'docker.io',
+  { signal: controller.signal, shouldPause: () => isPaused }
+);
+```
+
+제어 옵션은 인증·manifest 조회와 config/blob 전송 경계에 전달됩니다. 일시정지 중에는 네트워크와 stream buffer에 일부 바이트가 도착할 수 있지만, pause gate 뒤의 디스크 쓰기와 진행률 보고는 멈춥니다. 재개하면 현재 blob을 이어서 체크섬 검증합니다. 취소·전송 오류가 발생하면 활성 HTTP 요청과 writer를 정리하고 writer가 실제로 열린 경우에만 진행 중인 부분 파일을 삭제합니다. 열리지 않은 기존 대상 파일은 삭제하지 않습니다. config와 layer는 순서대로 처리하며 취소 뒤 다음 blob이나 최종 tar 패키징으로 진행하지 않습니다.
+
+이미지 작업 디렉터리와 tar 임시 파일은 다운로드별로 고유하게 생성됩니다. tar 생성이 시작된 뒤 취소되면 native tar 작업이 정리될 때까지 기다린 후 완료 전 publish를 막고 임시 파일을 정리합니다. tar 쓰기 자체가 즉시 중단된다고 가정하지 않습니다.
+
+인증 응답을 받은 뒤 일시정지한 시간도 토큰 유효기간에 포함합니다. 재개 시 이미 만료된 인증 응답은 사용하거나 캐시하지 않고 새 토큰을 요청합니다. 각 manifest·config·layer 요청 직전에 인증 캐시를 다시 확인하므로, 레이어 전송 중 오래 일시정지한 뒤 다음 레이어를 요청할 때도 갱신된 토큰을 사용합니다.
 
 ### 기술적 주의사항
 

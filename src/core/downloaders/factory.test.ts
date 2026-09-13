@@ -15,7 +15,7 @@ import {
   getDownloaderAsync,
 } from './factory';
 import { getRegisteredDownloaderTypes } from './registry';
-import { IDownloader, PackageType, PackageInfo } from '../../types';
+import { IDownloader, PackageType } from '../../types';
 
 // 테스트용 Mock 다운로더 생성
 function createMockDownloader(type: PackageType): IDownloader {
@@ -30,7 +30,6 @@ function createMockDownloader(type: PackageType): IDownloader {
     }),
     downloadPackage: vi.fn().mockResolvedValue('/path/to/package'),
     verifyChecksum: vi.fn().mockResolvedValue(true),
-    resolveDependencies: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -293,21 +292,4 @@ describe('테스트 시나리오: 모킹 사용 예제', () => {
     );
   });
 
-  it('의존성 해결 함수를 모킹하여 테스트할 수 있어야 함', async () => {
-    const mockMavenDownloader = createMockDownloader('maven');
-    const mockDependencies: PackageInfo[] = [
-      { name: 'dep1', version: '1.0.0', type: 'maven' },
-      { name: 'dep2', version: '2.0.0', type: 'maven' },
-    ];
-    vi.mocked(mockMavenDownloader.resolveDependencies).mockResolvedValue(mockDependencies);
-
-    setTestDownloader('maven', mockMavenDownloader);
-
-    const downloader = getDownloader('maven');
-    const deps = await downloader.resolveDependencies?.(
-      { name: 'spring-core', version: '5.3.0', type: 'maven' }
-    );
-
-    expect(deps).toEqual(mockDependencies);
-  });
 });

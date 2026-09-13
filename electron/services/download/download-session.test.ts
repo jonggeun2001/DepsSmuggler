@@ -1,9 +1,12 @@
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { createDownloadSessionRunner } from './download-session';
+import type { ConcurrencyLimiterFactory } from './concurrency-limiter';
 
 const logError = vi.hoisted(() => vi.fn());
 vi.mock('../../utils/logger', () => ({ createScopedLogger: () => ({ error: logError }) }));
+
+const immediateLimiter = <T>(task: () => Promise<T>): Promise<T> => task();
 
 describe('createDownloadSessionRunner', () => {
   it('초기 limiter 생성 실패도 실패 완료 이벤트와 로그를 남긴다', async () => {
@@ -28,8 +31,11 @@ describe('createDownloadSessionRunner', () => {
 
   it('성공한 패키지만 DeliveryPipeline으로 넘기고 completion payload를 emit해야 함', async () => {
     const ensureDir = vi.fn().mockResolvedValue(undefined);
-    const limit = vi.fn(async (task: () => Promise<unknown>) => task());
-    const createLimiter = vi.fn(() => limit);
+    const limit = vi.fn();
+    const createLimiter = vi.fn<ConcurrencyLimiterFactory>(() => <T>(task: () => Promise<T>) => {
+      limit(task);
+      return task();
+    });
     const packageRouter = {
       downloadPackage: vi
         .fn()
@@ -117,7 +123,7 @@ describe('createDownloadSessionRunner', () => {
 
     const runner = createDownloadSessionRunner({
       ensureDir: vi.fn().mockResolvedValue(undefined),
-      createLimiter: () => (async (task: () => Promise<unknown>) => task()) as never,
+      createLimiter: () => immediateLimiter,
       packageRouter: {
         downloadPackage: vi.fn().mockImplementation(async () => {
           cancelled = true;

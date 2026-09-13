@@ -35,8 +35,8 @@ export class NpmDownloader extends BaseLanguageDownloader implements IDownloader
   private versionResolver: NpmVersionResolver;
 
   constructor(
-    registryUrl = NPM_CONSTANTS.DEFAULT_REGISTRY_URL,
-    searchUrl = NPM_CONSTANTS.DEFAULT_SEARCH_URL
+    registryUrl: string = NPM_CONSTANTS.DEFAULT_REGISTRY_URL,
+    searchUrl: string = NPM_CONSTANTS.DEFAULT_SEARCH_URL
   ) {
     super();
     this.searchUrl = searchUrl;

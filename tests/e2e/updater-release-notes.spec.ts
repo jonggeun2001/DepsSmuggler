@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { setupMockElectronApp } from './fixtures/mock-electron-app';
+import type { UpdaterStatus } from '../../src/types/electron';
 
 const releaseNotes = `<h3>v0.2.26 주요 변경</h3>
 <ul>
@@ -20,7 +21,7 @@ const releaseNotesArray = [
 ];
 
 type CapturedUpdater = {
-  emit: ((status: unknown) => void) | null;
+  emit: ((status: UpdaterStatus) => void) | null;
   opened: string[];
 };
 
@@ -29,6 +30,7 @@ async function installUpdaterHarness(page: Page) {
   await page.addInitScript(() => {
     const api = window.electronAPI;
     const updater = api.updater;
+    if (!updater) throw new Error('Updater API unavailable');
     const captured: CapturedUpdater = { emit: null, opened: [] };
     const originalSubscribe = updater.onStatusChange;
     updater.onStatusChange = (callback) => {

@@ -5,8 +5,9 @@
  */
 
 import axios from 'axios';
-import { DockerManifest, DockerManifestEntry } from './docker-types';
+import { DockerManifest, DockerManifestEntry, type DockerRequestControls } from './docker-types';
 import { DockerAuthClient } from './docker-auth-client';
+import { waitForDownloadResume } from '../shared/download-control';
 
 /**
  * Docker 매니페스트 서비스
@@ -28,8 +29,11 @@ export class DockerManifestService {
     repository: string,
     reference: string,
     token: string,
-    registry: string = 'docker.io'
+    registry: string = 'docker.io',
+    options?: DockerRequestControls
   ): Promise<DockerManifest> {
+    await waitForDownloadResume(options);
+    const activeToken = options?.getAuthToken ? await options.getAuthToken() : token;
     const config = this.authClient.getRegistryConfig(registry);
     const headers: Record<string, string> = {
       Accept: [
@@ -40,14 +44,15 @@ export class DockerManifestService {
       ].join(', '),
     };
 
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    if (activeToken) {
+      headers.Authorization = `Bearer ${activeToken}`;
     }
 
     const response = await axios.get<DockerManifest>(
       `${config.registryUrl}/${repository}/manifests/${reference}`,
-      { headers }
+      { headers, ...(options?.signal ? { signal: options.signal } : {}) }
     );
+    await waitForDownloadResume(options);
 
     return response.data;
   }
@@ -92,9 +97,11 @@ export class DockerManifestService {
     token: string,
     registry: string,
     arch: string,
-    variant?: string
+    variant?: string,
+    options?: DockerRequestControls
   ): Promise<DockerManifest> {
-    let manifest = await this.getManifest(repository, reference, token, registry);
+    await waitForDownloadResume(options);
+    let manifest = await this.getManifest(repository, reference, token, registry, options);
 
     // 멀티 아키텍처인 경우 해당 아키텍처 매니페스트 찾기
     if (manifest.manifests) {
@@ -109,7 +116,8 @@ export class DockerManifestService {
         );
       }
 
-      manifest = await this.getManifest(repository, archManifest.digest, token, registry);
+      await waitForDownloadResume(options);
+      manifest = await this.getManifest(repository, archManifest.digest, token, registry, options);
     }
 
     return manifest;

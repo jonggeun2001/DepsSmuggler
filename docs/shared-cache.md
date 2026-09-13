@@ -247,6 +247,8 @@ interface CacheStoreOptions<T> {
 
 `src/core/downloaders/os-shared/cache-manager.ts`의 `OsPackageCache`는 OS 저장소 메타데이터를 관리합니다. CLI의 `os search`와 `os download`는 `settings.json`에서 읽은 캐시 사용 여부와 경로, 최대 크기를 이 캐시에 전달합니다.
 
+캐시 키는 `관리자:v2-<저장소 식별과 component의 SHA256>:아키텍처:데이터종류`이고 파일명은 전체 키의 Base64url 인코딩입니다. 식별 필드는 저장소의 ID·이름·정확한 URL·활성 상태·GPG 검증/키 URL·priority·공식 여부이며, factory와 disk cache가 `repository-identity.ts`의 같은 직렬화를 사용합니다. APT component는 원본 URL에 합치지 않고 별도로 해시에 포함합니다. 설정이 달라지면 기존 패키지에 저장된 옛 `repository` 정보도 재사용하지 않습니다. persistent 초기화 시 이전 v1 키의 메타데이터 파일은 제거하고 필요한 인덱스를 다시 조회합니다. 패키지 아티팩트/출력 아카이브는 대상이 아닙니다. 상세 형식은 [OS 패키지 캐시 절](os-package-downloader.md#ospackagecache)을 참고하세요.
+
 - CLI 설정 `cacheEnabled`는 GUI와 같은 저장 키 `enableCache`로 연결됩니다. 비동기 `ConfigManager` API의 이름은 `cachingEnabled`로 유지합니다. 읽기 우선순위와 입력 검증은 [CLI 설정](cli.md#config)을 참고하세요.
 - CLI의 `maxCacheSize` 기본값은 10GiB입니다. OS backend를 직접 호출하면서 `cacheMaxSize`를 생략한 경우에는 기존 생성자 기본값인 500MiB를 사용합니다.
 - 크기 예산은 저장 데이터의 `JSON.stringify(data).length * 2` 추정값이며, 파일의 JSON 부가 필드와 다른 캐시 디렉터리의 크기는 포함하지 않습니다. 저장과 디스크 캐시 로드 시 LRU로 공간을 확보하며, 항목 하나가 한도보다 크면 저장을 생략합니다. 캐시 저장 가능 여부 때문에 정상적인 검색·다운로드를 실패 처리하지 않습니다.

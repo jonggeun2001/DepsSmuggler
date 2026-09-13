@@ -4,6 +4,13 @@
  * DockerDownloader 모듈에서 사용되는 인터페이스와 타입들
  */
 
+import type { DownloadControlOptions } from '../shared/download-control';
+
+/** Refresh authentication after a pause, immediately before a new registry request. */
+export interface DockerRequestControls extends DownloadControlOptions {
+  getAuthToken?: () => Promise<string>;
+}
+
 // Docker Hub 검색 응답
 export interface DockerSearchResponse {
   count: number;

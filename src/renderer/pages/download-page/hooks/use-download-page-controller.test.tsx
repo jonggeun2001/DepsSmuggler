@@ -1,8 +1,20 @@
 // @vitest-environment jsdom
 
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import * as fs from 'node:fs';
+import * as http from 'node:http';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { groupDownloadItems } from '../utils';
 import type { DownloadStoreItem } from '../../../stores/download-store';
+import type {
+  AllCompleteData,
+  DepsResolvedData,
+  DownloadProgressData,
+  DownloadStatusData,
+} from '../../../../types/electron';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -51,11 +63,15 @@ vi.mock('./use-os-download-flow', () => ({
   useOSDownloadFlow: () => osFlowMock.value,
 }));
 
+vi.mock('../../../../../electron/utils/logger', () => ({
+  createScopedLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
+}));
+
 type DownloadListenerMap = {
-  progress?: (payload: Record<string, unknown>) => void;
-  status?: (payload: Record<string, unknown>) => void;
-  depsResolved?: (payload: Record<string, unknown>) => void;
-  allComplete?: (payload: Record<string, unknown>) => void;
+  progress?: (payload: DownloadProgressData) => void;
+  status?: (payload: DownloadStatusData) => void;
+  depsResolved?: (payload: DepsResolvedData) => void;
+  allComplete?: (payload: AllCompleteData) => void;
 };
 
 const createStorageMock = () => {
@@ -84,16 +100,38 @@ const createElectronApi = () => {
   const listeners: DownloadListenerMap = {};
 
   const electronAPI = {
+    getAppVersion: vi.fn().mockResolvedValue('0.0.0'),
+    getAppPath: vi.fn().mockResolvedValue('/tmp/depssmuggler'),
+    selectDirectory: vi.fn().mockResolvedValue('/tmp/selected'),
+    saveFile: vi.fn().mockResolvedValue('/tmp/saved'),
     config: {
       get: vi.fn().mockResolvedValue(null),
       set: vi.fn().mockResolvedValue(undefined),
       reset: vi.fn().mockResolvedValue(undefined),
+      getPath: vi.fn().mockResolvedValue('/tmp/depssmuggler/config.json'),
     },
     history: {
       load: vi.fn().mockResolvedValue([]),
+      save: vi.fn().mockResolvedValue({ success: true }),
       add: vi.fn().mockResolvedValue({ success: true }),
       delete: vi.fn().mockResolvedValue({ success: true }),
       clear: vi.fn().mockResolvedValue({ success: true }),
+    },
+    cache: {
+      getSize: vi.fn().mockResolvedValue(0),
+      getStats: vi.fn().mockResolvedValue({
+        scope: 'all',
+        excludes: [],
+        totalSize: 0,
+        entryCount: 0,
+        details: { pip: null, npm: null, maven: null, conda: null },
+      }),
+      clear: vi.fn().mockResolvedValue({ success: true }),
+    },
+    search: {
+      packages: vi.fn().mockResolvedValue({ results: [] }),
+      suggest: vi.fn().mockResolvedValue([]),
+      versions: vi.fn().mockResolvedValue({ versions: [] }),
     },
     dependency: {
       resolve: vi.fn(),
@@ -150,7 +188,7 @@ const loadController = async (options?: {
   vi.resetModules();
   const localStorage = createStorageMock();
   const { electronAPI, listeners } = createElectronApi();
-  (window as typeof window & { electronAPI?: typeof electronAPI }).electronAPI = electronAPI;
+  window.electronAPI = electronAPI;
   vi.stubGlobal('localStorage', localStorage);
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
@@ -300,7 +338,7 @@ describe('useDownloadPageController', () => {
   });
 
   afterEach(() => {
-    delete (window as typeof window & { electronAPI?: unknown }).electronAPI;
+    Reflect.deleteProperty(window, 'electronAPI');
   });
 
   it('의존성 확인에서 트리 밖 부모 POM까지 71개 항목을 원본 장바구니 ID 아래 표시한다', async () => {
@@ -364,6 +402,59 @@ describe('useDownloadPageController', () => {
       })
     );
     expect(rendered.result.current.isDownloading).toBe(true);
+  });
+
+  it('start 시 npm 직접 요청만 npmRootPackages로 전달하고 dependency는 제외한다', async () => {
+    const { electronAPI, rendered, stores } = await loadController({
+      cartItems: [{ id: 'npm-root', type: 'npm', name: 'is-odd', version: '3.0.1', addedAt: Date.now() }],
+    });
+    act(() => {
+      stores.useDownloadStore.setState({
+        items: [
+          {
+            id: 'npm-root', name: 'is-odd', version: '3.0.1', type: 'npm', isDependency: false,
+            status: 'pending', progress: 0, downloadedBytes: 0, totalBytes: 0, speed: 0,
+          },
+          {
+            id: 'npm-dependency', name: 'is-number', version: '6.0.0', type: 'npm', isDependency: true,
+            status: 'pending', progress: 0, downloadedBytes: 0, totalBytes: 0, speed: 0,
+          },
+        ],
+      });
+    });
+    await waitFor(() => expect(rendered.result.current.downloadItems).toHaveLength(2));
+
+    await act(async () => {
+      await rendered.result.current.handleStartDownload();
+    });
+
+    expect(electronAPI.download.start).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({
+        npmRootPackages: [{ type: 'npm', name: 'is-odd', version: '3.0.1', metadata: undefined }],
+      }),
+    }));
+  });
+
+  it('npm 항목이 dependency만이어도 npmRootPackages를 빈 배열로 전달한다', async () => {
+    const { electronAPI, rendered } = await loadController({
+      cartItems: [{ id: 'npm-root', type: 'npm', name: 'is-odd', version: '3.0.1', addedAt: Date.now() }],
+      includeDependencies: true,
+      downloadState: {
+        depsResolved: true,
+        items: [{
+          id: 'npm-dependency', name: 'is-number', version: '6.0.0', type: 'npm', isDependency: true,
+          status: 'pending', progress: 0, downloadedBytes: 0, totalBytes: 0, speed: 0,
+        }],
+      },
+    });
+
+    await act(async () => {
+      await rendered.result.current.handleStartDownload();
+    });
+
+    expect(electronAPI.download.start).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ npmRootPackages: [] }),
+    }));
   });
 
   it('pause 시 상태와 IPC 호출을 일시정지로 바꾼다', async () => {
@@ -526,4 +617,111 @@ describe('useDownloadPageController', () => {
       ])
     );
   });
+
+  it.each([503, 404, 'mid-response'] as const)('실제 HTTP %s 실패 후 같은 항목 재시도는 성공 산출물만 기록한다', async (failureMode) => {
+    const outputDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-http-status-'));
+    const payload = Buffer.alloc(19_160, 0x5a);
+    let requests = 0;
+    let unmount: (() => void) | undefined;
+    let cancelOrchestrator: (() => Promise<unknown>) | undefined;
+    const server = http.createServer((_request, response) => {
+      requests += 1;
+      if (requests === 1) {
+        if (failureMode === 'mid-response') {
+          response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': payload.length });
+          response.write(payload.subarray(0, 128));
+          setTimeout(() => response.destroy(), 20);
+        } else {
+          response.writeHead(failureMode, { 'content-type': 'text/plain' });
+          response.end(`failure-${failureMode}`);
+        }
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': payload.length });
+      response.end(payload);
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('HTTP fixture did not bind');
+
+    try {
+      const packageItem = {
+        id: `conda-http-${failureMode}`,
+        type: 'conda',
+        name: 'fixture',
+        version: '1.0.0',
+        downloadUrl: `http://127.0.0.1:${address.port}/fixture-1.0.0-0.tar.bz2`,
+        addedAt: Date.now(),
+      };
+      const { electronAPI, listeners, rendered, stores } = await loadController({
+        cartItems: [packageItem],
+        defaultDownloadPath: outputDir,
+      });
+      const { createDownloadOrchestrator } = await import('../../../../../electron/services/download-orchestrator');
+      const dispatch = (channel: string, data: unknown) => {
+        if (channel === 'download:progress') listeners.progress?.(data as DownloadProgressData);
+        if (channel === 'download:status') listeners.status?.(data as DownloadStatusData);
+        if (channel === 'download:all-complete') listeners.allComplete?.(data as AllCompleteData);
+      };
+      const orchestrator = createDownloadOrchestrator({
+        getMainWindow: () => ({
+          isDestroyed: () => false,
+          webContents: { isDestroyed: () => false, send: dispatch },
+        } as never),
+      });
+      cancelOrchestrator = orchestrator.cancelDownload;
+      electronAPI.download.start.mockImplementation((data) => orchestrator.startDownload(data as never));
+      await act(async () => { await rendered.result.current.handleStartDownload(); });
+      unmount = rendered.unmount;
+      await waitFor(() => expect(rendered.result.current.packagingStatus).toBe('failed'), { timeout: 3_000 });
+      expect(electronAPI.history.add).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed', outputPath: outputDir })
+      );
+      expect(fs.existsSync(`${outputDir}.zip`)).toBe(false);
+      const packagePath = path.join(outputDir, 'packages', 'fixture-1.0.0-0.tar.bz2');
+      expect(fs.existsSync(packagePath)).toBe(false);
+      const failedHistoryCalls = electronAPI.history.add.mock.calls.length;
+      expect(failedHistoryCalls).toBe(1);
+
+      const failedItem = rendered.result.current.downloadItems[0];
+      expect(failedItem.status).toBe('failed');
+      if (failureMode === 'mid-response') {
+        expect(failedItem.error).toContain('Download interrupted');
+        expect(failedItem.error).toContain('128/19160');
+      } else {
+        expect(failedItem.error).toContain(`HTTP ${failureMode}`);
+      }
+      await act(async () => { await rendered.result.current.executeRetryDownload(failedItem); });
+      await waitFor(() => expect(rendered.result.current.packagingStatus).toBe('completed'), { timeout: 10_000 });
+      expect(requests).toBe(2);
+      expect(electronAPI.history.add).toHaveBeenCalledTimes(failedHistoryCalls + 1);
+      expect(electronAPI.history.add).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: 'success', outputPath: `${outputDir}.zip` })
+      );
+      expect(stores.useDownloadStore.getState().isDownloading).toBe(false);
+      const outputPath = rendered.result.current.completedOutputPath;
+      expect(outputPath).toMatch(/\.zip$/);
+      expect(fs.existsSync(outputPath)).toBe(true);
+      expect((await fs.promises.stat(outputPath)).size).toBeGreaterThan(0);
+      expect(await fs.promises.readFile(packagePath)).toEqual(payload);
+      const python = process.platform === 'win32' ? 'py' : 'python3';
+      const args = process.platform === 'win32' ? ['-3', '-c'] : ['-c'];
+      args.push(
+        'import sys,zipfile,base64; z=zipfile.ZipFile(sys.argv[1]); print(base64.b64encode(z.read("packages/fixture-1.0.0-0.tar.bz2")).decode())',
+        outputPath,
+      );
+      const inspected = await promisify(execFile)(python, args, { timeout: 30_000 });
+      expect(inspected.stdout.trim()).toBe(payload.toString('base64'));
+    } finally {
+      unmount?.();
+      await cancelOrchestrator?.();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await fs.promises.rm(outputDir, { recursive: true, force: true });
+      await fs.promises.rm(`${outputDir}.zip`, { force: true });
+    }
+  }, 30_000);
 });

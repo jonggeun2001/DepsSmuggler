@@ -19,6 +19,7 @@
 | 공유 모듈 | [공유 개요](shared-utilities.md), [타입](shared-types.md), [HTTP](shared-http.md), [캐시](shared-cache.md), [의존성](shared-dependency.md), [파일·경로](shared-file-path.md), [기타](shared-misc.md) | `src/core/shared/`, `src/types/`, `src/core/ports/` 및 실제 호출부 |
 | 패키지별 공유 모듈 | [pip](shared-pip.md), [Conda](shared-conda.md), [Maven](shared-maven.md), [npm](shared-npm.md) | 각 shared 모듈의 export·옵션·구현·호출 테스트 |
 | 개발·검증 | [코딩 규칙](coding-conventions.md), [테스트](testing.md) | ESLint/TypeScript 설정, Vitest/Playwright 설정, 테스트 코드, CI |
+| 런타임 지원 | [런타임 지원](runtime-support.md), [보안 의존성](security-dependencies.md) | engines/packageManager, Node 타입, Electron·CI 버전, 최소 OS·갱신 절차 |
 | UI 검증 절차 | [체크리스트](ui-testing-checklist.md), [테스트 케이스](ui-testing-test-cases.md), [Playwright 전환](ui-testing-playwright-conversion.md) | 현재 화면·스토어와 `tests/e2e/`의 자동화 범위 |
 
 이 문서들은 현재 호출 순서·인자·기본값·경로를 설명합니다. 구현에 없는 통합 클래스나 옵션을 실제 API처럼 쓰던 예시를 교체하고, 이해를 위한 축약 코드에는 그 범위를 표시했습니다.
@@ -46,7 +47,10 @@
 - 업데이트 확인·다운로드·설치는 구현되어 있지만 `autoUpdate`/`autoDownloadUpdate` 설정 토글이 updater 동작을 제어하도록 연결되어 있지는 않습니다.
 - CLI의 실제 옵션, `--file`의 줄 단위 입력, 환경별 아티팩트 선택과 OS 출력 형식의 구분을 반영했습니다.
 - pip/Conda의 대상 파일 선택과 noarch 조건, Maven type/classifier·POM 처리, 캐시·공유 타입·함수 예시를 현재 구현에 맞췄습니다.
-- 테스트 도구와 CI의 범위를 구분했습니다. 특히 브라우저 E2E mock을 실제 Electron·SMTP·외부 저장소 통합 검증으로 설명하지 않습니다. Node 요구사항과 CI 버전, coverage 업로드의 기존 차이도 기록합니다.
+- 테스트 도구와 CI의 범위를 구분했습니다. 특히 브라우저 E2E mock을 실제 Electron·SMTP·외부 저장소 통합 검증으로 설명하지 않습니다. Node 요구사항과 CI 버전, coverage 업로드의 검증 범위도 기록합니다. 보안 의존성 갱신 과정에서 CI는 Node 24로 맞췄습니다.
+- 2026-09-13 #163: YUM 로컬 저장소의 payload 사전 검증, 실제 basename·크기·SHA-256 metadata, 파일명 URI 처리와 실패 경계를 README·OS 패키지·Packagers·테스트 문서에 반영했습니다. APT/APK semantics와 native DNF 설치 범위는 구분해 유지합니다.
+- 2026-09-13 후속 수정으로 core LCOV 생성·최소 비율·필수 업로드 검사를 연결했습니다. 측정 범위를 전체 앱으로 표현하지 않으며, 기준선과 실제 업로드 성공의 구분은 테스트 문서에서 유지합니다.
+- 테스트 전용 `tsconfig.tests.json`과 `typecheck:tests`를 추가해 일반·릴리스 CI에서 mock/fixture 계약을 검사합니다. 운영 빌드 검사, 테스트 정적 검사, 조건부 runtime 실행의 범위는 테스트·런타임 문서에서 구분합니다.
 
 ## README 구성 참고 조사
 
@@ -81,7 +85,11 @@
 
 전체 문서는 인덱스에서 연결하고, 설계 기록의 장·절과 주제는 유지합니다. 오래된 코드 예시를 현재 예시로 교체한 경우에도 해당 책임·동작·실패 조건 설명은 남깁니다.
 
+2026-09-13 #161: 설정·히스토리의 파일별 큐, 원자적 교체, 저장 입력 검증과 오류/레거시 복구 계약을 README·CLI·IPC·히스토리·아키텍처·공유 파일/모듈·Electron·테스트 문서에 반영했습니다.
+
 ## 검증과 유지보수 원칙
+
+- 2026-09-13 #162: OS resolver의 설정 스냅샷과 공통 저장소 식별, v2 메타데이터 캐시 키 및 이전 파일 재수집 계약을 README·Resolvers·OS 패키지·공유 캐시·테스트 문서에 반영했습니다.
 
 - 문서 상대 링크·앵커·코드펜스, README의 기존 CLI 예시 보존 여부, 문서 인덱스의 전체 파일 포함 여부를 검사합니다.
 - README/CLI 명령은 `package.json`과 Commander help를 대조하고, 관련 검증은 [테스트 문서](testing.md)의 표준 진입점을 사용합니다. 실제 실행 결과와 CI 결과는 변경 PR에 기록합니다.

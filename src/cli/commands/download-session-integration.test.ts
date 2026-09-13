@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { downloadCommand } from './download';
 import { ResolutionSession } from '../../core/shared/internal/resolution-session';
@@ -83,7 +84,10 @@ describe('downloadCommand request session integration', () => {
       items: [],
     });
     createArchive.mockResolvedValue(undefined);
-    generateAllScripts.mockResolvedValue(undefined);
+    generateAllScripts.mockImplementation(async (_packages, outputDir) => [
+      { type: 'bash', path: path.join(outputDir, 'install.sh'), content: '#!/bin/sh' },
+      { type: 'powershell', path: path.join(outputDir, 'install.ps1'), content: '# install' },
+    ]);
   });
 
   it('strict 모드는 실제 요청 세션의 재시도 성공 뒤에도 앞선 root 실패를 중단 처리한다', async () => {

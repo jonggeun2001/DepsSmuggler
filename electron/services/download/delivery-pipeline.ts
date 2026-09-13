@@ -1,4 +1,4 @@
-import * as fse from 'fs-extra';
+import * as path from 'path';
 import { initializeEmailSender } from '../../../src/core/mailer/email-sender';
 import { getArchivePackager } from '../../../src/core/packager/archive-packager';
 import { getFileSplitter } from '../../../src/core/packager/file-splitter';
@@ -8,12 +8,19 @@ import type { PackageInfo } from '../../../src/types';
 import type { DownloadPackageResult } from '../download-package-router';
 import type { DownloadProgressEmitter } from '../download-progress';
 
+export type ArchivePackager = Pick<
+  ReturnType<typeof getArchivePackager>,
+  'createArchiveFromDirectory'
+>;
+
+export type FileStat = (targetPath: string) => Promise<{ size: number }>;
+
 export interface DeliveryPipelineDeps {
-  archivePackager: ReturnType<typeof getArchivePackager>;
+  archivePackager: ArchivePackager;
   generateInstallScripts: typeof generateInstallScripts;
   initializeEmailSender: typeof initializeEmailSender;
   getFileSplitter: typeof getFileSplitter;
-  stat: typeof fse.stat;
+  stat: FileStat;
 }
 
 export interface DeliveryPipeline {
@@ -57,7 +64,30 @@ export function createDeliveryPipeline(deps: DeliveryPipelineDeps): DeliveryPipe
 
       if (includeScripts) {
         try {
-          deps.generateInstallScripts(outputDir, deliveredPackages);
+          const npmPackageFiles = deliveredPackages.filter(pkg => pkg.type === 'npm').map(pkg => {
+            const filePath = results.find(result => result.id === pkg.id && result.success)?.filePath;
+            if (!filePath) {
+              throw new Error(`npm 패키지 파일 경로가 없습니다: ${pkg.name}@${pkg.version}`);
+            }
+            return {
+              filePath,
+              relativePath: path.relative(path.join(outputDir, 'packages'), filePath).split(path.sep).join('/'),
+            };
+          });
+          const condaPackageFiles = deliveredPackages.filter(pkg => pkg.type === 'conda').map(pkg => {
+            const filePath = results.find(result => result.id === pkg.id && result.success)?.filePath;
+            if (!filePath) {
+              throw new Error(`Conda 패키지 파일 경로가 없습니다: ${pkg.name}@${pkg.version}`);
+            }
+            return {
+              relativePath: path.relative(path.join(outputDir, 'packages'), filePath).split(path.sep).join('/'),
+            };
+          });
+          await deps.generateInstallScripts(outputDir, deliveredPackages, {
+            npmPackageFiles,
+            npmRootPackages: options.npmRootPackages,
+            condaPackageFiles,
+          });
         } catch (error) {
           return {
             success: false,

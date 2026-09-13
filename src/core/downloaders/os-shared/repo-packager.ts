@@ -10,7 +10,7 @@ import * as zlib from 'zlib';
 import { promisify } from 'util';
 import * as tar from 'tar';
 import type { OSPackageInfo, OSPackageManager } from './types';
-import { getDownloadedFileKey, getPackageFilename } from './package-file-utils';
+import { getDownloadedFileKey } from './package-file-utils';
 import { OSScriptGenerator } from './script-generator';
 import { getWriteOptions } from '../../shared/path-utils';
 
@@ -91,10 +91,17 @@ export interface RepoResult {
   repoPath: string;
   /** 패키지 수 */
   packageCount: number;
-  /** 총 크기 */
+  /** YUM은 복사한 payload 바이트 합계, APT/APK는 입력 size 합계 (메타데이터 제외) */
   totalSize: number;
   /** 생성된 메타데이터 파일 */
   metadataFiles: string[];
+}
+
+interface DeliveredYumPackage {
+  pkg: OSPackageInfo;
+  filename: string;
+  size: number;
+  sha256: string;
 }
 
 /**
@@ -122,13 +129,18 @@ export class OSRepoPackager {
     }
 
     // 패키지 파일 복사
-    await this.copyPackageFiles(packages, downloadedFiles, repoPath, options.packageManager);
+    let yumPayloads: DeliveredYumPackage[] = [];
+    if (options.packageManager === 'yum') {
+      yumPayloads = await this.copyYumPackageFiles(packages, downloadedFiles, repoPath);
+    } else {
+      await this.copyPackageFiles(packages, downloadedFiles, repoPath);
+    }
 
     // 메타데이터 생성
     let metadataFiles: string[] = [];
     switch (options.packageManager) {
       case 'yum':
-        metadataFiles = await this.createYumRepoMetadata(packages, repoPath);
+        metadataFiles = await this.createYumRepoMetadata(yumPayloads, repoPath);
         break;
       case 'apt':
         metadataFiles = await this.createAptRepoMetadata(packages, repoPath, downloadedFiles);
@@ -153,7 +165,9 @@ export class OSRepoPackager {
     return {
       repoPath,
       packageCount: packages.length,
-      totalSize: packages.reduce((sum, pkg) => sum + pkg.size, 0),
+      totalSize: options.packageManager === 'yum'
+        ? yumPayloads.reduce((sum, payload) => sum + payload.size, 0)
+        : packages.reduce((sum, pkg) => sum + pkg.size, 0),
       metadataFiles,
     };
   }
@@ -164,33 +178,78 @@ export class OSRepoPackager {
   private async copyPackageFiles(
     packages: OSPackageInfo[],
     downloadedFiles: Map<string, string>,
-    repoPath: string,
-    pm: OSPackageManager
+    repoPath: string
   ): Promise<void> {
-    // YUM의 경우 Packages 디렉토리 사용
-    const packagesDir = pm === 'yum' ? path.join(repoPath, 'Packages') : repoPath;
-
-    if (!fs.existsSync(packagesDir)) {
-      fs.mkdirSync(packagesDir, { recursive: true });
-    }
-
     for (const pkg of packages) {
       const key = getDownloadedFileKey(pkg);
       const sourcePath = downloadedFiles.get(key);
 
       if (sourcePath && fs.existsSync(sourcePath)) {
         const filename = path.basename(sourcePath);
-        const destPath = path.join(packagesDir, filename);
+        const destPath = path.join(repoPath, filename);
         fs.copyFileSync(sourcePath, destPath);
       }
     }
+  }
+
+  /** Validate the entire selection before copying any YUM payload. */
+  private async copyYumPackageFiles(
+    packages: OSPackageInfo[],
+    downloadedFiles: Map<string, string>,
+    repoPath: string
+  ): Promise<DeliveredYumPackage[]> {
+    const packagesDir = path.join(repoPath, 'Packages');
+    const directory = fs.lstatSync(packagesDir, { throwIfNoEntry: false });
+    if (directory && !directory.isDirectory()) {
+      throw new Error(`YUM 패키지 디렉터리가 일반 디렉터리가 아닙니다: ${packagesDir}`);
+    }
+
+    const filenames = new Set<string>();
+    const plans = packages.map((pkg) => {
+      const sourcePath = downloadedFiles.get(getDownloadedFileKey(pkg));
+      if (!sourcePath) {
+        throw new Error(`YUM 패키지 ${pkg.name}-${pkg.version}의 다운로드 파일 정보가 없습니다`);
+      }
+      const source = fs.lstatSync(sourcePath, { throwIfNoEntry: false });
+      if (!source?.isFile()) {
+        throw new Error(`YUM 패키지 ${pkg.name}의 다운로드 파일이 없거나 일반 파일이 아닙니다: ${sourcePath}`);
+      }
+
+      const filename = path.basename(sourcePath);
+      // Repository output can be transferred to a case-insensitive filesystem.
+      const portableName = filename.normalize('NFC').toLowerCase();
+      if (filenames.has(portableName)) {
+        throw new Error(`YUM 패키지 파일명이 충돌합니다: ${filename}`);
+      }
+      filenames.add(portableName);
+
+      const destPath = path.join(packagesDir, filename);
+      const destination = fs.lstatSync(destPath, { throwIfNoEntry: false });
+      if (destination && !destination.isFile()) {
+        throw new Error(`YUM 패키지 저장 대상이 일반 파일이 아닙니다: ${destPath}`);
+      }
+      return { pkg, filename, sourcePath, destPath };
+    });
+
+    fs.mkdirSync(packagesDir, { recursive: true });
+    const delivered: DeliveredYumPackage[] = [];
+    for (const { pkg, filename, sourcePath, destPath } of plans) {
+      fs.copyFileSync(sourcePath, destPath);
+      const copied = fs.lstatSync(destPath);
+      if (!copied.isFile()) {
+        throw new Error(`YUM 패키지를 일반 파일로 저장하지 못했습니다: ${destPath}`);
+      }
+      const sha256 = await this.calculateSha256(destPath);
+      delivered.push({ pkg, filename, size: copied.size, sha256 });
+    }
+    return delivered;
   }
 
   /**
    * YUM 저장소 메타데이터 생성
    */
   private async createYumRepoMetadata(
-    packages: OSPackageInfo[],
+    packages: DeliveredYumPackage[],
     repoPath: string
   ): Promise<string[]> {
     const repodataDir = path.join(repoPath, 'repodata');
@@ -233,29 +292,36 @@ export class OSRepoPackager {
   /**
    * YUM primary.xml 생성
    */
-  private generateYumPrimaryXml(packages: OSPackageInfo[]): string {
+  private generateYumPrimaryXml(packages: DeliveredYumPackage[]): string {
     const lines: string[] = [];
     lines.push('<?xml version="1.0" encoding="UTF-8"?>');
     lines.push(`<metadata xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.duke.edu/metadata/rpm" packages="${packages.length}">`);
 
-    for (const pkg of packages) {
-      const filename = getPackageFilename(pkg, 'yum');
+    for (const { pkg, filename, size, sha256 } of packages) {
+      const location = this.escapeXml(`Packages/${encodeURIComponent(filename)}`);
+      // Installed/archive sizes are not extracted from RPM headers here.
+      const installedSize = isSafeNonNegativeInteger(pkg.installedSize) ? pkg.installedSize : size;
       const release = this.escapeXml(pkg.release || '1');
       lines.push(`  <package type="rpm">`);
       lines.push(`    <name>${this.escapeXml(pkg.name)}</name>`);
       lines.push(`    <arch>${pkg.architecture}</arch>`);
       lines.push(`    <version epoch="0" ver="${this.escapeXml(pkg.version)}" rel="${release}"/>`);
-      lines.push(`    <checksum type="${pkg.checksum?.type || 'sha256'}" pkgid="YES">${pkg.checksum?.value || ''}</checksum>`);
+      lines.push(`    <checksum type="sha256" pkgid="YES">${sha256}</checksum>`);
       lines.push(`    <summary>${this.escapeXml(pkg.description?.substring(0, 100) || pkg.name)}</summary>`);
       lines.push(`    <description>${this.escapeXml(pkg.description || '')}</description>`);
       lines.push(`    <packager>DepsSmuggler</packager>`);
       lines.push(`    <url></url>`);
       lines.push(`    <time file="${Math.floor(Date.now() / 1000)}" build="${Math.floor(Date.now() / 1000)}"/>`);
-      lines.push(`    <size package="${pkg.size}" installed="${pkg.size}" archive="${pkg.size}"/>`);
-      lines.push(`    <location href="Packages/${filename}"/>`);
+      lines.push(`    <size package="${size}" installed="${installedSize}" archive="${size}"/>`);
+      lines.push(`    <location href="${location}"/>`);
       lines.push(`    <format>`);
       lines.push(`      <rpm:provides>`);
       lines.push(`        <rpm:entry name="${this.escapeXml(pkg.name)}" flags="EQ" epoch="0" ver="${this.escapeXml(pkg.version)}" rel="${release}"/>`);
+      for (const provide of [...new Set(pkg.provides ?? [])]) {
+        if (provide && provide !== pkg.name) {
+          lines.push(`        <rpm:entry name="${this.escapeXml(provide)}"/>`);
+        }
+      }
       lines.push(`      </rpm:provides>`);
 
       if (pkg.dependencies.length > 0) {
@@ -270,6 +336,7 @@ export class OSRepoPackager {
         lines.push(`      </rpm:requires>`);
       }
 
+      lines.push(...this.generateYumFileEntries(pkg, '      '));
       lines.push(`    </format>`);
       lines.push(`  </package>`);
     }
@@ -281,15 +348,16 @@ export class OSRepoPackager {
   /**
    * YUM filelists.xml 생성
    */
-  private generateYumFilelistsXml(packages: OSPackageInfo[]): string {
+  private generateYumFilelistsXml(packages: DeliveredYumPackage[]): string {
     const lines: string[] = [];
     lines.push('<?xml version="1.0" encoding="UTF-8"?>');
     lines.push(`<filelists xmlns="http://linux.duke.edu/metadata/filelists" packages="${packages.length}">`);
 
-    for (const pkg of packages) {
+    for (const { pkg, sha256 } of packages) {
       const release = this.escapeXml(pkg.release || '1');
-      lines.push(`  <package pkgid="${pkg.checksum?.value || ''}" name="${this.escapeXml(pkg.name)}" arch="${pkg.architecture}">`);
+      lines.push(`  <package pkgid="${sha256}" name="${this.escapeXml(pkg.name)}" arch="${pkg.architecture}">`);
       lines.push(`    <version epoch="0" ver="${this.escapeXml(pkg.version)}" rel="${release}"/>`);
+      lines.push(...this.generateYumFileEntries(pkg, '    '));
       lines.push(`  </package>`);
     }
 
@@ -297,17 +365,25 @@ export class OSRepoPackager {
     return lines.join('\n');
   }
 
+  /** Retain primary file records in both indexes so native solvers can find file providers. */
+  private generateYumFileEntries(pkg: OSPackageInfo, indent: string): string[] {
+    return [...new Set((pkg.rpmPrimaryFiles ?? []).map((file) => {
+      const type = file.type === 'file' ? '' : ` type="${file.type}"`;
+      return `${indent}<file${type}>${this.escapeXml(file.path)}</file>`;
+    }))];
+  }
+
   /**
    * YUM other.xml 생성
    */
-  private generateYumOtherXml(packages: OSPackageInfo[]): string {
+  private generateYumOtherXml(packages: DeliveredYumPackage[]): string {
     const lines: string[] = [];
     lines.push('<?xml version="1.0" encoding="UTF-8"?>');
     lines.push(`<otherdata xmlns="http://linux.duke.edu/metadata/other" packages="${packages.length}">`);
 
-    for (const pkg of packages) {
+    for (const { pkg, sha256 } of packages) {
       const release = this.escapeXml(pkg.release || '1');
-      lines.push(`  <package pkgid="${pkg.checksum?.value || ''}" name="${this.escapeXml(pkg.name)}" arch="${pkg.architecture}">`);
+      lines.push(`  <package pkgid="${sha256}" name="${this.escapeXml(pkg.name)}" arch="${pkg.architecture}">`);
       lines.push(`    <version epoch="0" ver="${this.escapeXml(pkg.version)}" rel="${release}"/>`);
       lines.push(`  </package>`);
     }

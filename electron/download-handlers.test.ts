@@ -207,7 +207,6 @@ describe('registerDownloadHandlers', () => {
       id: 'baseos',
       name: 'BaseOS',
       baseUrl: 'https://mirror.example.com/baseos',
-      packageManager: 'yum',
       isOfficial: true,
       priority: 1,
       enabled: true,
@@ -424,10 +423,10 @@ describe('registerDownloadHandlers', () => {
           artifactPaths: [expectedArchivePath],
           deliveryMethod: 'local',
           results: [
-            {
+            expect.objectContaining({
               id: 'pip-requests-2.28.0',
               success: true,
-            },
+            }),
           ],
         })
       );
@@ -482,10 +481,10 @@ describe('registerDownloadHandlers', () => {
           artifactPaths: [expectedArchivePath],
           deliveryMethod: 'local',
           results: [
-            {
+            expect.objectContaining({
               id: 'pip-requests-2.28.0',
               success: true,
-            },
+            }),
           ],
         })
       );
@@ -806,7 +805,8 @@ describe('registerDownloadHandlers', () => {
             id: 'pip-requests-2.28.0',
             name: 'requests',
           }),
-        ]
+        ],
+        expect.any(Object),
       );
       expect(createArchiveFromDirectoryMock).toHaveBeenCalledWith(
         outputDir,

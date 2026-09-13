@@ -1,412 +1,275 @@
 /**
  * OS 패키지 다운로더 통합 테스트
  *
- * 실제 리포지토리를 호출하여 통합 다운로더 기능을 테스트합니다.
- *
- * 실행 방법:
- *   INTEGRATION_TEST=true npm test -- os.integration.test.ts
- *
- * 테스트 케이스:
- *   - YUM/RPM (Rocky Linux 9)
- *   - APT/DEB (Ubuntu 22.04)
- *   - APK (Alpine 3.19)
+ * 공개된 메타데이터 파서, 의존성 해결기, 다운로더 API를 실제 저장소에
+ * 연결해 검증합니다. 네트워크 통합 테스트는 INTEGRATION_TEST=true일 때만
+ * 실행됩니다.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-// import { OSPackageDownloader } from './os/downloader';
-// import type { OSDistribution, OSArchitecture, Repository } from './os/types';
 import * as fs from 'fs';
-import * as path from 'path';
 import * as os from 'os';
+import * as path from 'path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ApkMetadataParser, getApkDownloader } from './apk';
+import { AptMetadataParser, getAptDownloader } from './apt';
+import { OsPackageCache } from './os-shared/cache-manager';
+import { getYumDownloader, YumMetadataParser } from './yum';
+import { ApkDependencyResolver } from '../resolver/apk-resolver';
+import { AptDependencyResolver } from '../resolver/apt-resolver';
+import { YumDependencyResolver } from '../resolver/yum-resolver';
+import type { BaseDownloaderOptions } from './os-shared/base-downloader';
+import type {
+  OSArchitecture,
+  OSPackageInfo,
+  OSDistribution,
+  Repository,
+} from './os-shared/types';
 
 const INTEGRATION_TEST = process.env.INTEGRATION_TEST === 'true';
 const describeIntegration = INTEGRATION_TEST ? describe : describe.skip;
 
-// TODO: OSPackageDownloader는 제거되었고 개별 다운로더(YumDownloader, AptDownloader, ApkDownloader)로 분리됨
-// 이 테스트는 업데이트 필요
-describe.skip('OS 패키지 다운로더 통합 테스트', () => {
-  let downloader: OSPackageDownloader;
-  let tempDir: string;
+type OsFixture = {
+  distribution: OSDistribution;
+  repository: Repository;
+  architecture: OSArchitecture;
+};
 
-  // 테스트용 배포판 설정
-  const rockyLinux9: OSDistribution = {
+const rockyLinux9: OsFixture = {
+  distribution: {
     id: 'rocky-9',
     name: 'Rocky Linux 9',
     version: '9',
     packageManager: 'yum',
     architectures: ['x86_64'],
-    defaultRepos: [
-      {
-        id: 'baseos',
-        name: 'Rocky Linux 9 - BaseOS',
-        baseUrl: 'https://download.rockylinux.org/pub/rocky/9/BaseOS/x86_64/os/',
-        enabled: true,
-        type: 'yum',
-      },
-    ],
+    defaultRepos: [],
     extendedRepos: [],
-  };
+  },
+  repository: {
+    id: 'baseos',
+    name: 'Rocky Linux 9 - BaseOS',
+    baseUrl: 'https://download.rockylinux.org/pub/rocky/9/BaseOS/x86_64/os/',
+    enabled: true,
+    gpgCheck: false,
+    isOfficial: true,
+  },
+  architecture: 'x86_64',
+};
 
-  const ubuntu2204: OSDistribution = {
+const ubuntu2204: OsFixture = {
+  distribution: {
     id: 'ubuntu-22.04',
     name: 'Ubuntu 22.04 LTS',
     version: '22.04',
+    codename: 'jammy',
     packageManager: 'apt',
     architectures: ['amd64'],
-    defaultRepos: [
-      {
-        id: 'main',
-        name: 'Ubuntu 22.04 Main',
-        baseUrl: 'http://archive.ubuntu.com/ubuntu/dists/jammy/main',
-        enabled: true,
-        type: 'apt',
-      },
-    ],
+    defaultRepos: [],
     extendedRepos: [],
-  };
+  },
+  repository: {
+    id: 'main',
+    name: 'Ubuntu 22.04 Main',
+    baseUrl: 'http://archive.ubuntu.com/ubuntu/dists/jammy/main',
+    enabled: true,
+    gpgCheck: false,
+    isOfficial: true,
+  },
+  architecture: 'amd64',
+};
 
-  const alpine319: OSDistribution = {
+const alpine319: OsFixture = {
+  distribution: {
     id: 'alpine-3.19',
     name: 'Alpine Linux 3.19',
     version: '3.19',
     packageManager: 'apk',
     architectures: ['x86_64'],
-    defaultRepos: [
-      {
-        id: 'main',
-        name: 'Alpine 3.19 Main',
-        baseUrl: 'https://dl-cdn.alpinelinux.org/alpine/v3.19/main',
-        enabled: true,
-        type: 'apk',
-      },
-    ],
+    defaultRepos: [],
     extendedRepos: [],
+  },
+  repository: {
+    id: 'main',
+    name: 'Alpine 3.19 Main',
+    baseUrl: 'https://dl-cdn.alpinelinux.org/alpine/v3.19/main',
+    enabled: true,
+    gpgCheck: false,
+    isOfficial: true,
+  },
+  architecture: 'x86_64',
+};
+
+function downloaderOptions(
+  fixture: OsFixture,
+  outputDir: string,
+  onProgress?: BaseDownloaderOptions['onProgress']
+): BaseDownloaderOptions {
+  return {
+    outputDir,
+    distribution: fixture.distribution,
+    architecture: fixture.architecture,
+    repositories: [fixture.repository],
+    concurrency: 1,
+    onProgress,
   };
+}
+
+function packageFromResult(result: OSPackageInfo[] | Array<{ latest: OSPackageInfo }>): OSPackageInfo {
+  const first = result[0];
+  if (!first) throw new Error('Expected at least one package');
+  return 'latest' in first ? first.latest : first;
+}
+
+describeIntegration('OS 패키지 다운로더 통합 테스트', () => {
+  let tempDir: string;
 
   beforeAll(() => {
-    downloader = new OSPackageDownloader();
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'os-integration-test-'));
   });
 
-  afterAll(async () => {
+  afterAll(() => {
     if (tempDir && fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
-    await downloader.clearCache();
   });
 
-  describe('YUM/RPM - Rocky Linux 9', () => {
-    it('패키지 검색 - which', async () => {
-      const result = await downloader.search({
-        query: 'which',
-        distribution: rockyLinux9,
-        architecture: 'x86_64',
-        matchType: 'exact',
-      });
+  describe('메타데이터 검색', () => {
+    it('YUM exact/partial 검색은 패키지 이름을 반환한다', async () => {
+      const parser = new YumMetadataParser(rockyLinux9.repository, rockyLinux9.architecture);
+      const exact = await parser.searchPackages('which', 'exact');
+      const partial = await parser.searchPackages('bash', 'partial');
 
-      expect(result).toBeDefined();
-      expect(result.packages.length).toBeGreaterThan(0);
-      expect(result.totalCount).toBeGreaterThan(0);
-
-      const which = result.packages.find(p => p.name === 'which');
-      expect(which).toBeDefined();
+      expect(exact.some((pkg) => pkg.name === 'which')).toBe(true);
+      expect(partial.length).toBeGreaterThan(0);
+      expect(partial.every((pkg) => pkg.name.includes('bash'))).toBe(true);
     }, 180000);
 
-    it('패키지 검색 - 부분 일치', async () => {
-      const result = await downloader.search({
-        query: 'bash',
-        distribution: rockyLinux9,
-        architecture: 'x86_64',
-        matchType: 'partial',
-      });
-
-      expect(result).toBeDefined();
-      expect(result.packages.length).toBeGreaterThan(0);
-
-      // bash를 포함하는 패키지들
-      const allPartial = result.packages.every(p => p.name.includes('bash'));
-      expect(allPartial).toBe(true);
+    it('YUM 없는 패키지 검색은 빈 배열을 반환한다', async () => {
+      const parser = new YumMetadataParser(rockyLinux9.repository, rockyLinux9.architecture);
+      await expect(parser.searchPackages('nonexistent-package-xyz-12345', 'exact')).resolves.toEqual([]);
     }, 180000);
 
-    it('존재하지 않는 패키지 검색', async () => {
-      const result = await downloader.search({
-        query: 'nonexistent-package-xyz-12345',
-        distribution: rockyLinux9,
-        architecture: 'x86_64',
-        matchType: 'exact',
-      });
+    it('APT exact/partial 검색은 그룹화된 최신 패키지를 반환한다', async () => {
+      const parser = new AptMetadataParser(ubuntu2204.repository, 'main', ubuntu2204.architecture);
+      const exact = await parser.searchPackages('bash', 'exact');
+      const partial = await parser.searchPackages('lib', 'partial');
 
-      expect(result).toBeDefined();
-      expect(result.packages.length).toBe(0);
-      expect(result.totalCount).toBe(0);
-    }, 180000);
-  });
-
-  describe('APT/DEB - Ubuntu 22.04', () => {
-    it('패키지 검색 - bash', async () => {
-      const result = await downloader.search({
-        query: 'bash',
-        distribution: ubuntu2204,
-        architecture: 'amd64',
-        matchType: 'exact',
-      });
-
-      expect(result).toBeDefined();
-      expect(result.packages.length).toBeGreaterThan(0);
-
-      const bash = result.packages.find(p => p.name === 'bash');
-      expect(bash).toBeDefined();
+      expect(exact.some((result) => result.name === 'bash' && result.latest.name === 'bash')).toBe(true);
+      expect(partial.length).toBeGreaterThan(0);
+      expect(partial.every((result) => result.name.includes('lib'))).toBe(true);
     }, 180000);
 
-    it('패키지 검색 - curl', async () => {
-      const result = await downloader.search({
-        query: 'curl',
-        distribution: ubuntu2204,
-        architecture: 'amd64',
-        matchType: 'exact',
-      });
+    it('APK exact/wildcard 검색은 그룹화된 최신 패키지를 반환한다', async () => {
+      const parser = new ApkMetadataParser(alpine319.repository, alpine319.architecture);
+      const exact = await parser.searchPackages('busybox', 'exact');
+      const wildcard = await parser.searchPackages('curl*', 'wildcard');
 
-      expect(result).toBeDefined();
-      expect(result.packages.length).toBeGreaterThan(0);
-    }, 180000);
-
-    it('검색 결과 제한', async () => {
-      const result = await downloader.search({
-        query: 'lib',
-        distribution: ubuntu2204,
-        architecture: 'amd64',
-        matchType: 'partial',
-        limit: 10,
-      });
-
-      expect(result).toBeDefined();
-      expect(result.packages.length).toBeLessThanOrEqual(10);
-      expect(result.hasMore).toBe(true); // lib로 시작하는 패키지가 10개 이상
-    }, 180000);
-  });
-
-  describe('APK - Alpine 3.19', () => {
-    it('패키지 검색 - busybox', async () => {
-      const result = await downloader.search({
-        query: 'busybox',
-        distribution: alpine319,
-        architecture: 'x86_64',
-        matchType: 'exact',
-      });
-
-      expect(result).toBeDefined();
-      expect(result.packages.length).toBeGreaterThan(0);
-
-      const busybox = result.packages.find(p => p.name === 'busybox');
-      expect(busybox).toBeDefined();
-    }, 180000);
-
-    it('패키지 검색 - curl', async () => {
-      const result = await downloader.search({
-        query: 'curl',
-        distribution: alpine319,
-        architecture: 'x86_64',
-        matchType: 'exact',
-      });
-
-      expect(result).toBeDefined();
-      expect(result.packages.length).toBeGreaterThan(0);
+      expect(exact.some((result) => result.name === 'busybox')).toBe(true);
+      expect(wildcard.length).toBeGreaterThan(0);
+      expect(wildcard.every((result) => result.name.startsWith('curl'))).toBe(true);
     }, 180000);
   });
 
   describe('의존성 해결', () => {
-    it('YUM 패키지 의존성 해결', async () => {
-      // which 패키지 검색
-      const searchResult = await downloader.search({
-        query: 'which',
-        distribution: rockyLinux9,
-        architecture: 'x86_64',
-        matchType: 'exact',
+    it('YUM resolver는 검색된 패키지의 closure를 반환한다', async () => {
+      const parser = new YumMetadataParser(rockyLinux9.repository, rockyLinux9.architecture);
+      const pkg = packageFromResult(await parser.searchPackages('which', 'exact'));
+      const resolver = new YumDependencyResolver({
+        distribution: rockyLinux9.distribution,
+        repositories: [rockyLinux9.repository],
+        architecture: rockyLinux9.architecture,
+        includeOptional: false,
+        includeRecommends: false,
       });
 
-      if (searchResult.packages.length === 0) {
-        console.warn('which 패키지를 찾을 수 없습니다');
-        return;
-      }
-
-      const whichPkg = searchResult.packages[0].latest;
-      expect(whichPkg).toBeDefined();
-
-      // 의존성 해결
-      const depResult = await downloader.resolveDependencies(
-        [whichPkg],
-        rockyLinux9,
-        'x86_64'
-      );
-
-      expect(depResult).toBeDefined();
-      expect(depResult.packages.length).toBeGreaterThanOrEqual(1);
+      const result = await resolver.resolveDependencies([pkg]);
+      expect(result.packages.length).toBeGreaterThanOrEqual(1);
+      expect(result.packages.map((item) => item.name)).toContain(pkg.name);
     }, 300000);
 
-    it('APT 패키지 의존성 해결', async () => {
-      // hostname 패키지 검색 (작은 패키지)
-      const searchResult = await downloader.search({
-        query: 'hostname',
-        distribution: ubuntu2204,
-        architecture: 'amd64',
-        matchType: 'exact',
+    it('APT resolver는 검색된 패키지의 closure를 반환한다', async () => {
+      const parser = new AptMetadataParser(ubuntu2204.repository, 'main', ubuntu2204.architecture);
+      const pkg = packageFromResult(await parser.searchPackages('hostname', 'exact'));
+      const resolver = new AptDependencyResolver({
+        distribution: ubuntu2204.distribution,
+        repositories: [ubuntu2204.repository],
+        architecture: ubuntu2204.architecture,
+        includeOptional: false,
+        includeRecommends: false,
       });
 
-      if (searchResult.packages.length === 0) {
-        console.warn('hostname 패키지를 찾을 수 없습니다');
-        return;
-      }
-
-      const hostnamePkg = searchResult.packages[0].latest;
-      expect(hostnamePkg).toBeDefined();
-
-      // 의존성 해결
-      const depResult = await downloader.resolveDependencies(
-        [hostnamePkg],
-        ubuntu2204,
-        'amd64'
-      );
-
-      expect(depResult).toBeDefined();
-      expect(depResult.packages.length).toBeGreaterThanOrEqual(1);
+      const result = await resolver.resolveDependencies([pkg]);
+      expect(result.packages.length).toBeGreaterThanOrEqual(1);
+      expect(result.packages.map((item) => item.name)).toContain(pkg.name);
     }, 300000);
 
-    it('APK 패키지 의존성 해결', async () => {
-      // tzdata 패키지 검색 (의존성 적음)
-      const searchResult = await downloader.search({
-        query: 'tzdata',
-        distribution: alpine319,
-        architecture: 'x86_64',
-        matchType: 'exact',
+    it('APK resolver는 검색된 패키지의 closure를 반환한다', async () => {
+      const parser = new ApkMetadataParser(alpine319.repository, alpine319.architecture);
+      const pkg = packageFromResult(await parser.searchPackages('tzdata', 'exact'));
+      const resolver = new ApkDependencyResolver({
+        distribution: alpine319.distribution,
+        repositories: [alpine319.repository],
+        architecture: alpine319.architecture,
+        includeOptional: false,
+        includeRecommends: false,
       });
 
-      if (searchResult.packages.length === 0) {
-        console.warn('tzdata 패키지를 찾을 수 없습니다');
-        return;
-      }
-
-      const tzdataPkg = searchResult.packages[0].latest;
-      expect(tzdataPkg).toBeDefined();
-
-      // 의존성 해결
-      const depResult = await downloader.resolveDependencies(
-        [tzdataPkg],
-        alpine319,
-        'x86_64'
-      );
-
-      expect(depResult).toBeDefined();
-      expect(depResult.packages.length).toBeGreaterThanOrEqual(1);
+      const result = await resolver.resolveDependencies([pkg]);
+      expect(result.packages.length).toBeGreaterThanOrEqual(1);
+      expect(result.packages.map((item) => item.name)).toContain(pkg.name);
     }, 300000);
   });
 
   describe('패키지 다운로드', () => {
-    it('APK 패키지 다운로드', async () => {
+    it('APK downloadPackage는 실제 파일을 저장한다', async () => {
       const outputDir = path.join(tempDir, 'apk-download');
-      fs.mkdirSync(outputDir, { recursive: true });
+      const parser = new ApkMetadataParser(alpine319.repository, alpine319.architecture);
+      const pkg = packageFromResult(await parser.searchPackages('tzdata', 'exact'));
+      const result = await getApkDownloader(downloaderOptions(alpine319, outputDir)).downloadPackage(pkg);
 
-      // tzdata 패키지 검색
-      const searchResult = await downloader.search({
-        query: 'tzdata',
-        distribution: alpine319,
-        architecture: 'x86_64',
-        matchType: 'exact',
-      });
-
-      if (searchResult.packages.length === 0) {
-        console.warn('tzdata 패키지를 찾을 수 없습니다');
-        return;
-      }
-
-      const pkg = searchResult.packages[0].latest;
-
-      // 다운로드
-      const result = await downloader.download({
-        packages: [pkg],
-        outputDir,
-        resolveDependencies: false,
-      });
-
-      expect(result).toBeDefined();
-      expect(result.success.length).toBeGreaterThanOrEqual(1);
-      expect(result.totalSize).toBeGreaterThan(0);
-
-      // 파일 존재 확인
-      const files = fs.readdirSync(outputDir);
-      expect(files.length).toBeGreaterThan(0);
+      expect(result.success).toBe(true);
+      const filePath = result.filePath;
+      expect(filePath).toBeDefined();
+      if (!filePath) throw new Error('Expected an APK file path');
+      expect(fs.statSync(filePath).size).toBeGreaterThan(0);
     }, 300000);
 
-    it('다운로드 진행 콜백', async () => {
-      const outputDir = path.join(tempDir, 'progress-test');
-      fs.mkdirSync(outputDir, { recursive: true });
+    it('APT downloadPackages는 성공 파일을 반환한다', async () => {
+      const outputDir = path.join(tempDir, 'apt-download');
+      const parser = new AptMetadataParser(ubuntu2204.repository, 'main', ubuntu2204.architecture);
+      const pkg = packageFromResult(await parser.searchPackages('hostname', 'exact'));
+      const result = await getAptDownloader(downloaderOptions(ubuntu2204, outputDir)).downloadPackages([pkg]);
 
-      const searchResult = await downloader.search({
-        query: 'tzdata',
-        distribution: alpine319,
-        architecture: 'x86_64',
-        matchType: 'exact',
-      });
+      expect(result.success.map((item) => item.name)).toContain(pkg.name);
+      expect(result.downloadedFiles.size).toBe(1);
+    }, 300000);
 
-      if (searchResult.packages.length === 0) {
-        console.warn('tzdata 패키지를 찾을 수 없습니다');
-        return;
-      }
+    it('YUM downloader는 진행 콜백을 전달한다', async () => {
+      const outputDir = path.join(tempDir, 'yum-download');
+      const parser = new YumMetadataParser(rockyLinux9.repository, rockyLinux9.architecture);
+      const pkg = packageFromResult(await parser.searchPackages('which', 'exact'));
+      const progress: Parameters<NonNullable<BaseDownloaderOptions['onProgress']>>[0][] = [];
+      const downloader = getYumDownloader(downloaderOptions(rockyLinux9, outputDir, (event) => progress.push(event)));
+      const result = await downloader.downloadPackage(pkg);
 
-      const pkg = searchResult.packages[0].latest;
-      let progressCalled = false;
-
-      const result = await downloader.download({
-        packages: [pkg],
-        outputDir,
-        resolveDependencies: false,
-        onProgress: (progress) => {
-          progressCalled = true;
-          expect(progress.phase).toBeDefined();
-        },
-      });
-
-      expect(result).toBeDefined();
-      expect(progressCalled).toBe(true);
+      expect(result.success).toBe(true);
+      expect(progress.length).toBeGreaterThan(0);
+      expect(progress.at(-1)).toMatchObject({ currentPackage: pkg.name, phase: 'downloading' });
     }, 300000);
   });
 
-  describe('캐시 관리', () => {
-    it('캐시 통계 조회', () => {
-      const stats = downloader.getCacheStats();
-
-      expect(stats).toBeDefined();
+  describe('캐시 공개 API', () => {
+    it('캐시 통계를 조회하고 초기화할 수 있다', async () => {
+      const cache = new OsPackageCache({ type: 'session', maxSize: 1024 * 1024 });
+      await cache.set('fixture', { packageCount: 1 });
+      expect(cache.getStats()).toMatchObject({ entryCount: 1 });
+      await cache.invalidate();
+      expect(cache.getStats()).toMatchObject({ entryCount: 0 });
     });
 
-    it('캐시 초기화', async () => {
-      await downloader.clearCache();
-      // 에러 없이 완료되면 성공
-      expect(true).toBe(true);
+    it('캐시 설정을 업데이트할 수 있다', () => {
+      const cache = new OsPackageCache({ type: 'session' });
+      cache.updateConfig({ maxSize: 100 * 1024 * 1024 });
+      expect(cache.getStats()).toMatchObject({ entryCount: 0 });
     });
-
-    it('캐시 설정 업데이트', () => {
-      downloader.updateCacheConfig({
-        maxSize: 1024 * 1024 * 100, // 100MB
-      });
-      // 에러 없이 완료되면 성공
-      expect(true).toBe(true);
-    });
-  });
-
-  describe('검색 옵션', () => {
-    it('와일드카드 검색', async () => {
-      const result = await downloader.search({
-        query: 'curl*',
-        distribution: alpine319,
-        architecture: 'x86_64',
-        matchType: 'wildcard',
-      });
-
-      expect(result).toBeDefined();
-      expect(result.packages.length).toBeGreaterThan(0);
-
-      // curl로 시작하는 패키지들
-      const allWildcard = result.packages.every(p => p.name.startsWith('curl'));
-      expect(allWildcard).toBe(true);
-    }, 180000);
   });
 });

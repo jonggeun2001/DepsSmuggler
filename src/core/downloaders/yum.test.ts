@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { getYumDownloader } from './yum';
+import { getYumDownloader, YumMetadataParser } from './yum';
 import type { BaseDownloaderOptions } from './os-shared/base-downloader';
 
 describe('yum downloader', () => {
@@ -9,9 +9,25 @@ describe('yum downloader', () => {
   beforeEach(() => {
     options = {
       outputDir: '/tmp/test',
-      distribution: { id: 'rocky', version: '9', codename: '' },
+      distribution: {
+        id: 'rocky',
+        name: 'Rocky Linux',
+        version: '9',
+        codename: '',
+        packageManager: 'yum',
+        architectures: ['x86_64'],
+        defaultRepos: [],
+        extendedRepos: [],
+      },
       architecture: 'x86_64',
-      repositories: [],
+      repositories: [{
+        id: 'baseos',
+        name: 'Rocky BaseOS',
+        baseUrl: 'https://download.rockylinux.org/pub/rocky/9/BaseOS/x86_64/os/',
+        enabled: true,
+        gpgCheck: false,
+        isOfficial: true,
+      }],
       concurrency: 1,
     };
     downloader = getYumDownloader(options);
@@ -31,7 +47,8 @@ describe('yum downloader', () => {
 
   describe('searchPackages (integration)', () => {
     it.skip('패키지 검색', async () => {
-      const results = await downloader.searchPackages('httpd');
+      const parser = new YumMetadataParser(options.repositories[0], options.architecture);
+      const results = await parser.searchPackages('httpd');
       expect(Array.isArray(results)).toBe(true);
       if (results.length > 0) {
         expect(results[0]).toHaveProperty('name');
@@ -41,7 +58,8 @@ describe('yum downloader', () => {
 
   describe('getVersions (integration)', () => {
     it.skip('버전 목록 조회', async () => {
-      const versions = await downloader.getVersions('httpd');
+      const parser = new YumMetadataParser(options.repositories[0], options.architecture);
+      const versions = await parser.getPackageVersions('httpd');
       expect(Array.isArray(versions)).toBe(true);
     });
   });
@@ -243,7 +261,7 @@ describe('yum downloader utilities', () => {
     };
 
     it('repomd.xml URL 생성', () => {
-      expect(buildRepoDataUrl('https://mirror.centos.org/centos/7/os/x86_64')).toBe(
+      expect(buildRepoDataUrl(DEFAULT_REPOS[0])).toBe(
         'https://mirror.centos.org/centos/7/os/x86_64/repodata/repomd.xml'
       );
     });

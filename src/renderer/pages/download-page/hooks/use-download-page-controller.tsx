@@ -28,6 +28,7 @@ import type {
   HistoryPackageItem,
   HistorySettings,
   HistoryStatus,
+  PackageInfo,
 } from '../../../../types';
 import type { AllCompleteData, DependencyAPI } from '../../../../types/electron';
 import type { CartItem } from '../../../stores/cart-store';
@@ -1111,6 +1112,17 @@ export function useDownloadPageController() {
           fileSplitEnabled: enableFileSplit,
           maxFileSizeMB: maxFileSize,
         });
+        const npmItems = downloadItems.filter(item => item.type === 'npm');
+        if (npmItems.length > 0) {
+          options.npmRootPackages = downloadItems
+            .filter(item => item.type === 'npm' && !item.isDependency)
+            .map((item): PackageInfo => ({
+              type: 'npm',
+              name: item.name,
+              version: item.version,
+              metadata: item.metadata,
+            }));
+        }
 
         await window.electronAPI.download.start({
           sessionId: sessionSnapshot.id,
@@ -1379,6 +1391,14 @@ export function useDownloadPageController() {
         fileSplitEnabled: enableFileSplit,
         maxFileSizeMB: maxFileSize,
       });
+      if (item.type === 'npm') {
+        options.npmRootPackages = [{
+          type: 'npm',
+          name: item.name,
+          version: item.version,
+          metadata: item.metadata,
+        } satisfies PackageInfo];
+      }
 
       await window.electronAPI.download.start({
         sessionId: sessionSnapshot.id,

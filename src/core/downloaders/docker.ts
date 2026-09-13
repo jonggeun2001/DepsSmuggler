@@ -14,6 +14,7 @@
 
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import {
   IDownloader,
   PackageInfo,
@@ -23,6 +24,8 @@ import {
 import logger from '../../utils/logger';
 import { sanitizeDockerTag } from '../shared/filename-utils';
 import { sanitizePath } from '../shared/path-utils';
+import { waitForDownloadResume, type DownloadControlOptions } from '../shared/download-control';
+import type { DockerRequestControls } from './docker-types';
 import { ARCH_MAP, buildDockerArchiveFilename, extractRegistry, parseImageName } from './docker-utils';
 import { DockerAuthClient } from './docker-auth-client';
 import { DockerCatalogCache, CatalogCacheStatus } from './docker-catalog-cache';
@@ -50,6 +53,7 @@ interface ProgressTracker {
  * 다운로드 컨텍스트 (메서드 간 공유 데이터)
  */
 interface DownloadContext {
+  controls: DockerRequestControls;
   fullName: string;
   token: string;
   registry: string;
@@ -116,7 +120,8 @@ export class DockerDownloader implements IDownloader {
   async downloadPackage(
     info: PackageInfo,
     destPath: string,
-    onProgress?: (progress: DownloadProgressEvent) => void
+    onProgress?: (progress: DownloadProgressEvent) => void,
+    options?: DownloadControlOptions
   ): Promise<string> {
     const extracted = extractRegistry(info.name);
     const registry = extracted.registry || (info.metadata?.registry as string) || 'docker.io';
@@ -127,7 +132,8 @@ export class DockerDownloader implements IDownloader {
       info.arch || 'amd64',
       destPath,
       onProgress,
-      registry
+      registry,
+      options
     );
   }
 
@@ -140,11 +146,14 @@ export class DockerDownloader implements IDownloader {
     arch: Architecture,
     destPath: string,
     onProgress?: (progress: DownloadProgressEvent) => void,
-    registry: string = 'docker.io'
+    registry: string = 'docker.io',
+    options?: DownloadControlOptions
   ): Promise<string> {
+    let ctx: DownloadContext | undefined;
     try {
+      await waitForDownloadResume(options);
       // 1. 준비: 토큰 획득 및 매니페스트 조회
-      const ctx = await this.prepareDownload(repository, tag, destPath, registry);
+      ctx = await this.prepareDownload(repository, tag, destPath, registry, options);
       const manifest = await this.fetchManifest(ctx, arch);
 
       // 2. 진행률 추적 설정
@@ -160,6 +169,7 @@ export class DockerDownloader implements IDownloader {
 
       // 4. 패키징 및 정리
       const tarPath = await this.packageAndCleanup(ctx, destPath, layerPaths);
+      await waitForDownloadResume(options);
 
       logger.info('Docker 이미지 다운로드 완료', {
         repository,
@@ -173,6 +183,9 @@ export class DockerDownloader implements IDownloader {
     } catch (error) {
       this.logDownloadError(error, repository, tag, arch, registry);
       throw error;
+    } finally {
+      // Each download owns a separate work directory, including simultaneous images.
+      if (ctx) await fs.remove(ctx.imageDir);
     }
   }
 
@@ -183,18 +196,26 @@ export class DockerDownloader implements IDownloader {
     repository: string,
     tag: string,
     destPath: string,
-    registry: string
+    registry: string,
+    controls?: DownloadControlOptions
   ): Promise<DownloadContext> {
     const [namespace, repo] = parseImageName(repository);
     const fullName = `${namespace}/${repo}`;
-    const token = await this.authClient.getTokenForRegistry(registry, fullName);
+    await waitForDownloadResume(controls);
+    const token = await this.authClient.getTokenForRegistry(registry, fullName, controls);
+    await waitForDownloadResume(controls);
 
     const safeTag = sanitizeDockerTag(tag);
     const safeRepo = sanitizePath(repo);
-    const imageDir = path.join(destPath, `${safeRepo}-${safeTag}`);
-    await fs.ensureDir(imageDir);
+    await fs.ensureDir(destPath);
+    await waitForDownloadResume(controls);
+    const imageDir = await fs.mkdtemp(path.join(destPath, `${safeRepo}-${safeTag}-`));
 
     return {
+      controls: {
+        ...controls,
+        getAuthToken: () => this.authClient.getTokenForRegistry(registry, fullName, controls),
+      },
       fullName,
       token,
       registry,
@@ -221,7 +242,8 @@ export class DockerDownloader implements IDownloader {
       ctx.token,
       ctx.registry,
       dockerPlatform.architecture,
-      dockerPlatform.variant
+      dockerPlatform.variant,
+      ctx.controls
     );
 
     if (!manifest.layers || !manifest.config) {
@@ -284,7 +306,9 @@ export class DockerDownloader implements IDownloader {
       configDigest,
       configPath,
       ctx.token,
-      ctx.registry
+      ctx.registry,
+      undefined,
+      ctx.controls
     );
   }
 
@@ -308,7 +332,8 @@ export class DockerDownloader implements IDownloader {
         layerPath,
         ctx.token,
         ctx.registry,
-        progressTracker.update
+        progressTracker.update,
+        ctx.controls
       );
 
       layerPaths.push(layerPath);
@@ -325,6 +350,7 @@ export class DockerDownloader implements IDownloader {
     destPath: string,
     layerPaths: string[]
   ): Promise<string> {
+    await waitForDownloadResume(ctx.controls);
     // manifest.json 생성 (docker load 형식)
     const repoTagPrefix = ctx.registry === 'docker.io' ? '' : `${ctx.registry}/`;
     const repoTag = `${repoTagPrefix}${ctx.fullName}:${ctx.tag}`;
@@ -337,15 +363,21 @@ export class DockerDownloader implements IDownloader {
     ];
 
     await fs.writeJson(path.join(ctx.imageDir, 'manifest.json'), manifestJson);
+    await waitForDownloadResume(ctx.controls);
 
     // tar 파일로 패키징
     const tarPath = path.join(destPath, buildDockerArchiveFilename(ctx.repository, ctx.tag));
-    await this.blobDownloader.createImageTar(ctx.imageDir, tarPath);
-
-    // 임시 디렉토리 삭제
-    await fs.remove(ctx.imageDir);
-
-    return tarPath;
+    const pendingTar = path.join(destPath, `.${path.basename(tarPath)}.${randomUUID()}.partial`);
+    try {
+      await this.blobDownloader.createImageTar(ctx.imageDir, pendingTar);
+      await waitForDownloadResume(ctx.controls);
+      // Publish a complete tar only; a failed open never removes an existing output.
+      await fs.rename(pendingTar, tarPath);
+      await waitForDownloadResume(ctx.controls);
+      return tarPath;
+    } finally {
+      await fs.remove(pendingTar);
+    }
   }
 
   /**

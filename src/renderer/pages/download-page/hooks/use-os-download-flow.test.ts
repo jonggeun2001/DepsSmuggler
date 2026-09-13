@@ -127,19 +127,20 @@ function createApi() {
 }
 
 function mountFlow(overrides: Partial<Parameters<typeof useOSDownloadFlow>[0]> = {}) {
+  type AddHistory = Parameters<typeof useOSDownloadFlow>[0]['addHistory'];
   const args = {
     cartItems: [cartItem()],
     outputDir: '/downloads',
     includeDependencies: true,
     concurrentDownloads: 4,
     cartSnapshotRef: { current: [] as CartItem[] },
-    addHistory: vi.fn().mockResolvedValue('history-1'),
     clearCart: vi.fn(() => {
       mocks.cart.items = [];
     }),
     removeCartItem: vi.fn(),
     checkOutputPath: vi.fn().mockResolvedValue(true),
     ...overrides,
+    addHistory: vi.fn<AddHistory>().mockResolvedValue('history-1'),
   };
   mocks.cart.items = args.cartItems;
   const hook = renderHook((props) => useOSDownloadFlow(props), { initialProps: args });

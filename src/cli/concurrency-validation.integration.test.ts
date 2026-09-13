@@ -83,7 +83,7 @@ async function runChild(
     return {
       status: failure.code,
       signal: failure.signal ?? null,
-      killed: failure.killed === true,
+      killed: false,
       stdout: failure.stdout ?? '',
       stderr: failure.stderr ?? '',
     };

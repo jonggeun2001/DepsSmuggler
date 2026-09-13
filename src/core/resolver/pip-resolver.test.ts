@@ -4,7 +4,7 @@
  * 네트워크 호출 없이 PipResolver의 핵심 로직을 테스트합니다.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   createRequestPipResolver,
   getPipResolver,
@@ -546,7 +546,7 @@ describe('PipResolver 단위 테스트', () => {
     });
 
     it('setCacheOptions 호출 시 에러 없음', () => {
-      expect(() => resolver.setCacheOptions({ maxSize: 100 })).not.toThrow();
+      expect(() => resolver.setCacheOptions({ memoryTtl: 100 })).not.toThrow();
     });
 
     it('요청 resolver는 singleton cache options의 독립 snapshot과 session을 사용한다', () => {

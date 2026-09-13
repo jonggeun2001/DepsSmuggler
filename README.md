@@ -32,14 +32,16 @@
 | 운영체제 | 배포 파일 |
 |----------|-----------|
 | Windows | `.exe` 설치 프로그램 |
-| macOS | `.dmg` 디스크 이미지 |
+| macOS | 설치용 `.dmg`, 자동 업데이트용 `.zip` |
 | Linux | `.AppImage` |
+
+현재 소스의 Electron 44 앱은 macOS 13 이상을 요구합니다. 업데이트 피드에도 최소 OS 조건을 넣어 macOS 12의 기존 앱에 호환되지 않는 업데이트가 제공되지 않도록 합니다. 다운로드할 패키지의 대상 OS/아키텍처 선택과 앱 자체의 실행 조건은 별개입니다.
 
 릴리스마다 제공하는 아키텍처와 파일은 Assets 목록에서 확인합니다. 이 README와 `docs/`는 **현재 main 소스 기준**이며, 이미 배포된 릴리스의 기능과 차이가 있을 수 있습니다. 소스에서 최신 구현을 실행하려면 아래 빠른 시작을 따르세요.
 
 ## 빠른 시작
 
-소스 실행에는 Git, Node.js, npm이 필요합니다. 잠금 파일의 설치·테스트·패키징 도구 요구사항을 함께 만족하는 버전은 **Node.js 22.13 이상인 22.x 또는 24 이상**입니다. CI는 Node.js 20을 사용하지만 일부 패키징 도구의 요구 버전과 차이가 있습니다. 세부 사항은 [테스트 문서](docs/testing.md)를 참고하세요.
+소스 실행에는 Git, **Node.js 22.13 이상인 22.x 또는 24.x**, **npm 11.8.0**이 필요합니다. 새 개발 환경에는 Node.js 24의 최신 패치를 권장하며 테스트·릴리스 CI도 Node.js 24를 사용합니다. 설치된 Electron 앱은 내장 Node를 사용하므로 별도 Node 설치가 필요하지 않습니다. 최소 버전 검증과 갱신 기준은 [런타임 지원 정책](docs/runtime-support.md)을 참고하세요.
 
 ```bash
 git clone https://github.com/jonggeun2001/DepsSmuggler.git
@@ -75,12 +77,16 @@ depssmuggler --help
 | Python `conda` | 지원 | 지원 | 채널 선택, Python·CUDA·플랫폼을 고려한 빌드 선택 |
 | Java `maven` | 지원 | 지원 | Maven Central, POM·BOM·플러그인, 네이티브 classifier 선택 |
 | Node.js `npm` | 지원 | 지원 | npm Registry 검색·버전 조회·tarball 다운로드 |
-| OS `yum` | 지원 | 지원 | RPM 계열 배포판, 의존성 해결과 로컬 저장소 출력 |
+| OS `yum` | 지원 | 지원 | RPM 계열 배포판, provides capability를 포함한 의존성 해결과 로컬 저장소 출력 |
 | OS `apt` | 지원 | 지원 | Ubuntu/Debian, 의존성 포함 DEB 다운로드 |
 | OS `apk` | 지원 | 지원 | Alpine, APK 다운로드·아카이브·로컬 저장소 출력 |
 | Container `docker` | 지원 | 지원 | Docker Hub 이미지·태그·플랫폼 선택과 이미지 아카이브 |
 
-Maven 반출은 한 BFS에서 실제로 발견된 모든 버전의 원래 아티팩트와 POM·하위 의존성를 보존합니다. Parent POM의 일반 dependencies는 상속하고, BOM의 `dependencyManagement` 전체 라이브러리는 펼치지 않습니다. scope·optional·exclusion·탐색 깊이 제한은 유지됩니다.
+YUM 저장소는 필요한 RPM 파일이 없거나 파일명이 충돌하면 생성을 중단합니다. 저장소 메타데이터의 파일명·크기·SHA-256은 실제 복사된 파일을 기준으로 만듭니다.
+
+Maven 반출은 한 BFS에서 실제로 발견된 모든 버전의 원래 아티팩트와 POM·하위 의존성를 보존합니다. Parent POM의 일반 dependencies는 상속하고, 자식 문맥의 속성으로 상속된 관리 버전을 해석하며, 자식의 직접 `dependencyManagement` 선언은 부모보다 우선합니다. 같은 BOM GA를 다른 버전으로 자식이 다시 import하면 자식 import를 사용하고, 부모의 직접 관리 선언은 자식 import보다 우선합니다. BOM의 `dependencyManagement` 전체 라이브러리는 펼치지 않습니다. scope·optional·exclusion·탐색 깊이 제한은 유지됩니다.
+
+GUI에서 전체 `<project>` POM을 가져오면 프로젝트 의존성과 `package` 단계의 명시·상속·기본 빌드 플러그인을 함께 담습니다. 장바구니 상단에서 폐쇄망의 Maven 버전을 지정한 뒤 파일을 가져오거나 POM을 입력하세요(기본 `3.9.11`). `<dependency>` 조각은 라이브러리 입력으로 처리합니다. 지원 범위와 오프라인 검증 방법은 [Maven 프로젝트 POM 수집](docs/shared-maven.md#프로젝트-pom과-package-플러그인-수집)을 참고하세요.
 
 OS 패키지 CLI는 `os list-distros/search/download/cache`를 사용합니다. 배포판과 아키텍처 목록은 저장소 프리셋 및 조회 결과에 따라 달라지므로 `depssmuggler os list-distros`로 확인하세요.
 
@@ -147,13 +153,13 @@ depssmuggler os cache clear
 
 | 항목 | 현재 동작 |
 |------|-----------|
-| 압축·설치 스크립트 | 일반 GUI와 CLI에서 ZIP/tar.gz 지원. 일반 GUI는 설치 스크립트 포함 여부를 선택하고 OS 출력에는 전용 스크립트 생성기가 있습니다. |
-| 설치 스크립트 범위 | CLI의 npm 스크립트는 전달된 `.tgz`를 오프라인으로 설치해 스크립트 폴더의 `npm-project/node_modules`에 배치하며, 전이 의존성의 여러 버전을 함께 보존합니다. Conda 항목은 아직 pip 명령으로 처리하므로 Conda 오프라인 설치를 보장하지 않습니다. 생성기별 범위는 [Packagers](docs/packagers.md)를 참고하세요. |
+| 압축·설치 스크립트 | 일반 GUI와 CLI에서 ZIP/tar.gz 지원. 일반 GUI는 설치 스크립트 포함 여부를 선택하고, CLI는 생성한 `install.sh`·`install.ps1`을 출력 폴더와 아카이브 최상위에 포함합니다. OS 출력에는 전용 스크립트 생성기가 있습니다. |
+| 설치 스크립트 범위 | CLI와 GUI의 npm 스크립트는 실제로 다운로드된 `.tgz`와 직접 요청한 확정 버전을 공통 설치 계획에 전달해 오프라인으로 `npm-project/node_modules`에 설치하며, 전이 의존성의 여러 버전을 함께 보존합니다. CLI와 GUI의 Conda 스크립트는 실제로 완료된 Conda 아카이브 경로를 전달받아 오프라인 `conda create/install`을 실행합니다. pip와 npm 또는 Conda가 함께 있는 묶음은 각 설치가 모두 성공할 때만 전체 성공으로 처리합니다. 기본 Conda 환경 경로는 `SCRIPT_DIR/conda-env`이며 `DEPS_SMUGGLER_CONDA_PREFIX`로 바꿀 수 있습니다. Python noarch 패키지는 호환되는 Python 환경이 필요합니다. 생성기별 범위는 [Packagers](docs/packagers.md)를 참고하세요. |
 | 파일 분할 | 일반 GUI의 이메일 전달 중 첨부 한도를 초과하고 분할 설정이 켜진 경우 적용합니다. 로컬 저장 경로에서 자동 분할하지 않습니다. |
 | SMTP 테스트 | Electron IPC로 실제 연결을 테스트합니다. 브라우저 개발 환경에서는 시뮬레이션이며, Electron API가 일부 누락되면 안내 후 비활성화됩니다. |
 | 업데이트 | 배포 앱에서 시작 후 확인하고 사용자가 다운로드·설치할 수 있습니다. 개발 환경은 모의 동작입니다. `autoUpdate`·`autoDownloadUpdate` 설정은 저장되지만 updater 동작을 제어하는 연결은 아직 없습니다. |
 | 브라우저 실행·E2E | 일부 조회·히스토리 폴백과 UI 검증용입니다. Playwright는 `window.electronAPI` mock/stub을 사용하므로 실제 Electron·외부 저장소·SMTP 통합 검증과 구분합니다. |
-| 저장소 인증·무결성 | 공개 저장소 사용을 대상으로 하며 사용자 자격 증명을 쓰는 프라이빗 저장소 인증 UI/CLI는 없습니다. 체크섬 처리는 downloader마다 다르고, OS의 실제 GPG 서명 검증은 미구현입니다. |
+| 저장소 인증·무결성 | 공개 저장소 사용을 대상으로 하며 사용자 자격 증명을 쓰는 프라이빗 저장소 인증 UI/CLI는 없습니다. 데스크톱 앱은 기본적으로 TLS 인증서 검증을 유지합니다. 체크섬 처리는 downloader마다 다르고, OS의 실제 GPG 서명 검증은 미구현입니다. |
 | OS 로컬 저장소 | 관리자별 메타데이터를 생성하며 APK 인덱스는 `APKINDEX`를 담은 gzip tar 형식입니다. APK 메타데이터 필드 보존과 실제 Alpine 저장소 호환성의 남은 제한은 [OS 문서](docs/os-package-downloader.md)를 확인하세요. |
 
 이 범위는 기존 구현을 설명합니다. 상세 동작과 설계 기록의 구분은 [문서 상태](docs/documentation-status.md)에서 확인할 수 있습니다.
@@ -172,7 +178,11 @@ GUI 설정은 전달/출력, 캐시, 업데이트 등의 섹션으로 나뉩니�
 └── logs/             # 애플리케이션 로그
 ```
 
+설정과 히스토리 JSON은 같은 디렉터리의 임시 파일에 저장한 뒤 교체합니다. Electron의 파일별 요청과 비동기 설정 변경은 순서대로 처리하며, 읽기 실패 시 원본 파일을 보존합니다. 보장 범위와 복구 계약은 [파일 저장](docs/shared-file-path.md#설정히스토리-json-저장)을 참고하세요.
+
 Renderer의 Python 버전 캐시, 설정 백업과 브라우저 히스토리는 `localStorage`도 사용합니다. 상세 저장 방식은 [히스토리](docs/download-history.md), [캐시](docs/shared-cache.md), [Electron / Renderer](docs/electron-renderer.md)를 참고하세요.
+
+OS 저장소의 URL·활성 상태·GPG 설정 등이 바뀌면 이전 resolver와 메타데이터 캐시를 재사용하지 않습니다. 이전 형식의 OS 메타데이터 캐시는 다시 수집하며 다운로드한 패키지와 아카이브는 유지합니다. [OS 캐시 형식](docs/shared-cache.md#os-메타데이터-캐시-설정)을 참고하세요.
 
 ## 개발 명령어
 
@@ -203,6 +213,7 @@ INTEGRATION_TEST=true npm run test
 npm run lint
 npx tsc --noEmit
 npx tsc --noEmit -p tsconfig.electron.json
+npm run typecheck:tests
 
 # 브라우저 E2E
 npm run test:e2e
@@ -210,6 +221,8 @@ npm run test:e2e:ui
 ```
 
 Playwright는 Chromium 설치가 필요합니다. 설치·실행 조건과 테스트 범위는 [테스트 문서](docs/testing.md)를 참고하세요. 기본 E2E는 설정 반영, 장바구니→다운로드, 히스토리 기반 이메일 전달 복원, OS 전용 다운로드 흐름을 검증합니다.
+
+커버리지 수치는 `src/core` 범위입니다. CI는 core 커버리지 하한, 비어 있지 않은 LCOV 생성, Codecov 업로드 성공을 검사합니다. 전체 앱 커버리지와는 구분하며 기준선과 하한은 [테스트 문서](docs/testing.md)에 기록합니다.
 
 ## 프로젝트 구조
 

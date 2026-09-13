@@ -1,3 +1,4 @@
+import type { PackageInfo } from '../package-manager/metadata';
 import type { Architecture } from '../platform/architecture';
 import type { TargetOS } from '../platform/os-target';
 
@@ -37,6 +38,8 @@ export interface DownloadOptions {
   email?: DownloadEmailOptions;
   fileSplit?: DownloadFileSplitOptions;
   smtp?: DownloadSmtpOptions;
+  /** Directly requested npm roots, distinct from resolved dependency packages. */
+  npmRootPackages?: PackageInfo[];
 }
 
 export interface PipDownloadOptions extends DownloadOptions {

@@ -714,8 +714,13 @@ describe('DownloadManager 단위 테스트', () => {
       manager.addToQueue(packages);
 
       // 다운로더 모킹
-      const mockDownloader = {
-        downloadPackage: vi.fn().mockResolvedValue('/path/to/file'),
+      const mockDownloader: IDownloader = {
+        type: 'pip',
+        searchPackages: vi.fn<IDownloader['searchPackages']>().mockResolvedValue([]),
+        getVersions: vi.fn<IDownloader['getVersions']>().mockResolvedValue([]),
+        getPackageMetadata: vi.fn<IDownloader['getPackageMetadata']>()
+          .mockRejectedValue(new Error('Unexpected metadata lookup')),
+        downloadPackage: vi.fn<IDownloader['downloadPackage']>().mockResolvedValue('/path/to/file'),
       };
       asTestable(manager).downloaders.set('pip', mockDownloader);
 

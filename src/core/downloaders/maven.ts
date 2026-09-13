@@ -16,6 +16,12 @@ import {
   isRetryableHttpError,
 } from '../shared/retry-utils';
 import { BaseLanguageDownloader } from './lang-shared/base-language-downloader';
+import { waitForDownloadResume, type DownloadControlOptions } from '../shared/download-control';
+
+export interface MavenDownloadOptions extends DownloadControlOptions {
+  targetOS?: string;
+  targetArchitecture?: string;
+}
 
 // Maven Central Search API 응답 타입
 interface MavenSearchResponse {
@@ -426,12 +432,9 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     info: PackageInfo,
     destPath: string,
     onProgress?: (progress: DownloadProgressEvent) => void,
-    _options?: {
-      targetOS?: string;
-      targetArchitecture?: string;
-    }
+    options?: MavenDownloadOptions
   ): Promise<string> {
-    const files = await this.downloadPackageFiles(info, destPath, onProgress, _options);
+    const files = await this.downloadPackageFiles(info, destPath, onProgress, options);
     return files[0];
   }
 
@@ -440,14 +443,12 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     info: PackageInfo,
     destPath: string,
     onProgress?: (progress: DownloadProgressEvent) => void,
-    _options?: {
-      targetOS?: string;
-      targetArchitecture?: string;
-    }
+    options?: MavenDownloadOptions
   ): Promise<string[]> {
     const groupId = (info.metadata?.groupId as string) || info.name.split(':')[0];
     const artifactId = (info.metadata?.artifactId as string) || info.name.split(':')[1];
     const classifier = info.metadata?.classifier as string | undefined;
+    await waitForDownloadResume(options);
 
     // 네이티브 패키지이고 classifier가 없으면 경고만 표시 (자동 생성하지 않음)
     // 각 라이브러리마다 classifier 형식이 다르므로 (LWJGL: natives-linux, Netty: linux-x86_64)
@@ -469,14 +470,17 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     if (!packaging) {
       try {
         const pomUrl = this.buildDownloadUrl(groupId, artifactId, info.version, 'pom');
-        const pomResponse = await this.client.get<string>(pomUrl);
+        await waitForDownloadResume(options);
+        const pomResponse = await this.client.get<string>(pomUrl, { signal: options?.signal });
+        await waitForDownloadResume(options);
         const pomXml = pomResponse.data;
 
         // POM에서 <packaging> 태그 파싱
         const packagingMatch = pomXml.match(/<packaging>([^<]+)<\/packaging>/);
         packaging = packagingMatch ? packagingMatch[1].trim() : 'jar';
         logger.debug('POM 파일에서 packaging 타입 조회', { groupId, artifactId, version: info.version, packaging });
-      } catch {
+      } catch (error) {
+        if (options?.signal?.aborted) throw error;
         packaging = 'jar'; // 조회 실패 시 기본값
       }
     }
@@ -505,13 +509,14 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
         destPath,
         artifactType,
         onProgress,
-        classifier
+        classifier,
+        options
       );
       files.push(mainArtifactPath);
 
       // 메인 아티팩트 체크섬 파일 다운로드 (.sha1)
       const checksumPath = await this.downloadChecksumFile(
-        groupId, artifactId, info.version, destPath, artifactType, classifier
+        groupId, artifactId, info.version, destPath, artifactType, classifier, options
       );
       if (checksumPath) files.push(checksumPath);
     }
@@ -524,12 +529,14 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
         info.version,
         destPath,
         'pom',
-        isPomOnly ? onProgress : undefined // POM-only인 경우에만 진행률 표시
+        isPomOnly ? onProgress : undefined, // POM-only인 경우에만 진행률 표시
+        undefined,
+        options
       );
       files.push(pomPath);
       // pom 체크섬 파일 다운로드 (.sha1)
       const checksumPath = await this.downloadChecksumFile(
-        groupId, artifactId, info.version, destPath, 'pom'
+        groupId, artifactId, info.version, destPath, 'pom', undefined, options
       );
       if (checksumPath) files.push(checksumPath);
     } catch (error) {
@@ -539,6 +546,7 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
       );
     }
 
+    await waitForDownloadResume(options);
     logger.info('Maven 패키지 다운로드 완료', {
       groupId,
       artifactId,
@@ -561,9 +569,11 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     destPath: string,
     artifactType: ArtifactType = 'jar',
     onProgress?: (progress: DownloadProgressEvent) => void,
-    classifier?: string
+    classifier?: string,
+    options?: MavenDownloadOptions
   ): Promise<string> {
     try {
+      await waitForDownloadResume(options);
       const downloadUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType, classifier);
       const fileName = this.buildFileName(artifactId, version, artifactType, classifier);
 
@@ -575,9 +585,11 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
       // SHA-1 체크섬 조회
       let expectedSha1: string | undefined;
       try {
-        const sha1Response = await this.client.get<string>(downloadUrl + '.sha1');
+        const sha1Response = await this.client.get<string>(downloadUrl + '.sha1', { signal: options?.signal });
+        await waitForDownloadResume(options);
         expectedSha1 = sha1Response.data.trim().split(' ')[0];
-      } catch {
+      } catch (error) {
+        if (options?.signal?.aborted) throw error;
         // 체크섬 없을 수 있음
       }
 
@@ -594,9 +606,12 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
           relativeFilePath: path.posix.join(m2SubPath, fileName),
           verifyFile,
           verificationFailureMessage: '체크섬 검증 실패',
+          signal: options?.signal,
+          shouldPause: options?.shouldPause,
         },
         onProgress
       );
+      await waitForDownloadResume(options);
 
       logger.info('Maven 아티팩트 다운로드 완료', {
         groupId,
@@ -749,7 +764,8 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     version: string,
     destPath: string,
     artifactType: ArtifactType,
-    classifier?: string
+    classifier?: string,
+    options?: MavenDownloadOptions
   ): Promise<string | undefined> {
     const baseUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType, classifier);
     const baseFileName = this.buildFileName(artifactId, version, artifactType, classifier);
@@ -759,27 +775,33 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     const artifactDir = path.join(destPath, m2SubPath);
 
     try {
+      await waitForDownloadResume(options);
       const checksumUrl = `${baseUrl}.sha1`;
       const checksumFileName = `${baseFileName}.sha1`;
       const checksumFilePath = path.join(artifactDir, checksumFileName);
 
       // 디렉토리 확인 (이미 downloadArtifact에서 생성되었을 것이지만 안전을 위해)
       await fs.ensureDir(artifactDir);
+      await waitForDownloadResume(options);
 
       const response = await this.client.get<string>(checksumUrl, {
         responseType: 'text',
         timeout: 10000,
+        signal: options?.signal,
       });
+      await waitForDownloadResume(options);
 
       // sha1 파일 내용 정리 (공백이나 파일명이 포함된 경우 처리)
       const sha1Content = response.data.trim().split(' ')[0].split('\n')[0];
       await fs.writeFile(checksumFilePath, sha1Content);
+      await waitForDownloadResume(options);
 
       logger.debug('체크섬 파일 다운로드 완료', {
         file: checksumFileName,
       });
       return checksumFilePath;
     } catch (error) {
+      if (options?.signal?.aborted) throw error;
       // 체크섬 파일이 없을 수 있으므로 경고만 로깅
       logger.debug('sha1 파일 다운로드 실패 (선택적)', {
         artifactType,

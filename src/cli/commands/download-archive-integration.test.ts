@@ -5,6 +5,7 @@ import * as path from 'path';
 import { createRequire } from 'module';
 import * as tar from 'tar';
 import { downloadCommand } from './download';
+import type { GeneratedScript } from '../../core/packager/script-generator';
 
 const require = createRequire(import.meta.url);
 const yauzl = require('yauzl') as {
@@ -129,7 +130,22 @@ describe('downloadCommand Maven archive integration', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-issue-67-'));
-    generateAllScripts.mockResolvedValue(undefined);
+    generateAllScripts.mockImplementation(async (_packages: unknown[], outputDir: string): Promise<GeneratedScript[]> => {
+      const scripts: GeneratedScript[] = [
+        {
+          path: path.join(outputDir, 'install.sh'),
+          content: '#!/usr/bin/env bash\nprintf \'install.sh\n\'\n',
+          type: 'bash',
+        },
+        {
+          path: path.join(outputDir, 'install.ps1'),
+          content: 'Write-Output \'install.ps1\'\r\n',
+          type: 'powershell',
+        },
+      ];
+      await Promise.all(scripts.map((script) => fs.writeFile(script.path, script.content)));
+      return scripts;
+    });
     resolveAllDependencies.mockResolvedValue({
       originalPackages: [
         { type: 'maven', name: 'com.example:demo', version: '1.0.0' },
@@ -237,11 +253,70 @@ describe('downloadCommand Maven archive integration', () => {
       'packages/org/example/parent/1.0.0/parent-1.0.0.pom.sha1',
       'manifest.json',
       'README.txt',
+      'install.sh',
+      'install.ps1',
     ];
 
     expect([...archive.names].sort()).toEqual([...expectedNames].sort());
+    expect(archive.names).not.toContain('packages/stale-archive.zip');
     expect(archive.names.filter((name) => name === 'packages/com/example/demo/1.0.0/demo-1.0.0.pom'))
       .toHaveLength(1);
     expect(JSON.parse(archive.text.get('manifest.json') ?? '{}').packages).toHaveLength(2);
+    expect(archive.text.get('install.sh')).toContain('install.sh');
+    expect(archive.text.get('install.ps1')).toContain('install.ps1');
+  });
+
+  it.each(['zip', 'tar.gz'] as const)('설치 스크립트 생성 실패 시 %s archive와 성공 출력을 만들지 않는다', async (format) => {
+    const outputDir = path.join(tempDir, `script-failure-${format}`);
+    await fs.ensureDir(outputDir);
+    const payloadPath = path.join(outputDir, 'com/example/demo/1.0.0/demo-1.0.0.jar');
+    await fs.ensureDir(path.dirname(payloadPath));
+    await fs.writeFile(payloadPath, 'jar');
+
+    startDownload.mockResolvedValueOnce({
+      success: true,
+      totalSize: 3,
+      duration: 1,
+      items: [{
+        id: 'maven-demo-1.0.0',
+        package: { type: 'maven', name: 'com.example:demo', version: '1.0.0' },
+        status: 'completed',
+        progress: 100,
+        filePath: payloadPath,
+        filePaths: [payloadPath],
+      }],
+    });
+    generateAllScripts.mockRejectedValueOnce(new Error('script generation failed'));
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit');
+    }) as never);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    try {
+      await expect(downloadCommand({
+        type: 'maven',
+        package: 'com.example:demo',
+        pkgVersion: '1.0.0',
+        arch: 'x86_64',
+        targetOS: 'any',
+        condaChannel: 'conda-forge',
+        output: outputDir,
+        format,
+        deps: true,
+        concurrency: '1',
+      } as Parameters<typeof downloadCommand>[0])).rejects.toThrow('process.exit');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('script generation failed'));
+      expect(logSpy.mock.calls.flat().some((value) => String(value).includes('압축 파일 생성 완료'))).toBe(false);
+    } finally {
+      errorSpy.mockRestore();
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    const outputEntries = await fs.readdir(outputDir);
+    expect(outputEntries.some((entry) => entry.startsWith('packages-'))).toBe(false);
   });
 });

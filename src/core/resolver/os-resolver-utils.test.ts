@@ -8,7 +8,7 @@ import {
   sortVersionsDescending,
   type DependencyResolverOptions,
 } from './os-resolver-utils';
-import type { OSPackageInfo } from '../downloaders/os-shared/types';
+import type { OSPackageInfo, Repository } from '../downloaders/os-shared/types';
 import * as versionUtils from '../shared/version-utils';
 
 function pkg(name: string, version = '1.0'): OSPackageInfo {
@@ -140,7 +140,8 @@ describe('createResolverFactory', () => {
     const create = createResolverFactory(Resolver, 'APT resolver');
     expect(() => create()).toThrow('APT resolver requires DependencyResolverOptions');
     const opts = options();
-    expect(create(opts).options).toBe(opts);
+    expect(create(opts).options).toEqual(opts);
+    expect(create(opts).options).not.toBe(opts);
   });
 
   it('reuses an instance for equivalent options and keeps distinct factories isolated', () => {
@@ -156,6 +157,101 @@ describe('createResolverFactory', () => {
       })
     ).toBe(first);
     expect(secondFactory(opts)).not.toBe(first);
+  });
+
+  it.each([
+    ['id', 'universe-id'],
+    ['name', 'Universe'],
+    ['baseUrl', 'https://mirror.example.test'],
+    ['enabled', false],
+    ['gpgCheck', true],
+    ['gpgKeyUrl', 'https://keys.example.test/repo.asc'],
+    ['priority', 50],
+    ['isOfficial', false],
+  ] as const)('does not reuse the resolver when repository %s changes', (field, value) => {
+    const create = createResolverFactory(Resolver, 'APT');
+    const opts = options();
+    const first = create(opts);
+    const repository = { ...opts.repositories[0], [field]: value } as Repository;
+    const changed = { ...opts, repositories: [repository] };
+
+    const second = create(changed);
+    expect(second).not.toBe(first);
+    expect(second.options).toEqual(changed);
+    expect(second.options).not.toBe(changed);
+  });
+
+  it('treats repository order as part of the cache identity', () => {
+    const create = createResolverFactory(Resolver, 'APT');
+    const opts = options();
+    const secondary = { ...opts.repositories[0], id: 'universe' };
+    const first = create({ ...opts, repositories: [opts.repositories[0], secondary] });
+    const reordered = create({ ...opts, repositories: [secondary, opts.repositories[0]] });
+
+    expect(reordered).not.toBe(first);
+  });
+
+  it('reuses equivalent cloned options regardless of object property order', () => {
+    const create = createResolverFactory(Resolver, 'APT');
+    const opts = options();
+    const repository = opts.repositories[0];
+    const equivalent: DependencyResolverOptions = {
+      includeRecommends: opts.includeRecommends,
+      repositories: [{
+        isOfficial: repository.isOfficial,
+        priority: repository.priority,
+        gpgCheck: repository.gpgCheck,
+        enabled: repository.enabled,
+        baseUrl: repository.baseUrl,
+        name: repository.name,
+        id: repository.id,
+        gpgKeyUrl: repository.gpgKeyUrl,
+      }],
+      architecture: opts.architecture,
+      distribution: {
+        extendedRepos: [...opts.distribution.extendedRepos],
+        defaultRepos: [...opts.distribution.defaultRepos],
+        architectures: [...opts.distribution.architectures],
+        packageManager: opts.distribution.packageManager,
+        version: opts.distribution.version,
+        name: opts.distribution.name,
+        id: opts.distribution.id,
+      },
+      includeOptional: opts.includeOptional,
+    };
+
+    expect(create(opts)).toBe(create(equivalent));
+  });
+
+  it('snapshots nested options without retaining mutable caller objects', () => {
+    const create = createResolverFactory(Resolver, 'APT');
+    const opts = options();
+    const first = create(opts);
+    const equivalent = structuredClone(opts);
+
+    opts.architecture = 'arm64';
+    opts.repositories[0].name = 'mutated';
+    opts.distribution.architectures.push('i386');
+    opts.distribution.defaultRepos[0].baseUrl = 'https://mutated.example.test';
+
+    expect(first.options).toEqual(equivalent);
+    expect(first.options).not.toBe(opts);
+    expect(first.options.repositories).not.toBe(opts.repositories);
+    expect(first.options.distribution).not.toBe(opts.distribution);
+    expect(create(equivalent)).toBe(first);
+  });
+
+  it('refreshes the resolver when the cache manager reference changes and reuses it afterward', () => {
+    const create = createResolverFactory(Resolver, 'APT');
+    const opts = options();
+    const cacheA = { get: vi.fn(), set: vi.fn() };
+    const cacheB = { get: vi.fn(), set: vi.fn() };
+    const first = create({ ...opts, cacheManager: cacheA });
+    const secondOptions = { ...opts, cacheManager: cacheB };
+    const second = create(secondOptions);
+
+    expect(second).not.toBe(first);
+    expect(create(secondOptions)).toBe(second);
   });
 
   it.each([
@@ -192,7 +288,8 @@ describe('createResolverFactory', () => {
     const changed = change(opts);
     const second = create(changed);
     expect(second).not.toBe(first);
-    expect(second.options).toBe(changed);
+    expect(second.options).toEqual(changed);
+    expect(second.options).not.toBe(changed);
     expect(create(changed)).toBe(second);
   });
 
@@ -210,7 +307,9 @@ describe('createResolverFactory', () => {
       const secondRequest = create(requestOptions);
       expect(firstRequest).not.toBe(cached);
       expect(secondRequest).not.toBe(firstRequest);
-      expect(firstRequest.options).toBe(requestOptions);
+      expect(firstRequest.options).toEqual(requestOptions);
+      expect(firstRequest.options).not.toBe(requestOptions);
+      expect(firstRequest.options[field]).toBe(requestOptions[field]);
       expect(create(opts)).toBe(cached);
     }
   );

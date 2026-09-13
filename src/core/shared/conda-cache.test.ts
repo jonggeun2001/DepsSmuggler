@@ -79,7 +79,7 @@ describe('conda-cache', () => {
     const result = await fetchRepodata('conda-forge', 'linux-64', { cacheDir });
 
     expect(result?.fromCache).toBe(true);
-    expect(result?.data.info.subdir).toBe('linux-64');
+    expect(result?.data.info?.subdir).toBe('linux-64');
     expect(mockedAxiosGet).not.toHaveBeenCalled();
   });
 
@@ -115,7 +115,7 @@ describe('conda-cache', () => {
     const updatedMeta = await fs.readJson(metaPath);
 
     expect(result?.fromCache).toBe(true);
-    expect(result?.data.info.subdir).toBe(subdir);
+    expect(result?.data.info?.subdir).toBe(subdir);
     expect(updatedMeta.cachedAt).toBeGreaterThan(cachedAt);
     expect(mockedAxiosGet).toHaveBeenCalledTimes(2);
   });
@@ -154,8 +154,8 @@ describe('conda-cache', () => {
 
     expect(first?.fromCache).toBe(false);
     expect(second?.fromCache).toBe(false);
-    expect(first?.data.info.subdir).toBe(subdir);
-    expect(second?.data.info.subdir).toBe(subdir);
+    expect(first?.data.info?.subdir).toBe(subdir);
+    expect(second?.data.info?.subdir).toBe(subdir);
     expect(mockedAxiosGet).toHaveBeenCalledTimes(2);
   });
 

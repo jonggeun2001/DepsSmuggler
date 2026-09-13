@@ -284,7 +284,7 @@ describe('ArtifactCacheManager 매니페스트 및 캐시 조작', () => {
         enabled: true,
       });
 
-      const packageInfo = { type: 'pip', name: 'requests', version: '2.28.0' };
+      const packageInfo = { type: 'pip', name: 'requests', version: '2.28.0' } as const;
       const filePath = '/tmp/test-file.whl';
 
       // addToCache 호출 (비동기로 스트림 이벤트 발생)

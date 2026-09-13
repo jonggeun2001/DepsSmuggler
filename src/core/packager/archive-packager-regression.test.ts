@@ -60,4 +60,35 @@ describe('ArchivePackager regression', () => {
       ])
     );
   });
+
+  it.each(['manifest.json', 'README.txt', 'packages'])('루트 파일 %s가 기본 압축 경로를 덮어쓰지 못한다', async (filename) => {
+    const source = path.join(tempDir, filename);
+    const output = path.join(tempDir, 'bundle.zip');
+    await fs.writeFile(source, 'conflicting content');
+    await expect(getArchivePackager().createArchive([], output, [], {
+      format: 'zip', rootFiles: [source],
+    })).rejects.toThrow('압축 루트 파일 이름이 중복됩니다');
+    expect(await fs.pathExists(output)).toBe(false);
+  });
+
+  it('서로 다른 디렉터리의 같은 루트 파일 이름을 거부한다', async () => {
+    const first = path.join(tempDir, 'one/install.sh');
+    const second = path.join(tempDir, 'two/install.sh');
+    await fs.outputFile(first, 'first');
+    await fs.outputFile(second, 'second');
+    const output = path.join(tempDir, 'bundle.tar.gz');
+    await expect(getArchivePackager().createArchive([], output, [], {
+      format: 'tar.gz', rootFiles: [first, second],
+    })).rejects.toThrow('압축 루트 파일 이름이 중복됩니다');
+    expect(await fs.pathExists(output)).toBe(false);
+  });
+
+  it('필수 루트 파일이 없으면 압축물을 만들지 않는다', async () => {
+    const output = path.join(tempDir, 'bundle.zip');
+    await expect(getArchivePackager().createArchive([], output, [], {
+      format: 'zip', rootFiles: [path.join(tempDir, 'install.sh')],
+    })).rejects.toThrow();
+    expect(await fs.pathExists(output)).toBe(false);
+  });
+
 });

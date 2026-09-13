@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node-version: [20]
+        node-version: [24]
 
     runs-on: ${{ matrix.os }}
 
@@ -27,8 +27,19 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
+      - name: Use npm 11.8.0
+        run: |
+          npm install --global npm@11.8.0
+          npm --version
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify Electron runtime
+        env:
+          ELECTRON_RUN_AS_NODE: '1'
+        run: >-
+          npx electron -e "require('node:assert/strict').equal(process.versions.electron, require('./node_modules/electron/package.json').version); console.log(JSON.stringify({electron: process.versions.electron, node: process.versions.node}))"
 
       - name: Run unit tests
         run: npm test
@@ -63,6 +74,12 @@ jobs:
           DEPS_SMUGGLER_NATIVE_MAVEN: '1'
         run: bash scripts/verify-worktree.sh src/core/packager/maven-native-consumer.integration.test.ts
 
+      - name: Test Maven project bundle with native Maven
+        if: runner.os == 'Linux'
+        env:
+          DEPS_SMUGGLER_NATIVE_MAVEN_PROJECT: '1'
+        run: bash scripts/verify-worktree.sh src/core/packager/maven-project-native-consumer.integration.test.ts
+
       - name: Build project
         run: npm run build
 
@@ -71,6 +88,41 @@ jobs:
 
       - name: Test CLI help
         run: node dist/src/cli/index.js --help
+
+  runtime-contract:
+    name: Runtime contract (Node ${{ matrix.node-version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22.13.0', '24']
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Use npm 11.8.0
+        run: |
+          npm install --global npm@11.8.0
+          npm --version
+
+      - name: Install dependencies with engine enforcement
+        run: npm ci --engine-strict
+
+      - name: Run CJS CLI and ESM script contract
+        run: |
+          bash scripts/verify-worktree.sh \
+            src/cli/version.integration.test.ts \
+            tests/unit/macos-release-artifacts.test.ts \
+            tests/unit/macos-update-support.test.ts \
+            tests/unit/macos-package-command.test.ts
 
   lint:
     name: Lint
@@ -83,8 +135,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
+
+      - name: Use npm 11.8.0
+        run: |
+          npm install --global npm@11.8.0
+          npm --version
 
       - name: Install dependencies
         run: npm ci
@@ -103,14 +160,25 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
+
+      - name: Use npm 11.8.0
+        run: |
+          npm install --global npm@11.8.0
+          npm --version
 
       - name: Install dependencies
         run: npm ci
 
       - name: Run TypeScript type check
         run: npx tsc --noEmit
+
+      - name: Run Electron TypeScript type check
+        run: npx tsc --noEmit -p tsconfig.electron.json
+
+      - name: Run test TypeScript type check
+        run: npm run typecheck:tests
 
   e2e:
     name: Playwright E2E
@@ -123,8 +191,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
+
+      - name: Use npm 11.8.0
+        run: |
+          npm install --global npm@11.8.0
+          npm --version
 
       - name: Install dependencies
         run: npm ci
@@ -147,6 +220,9 @@ jobs:
   coverage:
     name: Test Coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout code
@@ -155,8 +231,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
+
+      - name: Use npm 11.8.0
+        run: |
+          npm install --global npm@11.8.0
+          npm --version
 
       - name: Install dependencies
         run: npm ci
@@ -164,8 +245,24 @@ jobs:
       - name: Run tests with coverage
         run: npm run test:coverage
 
+      - name: Verify non-empty core LCOV report
+        run: test -s coverage/lcov.info
+
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v7
         with:
-          file: ./coverage/lcov.info
-          fail_ci_if_error: false
+          files: ./coverage/lcov.info
+          disable_search: true
+          fail_ci_if_error: true
+          use_oidc: true
+          flags: core
+          name: core-v8
+
+      - name: Preserve core LCOV report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-coverage-lcov
+          path: coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 14

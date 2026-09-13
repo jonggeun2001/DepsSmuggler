@@ -29,6 +29,8 @@
 
 `DownloadPage.tsx` 자체는 현재 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `src/renderer/pages/download-page/hooks/*`, `components/*`, `utils.ts`, `view-state.ts`로 분리되어 있습니다.
 
+main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 생성·파일 크기 조회를 주입받습니다. 주입 계약은 `createArchiveFromDirectory`와 `(path: string) => Promise<{ size: number }>`로 제한해 실제 구현과 부분 테스트 대역을 같은 public 계약으로 검사합니다. IPC payload와 다운로드 처리 흐름은 이 타입 분리로 바뀌지 않습니다. 서비스·화면 테스트는 `npm run typecheck:tests`에서도 검사합니다.
+
 ## 패키지 매니저 노출 범위
 
 ### 홈/위자드에서 노출되는 타입
@@ -81,7 +83,7 @@
 
 추가 특징:
 
-- 기본적으로 SSL 검증을 완화하고 `DEPSSMUGGLER_STRICT_SSL=true`일 때만 엄격 모드로 전환합니다.
+- 기본적으로 Node/axios의 TLS 인증서 검증을 유지해 신뢰되지 않은 인증서를 거부합니다. `DEPSSMUGGLER_STRICT_SSL=false`를 명시했을 때만 `NODE_TLS_REJECT_UNAUTHORIZED=0`과 axios의 `rejectUnauthorized:false`를 설정하는 기존 완화 모드를 사용합니다. 미지정·`true`·잘못된 값은 완화 모드를 켜지 않습니다. 앱 시작 전에 사용자가 별도로 지정한 Node TLS 환경이나 신뢰 CA 설정은 기본 모드에서 덮어쓰지 않습니다.
 - `registerConfigHandlers`, `registerCacheHandlers`, `registerHistoryHandlers`, `registerSearchHandlers`, `registerVersionHandlers`, `registerDownloadHandlers`를 순서대로 등록합니다.
 - 개발 모드에서는 updater 더미 핸들러를 사용합니다.
 
@@ -139,6 +141,8 @@
 - Electron 환경에서는 settings store가 IPC를 통해 `~/.depssmuggler/settings.json`과 동기화되며, 레거시 `defaultOutputFormat/defaultArchiveType` 조합은 로드 시 `zip | tar.gz`로 정규화됩니다.
 - 설정 로드 시 잘못된 숫자·불리언·목록·중첩 객체는 기존 기본값으로 복구하며, 파일의 데이터가 스토어 액션 함수를 덮어쓰지 못하게 합니다. 정상 Windows/macOS pip 타겟의 선택적 필드와 알 수 없는 기존 데이터 필드는 유지합니다. 브라우저 백업 저장소의 접근/용량 오류는 메모리 갱신과 Electron 파일 저장을 막지 않으며, `config:set`의 실패 응답도 로그로 남깁니다. `[settings-store:*]` 로그와 `settings-store.test.ts`로 로드/저장 실패를 추적·검증합니다.
 - 초기 설정 로드·정규화와 기본값 대체는 메모리에만 반영합니다. Electron 파일이나 브라우저 백업을 자동으로 덮어쓰지 않고, 사용자의 설정 변경/초기화부터 저장합니다. 정상/손상/읽기 실패 및 브라우저 초기화의 저장 호출 여부를 `settings-store.test.ts`에서 검증합니다.
+- 설정 IPC는 저장 전에 객체 형태와 알려진 필드의 타입/범위를 검증합니다. 잘못된 저장 입력은 전체 거부하고 기존 파일을 보존하며, 레거시 출력 형식·캐시 별칭과 알 수 없는 JSON 데이터 필드는 유지합니다. 함수·순환 참조·비 JSON 객체와 `__proto__`/`constructor` 키는 저장 입력에서 거부합니다. 조회는 잘못된 개별 필드를 renderer의 기존 메모리 보정에 맡깁니다.
+- 설정·히스토리 IPC는 파일별로 조회/변경을 직렬화하고 임시 파일을 완성한 뒤 rename으로 교체합니다. 전체 저장은 전달한 상태로 대체하는 계약이며, 서로 다른 프로세스의 동시 편집 병합은 포함하지 않습니다. [저장 동작과 실패 계약](shared-file-path.md#설정히스토리-json-저장)을 참고하세요.
 - 설정 화면의 캐시 위젯은 현재 `cache:*` IPC 기준 패키지 메타데이터 캐시만 집계/삭제합니다.
 - `src/renderer/pages/settings/` 아래 `DeliverySettingsSection`, `CacheSettingsSection`, `UpdateSettingsSection`, `use-settings-form-actions.ts`가 `SettingsPage`의 세부 책임을 분리합니다.
 - SMTP 테스트 버튼은 `testSmtpConnection` IPC가 있으면 실제 연결 테스트를 실행하고, 브라우저 개발 환경에서는 시뮬레이션, IPC가 빠진 Electron 빌드에서는 경고와 비활성화 상태를 노출합니다.
@@ -158,7 +162,9 @@
 
 `CartPage`에서 `pom.xml` 파일을 가져오거나 텍스트로 붙여넣을 때는 `<type>pom</type>` 같은 Maven artifact type을 장바구니 metadata로 유지합니다. Maven 장바구니의 중복 판정도 이 artifact type을 포함하므로 같은 GAV라도 기본 JAR과 POM은 각각 보관하고, 같은 type만 중복으로 처리합니다. 이 metadata는 일반 다운로드 IPC를 거쳐 `MavenDownloader`에 전달되므로 POM 전용 의존성은 `.pom` 아티팩트와 체크섬으로 다운로드되고, 최상위 복사본도 `.pom` 확장자를 사용합니다.
 
-Maven 입력의 `dependencyManagement`에 있는 BOM 선언도 가져옵니다. 장바구니 의존성 트리 미리보기와 실제 의존성 포함 다운로드 모두 선택한 type을 resolver에 전달하며, 원격 packaging보다 명시한 type을 우선합니다.
+전체 `<project>` POM의 파일/텍스트 입력은 `maven:parseProject` IPC로 프로젝트 모델과 package 플러그인을 함께 수집합니다. 대상 Maven 버전 입력은 파일/텍스트 양쪽에서 공유하며 기본값은 3.9.11입니다. 파일 읽기와 텍스트 파싱의 전체 진행 작업 수를 추적합니다. 다중 파일 중 일부가 먼저 끝나도 나머지가 완료될 때까지 중복 제출·입력 편집·탭 전환·Esc 및 취소 닫기를 막고, 실패하면 오류와 원본 입력을 유지합니다. preload API가 없는 환경에서는 전체 POM을 부분 파싱해서 성공으로 처리하지 않습니다.
+
+`<dependency>` 조각은 기존 동기 파서로 처리합니다. 전체 POM의 `dependencyManagement`에 있는 import BOM 선언도 모델 POM으로 가져옵니다. 부모 관리 속성은 자식 POM의 최종 property/project.version 문맥으로 해석하고, 자식의 직접 관리 선언 및 child import를 우선합니다. 부모의 직접 관리 선언은 child import보다 우선하며, 같은 BOM GA의 다른 버전 import는 child 선언을 사용합니다. 장바구니 의존성 트리 미리보기와 실제 의존성 포함 다운로드 모두 선택한 type을 resolver에 전달하며, 원격 packaging보다 명시한 type을 우선합니다.
 
 Maven 해결 결과의 `root`는 실행 의존성 그래프이고, `flatList`에는 그 그래프에 없는 부모 POM과 import BOM도 포함될 수 있습니다. 장바구니 미리보기의 `함께 다운로드할 POM` 목록을 펼치면 그래프 밖 모델의 좌표·버전·파일 상세를 확인할 수 있습니다. 그래프에 이미 있는 POM은 이 목록에 중복 표시하지 않으며, 같은 GAV의 JAR와 POM, 서로 다른 classifier를 구분합니다.
 
@@ -205,6 +211,8 @@ OS 전용 흐름의 전달 방식은 로컬 저장이며, 일반 다운로드의
 - 패치 노트는 GitHub updater가 전달하는 HTML의 제목·목록·강조·코드·표를 서식에 맞게 표시합니다. 일반 텍스트는 줄바꿈을 유지하며, 버전별 노트 배열은 버전과 함께 표시하고 빈 노트는 생략합니다. Markdown을 직접 파싱하는 화면은 아닙니다.
 - 외부 HTML은 DOMPurify의 태그·속성 허용 목록으로 정제합니다. 스크립트, 이벤트 속성, 스타일, 이미지와 iframe은 표시하지 않습니다. HTTP(S) 링크는 updater IPC에서 주소를 다시 검증한 뒤 시스템 브라우저로 열며 앱 화면은 이동하지 않습니다.
 - 패키징된 앱은 시작 후 약 3초 뒤 업데이트를 확인합니다. 자동 다운로드 기본값은 `false`이며, 사용자가 다운로드와 설치/재시작을 선택할 수 있고 내려받은 업데이트는 앱 종료 시 설치하도록 설정되어 있습니다.
+- Electron 44 앱 번들의 `mac.minimumSystemVersion`은 macOS `13.0.0`입니다. 업데이트 피드의 `minimumSystemVersion`은 updater가 `os.release()`와 비교하므로 Darwin 커널 `22.0.0`을 사용합니다. `postpackage:mac`이 생성된 피드에 이 조건을 기록하고 검증합니다. 정책 값은 `scripts/macos-update-policy.json`에 있습니다. 마케팅 OS 버전 `13.0.0`을 피드에 넣으면 macOS 12 차단이 되지 않습니다. 생성된 모든 `*-mac.yml`은 이 조건도 검사합니다.
+- macOS 릴리스는 설치용 DMG와 업데이트용 ZIP을 함께 생성합니다. `latest-mac.yml`은 ZIP을 참조해야 하며 DMG만 있으면 MacUpdater가 다운로드를 시작하지 못합니다. 릴리스 CI는 업로드 전에 참조 파일의 존재·크기·SHA512를 검사하고 메타데이터도 함께 전달합니다. 기존 DMG 단독 릴리스에는 소스 수정이 소급 적용되지 않습니다.
 - 설정 화면의 `autoUpdate`/`autoDownloadUpdate` 값은 저장·복원되지만 현재 updater 동작과 연결되어 있지 않습니다. 시작 검사에서는 `autoUpdate`를 읽지 않으며, 설정 저장은 `updater.setAutoDownload`를 호출하지 않습니다. `지금 확인` 버튼은 실제 `updater.check`를 호출합니다.
 - 개발 모드에서는 업데이트 확인·다운로드·설치가 no-op 응답을 반환합니다. 패치 노트 링크 열기는 배포 앱과 같은 주소 검증을 사용합니다.
 

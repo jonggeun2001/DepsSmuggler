@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { parseMavenPomDependencies } from './maven-pom-parser';
+import { isMavenProjectPom, parseMavenPomDependencies } from './maven-pom-parser';
 
 describe('parseMavenPomDependencies', () => {
+  it('routes a namespace-prefixed project to full model parsing and ignores project tags in comments', () => {
+    expect(isMavenProjectPom('<m:project xmlns:m="urn:maven"><m:artifactId>app</m:artifactId></m:project>')).toBe(true);
+    expect(isMavenProjectPom('<!-- <project> --> <dependencies/>')).toBe(false);
+    expect(isMavenProjectPom('<project/>')).toBe(true);
+  });
   it('일반 의존성과 dependencyManagement의 BOM 선언을 함께 가져온다', () => {
     const packages = parseMavenPomDependencies(`
       <project>

@@ -308,7 +308,13 @@ XML 속성을 일괄 숫자 변환하지 않으므로 RPM 버전·release·의�
 
 `YumDependencyResolver`는 모든 활성 저장소의 로딩이 성공한 뒤 패키지·provides 인덱스를 반영합니다. primary 누락이나 조회·파싱 실패를 빈 검색 결과로 숨기지 않으며, 실패한 시도의 일부 목록은 다음 재시도에서 사용하지 않습니다. 정상적으로 저장한 저장소별 디스크 캐시는 재사용합니다.
 
-YUM 파싱 결과는 `{ schemaVersion: 1, packages }` 캐시로 저장합니다. 이전 배열 형식, 알 수 없는 스키마와 잘못된 버전 타입은 다시 파싱해 같은 키에 저장하며, 현재 형식은 JSON 저장·복원 뒤에도 버전·release·의존성 버전 문자열을 유지합니다.
+YUM 파싱 결과는 `{ schemaVersion: 3, packages }` 캐시로 저장합니다. 이전 배열 형식과 schema 1·2, 알 수 없는 스키마와 잘못된 버전·파일 정보 타입은 다시 파싱해 같은 키에 저장합니다. 현재 형식은 JSON 저장·복원 뒤에도 버전·release·의존성 버전 문자열과 primary 파일 정보를 유지합니다. schema 1에서 `pre=1`을 선택 의존성으로 저장했거나 schema 2에서 파일 제공 정보를 누락한 결과도 다시 파싱합니다.
+
+`rpm:requires`의 `pre=1`은 설치 시 필요한 선행 요구 항목이며 선택 의존성이 아닙니다. 일반 requires와 함께 기본 의존성 목록에 포함합니다. 예를 들어 Rocky의 `filesystem → setup → system-release` 관계는 `includeRecommends`를 켜지 않아도 따라가며, `system-release`는 해당 기능을 제공하는 `rocky-release`로 해결합니다. 별도 recommends 항목과 기존 시스템 런타임 필터는 그대로 적용합니다. [RPM Requires 설명](https://rpm.org/docs/4.20.x/manual/spec.html#requires)
+
+YUM `primary.xml.gz`의 `rpm:provides`에는 패키지 자체의 이름을 항상 포함하고, `OSPackageInfo.provides`에 있는 capability 이름을 중복 없이 추가합니다. 이름은 XML 속성으로 escape하므로 `libtinfo.so.6()(64bit)` 같은 라이브러리 capability도 생성 저장소의 DNF 검색에 전달됩니다. 현재 `provides` 타입은 `string[]`이므로 RPM provide의 flags·epoch·ver·rel 속성은 별도로 보존하거나 비교하지 않습니다.
+
+`primary.xml.gz`의 `<format><file>` 항목은 `OSPackageInfo.rpmPrimaryFiles`에 경로와 `file`·`dir`·`ghost` 타입으로 보존합니다. 로컬 저장소의 primary와 filelists 양쪽에 해당 패키지의 파일 정보를 기록하므로 `/usr/bin/sh` 같은 파일 제공 항목을 DNF가 조회할 수 있습니다. 경로는 XML escape하고 중복 항목은 한 번만 출력합니다. 보존 범위는 상위 primary에 실린 파일이며, 상위 filelists 전체를 내려받거나 RPM의 전체 파일 목록을 추출하지는 않습니다.
 
 ```typescript
 interface RepomdInfo {
@@ -481,7 +487,9 @@ class OsPackageCache {
 
 persistent 캐시 조회 시 최근 접근 시각을 JSON 파일에도 기록해 다음 실행의 LRU 정리에 반영합니다. 이 기록은 기존 캐시 파일을 다시 쓰며, TTL 기준인 최초 저장 시각은 갱신하지 않습니다. 접근 시각 저장에 실패해도 캐시에서 읽은 데이터는 반환하고 경고를 기록합니다.
 
-캐시 키는 패키지 관리자·저장소 URL 토큰·아키텍처·데이터 종류로 구성하고 전체 키를 Base64url 파일명으로 저장합니다. 다시 읽을 때 첫 관리자와 마지막 아키텍처·데이터 종류를 기준으로 구분하므로 저장소 토큰 안의 포트·IPv6 콜론은 유지됩니다. 기존 키와 파일명을 그대로 사용하며, 관리자·아키텍처·데이터 종류가 유효하지 않거나 저장소 토큰이 비어 있는 파일과 이전 손실 파일명 형식은 계속 제거합니다.
+캐시 키는 `관리자:v2-<저장소 식별과 component의 SHA256>:아키텍처:데이터종류`이며 전체 키를 Base64url 파일명으로 저장합니다. `repository-identity.ts`가 ID·이름·URL·활성 상태·GPG 검증/키 URL·priority·공식 여부를 고정 순서로 직렬화합니다. URL의 protocol·포트·IPv6·경로·query·대소문자를 그대로 반영하므로 서로 다른 주소나 설정이 같은 키가 되지 않습니다. 같은 의미 필드를 가진 객체 복제는 같은 키를 사용합니다. APT는 입력 저장소 URL을 수정하지 않고 원본 저장소와 component를 `createKey`의 별도 인수로 전달합니다. component는 해시 입력에 포함하며 다른 관리자는 생략합니다.
+
+persistent 캐시 시작 시 v2 SHA256 형식과 관리자·아키텍처·데이터 종류를 검증합니다. 저장소 설정을 충분히 식별하지 못하는 이전 v1/Base64url 메타데이터와 더 오래된 손실 파일명 형식은 제거하고 다음 조회에서 다시 수집합니다. 이 변경은 OS 메타데이터 캐시 파일에만 적용하며 다운로드한 패키지/아카이브는 삭제하지 않습니다. resolver 인스턴스 재사용도 동일한 저장소 설정과 배열 순서를 기준으로 합니다. [Resolver 계약](resolvers.md)을 참고하세요.
 
 APT resolver는 원본 Control 필드를 함께 보존하는 `{ schemaVersion: 1, packages }` 값을 저장합니다. 이전 배열 캐시나 알 수 없는 스키마는 다시 파싱해 같은 키에 저장하고, 현재 스키마는 재사용합니다. 원본 필드는 JSON 객체이므로 persistent 캐시를 거쳐도 의존성 연산자·대안·여러 줄 설명이 유지됩니다.
 
@@ -629,7 +637,19 @@ class OSRepoPackager {
 | APT | `Packages`, `Packages.gz`, `Release` | TypeScript Control 텍스트 생성 + gzip |
 | APK | `APKINDEX.tar.gz` | `APKINDEX` 항목 하나를 담은 gzip tar 아카이브를 Node `tar`로 생성 |
 
-현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다.
+현재 패키저는 `createrepo`, `dpkg-scanpackages`, `apk index`를 실행하지 않습니다. YUM은 `Packages/` 하위에, APT/APK는 저장소 루트에 파일을 복사합니다. APT/APK의 기존 metadata 생성 의미는 유지합니다.
+
+YUM 저장소 생성은 선택된 모든 패키지의 `downloadedFiles` 매핑과 소스 경로를 먼저 확인한 뒤 복사합니다. 소스는 심볼릭 링크를 포함하지 않는 일반 파일이어야 하며, 기존 `Packages` 항목은 일반 디렉터리여야 합니다. 이미 존재하는 목적지 항목도 일반 파일이어야 하고, 실제 basename이 대소문자만 다른 경우까지 포함해 충돌하면 복사 전에 실패합니다. 매핑 누락·소스 오류·목적지 오류는 빈 저장소 성공으로 처리하지 않습니다.
+
+복사 후 YUM 메타데이터의 `location`은 실제 파일명을 URI 경로 한 구간으로 인코딩한 `Packages/<segment>`를 사용하고 XML 특수 문자를 이스케이프합니다. `primary.xml.gz`의 RPM checksum과 `size package`, `filelists.xml.gz`와 `other.xml.gz`의 `pkgid`는 실제 복사한 파일의 바이트 수와 스트림으로 계산한 SHA-256을 사용합니다. 입력 모델의 오래된 크기·체크섬은 사용하지 않습니다. 유효한 `installedSize`는 0을 포함해 보존하고, 알 수 없으면 파일 크기를 대체값으로 기록합니다. 모델에 없는 `size archive`도 파일 크기로 대체하며, 두 대체값은 RPM 헤더에서 추출한 설치·아카이브 크기가 아닙니다.
+
+YUM의 `RepoResult.totalSize`는 복사한 패키지 파일의 바이트 합계이며 메타데이터·스크립트 크기는 제외합니다. APT/APK의 `totalSize`는 기존처럼 입력 모델의 `size` 합계를 반환합니다.
+
+YUM preflight 이후 복사·metadata 생성 중 파일 시스템 오류가 발생하면 오류를 전달합니다. 이 경계는 디렉터리 내구성이나 전체 출력의 rollback을 보장하지 않으므로, 호출자는 실패 결과를 성공 저장소로 사용하지 않아야 합니다.
+
+YUM 저장소를 생성할 때 `primary.xml.gz`의 각 RPM에는 self-provide와 입력 패키지의 distinct `provides` capability 이름이 기록됩니다. 이 정보는 다운로드된 RPM payload에서 새로 추출하지 않고 resolver/parser가 가진 `OSPackageInfo.provides`를 사용합니다. 현재 모델은 capability 이름만 표현하므로 versioned 또는 flags가 붙은 RPM provides의 의미까지 native solver에서 재현한다고 보장하지 않습니다.
+
+Rocky 9 Bash의 기본 CLI 묶음에는 `setup`과 그 하위 의존성이 포함됩니다. 네트워크를 차단한 기존 Rocky 9.3 컨테이너에서 생성 저장소만 사용해 `/usr/bin/sh` 제공 패키지를 조회하고 `bash`·`filesystem`·`setup`을 실제 업그레이드했습니다. 새 컨테이너 두 번에서 Bash `5.1.8-9.el9`, filesystem `3.16-5.el9`, setup `2.13.7-10.el9` 설치와 기존 ca-certificates 유지, 새 Bash 실행을 확인했습니다. 빈 installroot는 기존 필터가 제외하는 libc·loader 런타임 때문에 완전한 OS 설치에 사용할 수 없습니다.
 
 APT는 수신한 `Packages`의 `aptControlFields`에서 의존성 조건과 대안, `Pre-Depends`, `Provides`, `Conflicts`, `Breaks`, `Replaces`, `Multi-Arch`, `Installed-Size` 등 Control 필드를 보존합니다. 여러 줄 값이 있으면 Debian continuation 문법으로 출력하므로 설명의 들여쓰기와 빈 문단 표기도 유지됩니다. 상위 저장소가 짧은 설명과 `Description-md5`만 제공하면 그 값을 유지하며, 별도 Translation 파일을 받거나 DEB의 긴 설명을 추출하지는 않습니다. `Packages.gz`에는 같은 `Packages` 내용을 압축합니다.
 

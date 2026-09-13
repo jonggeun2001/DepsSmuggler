@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { createEmailSenderMock } from '../../src/core/mailer/__mocks__/email-sender-mock';
+import type { Limiter } from './download/concurrency-limiter';
 
 vi.mock('../utils/logger', () => ({ createScopedLogger: () => ({
   info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
@@ -15,6 +16,8 @@ const createDeferred = <T>() => {
   });
   return { promise, resolve, reject };
 };
+
+const immediateLimiter = <T>(task: () => Promise<T>): Promise<T> => task();
 
 describe('createDownloadOrchestrator', () => {
   it.each([null, {}, { packages: null }, { packages: [], options: null },
@@ -75,7 +78,7 @@ describe('createDownloadOrchestrator', () => {
       scheduleTask: async (task: () => Promise<void>) => {
         await task();
       },
-      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createLimiter: () => immediateLimiter,
       createPackageRouter: () => router,
       createProgressEmitter: () => progressEmitter as never,
       archivePackager,
@@ -114,11 +117,14 @@ describe('createDownloadOrchestrator', () => {
     const { createDownloadOrchestrator } = await import('./download-orchestrator');
 
     const limiterCalls: number[] = [];
-    const limit = vi.fn(async (task: () => Promise<unknown>) => task());
-    const createLimiter = vi.fn((concurrency: number) => {
+    const limit = vi.fn();
+    const createLimiter = (concurrency: number): Limiter => {
       limiterCalls.push(concurrency);
-      return limit;
-    });
+      return <T>(task: () => Promise<T>) => {
+        limit(task);
+        return task();
+      };
+    };
     const router = {
       downloadPackage: vi.fn().mockImplementation(async (pkg: { id: string }) => ({
         id: pkg.id,
@@ -138,7 +144,7 @@ describe('createDownloadOrchestrator', () => {
         emitDownloadStatus: vi.fn(),
         emitAllComplete: vi.fn(),
       }) as never,
-      archivePackager: createArchivePackagerMock() as never,
+      archivePackager: createArchivePackagerMock(),
       generateInstallScripts: vi.fn(),
     });
 
@@ -175,7 +181,7 @@ describe('createDownloadOrchestrator', () => {
       scheduleTask: async (task: () => Promise<void>) => {
         await task();
       },
-      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createLimiter: () => immediateLimiter,
       createPackageRouter: () => ({
         downloadPackage: vi.fn().mockResolvedValue({
           id: 'pip-requests-2.32.0',
@@ -183,7 +189,7 @@ describe('createDownloadOrchestrator', () => {
         }),
       }),
       createProgressEmitter: () => progressEmitter as never,
-      archivePackager: createArchivePackagerMock() as never,
+      archivePackager: createArchivePackagerMock(),
       generateInstallScripts: vi.fn(),
     });
 
@@ -244,7 +250,7 @@ describe('createDownloadOrchestrator', () => {
       scheduleTask: async (task: () => Promise<void>) => {
         await task();
       },
-      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createLimiter: () => immediateLimiter,
       createPackageRouter: () => router,
       createProgressEmitter: () => progressEmitter as never,
       archivePackager,
@@ -288,7 +294,7 @@ describe('createDownloadOrchestrator', () => {
         id: 'pip-requests-2.28.0',
         name: 'requests',
       }),
-    ]);
+    ], { npmPackageFiles: [], npmRootPackages: undefined, condaPackageFiles: [] });
     expect(archivePackager.createArchiveFromDirectory).toHaveBeenCalledWith(
       '/tmp/out',
       '/tmp/out.tar.gz',
@@ -339,7 +345,7 @@ describe('createDownloadOrchestrator', () => {
       scheduleTask: async (task: () => Promise<void>) => {
         await task();
       },
-      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createLimiter: () => immediateLimiter,
       createPackageRouter: () => router,
       createProgressEmitter: () => progressEmitter as never,
       archivePackager,
@@ -412,11 +418,11 @@ describe('createDownloadOrchestrator', () => {
     const orchestrator = createDownloadOrchestrator({
       getMainWindow: () => null,
       ensureDir,
-      stat: vi.fn().mockImplementation(async () => statDeferred.promise as never),
+      stat: vi.fn(async (_targetPath: string) => statDeferred.promise),
       scheduleTask: (task: () => Promise<void>) => {
         backgroundTask = task();
       },
-      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createLimiter: () => immediateLimiter,
       createPackageRouter: () => router,
       createProgressEmitter: () => progressEmitter as never,
       archivePackager,
@@ -502,14 +508,14 @@ describe('createDownloadOrchestrator', () => {
     const orchestrator = createDownloadOrchestrator({
       getMainWindow: () => null,
       ensureDir: vi.fn().mockResolvedValue(undefined),
-      stat: vi.fn().mockResolvedValue({ size: 1024 } as never),
+      stat: vi.fn(async (_targetPath: string) => ({ size: 1024 })),
       scheduleTask: (task: () => Promise<void>) => {
         backgroundTask = task();
       },
-      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createLimiter: () => immediateLimiter,
       createPackageRouter: () => router,
       createProgressEmitter: () => progressEmitter as never,
-      archivePackager: createArchivePackagerMock() as never,
+      archivePackager: createArchivePackagerMock(),
       generateInstallScripts: vi.fn(),
       initializeEmailSender: (vi.fn(() =>
         createEmailSenderMock({
@@ -609,7 +615,7 @@ describe('createDownloadOrchestrator', () => {
       scheduleTask: (task: () => Promise<void>) => {
         backgroundTasks.push(task());
       },
-      createLimiter: () => ((task: () => Promise<unknown>) => task()),
+      createLimiter: () => immediateLimiter,
       createPackageRouter: () => router,
       createProgressEmitter: () => progressEmitter as never,
       archivePackager: {
@@ -617,7 +623,7 @@ describe('createDownloadOrchestrator', () => {
           .fn()
           .mockImplementationOnce(async () => archiveDeferred.promise)
           .mockResolvedValueOnce('/tmp/out-2.tar.gz'),
-      } as never,
+      },
       generateInstallScripts: vi.fn(),
     });
 

@@ -3,7 +3,7 @@
  * vi.mock()을 사용하여 axios를 모킹
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
+import { PassThrough, Writable } from 'stream';
 
 // vi.hoisted를 사용하여 모킹 함수 정의
 const { mockAxiosDefault, mockAxiosGet } = vi.hoisted(() => {
@@ -71,13 +71,12 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       });
       (downloader as any).getPackageMetadata = mockGetPackageMetadata;
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
       (downloader as any).verifyShasum = vi.fn().mockResolvedValue(true);
 
@@ -95,8 +94,8 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const downloadPromise = downloader.downloadPackage(info, '/tmp/test');
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test data'));
+        mockStream.end();
       }, 10);
 
       await downloadPromise;
@@ -155,15 +154,14 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       (downloader as any).getPackageMetadata = mockGetPackageMetadata;
 
       // 스트림 모킹
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const info = { type: 'npm' as const, name: 'test-pkg', version: '1.0.0' };
@@ -171,8 +169,8 @@ describe('NpmDownloader downloadPackage 테스트', () => {
 
       // 스트림 이벤트 시뮬레이션
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test data'));
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
@@ -193,15 +191,14 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       });
       (downloader as any).getPackageMetadata = mockGetPackageMetadata;
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       // verifyIntegrity 모킹
@@ -212,8 +209,8 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const downloadPromise = downloader.downloadPackage(info, '/tmp/test');
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test data'));
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
@@ -235,15 +232,14 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       });
       (downloader as any).getPackageMetadata = mockGetPackageMetadata;
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       // verifyIntegrity 모킹 - 실패
@@ -260,8 +256,8 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const downloadPromise = downloader.downloadPackage(info, '/tmp/test');
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test data'));
+        mockStream.end();
       }, 10);
 
       await expect(downloadPromise).rejects.toThrow('무결성 검증 실패');
@@ -282,15 +278,14 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       });
       (downloader as any).getPackageMetadata = mockGetPackageMetadata;
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       // verifyShasum 모킹
@@ -301,8 +296,8 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const downloadPromise = downloader.downloadPackage(info, '/tmp/test');
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test data'));
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
@@ -324,15 +319,14 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       });
       (downloader as any).getPackageMetadata = mockGetPackageMetadata;
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       // verifyShasum 모킹 - 실패
@@ -343,8 +337,8 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const downloadPromise = downloader.downloadPackage(info, '/tmp/test');
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test data'));
+        mockStream.end();
       }, 10);
 
       await expect(downloadPromise).rejects.toThrow('체크섬 검증 실패');
@@ -361,15 +355,14 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       });
       (downloader as any).getPackageMetadata = mockGetPackageMetadata;
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '100' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const progressEvents: any[] = [];
@@ -379,9 +372,9 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const downloadPromise = downloader.downloadPackage(info, '/tmp/test', onProgress);
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('1234567890')); // 10 bytes
-        mockStream.emit('data', Buffer.from('1234567890')); // 10 more bytes
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('1234567890')); // 10 bytes
+        mockStream.write(Buffer.from('1234567890')); // 10 more bytes
+        mockStream.end();
       }, 10);
 
       await downloadPromise;
@@ -445,22 +438,21 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       });
       (downloader as any).getPackageMetadata = mockGetPackageMetadata;
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '100' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const info = { type: 'npm' as const, name: 'test-pkg', version: '1.0.0' };
       const downloadPromise = downloader.downloadPackage(info, '/tmp/test');
 
       setTimeout(() => {
-        mockWriter.emit('error', new Error('Write Error'));
+        mockWriter.destroy(new Error('Write Error'));
       }, 10);
 
       await expect(downloadPromise).rejects.toThrow('Write Error');
@@ -477,15 +469,14 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       });
       (downloader as any).getPackageMetadata = mockGetPackageMetadata;
 
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: {}, // content-length 없음
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const onProgress = vi.fn();
@@ -494,8 +485,8 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const downloadPromise = downloader.downloadPackage(info, '/tmp/test', onProgress);
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test'));
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
@@ -505,23 +496,22 @@ describe('NpmDownloader downloadPackage 테스트', () => {
 
   describe('downloadTarball', () => {
     it('tarball 다운로드 성공', async () => {
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const tarballUrl = 'https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz';
       const downloadPromise = downloader.downloadTarball(tarballUrl, '/tmp/test');
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test data'));
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
@@ -529,15 +519,14 @@ describe('NpmDownloader downloadPackage 테스트', () => {
     });
 
     it('무결성 검증과 함께 다운로드 성공', async () => {
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       // verifyIntegrity 모킹 - 성공
@@ -549,8 +538,8 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const downloadPromise = downloader.downloadTarball(tarballUrl, '/tmp/test', integrity);
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test data'));
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
@@ -559,15 +548,14 @@ describe('NpmDownloader downloadPackage 테스트', () => {
     });
 
     it('무결성 검증 실패 시 에러', async () => {
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       // verifyIntegrity 모킹 - 실패
@@ -579,23 +567,22 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const downloadPromise = downloader.downloadTarball(tarballUrl, '/tmp/test', integrity);
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test data'));
+        mockStream.end();
       }, 10);
 
       await expect(downloadPromise).rejects.toThrow('무결성 검증 실패');
     });
 
     it('progress 콜백 호출', async () => {
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '100' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const onProgress = vi.fn();
@@ -604,8 +591,8 @@ describe('NpmDownloader downloadPackage 테스트', () => {
       const downloadPromise = downloader.downloadTarball(tarballUrl, '/tmp/test', undefined, onProgress);
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('12345'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('12345'));
+        mockStream.end();
       }, 10);
 
       await downloadPromise;
@@ -620,23 +607,22 @@ describe('NpmDownloader downloadPackage 테스트', () => {
     });
 
     it('scoped 패키지 tarball 다운로드', async () => {
-      const mockStream = new EventEmitter();
-      (mockStream as any).pipe = vi.fn().mockReturnValue(mockStream);
+      const mockStream = new PassThrough();
 
       mockAxiosDefault.mockResolvedValue({
         data: mockStream,
         headers: { 'content-length': '1000' },
       });
 
-      const mockWriter = new EventEmitter();
+      const mockWriter = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       (fs.createWriteStream as any).mockReturnValue(mockWriter);
 
       const tarballUrl = 'https://registry.npmjs.org/@types/node/-/node-20.10.0.tgz';
       const downloadPromise = downloader.downloadTarball(tarballUrl, '/tmp/test');
 
       setTimeout(() => {
-        mockStream.emit('data', Buffer.from('test data'));
-        mockWriter.emit('finish');
+        mockStream.write(Buffer.from('test data'));
+        mockStream.end();
       }, 10);
 
       const result = await downloadPromise;
