@@ -46,7 +46,7 @@
 - 업데이트 확인·다운로드·설치는 구현되어 있지만 `autoUpdate`/`autoDownloadUpdate` 설정 토글이 updater 동작을 제어하도록 연결되어 있지는 않습니다.
 - CLI의 실제 옵션, `--file`의 줄 단위 입력, 환경별 아티팩트 선택과 OS 출력 형식의 구분을 반영했습니다.
 - pip/Conda의 대상 파일 선택과 noarch 조건, Maven type/classifier·POM 처리, 캐시·공유 타입·함수 예시를 현재 구현에 맞췄습니다.
-- 테스트 도구와 CI의 범위를 구분했습니다. 특히 브라우저 E2E mock을 실제 Electron·SMTP·외부 저장소 통합 검증으로 설명하지 않습니다. Node 요구사항과 CI 버전, coverage 업로드의 기존 차이도 기록합니다.
+- 테스트 도구와 CI의 범위를 구분했습니다. 특히 브라우저 E2E mock을 실제 Electron·SMTP·외부 저장소 통합 검증으로 설명하지 않습니다. Node 요구사항과 CI 버전, coverage 업로드의 검증 범위도 기록합니다. 보안 의존성 갱신 과정에서 CI는 Node 24로 맞췄습니다.
 
 ## README 구성 참고 조사
 

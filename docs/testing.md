@@ -6,7 +6,7 @@
 
 ## 로컬 검증 명령
 
-`package.json`에는 프로젝트 자체 `engines`가 없습니다. 현재 lockfile의 개발 도구 조건은 Vite `^20.19.0 || >=22.12.0`, jsdom `^20.19.0 || ^22.13.0 || >=24.0.0`, Vitest `^20.0.0 || ^22.0.0 || >=24.0.0`입니다. 패키징 도구의 `@electron/rebuild`와 `node-abi`는 `>=22.12.0`을 요구하므로 전체 도구 조건을 맞추려면 Node 22.13 이상인 22.x 또는 24 이상을 사용합니다. CI는 여전히 `actions/setup-node`의 Node `20`을 사용하며, 이는 패키징 도구의 선언된 최소 버전과 차이가 있습니다.
+`package.json`에는 프로젝트 자체 `engines`가 없습니다. 현재 lockfile의 개발 도구 조건은 Vite `^20.19.0 || >=22.12.0`, jsdom `^20.19.0 || ^22.13.0 || >=24.0.0`, Vitest `^20.0.0 || ^22.0.0 || >=24.0.0`입니다. Electron 44 설치기와 패키징 도구의 `@electron/rebuild`·`node-abi`는 `>=22.12.0`을 요구하므로 전체 도구 조건을 맞추려면 Node 22.13 이상인 22.x 또는 24 이상을 사용합니다. 테스트·릴리스 CI는 `actions/setup-node`의 Node `24`를 사용합니다.
 
 ```bash
 # 표준 worktree 검증 진입점
@@ -39,7 +39,7 @@ CLI 버전 회귀 테스트(`src/cli/version.integration.test.ts`)는 실제 하
 
 두 TypeScript 설정 모두 `noUnusedLocals`와 `noUnusedParameters`를 활성화합니다. 죽은 코드·미사용 인수 정리 후 재유입을 검사하며, 외부 호출 규약을 유지할 인수에는 `_` 접두어를 붙입니다. `retry-utils.test.ts`는 `unknown` 오류 처리에서도 HTTP 상태 코드·타임아웃 판정과 비정형 값의 기존 결과가 유지되는지 확인합니다.
 
-보안/의존성 유지보수 작업에서는 `npm audit`와 함께 `npm test`, `npm run test:e2e`, `npx tsc --noEmit`를 묶어 확인합니다. direct dependency를 올린 뒤 transitive 취약점이 남으면, 가능한 한 patch/minor 범위에서 lockfile 재해결이나 `overrides`로 먼저 정리합니다.
+보안/의존성 유지보수 작업에서는 `npm audit --audit-level=high`와 `npm audit --omit=dev --audit-level=high`를 각각 실행하고, [보안 의존성 갱신 기록](security-dependencies.md)에 잔여 항목과 적용 버전을 남깁니다. 함께 `npm test`, `npm run test:e2e`, `npx tsc --noEmit`를 묶어 확인합니다. direct dependency를 올린 뒤 transitive 취약점이 남으면, 가능한 한 patch/minor 범위에서 lockfile 재해결이나 `overrides`로 먼저 정리합니다.
 
 ## 테스트 종류
 
@@ -466,7 +466,7 @@ UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
 
 주요 잡:
 
-- `test`: Ubuntu/Windows/macOS + Node 20에서 `npm ci`, `npm test`, `npm run build`, CLI `--version`, `--help`
+- `test`: Ubuntu/Windows/macOS + Node 24에서 `npm ci`, `npm test`, `npm run build`, CLI `--version`, `--help`
 - `lint`: `npm run lint`로 ESLint 실행
 - `typecheck`: `npx tsc --noEmit`
 - `e2e`: Chromium 설치 후 `npm run test:e2e`, 실패 시 Playwright 보고서와 결과 artifact 업로드
@@ -483,9 +483,9 @@ UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
 
 그 후 Windows/macOS/Linux 패키징과 draft release 생성이 이어집니다.
 
-macOS는 DMG와 ZIP을 생성한 뒤 `node scripts/verify-macos-update.mjs build`로 안정 채널의 `latest-mac.yml`과 시험 채널의 `beta-mac.yml` 등 `*-mac.yml`을 검사합니다. ZIP 참조, DMG/ZIP 파일의 존재, 메타데이터의 크기·SHA512와 실제 파일의 일치가 필수입니다. 파일 경로가 출력 폴더를 벗어나거나 메타데이터가 누락·손상되면 실패합니다. macOS 패키징 단계는 `--publish never`를 사용하며, 검증이 끝난 산출물과 `*-mac.yml`, blockmap을 artifact로 넘겨 최종 릴리스 단계에서 게시합니다.
+macOS는 DMG와 ZIP을 생성한 뒤 `node scripts/verify-macos-update.mjs build`로 안정 채널의 `latest-mac.yml`과 시험 채널의 `beta-mac.yml` 등 `*-mac.yml`을 검사합니다. ZIP 참조, DMG/ZIP 파일의 존재, 메타데이터의 크기·SHA512와 실제 파일의 일치가 필수입니다. 업데이트 피드는 `scripts/macos-update-policy.json`에 지정된 Darwin 커널 `22.0.0` 조건도 포함해야 합니다. 앱 번들의 macOS `13.0.0` 값과 혼동하지 않습니다. 파일 경로가 출력 폴더를 벗어나거나 메타데이터가 누락·손상되면 실패합니다. macOS 패키징 단계는 `--publish never`를 사용하며, 검증이 끝난 산출물과 `*-mac.yml`, blockmap을 artifact로 넘겨 최종 릴리스 단계에서 게시합니다.
 
-회귀 테스트는 `bash scripts/verify-worktree.sh tests/unit/macos-release-artifacts.test.ts`로 실행합니다. 기존 DMG 단독 설정과 잘못된 feed를 거절하고 실제 임시 파일의 크기·해시를 대조합니다. electron-updater의 ZIP 선택 계약도 확인하며, 서명된 앱의 설치·재시작 성공을 대신하는 검증은 아닙니다. 실제 macOS 다운로드 smoke에서는 격리 프로필의 packaged 앱에 loopback feed를 지정하고 `autoDownload=false`, `autoInstallOnAppQuit=false`로 설정해 다운로드 파일의 해시를 비교합니다. 설치 요청을 호출하지 않고 updater의 임시 서버를 닫습니다.
+회귀 테스트는 `bash scripts/verify-worktree.sh tests/unit/macos-release-artifacts.test.ts tests/unit/macos-update-support.test.ts`로 실행합니다. 실제 prepare 스크립트가 만든 피드를 AppUpdater의 OS 판정에 전달하여 Darwin 21(macOS 12)은 거부하고 Darwin 22 이상은 허용하는지 확인합니다. 기존 DMG 단독 설정과 잘못된 feed를 거절하고 실제 임시 파일의 크기·해시를 대조합니다. electron-updater의 ZIP 선택 계약도 확인하며, 서명된 앱의 설치·재시작 성공을 대신하는 검증은 아닙니다. 실제 macOS 다운로드 smoke에서는 격리 프로필의 packaged 앱에 loopback feed를 지정하고 `autoDownload=false`, `autoInstallOnAppQuit=false`로 설정해 다운로드 파일의 해시를 비교합니다. 설치 요청을 호출하지 않고 updater의 임시 서버를 닫습니다.
 
 ## 테스트 작성 원칙
 

@@ -13,6 +13,7 @@
 | [IPC 핸들러](ipc-handlers.md) | preload API와 main 채널·서비스 연결 |
 | [다운로드 히스토리](download-history.md) | 기록 모델·저장·재다운로드·전달 설정 복원 |
 | [코딩 규칙](coding-conventions.md) | 명명, 모듈 경계, 타입·로그·오류 처리 |
+| [보안 의존성](security-dependencies.md) | 직접·전이 의존성 보안 갱신, 버전 선택·예외·검증 방법 |
 | [테스트](testing.md) | 실행 명령, Vitest·Playwright·CI·검증 한계 |
 | [문서 상태](documentation-status.md) | 문서 분류, 전체 대조 범위, README 참고 조사, 유지보수 기준 |
 
