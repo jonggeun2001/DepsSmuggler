@@ -6,7 +6,7 @@
 
 ## 로컬 검증 명령
 
-`package.json`에는 프로젝트 자체 `engines`가 없습니다. 현재 lockfile의 개발 도구 조건은 Vite `^20.19.0 || >=22.12.0`, jsdom `^20.19.0 || ^22.13.0 || >=24.0.0`, Vitest `^20.0.0 || ^22.0.0 || >=24.0.0`입니다. 패키징 도구의 `@electron/rebuild`와 `node-abi`는 `>=22.12.0`을 요구하므로 전체 도구 조건을 맞추려면 Node 22.13 이상인 22.x 또는 24 이상을 사용합니다. CI는 여전히 `actions/setup-node`의 Node `20`을 사용하며, 이는 패키징 도구의 선언된 최소 버전과 차이가 있습니다.
+`package.json`에는 프로젝트 자체 `engines`가 없습니다. 현재 lockfile의 개발 도구 조건은 Vite `^20.19.0 || >=22.12.0`, jsdom `^20.19.0 || ^22.13.0 || >=24.0.0`, Vitest `^20.0.0 || ^22.0.0 || >=24.0.0`입니다. Electron 44 설치기와 패키징 도구의 `@electron/rebuild`·`node-abi`는 `>=22.12.0`을 요구하므로 전체 도구 조건을 맞추려면 Node 22.13 이상인 22.x 또는 24 이상을 사용합니다. 테스트·릴리스 CI는 `actions/setup-node`의 Node `24`를 사용합니다.
 
 ```bash
 # 표준 worktree 검증 진입점
@@ -39,7 +39,7 @@ CLI 버전 회귀 테스트(`src/cli/version.integration.test.ts`)는 실제 하
 
 두 TypeScript 설정 모두 `noUnusedLocals`와 `noUnusedParameters`를 활성화합니다. 죽은 코드·미사용 인수 정리 후 재유입을 검사하며, 외부 호출 규약을 유지할 인수에는 `_` 접두어를 붙입니다. `retry-utils.test.ts`는 `unknown` 오류 처리에서도 HTTP 상태 코드·타임아웃 판정과 비정형 값의 기존 결과가 유지되는지 확인합니다.
 
-보안/의존성 유지보수 작업에서는 `npm audit`와 함께 `npm test`, `npm run test:e2e`, `npx tsc --noEmit`를 묶어 확인합니다. direct dependency를 올린 뒤 transitive 취약점이 남으면, 가능한 한 patch/minor 범위에서 lockfile 재해결이나 `overrides`로 먼저 정리합니다.
+보안/의존성 유지보수 작업에서는 `npm audit --audit-level=high`와 `npm audit --omit=dev --audit-level=high`를 각각 실행하고, [보안 의존성 갱신 기록](security-dependencies.md)에 잔여 항목과 적용 버전을 남깁니다. 함께 `npm test`, `npm run test:e2e`, `npx tsc --noEmit`를 묶어 확인합니다. direct dependency를 올린 뒤 transitive 취약점이 남으면, 가능한 한 patch/minor 범위에서 lockfile 재해결이나 `overrides`로 먼저 정리합니다.
 
 ## 테스트 종류
 
@@ -466,7 +466,7 @@ UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
 
 주요 잡:
 
-- `test`: Ubuntu/Windows/macOS + Node 20에서 `npm ci`, `npm test`, `npm run build`, CLI `--version`, `--help`
+- `test`: Ubuntu/Windows/macOS + Node 24에서 `npm ci`, `npm test`, `npm run build`, CLI `--version`, `--help`
 - `lint`: `npm run lint`로 ESLint 실행
 - `typecheck`: `npx tsc --noEmit`
 - `e2e`: Chromium 설치 후 `npm run test:e2e`, 실패 시 Playwright 보고서와 결과 artifact 업로드

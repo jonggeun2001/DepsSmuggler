@@ -39,7 +39,7 @@
 
 ## 빠른 시작
 
-소스 실행에는 Git, Node.js, npm이 필요합니다. 잠금 파일의 설치·테스트·패키징 도구 요구사항을 함께 만족하는 버전은 **Node.js 22.13 이상인 22.x 또는 24 이상**입니다. CI는 Node.js 20을 사용하지만 일부 패키징 도구의 요구 버전과 차이가 있습니다. 세부 사항은 [테스트 문서](docs/testing.md)를 참고하세요.
+소스 실행에는 Git, Node.js, npm이 필요합니다. 잠금 파일의 설치·테스트·패키징 도구 요구사항을 함께 만족하는 버전은 **Node.js 22.13 이상인 22.x 또는 24 이상**입니다. 테스트·릴리스 CI는 Node.js 24를 사용합니다. 세부 사항은 [테스트 문서](docs/testing.md)를 참고하세요.
 
 ```bash
 git clone https://github.com/jonggeun2001/DepsSmuggler.git

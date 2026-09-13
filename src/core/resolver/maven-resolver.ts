@@ -556,7 +556,7 @@ export class MavenResolver implements IResolver {
             const response = await this.axiosInstance.head(url, {
               timeout: MAVEN_CONSTANTS.HEAD_REQUEST_TIMEOUT_MS,
             });
-            const size = parseInt(response.headers['content-length'] || '0', 10);
+            const size = parseInt(String(response.headers['content-length'] || '0'), 10);
 
             return {
               ...pkg,

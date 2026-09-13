@@ -47,7 +47,7 @@ export abstract class BaseLanguageDownloader {
       });
       source = response.data as Readable;
       controller.signal.throwIfAborted();
-      const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
+      const totalBytes = parseInt(String(response.headers['content-length'] || '0'), 10);
       let downloadedBytes = 0;
       let lastBytes = 0;
       let lastTime = Date.now();
