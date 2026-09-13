@@ -275,8 +275,10 @@ Control continuation과 필드 의미는 [Debian Policy](https://www.debian.org/
 
 `src/core/resolver/os-resolver-utils.test.ts`는 같은 값의 복제본 재사용, 저장소 설정/순서와 cache manager 참조 변경, 외부 옵션 변경으로부터의 스냅샷 분리, signal/progress 요청의 bypass를 검증합니다. `os-repository-identity.integration.test.ts`는 실제 loopback YUM 저장소·resolver·persistent cache를 연결해 같은 ID의 URL 변경이 새 endpoint를 조회하고, 같은 URL의 GPG/priority 변경이 이전 repository 정보를 재사용하지 않는지 확인합니다. 새 캐시 인스턴스로 같은 설정을 다시 읽을 때는 HTTP 요청이 늘지 않아야 합니다. fixture는 인덱스 파싱과 출처 정보 검증용이며 네이티브 RPM 설치 검증은 아닙니다.
 
+`apt-repository-identity.integration.test.ts`는 실제 APT parser·resolver·persistent cache를 연결해 원본 URL의 trailing slash 변경이 옛 출처 정보를 재사용하지 않는지 검증합니다. component별 키 분리는 공통 캐시 단위 테스트에서 검사합니다.
+
 ```bash
-bash scripts/verify-worktree.sh src/core/resolver/os-resolver-utils.test.ts src/core/downloaders/os-shared/cache-manager.test.ts src/core/resolver/os-repository-identity.integration.test.ts
+bash scripts/verify-worktree.sh src/core/resolver/os-resolver-utils.test.ts src/core/downloaders/os-shared/cache-manager.test.ts src/core/resolver/os-repository-identity.integration.test.ts src/core/resolver/apt-repository-identity.integration.test.ts
 ```
 
 `src/core/downloaders/apk.integration.test.ts`는 현재 OS backend API로 실제 Alpine 3.20의 `zlib`와 제공 패키지를 내려받고 APK 내부 `.PKGINFO` 및 TAR.GZ의 파일 목록을 비교합니다. 기본 의존성 포함 경로와 `--no-deps`를 구분하며, 오래된 다운로더 API 호출과 조용한 조기 성공 처리를 사용하지 않습니다. 임시 캐시·출력을 정리하며 네이티브 `apk` 설치는 수행하지 않습니다.

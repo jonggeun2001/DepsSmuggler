@@ -112,10 +112,11 @@ export class OsPackageCache {
     type: 'yum' | 'apt' | 'apk',
     repo: Repository,
     architecture: OSArchitecture,
-    dataType: 'repomd' | 'primary' | 'packages' | 'apkindex' | 'release'
+    dataType: 'repomd' | 'primary' | 'packages' | 'apkindex' | 'release',
+    component?: string
   ): string {
     const repositoryHash = createHash('sha256')
-      .update(getRepositoryIdentity(repo), 'utf8')
+      .update(JSON.stringify([getRepositoryIdentity(repo), component ?? null]), 'utf8')
       .digest('hex');
     return `${type}:v2-${repositoryHash}:${architecture}:${dataType}`;
   }

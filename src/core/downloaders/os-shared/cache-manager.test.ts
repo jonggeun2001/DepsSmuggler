@@ -94,6 +94,30 @@ describe('OsPackageCache', () => {
     expect(key).toMatch(/^yum:v2-[a-f0-9]{64}:x86_64:primary$/);
   });
 
+  it('APT component와 원본 repository URL의 trailing slash를 함께 식별한다', () => {
+    const repository = repo({
+      baseUrl: 'https://archive.example/ubuntu/dists/jammy/',
+    });
+    const normalizedRepository = repo({
+      baseUrl: 'https://archive.example/ubuntu/dists/jammy',
+    });
+    const mainKey = OsPackageCache.createKey('apt', repository, 'amd64', 'packages', 'main');
+    const universeKey = OsPackageCache.createKey('apt', repository, 'amd64', 'packages', 'universe');
+    const normalizedKey = OsPackageCache.createKey(
+      'apt', normalizedRepository, 'amd64', 'packages', 'main'
+    );
+    const omittedComponentKey = OsPackageCache.createKey(
+      'apt', repository, 'amd64', 'packages'
+    );
+    const emptyComponentKey = OsPackageCache.createKey(
+      'apt', repository, 'amd64', 'packages', ''
+    );
+
+    expect(universeKey).not.toBe(mainKey);
+    expect(normalizedKey).not.toBe(mainKey);
+    expect(omittedComponentKey).not.toBe(emptyComponentKey);
+  });
+
   it.each([
     ['id', { id: 'changed-id' }],
     ['name', { name: 'Changed name' }],
