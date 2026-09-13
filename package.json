@@ -13,7 +13,8 @@
     "build:electron": "tsc -p tsconfig.electron.json && node -e \"require('fs').writeFileSync('dist/package.json', '{\\\"type\\\":\\\"commonjs\\\"}')\"",
     "watch": "tsc -w",
     "package:win": "npm run build && electron-builder --win",
-    "package:mac": "npm run build && electron-builder --mac",
+    "package:mac": "npm run build && node scripts/package-macos.mjs",
+    "postpackage:mac": "node scripts/prepare-macos-update.mjs build && node scripts/verify-macos-update.mjs build",
     "package:linux": "npm run build && electron-builder --linux",
     "cli": "node scripts/cli.cjs",
     "test": "vitest run",
@@ -105,6 +106,7 @@
     },
     "mac": {
       "target": ["dmg", "zip"],
+      "minimumSystemVersion": "13.0.0",
       "category": "public.app-category.developer-tools",
       "icon": "assets/icons/icon.icns"
     },

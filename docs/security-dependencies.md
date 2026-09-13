@@ -24,7 +24,9 @@ package.json의 최소 버전과 lockfile을 함께 갱신했습니다. 두 Vite
 - `minimatch@10 → brace-expansion ^5.0.9`: 기존 `^5.0.5` 범위 안에서 자원 고갈 패치를 포함하는 최소 버전을 보장합니다. 이전 minimatch major의 brace-expansion API는 바꾸지 않습니다.
 - `undici@7 → ^7.29.0`: jsdom의 `^7.24.5` 범위 안에서 HTTP/TLS·캐시 처리 패치를 반영합니다. node-gyp가 사용하는 undici 6에는 적용하지 않습니다.
 
-Electron 39.8.10은 일부 런타임 advisory를 해결해도 `extract-zip`의 High 항목을 남깁니다. Electron 44는 유지보수되는 `@electron-internal/extract-zip`을 사용하므로 런타임과 설치기를 함께 갱신했습니다. Electron 44 설치기의 Node 최소 요구사항은 22.12이므로 테스트·릴리스 CI도 Node 24로 변경했습니다. CLI 최소 버전·타입·packageManager 계약은 [이슈 #158](https://github.com/jonggeun2001/DepsSmuggler/issues/158)에서 이어서 관리합니다. [Electron 지원 일정](https://releases.electronjs.org/schedule)
+Electron 39.8.10은 일부 런타임 advisory를 해결해도 `extract-zip`의 High 항목을 남깁니다. Electron 44는 유지보수되는 `@electron-internal/extract-zip`을 사용하므로 런타임과 설치기를 함께 갱신했습니다. Electron 44 설치기의 Node 최소 요구사항은 22.12이므로 테스트·릴리스 CI도 Node 24로 변경했습니다. Electron 44의 최소 macOS는 13입니다. 앱 번들에는 `minimumSystemVersion: 13.0.0`을 설정합니다. `postpackage:mac`은 `scripts/macos-update-policy.json`에 정의한 `22.0.0`(Darwin 커널)을 생성된 모든 `*-mac.yml`의 `minimumSystemVersion`에 기록하고 검증합니다. electron-builder의 ReleaseInfo 스키마는 이 필드를 받지 않으므로 지원하지 않는 설정을 주입하지 않습니다. `scripts/package-macos.mjs`는 반복된 `--publish never` 인자를 하나로 정리합니다. 빌더가 중복 값을 배열로 읽어 게시 모드로 오인하는 것을 막으며, macOS 패키징은 `--publish never`로 생성하고 검증된 파일만 릴리스 workflow에서 게시합니다. 직접 electron-builder를 호출해 다른 출력 경로를 사용했다면 prepare/verify 스크립트에 해당 디렉터리를 전달해야 합니다. 기존 updater도 커널 버전으로 피드를 검사하므로 macOS 12 사용자에게 호환되지 않는 업데이트가 제공되는 것을 막습니다. 생성 피드 검증과 실제 AppUpdater의 OS 지원 판정 회귀를 함께 둡니다. [공식 macOS 12 지원 종료 안내](https://www.electronjs.org/docs/latest/breaking-changes#removed-macos-12-support)
+
+CLI 최소 버전·타입·packageManager 계약은 [이슈 #158](https://github.com/jonggeun2001/DepsSmuggler/issues/158)에서 이어서 관리합니다. [Electron 지원 일정](https://releases.electronjs.org/schedule)
 
 ## 확인 방법과 잔여 항목
 

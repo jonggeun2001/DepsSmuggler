@@ -8,9 +8,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/verify-macos-update.mjs');
 
-async function runVerifier(directory: string) {
+async function runVerifier(directory: string, executable = script) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, [script, directory]);
+    const child = spawn(process.execPath, [executable, directory]);
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -36,7 +36,7 @@ async function fixture(entries: Array<{ name: string; contents: string }>, feedN
       sha512: createHash('sha512').update(entry.contents).digest('base64'),
     });
   }
-  await writeFile(path.join(build, feedName), `version: 0.2.27\nfiles:\n${files.map((file) => `  - url: ${file.url}\n    size: ${file.size}\n    sha512: ${file.sha512}`).join('\n')}\n`);
+  await writeFile(path.join(build, feedName), `version: 0.2.27\nminimumSystemVersion: 22.0.0\nfiles:\n${files.map((file) => `  - url: ${file.url}\n    size: ${file.size}\n    sha512: ${file.sha512}`).join('\n')}\n`);
   return build;
 }
 
@@ -87,7 +87,22 @@ describe('macOS release artifact verifier', () => {
     expect(result.code).toBe(0);
   });
 
+  it.each(['latest-mac.yml', 'beta-mac.yml'])('prepares the OS requirement in %s without changing artifact hashes', async (feedName) => {
+    const build = await fixture([
+      { name: 'DepsSmuggler-0.2.28-arm64.dmg', contents: 'dmg-bytes' },
+      { name: 'DepsSmuggler-0.2.28-arm64.zip', contents: 'zip-bytes' },
+    ], feedName);
+    const file = path.join(build, feedName);
+    await writeFile(file, (await readFile(file, 'utf8')).replace('minimumSystemVersion: 22.0.0\n', ''));
+    expect((await runVerifier(build)).code).toBe(1);
+    const prepared = await runVerifier(build, path.resolve('scripts/prepare-macos-update.mjs'));
+    expect(prepared.code).toBe(0);
+    expect((await runVerifier(build)).code).toBe(0);
+  });
+
   it.each([
+    ['missing minimum OS', (feed: string) => feed.replace('minimumSystemVersion: 22.0.0\n', '')],
+    ['marketing OS instead of kernel version', (feed: string) => feed.replace('minimumSystemVersion: 22.0.0', 'minimumSystemVersion: 13.0.0')],
     ['missing size', (feed: string) => feed.replace(/\s{4}size: \d+\n/g, '')],
     ['missing hash', (feed: string) => feed.replace(/\s{4}sha512: [^\n]+\n/g, '')],
     ['wrong size', (feed: string) => feed.replace(/\s{4}size: \d+/, '    size: 999')],

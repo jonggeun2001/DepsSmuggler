@@ -17,7 +17,7 @@ async function sha512(file) {
   });
 }
 
-async function verifyFeed(feedName) {
+async function verifyFeed(feedName, minimumSystemVersion) {
   const feed = load(await readFile(path.join(buildDir, feedName), 'utf8'));
   if (!feed || !Array.isArray(feed.files) || feed.files.length === 0) {
     throw new Error(`${feedName} must contain a nonempty files array`);
@@ -34,6 +34,9 @@ async function verifyFeed(feedName) {
   }
   if (!feed.files.some(({ url }) => url.endsWith('.dmg'))) {
     throw new Error(`${feedName}: DMG entry is missing`);
+  }
+  if (feed.minimumSystemVersion !== minimumSystemVersion) {
+    throw new Error(`${feedName}: minimumSystemVersion must be Darwin ${minimumSystemVersion}`);
   }
   for (const entry of feed.files) {
     const file = path.join(buildDir, entry.url);
@@ -60,9 +63,14 @@ async function verifyFeed(feedName) {
 }
 
 try {
+  const policy = JSON.parse(await readFile(new URL('./macos-update-policy.json', import.meta.url), 'utf8'));
+  const minimumSystemVersion = policy.minimumDarwinVersion;
+  if (typeof minimumSystemVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(minimumSystemVersion)) {
+    throw new Error('macOS update policy must specify the minimum Darwin kernel version');
+  }
   const feeds = (await readdir(buildDir)).filter((name) => name.endsWith('-mac.yml')).sort();
   if (feeds.length === 0) throw new Error('macOS update metadata (*-mac.yml) is missing');
-  for (const feedName of feeds) await verifyFeed(feedName);
+  for (const feedName of feeds) await verifyFeed(feedName, minimumSystemVersion);
 } catch (error) {
   console.error(`macOS update artifact validation failed: ${error.message}`);
   process.exitCode = 1;

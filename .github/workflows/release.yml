@@ -125,7 +125,7 @@ jobs:
         run: npm run build
 
       - name: Package for macOS
-        run: npm run package:mac -- --publish never
+        run: npm run package:mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 코드 서명 (선택사항 - secrets 설정 필요)
