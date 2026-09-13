@@ -217,6 +217,9 @@ jobs:
   coverage:
     name: Test Coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout code
@@ -239,8 +242,24 @@ jobs:
       - name: Run tests with coverage
         run: npm run test:coverage
 
+      - name: Verify non-empty core LCOV report
+        run: test -s coverage/lcov.info
+
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v7
         with:
-          file: ./coverage/lcov.info
-          fail_ci_if_error: false
+          files: ./coverage/lcov.info
+          disable_search: true
+          fail_ci_if_error: true
+          use_oidc: true
+          flags: core
+          name: core-v8
+
+      - name: Preserve core LCOV report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-coverage-lcov
+          path: coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 14
