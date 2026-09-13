@@ -37,6 +37,12 @@ interface ParsedDependency {
   build?: string;
 }
 
+export interface CondaResolverOptions extends ResolverOptions {
+  channel?: string;
+  pythonVersion?: string;
+  cudaVersion?: string;
+}
+
 // PackageCandidate는 conda-repodata-processor.ts에서 import됨
 
 export class CondaResolver implements IResolver {
@@ -72,12 +78,12 @@ export class CondaResolver implements IResolver {
   async resolveDependencies(
     packageName: string,
     version: string,
-    options?: ResolverOptions & { channel?: string; pythonVersion?: string }
+    options?: CondaResolverOptions
   ): Promise<DependencyResolutionResult> {
     this.visited.clear();
     this.conflicts = [];
 
-    const channel = (options as { channel?: string })?.channel || this.defaultChannel;
+    const channel = options?.channel || this.defaultChannel;
     const maxDepth = options?.maxDepth ?? 10;
 
     // 타겟 플랫폼 결정
@@ -88,10 +94,10 @@ export class CondaResolver implements IResolver {
       : 'noarch';
 
     // Python 버전 설정
-    this.pythonVersion = (options as { pythonVersion?: string })?.pythonVersion || null;
+    this.pythonVersion = options?.pythonVersion || null;
 
     // CUDA 버전 설정
-    const cudaVersion = (options as { cudaVersion?: string })?.cudaVersion || null;
+    const cudaVersion = options?.cudaVersion || null;
     this.targetArchitecture = arch;
     this.cudaVersion = cudaVersion;
 

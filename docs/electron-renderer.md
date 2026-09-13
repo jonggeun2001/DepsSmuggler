@@ -29,6 +29,8 @@
 
 `DownloadPage.tsx` 자체는 현재 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `src/renderer/pages/download-page/hooks/*`, `components/*`, `utils.ts`, `view-state.ts`로 분리되어 있습니다.
 
+main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 생성·파일 크기 조회를 주입받습니다. 주입 계약은 `createArchiveFromDirectory`와 `(path: string) => Promise<{ size: number }>`로 제한해 실제 구현과 부분 테스트 대역을 같은 public 계약으로 검사합니다. IPC payload와 다운로드 처리 흐름은 이 타입 분리로 바뀌지 않습니다. 서비스·화면 테스트는 `npm run typecheck:tests`에서도 검사합니다.
+
 ## 패키지 매니저 노출 범위
 
 ### 홈/위자드에서 노출되는 타입

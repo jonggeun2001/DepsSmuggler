@@ -6,7 +6,6 @@ import {
   resolveAllDependencies,
   resolveSinglePackageDependencies,
   DependencyResolverOptions,
-  DependencyProgressCallback,
 } from './dependency-resolver';
 import { DownloadPackage } from './types';
 import { ResolutionSession } from './internal/resolution-session';

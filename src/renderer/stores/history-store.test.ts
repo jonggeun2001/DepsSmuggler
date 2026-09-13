@@ -131,11 +131,11 @@ describe('history-store', () => {
   });
 
   it('hydrate보다 늦게 적용된 mutation state를 stale load가 덮어쓰지 않는다', async () => {
-    let resolveLoad: ((value: DownloadHistory[]) => void) | null = null;
+    const loadResolver: { current?: (value: DownloadHistory[]) => void } = {};
     const client = {
       load: vi.fn().mockImplementation(
         () => new Promise<DownloadHistory[]>((resolve) => {
-          resolveLoad = resolve;
+          loadResolver.current = resolve;
         })
       ),
       add: vi.fn().mockResolvedValue({ success: true }),
@@ -158,7 +158,9 @@ describe('history-store', () => {
       'success'
     );
 
-    resolveLoad?.([]);
+    const completeLoad = loadResolver.current;
+    if (!completeLoad) throw new Error('hydrate did not start loading history');
+    completeLoad([]);
     await hydratePromise;
 
     expect(store.getState().histories).toEqual([

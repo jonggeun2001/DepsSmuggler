@@ -320,10 +320,14 @@ nativeSuite('native Conda offline installer consumer', () => {
     const address = trap.address();
     if (!address || typeof address === 'string') throw new Error('Conda HTTP trap has no port');
     const env = await writeIsolatedEnv(tempRoot, address.port);
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      ...env,
+      PATH: `${path.join(conda.root, 'bin')}:${process.env.PATH ?? ''}`,
+    };
     return {
       ...conda,
       tempRoot,
-      env: { ...env, PATH: `${path.join(conda.root, 'bin')}:${process.env.PATH ?? ''}` },
+      env: runtimeEnv,
     };
   }
 

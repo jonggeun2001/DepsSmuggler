@@ -8,7 +8,7 @@
 |------|------|------|
 | 독립 CLI·소스 개발 | Node `^22.13.0 || ^24.0.0` | 최소 22.13.0의 실제 CLI, Node 24의 3개 OS 테스트·빌드 |
 | 패키지 관리자 | npm `11.8.0` | `packageManager` 선언과 CI 명시 설치 |
-| Node 타입 | `@types/node` 22 계열 | renderer 포함 설정과 Electron/CJS 설정 모두 타입 검사 |
+| Node 타입 | `@types/node` 22 계열 | renderer 포함 운영 설정, Electron/CJS 설정 및 테스트 전용 설정 검사 |
 | 배포 GUI | Electron 44 계열의 내장 Chromium·Node | 바이너리 확인, 패키징된 앱 실행·IPC·업데이트 다운로드 |
 | macOS GUI | macOS 13 이상 | 번들 `13.0.0`, 업데이트 피드 Darwin `22.0.0` |
 
@@ -29,6 +29,7 @@ npm ci --engine-strict
 bash scripts/verify-worktree.sh src/cli/version.integration.test.ts tests/unit/macos-release-artifacts.test.ts tests/unit/macos-update-support.test.ts tests/unit/macos-package-command.test.ts
 npx tsc --noEmit
 npx tsc --noEmit -p tsconfig.electron.json
+npm run typecheck:tests
 ```
 
 CLI 테스트는 소스 실행, 빌드, 배포와 같은 디렉터리 구조에서 실제 명령을 실행하고 버전을 대조합니다. 프로필·설정·출력은 임시 폴더에 격리합니다. macOS 스크립트 테스트는 실제 Node ESM 프로세스를 실행하지만 DMG 생성이나 업데이트 설치는 수행하지 않습니다. Node 24의 Ubuntu·Windows·macOS 잡이 전체 테스트와 renderer/CJS 빌드를 담당합니다.
@@ -38,7 +39,7 @@ CLI 테스트는 소스 실행, 빌드, 배포와 같은 디렉터리 구조에�
 Electron의 최신 3개 안정 major 지원 정책과 [공식 일정](https://releases.electronjs.org/schedule)을 확인합니다. 39는 지원이 종료돼 44로 전환했으며 보안 의존성 변경과 최소 macOS 조건은 [갱신 기록](security-dependencies.md)에 남겼습니다.
 
 1. lockfile을 새로 설치하고 각 OS에서 `ELECTRON_RUN_AS_NODE=1`을 해당 확인 단계에만 지정하고 Electron의 `process.versions.electron`을 설치 패키지 버전과 대조합니다. 내장 Node 버전도 기록합니다. Linux runner의 SUID sandbox 설정에 의존하지 않고 실제 바이너리를 실행하기 위한 모드이며 GUI 실행 확인은 아래 별도 smoke로 수행합니다. [Electron 환경 변수](https://www.electronjs.org/docs/latest/api/environment-variables#electron_run_as_node) Electron 설치 패키지의 lazy download 때문에 `npm ci` 성공만으로 바이너리 준비를 판정하지 않습니다.
-2. 3개 OS 테스트·빌드와 두 TypeScript 설정 검사를 통과시킵니다. Electron·Node 변경으로 추가된 타입 오류를 단언이나 테스트 제외로 숨기지 않습니다.
+2. 3개 OS 테스트·빌드, 두 운영 TypeScript 설정 및 `npm run typecheck:tests`를 통과시킵니다. Electron·Node 변경으로 추가된 타입 오류를 단언이나 테스트 제외로 숨기지 않습니다.
 3. macOS에서 `npm run package:mac`으로 DMG·ZIP·피드를 만들고 자동 posthook의 크기·SHA512·최소 OS 검증을 통과시킵니다. Windows/Linux도 해당 runner의 빌드 결과를 확인합니다.
 4. 실제 packaged 앱을 별도 `userData`와 테스트용 홈 디렉터리로 실행합니다. preload의 앱 버전·히스토리 IPC, 창 로딩을 확인합니다.
 5. updater를 loopback HTTP feed로 연결하고 더 높은 버전의 ZIP fixture를 확인·다운로드합니다. 실제 다운로드 크기·SHA512를 feed와 대조합니다. `autoDownload`, `autoInstallOnAppQuit`, `autoRunAppAfterInstall`을 모두 끄고 설치·재시작을 호출하지 않습니다. 임시 updater 서버와 앱을 종료합니다.

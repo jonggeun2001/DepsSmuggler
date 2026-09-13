@@ -5,6 +5,10 @@ import { AptMetadataParser } from './apt';
 import { YumMetadataParser } from './yum';
 import type { Repository } from './os-shared/types';
 
+type ApkParserInternals = {
+  extractApkIndex: ApkMetadataParser['extractApkIndex'];
+};
+
 describe('OS metadata parsers', () => {
   const fetchMock = vi.fn();
   const repo: Repository = {
@@ -156,7 +160,7 @@ describe('OS metadata parsers', () => {
 
   it('APK parser는 인덱스 아카이브의 capability 의존성과 provides를 보존한다', async () => {
     const parser = new ApkMetadataParser(repo, 'x86_64');
-    vi.spyOn(parser as never, 'extractApkIndex').mockResolvedValue(
+    vi.spyOn(parser as unknown as ApkParserInternals, 'extractApkIndex').mockResolvedValue(
       [
         'P:busybox',
         'V:1.36.1-r0',

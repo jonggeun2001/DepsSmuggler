@@ -109,6 +109,7 @@ async function runChild(
   } catch (error) {
     const failure = error as typeof error & {
       code?: number;
+      killed?: boolean;
       signal?: string | null;
       stdout?: string;
       stderr?: string;

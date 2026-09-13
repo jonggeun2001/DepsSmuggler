@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDeliveryPipeline } from './delivery-pipeline';
+import { createDeliveryPipeline, type FileStat } from './delivery-pipeline';
 import { createEmailSenderMock } from '../../../src/core/mailer/__mocks__/email-sender-mock';
 
 const createDeferred = <T>() => {
@@ -50,11 +50,11 @@ describe('createDeliveryPipeline', () => {
     const createArchiveFromDirectory = vi.fn();
     const generateInstallScripts = vi.fn(() => scriptDeferred.promise);
     const pipeline = createDeliveryPipeline({
-      archivePackager: { createArchiveFromDirectory } as never,
+      archivePackager: { createArchiveFromDirectory },
       generateInstallScripts,
       initializeEmailSender: vi.fn() as never,
       getFileSplitter: vi.fn() as never,
-      stat: vi.fn() as never,
+      stat: vi.fn<FileStat>(),
     });
     const base = createBaseParams();
     const result = pipeline.finalizeDownload({
@@ -73,11 +73,11 @@ describe('createDeliveryPipeline', () => {
   it('npm 결과 파일 경로와 다운로드 전 루트 선택을 스크립트 생성기로 전달한다', async () => {
     const generateInstallScripts = vi.fn().mockResolvedValue(undefined);
     const pipeline = createDeliveryPipeline({
-      archivePackager: { createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.zip') } as never,
+      archivePackager: { createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.zip') },
       generateInstallScripts,
       initializeEmailSender: vi.fn() as never,
       getFileSplitter: vi.fn() as never,
-      stat: vi.fn() as never,
+      stat: vi.fn<FileStat>(),
     });
     const base = createBaseParams();
     const npm = { id: 'npm-is-number', type: 'npm', name: 'is-number', version: '6.0.0' };
@@ -100,11 +100,11 @@ describe('createDeliveryPipeline', () => {
   it('Conda 결과의 실제 파일 경로를 packages 기준 상대 경로로 스크립트 생성기에 전달한다', async () => {
     const generateInstallScripts = vi.fn().mockResolvedValue(undefined);
     const pipeline = createDeliveryPipeline({
-      archivePackager: { createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.zip') } as never,
+      archivePackager: { createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.zip') },
       generateInstallScripts,
       initializeEmailSender: vi.fn() as never,
       getFileSplitter: vi.fn() as never,
-      stat: vi.fn() as never,
+      stat: vi.fn<FileStat>(),
     });
     const base = createBaseParams();
     const conda = { id: 'conda-six', type: 'conda', name: 'six', version: '1.16.0' };
@@ -128,11 +128,11 @@ describe('createDeliveryPipeline', () => {
     const generateInstallScripts = vi.fn().mockResolvedValue(undefined);
     const createArchiveFromDirectory = vi.fn().mockResolvedValue('/tmp/out.zip');
     const pipeline = createDeliveryPipeline({
-      archivePackager: { createArchiveFromDirectory } as never,
+      archivePackager: { createArchiveFromDirectory },
       generateInstallScripts,
       initializeEmailSender: vi.fn() as never,
       getFileSplitter: vi.fn() as never,
-      stat: vi.fn() as never,
+      stat: vi.fn<FileStat>(),
     });
     const base = createBaseParams();
     const conda = { id: 'conda-six', type: 'conda', name: 'six', version: '1.16.0' };
@@ -155,11 +155,11 @@ describe('createDeliveryPipeline', () => {
       createArchiveFromDirectory: vi.fn(),
     };
     const pipeline = createDeliveryPipeline({
-      archivePackager: archivePackager as never,
+      archivePackager,
       generateInstallScripts: vi.fn(),
       initializeEmailSender: vi.fn() as never,
       getFileSplitter: vi.fn() as never,
-      stat: vi.fn() as never,
+      stat: vi.fn<FileStat>(),
     });
 
     const completionPayload = await pipeline.finalizeDownload({
@@ -172,7 +172,13 @@ describe('createDeliveryPipeline', () => {
       },
       progressEmitter: {
         emitDownloadStatus: vi.fn(),
-      } as never,
+        emitPackageProgress: vi.fn(),
+        clearPackageProgress: vi.fn(),
+        clearAllPackageProgress: vi.fn(),
+        emitAllComplete: vi.fn(),
+        emitOSProgress: vi.fn(),
+        emitOSResolveDependenciesProgress: vi.fn(),
+      },
       isCancelled: () => false,
     });
 
@@ -197,11 +203,11 @@ describe('createDeliveryPipeline', () => {
     const pipeline = createDeliveryPipeline({
       archivePackager: {
         createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.tar.gz'),
-      } as never,
+      },
       generateInstallScripts: vi.fn(),
       initializeEmailSender: vi.fn(() => createEmailSenderMock({ sendEmail })) as never,
       getFileSplitter: vi.fn() as never,
-      stat: vi.fn().mockImplementation(async () => statDeferred.promise as never),
+      stat: vi.fn(async (_targetPath: string) => statDeferred.promise),
     });
 
     const completionPromise = pipeline.finalizeDownload({
@@ -276,7 +282,7 @@ describe('createDeliveryPipeline', () => {
     const pipeline = createDeliveryPipeline({
       archivePackager: {
         createArchiveFromDirectory: vi.fn().mockResolvedValue('/tmp/out.tar.gz'),
-      } as never,
+      },
       generateInstallScripts: vi.fn(),
       initializeEmailSender: vi.fn(() => createEmailSenderMock({ sendEmail })) as never,
       getFileSplitter: vi.fn(() => ({
@@ -288,7 +294,7 @@ describe('createDeliveryPipeline', () => {
           },
         }),
       })) as never,
-      stat: vi.fn().mockResolvedValue({ size: 20 * 1024 * 1024 } as never),
+      stat: vi.fn(async (_targetPath: string) => ({ size: 20 * 1024 * 1024 })),
     });
 
     const completionPayload = await pipeline.finalizeDownload({

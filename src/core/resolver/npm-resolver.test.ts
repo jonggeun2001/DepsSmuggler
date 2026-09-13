@@ -13,7 +13,7 @@ import {
 import { NpmVersionResolver } from './npm-version-resolver';
 import { NpmTreeManager } from './npm-tree-manager';
 import { fetchPackument } from '../shared/npm-cache';
-import { NpmPackument, NpmNode, DependencyType, DepsQueueItem, NpmPackageVersion, NpmFlatPackage, NpmResolvedNode, NpmDist } from '../shared/npm-types';
+import { NpmPackument, DependencyType, DepsQueueItem, NpmPackageVersion, NpmFlatPackage, NpmResolvedNode, NpmDist } from '../shared/npm-types';
 import { ResolutionSession } from '../shared/internal/resolution-session';
 import { getAttachedResolutionSession } from '../shared/internal/resolution-session-registry';
 
@@ -47,29 +47,10 @@ const createPackument = (
 ): NpmPackument => ({
   name,
   'dist-tags': { latest: Object.keys(versions)[0], ...distTags },
+  _id: name,
   versions: Object.fromEntries(
     Object.entries(versions).map(([v, data]) => [v, { version: v, ...data } as NpmPackageVersion])
   ),
-});
-
-/**
- * 테스트용 부분 NpmNode 생성 헬퍼
- */
-const createMockNode = (partial: Partial<NpmNode>): NpmNode => ({
-  name: '',
-  version: '',
-  depth: 0,
-  path: '',
-  parent: null,
-  children: new Map(),
-  edgesOut: new Map(),
-  edgesIn: new Set(),
-  packageInfo: {} as NpmPackageVersion,
-  isRoot: false,
-  optional: false,
-  dev: false,
-  peer: false,
-  ...partial,
 });
 
 /**
@@ -189,17 +170,39 @@ describe('NpmResolver 단위 테스트', () => {
 
   describe('resolveVersion', () => {
     // versionResolver를 통해 접근
+    type TestPackument = {
+      name: string;
+      'dist-tags': Record<string, string>;
+      versions: Record<string, Partial<NpmPackageVersion>>;
+    };
+
     const callResolveVersion = (
       resolver: NpmResolver,
       spec: string,
-      packument: NpmPackument
+      packument: TestPackument
     ): string | null => {
       const versionResolver = asTestable(resolver).versionResolver;
-      return versionResolver.resolveVersion(spec, packument);
+      const normalizedPackument: NpmPackument = {
+        ...packument,
+        _id: packument.name,
+        versions: Object.fromEntries(
+          Object.entries(packument.versions).map(([version, data]) => [
+            version,
+            {
+              name: packument.name,
+              version,
+              dist: { tarball: '', shasum: '' },
+              ...data,
+            } as NpmPackageVersion,
+          ])
+        ),
+      };
+      return versionResolver.resolveVersion(spec, normalizedPackument);
     };
 
     it('dist-tag로 버전 해결 (latest)', () => {
       const packument = {
+        _id: 'test-packument',
         name: 'lodash',
         'dist-tags': { latest: '4.17.21', next: '5.0.0-beta.1' },
         versions: {
@@ -213,6 +216,7 @@ describe('NpmResolver 단위 테스트', () => {
 
     it('dist-tag로 버전 해결 (next)', () => {
       const packument = {
+        _id: 'test-packument',
         name: 'lodash',
         'dist-tags': { latest: '4.17.21', next: '5.0.0-beta.1' },
         versions: {
@@ -226,6 +230,7 @@ describe('NpmResolver 단위 테스트', () => {
 
     it('정확한 버전', () => {
       const packument = {
+        _id: 'test-packument',
         name: 'lodash',
         'dist-tags': { latest: '4.17.21' },
         versions: {
@@ -239,6 +244,7 @@ describe('NpmResolver 단위 테스트', () => {
 
     it('semver 범위 ^4.0.0', () => {
       const packument = {
+        _id: 'test-packument',
         name: 'lodash',
         'dist-tags': { latest: '4.17.21' },
         versions: {
@@ -254,6 +260,7 @@ describe('NpmResolver 단위 테스트', () => {
 
     it('semver 범위 ~4.17.0', () => {
       const packument = {
+        _id: 'test-packument',
         name: 'lodash',
         'dist-tags': { latest: '4.17.21' },
         versions: {
@@ -268,6 +275,7 @@ describe('NpmResolver 단위 테스트', () => {
 
     it('semver 범위 >=4.0.0 <5.0.0', () => {
       const packument = {
+        _id: 'test-packument',
         name: 'lodash',
         'dist-tags': { latest: '4.17.21' },
         versions: {
@@ -282,6 +290,7 @@ describe('NpmResolver 단위 테스트', () => {
 
     it('prerelease 버전 제외', () => {
       const packument = {
+        _id: 'test-packument',
         name: 'test-pkg',
         'dist-tags': { latest: '1.0.0' },
         versions: {
@@ -296,6 +305,7 @@ describe('NpmResolver 단위 테스트', () => {
 
     it('버전이 없는 경우 null 반환', () => {
       const packument = {
+        _id: 'test-packument',
         name: 'test-pkg',
         'dist-tags': { latest: '1.0.0' },
         versions: {
@@ -308,6 +318,7 @@ describe('NpmResolver 단위 테스트', () => {
 
     it('캐시 활용 확인', () => {
       const packument = {
+        _id: 'test-packument',
         name: 'lodash',
         'dist-tags': { latest: '4.17.21' },
         versions: {
@@ -463,6 +474,9 @@ describe('NpmResolver 단위 테스트', () => {
       const lodash = result.find((p) => p.name === 'lodash');
 
       expect(lodash).toBeDefined();
+      if (!lodash) {
+        throw new Error('lodash 패키지 정보가 없습니다');
+      }
       expect(lodash.version).toBe('4.17.21');
       expect(lodash.tarball).toContain('lodash');
       expect(lodash.hoistedPath).toBe('node_modules/lodash');
@@ -571,7 +585,7 @@ describe('NpmResolver 단위 테스트', () => {
           unpackedSize: 50000,
         },
       };
-      const item = { name: 'fsevents', version: '^2.0.0' };
+      const item = createMockQueueItem({ name: 'fsevents', spec: '^2.0.0' });
 
       callAddNodeToTree(
         resolver,

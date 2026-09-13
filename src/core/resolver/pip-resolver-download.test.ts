@@ -32,6 +32,13 @@ import logger from '../../utils/logger';
 import { PipDownloader } from '../downloaders/pip';
 import { ResolutionSession } from '../shared/internal/resolution-session';
 
+type PipArtifactDownloader = {
+  downloadArtifactFile: PipDownloader['downloadArtifactFile'];
+};
+
+const asPipArtifactDownloader = (downloader: PipDownloader): PipArtifactDownloader =>
+  downloader as unknown as PipArtifactDownloader;
+
 async function expectSelectedArtifactIsDownloaded(
   packageInfo: Awaited<
     ReturnType<PipResolver['resolveDependencies']>
@@ -55,7 +62,7 @@ async function expectSelectedArtifactIsDownloaded(
     .spyOn(downloader, 'verifyChecksum')
     .mockResolvedValue(true);
   const downloadArtifactFile = vi
-    .spyOn(downloader as any, 'downloadArtifactFile')
+    .spyOn(asPipArtifactDownloader(downloader), 'downloadArtifactFile')
     .mockResolvedValue('/tmp/test/demo.whl');
 
   await downloader.downloadPackage(packageInfo, '/tmp/test');
@@ -67,7 +74,10 @@ async function expectSelectedArtifactIsDownloaded(
     undefined,
   );
 
-  const artifactOptions = downloadArtifactFile.mock.calls[0][1];
+  const artifactOptions = downloadArtifactFile.mock.calls[0]?.[1];
+  if (typeof artifactOptions?.verifyFile !== 'function') {
+    throw new Error('downloadArtifactFile 호출에 검증 옵션이 없습니다');
+  }
   await artifactOptions.verifyFile('/tmp/test/demo.whl');
   expect(verifyChecksum).toHaveBeenCalledWith(
     '/tmp/test/demo.whl',

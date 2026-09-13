@@ -7,7 +7,8 @@ vi.mock('../utils/logger', () => ({ createScopedLogger: () => ({ warn: warning }
 
 describe('download progress IPC boundary', () => {
   it('닫힌 창과 send 실패가 다운로드 실행으로 전파되지 않고 새 창에는 다시 전달한다', () => {
-    const send = vi.fn(() => { throw new Error('Object has been destroyed'); });
+    type Send = (channel: string, payload: unknown) => void;
+    const send = vi.fn<Send>((_channel, _payload) => { throw new Error('Object has been destroyed'); });
     let destroyed = false;
     const window = {
       isDestroyed: () => destroyed,

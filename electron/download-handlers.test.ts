@@ -207,7 +207,6 @@ describe('registerDownloadHandlers', () => {
       id: 'baseos',
       name: 'BaseOS',
       baseUrl: 'https://mirror.example.com/baseos',
-      packageManager: 'yum',
       isOfficial: true,
       priority: 1,
       enabled: true,

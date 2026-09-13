@@ -30,7 +30,6 @@ describe('ConfigManager', () => {
 
   describe('암호화/복호화', () => {
     let testConfigDir: string;
-    let originalConfigDir: string;
     let configManager: ConfigManager;
 
     beforeEach(async () => {

@@ -5,7 +5,6 @@ import {
   calculateRelevanceScore,
   sortByRelevance,
   SortableSearchResult,
-  PackageType
 } from './search-utils';
 
 describe('search-utils', () => {

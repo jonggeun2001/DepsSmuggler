@@ -121,6 +121,7 @@ async function runChild(
   } catch (error) {
     const failure = error as typeof error & {
       code?: number;
+      killed?: boolean;
       signal?: string | null;
       stdout?: string;
       stderr?: string;
@@ -399,7 +400,7 @@ describe('npm CLI resolved root install integration', () => {
         ? await fs.readFile(npmProjectManifest, 'utf8')
         : '<missing>';
       throw new Error([
-        `installer failed: ${failure.message ?? String(error)}`,
+        `installer failed: ${error instanceof Error ? error.message : String(error)}`,
         `stdout:\n${failure.stdout ?? ''}`,
         `stderr:\n${failure.stderr ?? ''}`,
         `npm-project/package.json:\n${manifestState}`,

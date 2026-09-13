@@ -207,6 +207,7 @@ INTEGRATION_TEST=true npm run test
 npm run lint
 npx tsc --noEmit
 npx tsc --noEmit -p tsconfig.electron.json
+npm run typecheck:tests
 
 # 브라우저 E2E
 npm run test:e2e

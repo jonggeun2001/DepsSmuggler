@@ -46,6 +46,9 @@ jobs:
       - name: Electron type check
         run: npx tsc --noEmit -p tsconfig.electron.json
 
+      - name: Test type check
+        run: npm run typecheck:tests
+
   # Windows 빌드
   build-windows:
     name: Build Windows

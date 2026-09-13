@@ -1,4 +1,3 @@
-import * as fse from 'fs-extra';
 import * as path from 'path';
 import { initializeEmailSender } from '../../../src/core/mailer/email-sender';
 import { getArchivePackager } from '../../../src/core/packager/archive-packager';
@@ -9,12 +8,19 @@ import type { PackageInfo } from '../../../src/types';
 import type { DownloadPackageResult } from '../download-package-router';
 import type { DownloadProgressEmitter } from '../download-progress';
 
+export type ArchivePackager = Pick<
+  ReturnType<typeof getArchivePackager>,
+  'createArchiveFromDirectory'
+>;
+
+export type FileStat = (targetPath: string) => Promise<{ size: number }>;
+
 export interface DeliveryPipelineDeps {
-  archivePackager: ReturnType<typeof getArchivePackager>;
+  archivePackager: ArchivePackager;
   generateInstallScripts: typeof generateInstallScripts;
   initializeEmailSender: typeof initializeEmailSender;
   getFileSplitter: typeof getFileSplitter;
-  stat: typeof fse.stat;
+  stat: FileStat;
 }
 
 export interface DeliveryPipeline {

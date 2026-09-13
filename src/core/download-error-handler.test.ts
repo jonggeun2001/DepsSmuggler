@@ -7,7 +7,6 @@ import {
   DownloadErrorHandler,
   createErrorHandler,
   DEFAULT_RETRY_POLICY,
-  ErrorCategory,
 } from './download-error-handler';
 
 describe('DownloadErrorHandler', () => {

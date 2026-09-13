@@ -4,12 +4,6 @@ import { getFileSplitter } from './file-splitter';
 import { getScriptGenerator } from './script-generator';
 
 describe('archivePackager', () => {
-  let packager: ReturnType<typeof getArchivePackager>;
-
-  beforeEach(() => {
-    packager = getArchivePackager();
-  });
-
   describe('getArchivePackager', () => {
     it('싱글톤 인스턴스 반환', () => {
       const instance1 = getArchivePackager();
@@ -44,12 +38,6 @@ describe('fileSplitter', () => {
 });
 
 describe('scriptGenerator', () => {
-  let generator: ReturnType<typeof getScriptGenerator>;
-
-  beforeEach(() => {
-    generator = getScriptGenerator();
-  });
-
   describe('getScriptGenerator', () => {
     it('싱글톤 인스턴스 반환', () => {
       const instance1 = getScriptGenerator();

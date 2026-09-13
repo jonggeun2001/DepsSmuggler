@@ -181,7 +181,12 @@ test('전체 Maven POM은 입력한 기준 버전을 IPC에 전달하고 build p
       (window as typeof window & { mavenCalls: unknown[] }).mavenCalls.push({ content, options });
       return {
         success: true,
-        packages: [{ name: 'org.apache.maven.plugins:maven-compiler-plugin', version: '3.13.0', metadata: { type: 'maven-plugin' } }],
+        packages: [{
+          type: 'maven',
+          name: 'org.apache.maven.plugins:maven-compiler-plugin',
+          version: '3.13.0',
+          metadata: { type: 'maven-plugin' },
+        }],
       };
     };
   });

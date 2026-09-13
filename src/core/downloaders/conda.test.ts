@@ -1,7 +1,12 @@
 import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import { getCondaDownloader } from './conda';
+import type { RepoData } from '../shared/conda-types';
 
-function repodataPackage(subdir: string) {
+type CondaDownloaderInternals = {
+  getRepoData: ReturnType<typeof getCondaDownloader>['getRepoData'];
+};
+
+function repodataPackage(subdir: string): RepoData {
   return {
     packages: {
       'six-1.16.0-pyhd3eb1b0_1.conda': {
@@ -106,7 +111,7 @@ describe('conda downloader', () => {
       ['noarch', 'noarch', 'https://repo.anaconda.com/pkgs/main/noarch/'],
     ] as const)('uses the canonical %s repository endpoint', async (arch, subdir, base) => {
       const getRepoData = vi
-        .spyOn(downloader as any, 'getRepoData')
+        .spyOn(downloader as unknown as CondaDownloaderInternals, 'getRepoData')
         .mockImplementation(async (_channel: string, requestedSubdir: string) =>
           requestedSubdir === subdir ? repodataPackage(subdir) : null
         );

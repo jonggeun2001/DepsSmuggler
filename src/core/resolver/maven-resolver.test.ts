@@ -741,7 +741,7 @@ describe('MavenResolver 단위 테스트', () => {
     });
 
     it('setCacheOptions 호출 시 에러 없음', () => {
-      expect(() => resolver.setCacheOptions({ maxSize: 100 })).not.toThrow();
+      expect(() => resolver.setCacheOptions({ memoryTtl: 100 })).not.toThrow();
     });
 
     it('getSkipperStats 호출 시 객체 반환', () => {
