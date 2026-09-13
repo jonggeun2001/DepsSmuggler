@@ -13,11 +13,11 @@
  *   - 존재하지 않는 패키지 처리
  */
 
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { CondaDownloader } from './conda';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 
 const INTEGRATION_TEST = process.env.INTEGRATION_TEST === 'true';
 const describeIntegration = INTEGRATION_TEST ? describe : describe.skip;
@@ -206,7 +206,7 @@ describeIntegration('conda 통합 테스트', () => {
       const filePath = await downloader.downloadPackage(
         { type: 'conda', name: 'six', version: '1.16.0' },
         outputDir,
-        (progress) => {
+        (_progress) => {
           progressCalled = true;
         }
       );

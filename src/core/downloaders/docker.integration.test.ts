@@ -13,12 +13,12 @@
  *   - 존재하지 않는 이미지 처리
  */
 
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DockerDownloader } from './docker';
 import { extractRegistry } from './docker-utils';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 
 const INTEGRATION_TEST = process.env.INTEGRATION_TEST === 'true';
 const describeIntegration = INTEGRATION_TEST ? describe : describe.skip;
@@ -89,7 +89,7 @@ describeIntegration('Docker 통합 테스트', () => {
 
       // Docker Hub 검색 결과에서 alpine 관련 이미지가 포함되어야 함
       const alpineRelated = results.some(p =>
-        p.name.includes('alpine') || (p.description && p.description.toLowerCase().includes('alpine'))
+        p.name.includes('alpine') || p.metadata?.description?.toLowerCase().includes('alpine')
       );
       expect(alpineRelated).toBe(true);
     });
@@ -217,7 +217,7 @@ describeIntegration('Docker 통합 테스트', () => {
       const filePath = await downloader.downloadPackage(
         { type: 'docker', name: 'hello-world', version: 'latest', arch: 'x86_64' },
         outputDir,
-        (progress) => {
+        (_progress) => {
           progressCalled = true;
         }
       );

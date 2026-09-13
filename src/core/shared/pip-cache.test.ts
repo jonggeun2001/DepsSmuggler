@@ -10,10 +10,8 @@ import axios from 'axios';
 import {
   fetchPackageMetadata,
   clearMemoryCache,
-  clearDiskCache,
   clearAllCache,
   getCacheStats,
-  pruneExpiredCache,
   PyPIResponse,
 } from './pip-cache';
 

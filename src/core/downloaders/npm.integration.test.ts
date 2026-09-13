@@ -178,6 +178,7 @@ describeIntegration('npm 통합 테스트', () => {
       const versionInfo = await downloader.getPackageVersion('lodash', '4.17.21');
 
       expect(versionInfo).toBeDefined();
+      if (!versionInfo) return;
       expect(versionInfo.version).toBe('4.17.21');
       expect(versionInfo.dist).toBeDefined();
       expect(versionInfo.dist.tarball).toBeDefined();

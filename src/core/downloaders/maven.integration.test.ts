@@ -57,7 +57,7 @@ describeIntegration('Maven 통합 테스트', () => {
       expect(results.length).toBeGreaterThan(0);
 
       const log4j = results.find(p =>
-        p.name.includes('log4j-core') || p.groupId === groupId
+        p.name.includes('log4j-core') || p.metadata?.groupId === groupId
       );
       expect(log4j).toBeDefined();
     });
@@ -286,7 +286,7 @@ describeIntegration('Maven 통합 테스트', () => {
           }
         },
         outputDir,
-        (progress) => {
+        (_progress) => {
           progressCalled = true;
         }
       );
@@ -300,16 +300,16 @@ describeIntegration('Maven 통합 테스트', () => {
     it('groupId:artifactId 형식 파싱', () => {
       const coords = downloader.parseCoordinates('org.apache.commons:commons-lang3');
 
-      expect(coords.groupId).toBe('org.apache.commons');
-      expect(coords.artifactId).toBe('commons-lang3');
+      expect(coords?.groupId).toBe('org.apache.commons');
+      expect(coords?.artifactId).toBe('commons-lang3');
     });
 
     it('groupId:artifactId:version 형식 파싱', () => {
       const coords = downloader.parseCoordinates('org.apache.commons:commons-lang3:3.12.0');
 
-      expect(coords.groupId).toBe('org.apache.commons');
-      expect(coords.artifactId).toBe('commons-lang3');
-      expect(coords.version).toBe('3.12.0');
+      expect(coords?.groupId).toBe('org.apache.commons');
+      expect(coords?.artifactId).toBe('commons-lang3');
+      expect(coords?.version).toBe('3.12.0');
     });
   });
 
@@ -324,9 +324,9 @@ describeIntegration('Maven 통합 테스트', () => {
 
       expect(result).toBeDefined();
       expect(result.root).toBeDefined();
-      expect(result.root.groupId).toBe('org.apache.commons');
-      expect(result.root.artifactId).toBe('commons-lang3');
-      expect(result.root.version).toBe('3.12.0');
+      expect(result.root.package.metadata?.groupId).toBe('org.apache.commons');
+      expect(result.root.package.metadata?.artifactId).toBe('commons-lang3');
+      expect(result.root.package.version).toBe('3.12.0');
 
       // commons-lang3는 의존성이 거의 없음
       expect(result.flatList).toBeDefined();
@@ -346,7 +346,7 @@ describeIntegration('Maven 통합 테스트', () => {
       expect(result.flatList.length).toBeGreaterThan(1);
 
       // jackson-databind는 jackson-core, jackson-annotations 의존
-      const depNames = result.flatList.map(d => `${d.groupId}:${d.artifactId}`);
+      const depNames = result.flatList.map(d => `${d.metadata?.groupId}:${d.metadata?.artifactId}`);
       expect(depNames).toContain('com.fasterxml.jackson.core:jackson-databind');
       expect(depNames).toContain('com.fasterxml.jackson.core:jackson-core');
       expect(depNames).toContain('com.fasterxml.jackson.core:jackson-annotations');
@@ -365,7 +365,7 @@ describeIntegration('Maven 통합 테스트', () => {
       expect(result.flatList.length).toBeGreaterThan(1);
 
       // log4j-core는 log4j-api 의존
-      const depNames = result.flatList.map(d => `${d.groupId}:${d.artifactId}`);
+      const depNames = result.flatList.map(d => `${d.metadata?.groupId}:${d.metadata?.artifactId}`);
       expect(depNames).toContain('org.apache.logging.log4j:log4j-core');
       expect(depNames).toContain('org.apache.logging.log4j:log4j-api');
     }, 120000);
@@ -383,7 +383,7 @@ describeIntegration('Maven 통합 테스트', () => {
       expect(result.flatList.length).toBeGreaterThan(10);
 
       // spring-boot 관련 의존성 확인
-      const depNames = result.flatList.map(d => `${d.groupId}:${d.artifactId}`);
+      const depNames = result.flatList.map(d => `${d.metadata?.groupId}:${d.metadata?.artifactId}`);
       expect(depNames).toContain('org.springframework.boot:spring-boot-starter-web');
       expect(depNames).toContain('org.springframework.boot:spring-boot-starter');
 
@@ -422,13 +422,13 @@ describeIntegration('Maven 통합 테스트', () => {
       const resultWithOptional = await resolver.resolveDependencies(
         'org.apache.logging.log4j:log4j-core',
         '2.20.0',
-        { includeOptional: true }
+        { includeOptionalDependencies: true }
       );
 
       const resultWithoutOptional = await resolver.resolveDependencies(
         'org.apache.logging.log4j:log4j-core',
         '2.20.0',
-        { includeOptional: false }
+        { includeOptionalDependencies: false }
       );
 
       expect(resultWithOptional).toBeDefined();
@@ -593,8 +593,8 @@ describeIntegration('Maven 통합 테스트', () => {
       );
 
       expect(result.root).toBeDefined();
-      expect(result.root.children).toBeDefined();
-      expect(Array.isArray(result.root.children)).toBe(true);
+      expect(result.root.dependencies).toBeDefined();
+      expect(Array.isArray(result.root.dependencies)).toBe(true);
     }, 120000);
 
     it('flatList에 모든 의존성 포함', async () => {
@@ -606,8 +606,8 @@ describeIntegration('Maven 통합 테스트', () => {
       expect(result.flatList).toBeDefined();
 
       for (const dep of result.flatList) {
-        expect(dep.groupId).toBeDefined();
-        expect(dep.artifactId).toBeDefined();
+        expect(dep.metadata?.groupId).toBeDefined();
+        expect(dep.metadata?.artifactId).toBeDefined();
         expect(dep.version).toBeDefined();
       }
     }, 120000);

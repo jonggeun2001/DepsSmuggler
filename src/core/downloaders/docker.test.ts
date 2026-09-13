@@ -796,11 +796,13 @@ describe('DockerDownloader 클래스 메서드 테스트', () => {
     it('catalogCache에 위임', () => {
       const mockCatalogCache = {
         clearCatalogCache: vi.fn(),
-        getCatalogCacheStatus: vi.fn().mockReturnValue({
-          size: 100,
-          hitRate: 0.85,
-          entries: 50,
-        }),
+        getCatalogCacheStatus: vi.fn().mockReturnValue([{
+          registry: 'docker.io',
+          repositoryCount: 50,
+          fetchedAt: 1,
+          expiresAt: 2,
+          isExpired: false,
+        }]),
         setCatalogCacheTTL: vi.fn(),
         refreshCatalogCache: vi.fn(),
       };
@@ -809,7 +811,11 @@ describe('DockerDownloader 클래스 메서드 테스트', () => {
       const status = downloader.getCatalogCacheStatus();
 
       expect(mockCatalogCache.getCatalogCacheStatus).toHaveBeenCalled();
-      expect(status.hitRate).toBe(0.85);
+      expect(status).toEqual([expect.objectContaining({
+        registry: 'docker.io',
+        repositoryCount: 50,
+        isExpired: false,
+      })]);
     });
   });
 
@@ -1053,15 +1059,17 @@ describe('DockerDownloader createProgressTracker', () => {
         arch: 'amd64' as const,
         destPath: '/dest',
       };
-      let lastProgress = 0;
-      const progressCallback = vi.fn((progress) => {
-        lastProgress = progress.progress;
-      });
+      const progressCallback = vi.fn();
 
       const tracker = (downloader as any).createProgressTracker(layers, ctx, progressCallback);
       tracker.update(1000000);
 
       expect(tracker.downloadedSize).toBe(1000000);
+      expect(progressCallback).toHaveBeenCalledWith(expect.objectContaining({
+        progress: 100,
+        downloadedBytes: 1000000,
+        totalBytes: 1000000,
+      }));
     });
   });
 });

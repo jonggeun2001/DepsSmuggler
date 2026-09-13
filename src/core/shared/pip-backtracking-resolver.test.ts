@@ -6,9 +6,26 @@ import {
   BacktrackingResolver,
   resolveDependencies,
   ResolverConfig,
-  ResolutionResult,
 } from './pip-backtracking-resolver';
 import { Requirement, Candidate, PackageInfoFetcher } from './pip-provider';
+
+const createCandidate = (
+  name: string,
+  version: string,
+  dependencies: Requirement[] = [],
+): Candidate => ({
+  name,
+  version,
+  dependencies,
+  installationCandidate: {
+    name,
+    version,
+    url: `https://files.example/${name}-${version}.whl`,
+    filename: `${name}-${version}.whl`,
+    packageType: 'wheel',
+  },
+  extras: [],
+});
 
 // PipProvider 모킹 - vitest 4.x에서는 function/class 키워드 필요
 vi.mock('./pip-provider', async (importOriginal) => {
@@ -44,6 +61,7 @@ describe('pip-backtracking-resolver', () => {
     defaultConfig = {
       pythonVersion: '3.11',
       platform: 'linux',
+      arch: 'x86_64',
     };
   });
 
@@ -90,7 +108,7 @@ describe('pip-backtracking-resolver', () => {
           this.identify = vi.fn((req: Requirement) => req.name);
           this.getDependencies = vi.fn().mockResolvedValue([]);
           this.findMatches = vi.fn().mockResolvedValue([
-            { name: 'requests', version: '2.28.0', extras: [] },
+            createCandidate('requests', '2.28.0'),
           ]);
           this.isSatisfiedBy = vi.fn().mockReturnValue(true);
           this.narrowRequirementSelection = vi.fn((ids: string[]) => ids);
@@ -100,7 +118,7 @@ describe('pip-backtracking-resolver', () => {
 
         const resolver = new BacktrackingResolver(defaultConfig, mockFetcher);
         const requirements: Requirement[] = [
-          { name: 'requests', specifier: '>=2.0.0' },
+          { name: 'requests', versionSpec: '>=2.0.0' },
         ];
 
         const result = await resolver.resolve(requirements);
@@ -116,8 +134,8 @@ describe('pip-backtracking-resolver', () => {
           this.identify = vi.fn((req: Requirement) => req.name);
           this.getDependencies = vi.fn().mockResolvedValue([]);
           this.findMatches = vi.fn()
-            .mockResolvedValueOnce([{ name: 'requests', version: '2.28.0', extras: [] }])
-            .mockResolvedValueOnce([{ name: 'flask', version: '2.0.0', extras: [] }]);
+            .mockResolvedValueOnce([createCandidate('requests', '2.28.0')])
+            .mockResolvedValueOnce([createCandidate('flask', '2.0.0')]);
           this.isSatisfiedBy = vi.fn().mockReturnValue(true);
           this.narrowRequirementSelection = vi.fn((ids: string[]) => ids);
           this.getPreference = vi.fn().mockReturnValue({ depth: 0, requestCount: 1 });
@@ -126,8 +144,8 @@ describe('pip-backtracking-resolver', () => {
 
         const resolver = new BacktrackingResolver(defaultConfig, mockFetcher);
         const requirements: Requirement[] = [
-          { name: 'requests', specifier: '>=2.0.0' },
-          { name: 'flask', specifier: '>=2.0.0' },
+          { name: 'requests', versionSpec: '>=2.0.0' },
+          { name: 'flask', versionSpec: '>=2.0.0' },
         ];
 
         const result = await resolver.resolve(requirements);
@@ -137,8 +155,8 @@ describe('pip-backtracking-resolver', () => {
       });
 
       it('의존성이 있는 패키지 해결', async () => {
-        const flaskCandidate: Candidate = { name: 'flask', version: '2.0.0', extras: [] };
-        const werkzeugReq: Requirement = { name: 'werkzeug', specifier: '>=2.0.0' };
+        const flaskCandidate = createCandidate('flask', '2.0.0');
+        const werkzeugReq: Requirement = { name: 'werkzeug', versionSpec: '>=2.0.0' };
 
         vi.mocked(PipProvider).mockImplementation(function (this: any) {
           this.identify = vi.fn((req: Requirement) => req.name);
@@ -147,7 +165,7 @@ describe('pip-backtracking-resolver', () => {
             .mockResolvedValueOnce([]); // werkzeug의 의존성
           this.findMatches = vi.fn()
             .mockResolvedValueOnce([flaskCandidate])
-            .mockResolvedValueOnce([{ name: 'werkzeug', version: '2.0.0', extras: [] }]);
+            .mockResolvedValueOnce([createCandidate('werkzeug', '2.0.0')]);
           this.isSatisfiedBy = vi.fn().mockReturnValue(true);
           this.narrowRequirementSelection = vi.fn((ids: string[]) => ids);
           this.getPreference = vi.fn().mockReturnValue({ depth: 0, requestCount: 1 });
@@ -155,7 +173,7 @@ describe('pip-backtracking-resolver', () => {
         });
 
         const resolver = new BacktrackingResolver(defaultConfig, mockFetcher);
-        const result = await resolver.resolve([{ name: 'flask', specifier: '>=2.0.0' }]);
+        const result = await resolver.resolve([{ name: 'flask', versionSpec: '>=2.0.0' }]);
 
         expect(result.success).toBe(true);
         expect(result.mapping.size).toBe(2);
@@ -175,7 +193,7 @@ describe('pip-backtracking-resolver', () => {
         });
 
         const resolver = new BacktrackingResolver(defaultConfig, mockFetcher);
-        const result = await resolver.resolve([{ name: 'nonexistent', specifier: '>=1.0.0' }]);
+        const result = await resolver.resolve([{ name: 'nonexistent', versionSpec: '>=1.0.0' }]);
 
         expect(result.success).toBe(false);
         expect(result.conflicts).toBeDefined();
@@ -188,25 +206,22 @@ describe('pip-backtracking-resolver', () => {
         vi.mocked(PipProvider).mockImplementation(function (this: any) {
           this.identify = vi.fn((req: Requirement) => req.name);
           this.getDependencies = vi.fn().mockImplementation((candidate: Candidate) => {
-            if (candidate.name === 'pkg-a' && candidate.version === '2.0.0') {
-              return [{ name: 'pkg-c', specifier: '>=1.0.0,<2.0.0' }];
-            }
             if (candidate.name === 'pkg-b') {
-              return [{ name: 'pkg-c', specifier: '>=2.0.0' }]; // 충돌
+              return [{ name: 'pkg-a', versionSpec: '>=3.0.0' }]; // 이미 선택된 pkg-a와 충돌
             }
             return [];
           });
           this.findMatches = vi.fn()
             .mockResolvedValueOnce([
-              { name: 'pkg-a', version: '2.0.0', extras: [] },
-              { name: 'pkg-a', version: '1.0.0', extras: [] }, // 대안
+              createCandidate('pkg-a', '2.0.0'),
+              createCandidate('pkg-a', '1.0.0'), // 대안
             ])
-            .mockResolvedValueOnce([{ name: 'pkg-b', version: '1.0.0', extras: [] }])
-            .mockResolvedValueOnce([{ name: 'pkg-c', version: '1.5.0', extras: [] }])
-            .mockResolvedValueOnce([{ name: 'pkg-c', version: '2.5.0', extras: [] }]);
+            .mockResolvedValueOnce([createCandidate('pkg-b', '1.0.0')])
+            .mockResolvedValueOnce([createCandidate('pkg-c', '1.5.0')])
+            .mockResolvedValueOnce([createCandidate('pkg-c', '2.5.0')]);
           this.isSatisfiedBy = vi.fn().mockImplementation((req: Requirement, candidate: Candidate) => {
             // pkg-c 버전 충돌 시뮬레이션
-            if (req.name === 'pkg-c' && req.specifier === '>=2.0.0' && candidate.version === '1.5.0') {
+            if (req.name === 'pkg-a' && req.versionSpec === '>=3.0.0' && candidate.version === '2.0.0') {
               backtrackTrigger = true;
               return false;
             }
@@ -219,14 +234,14 @@ describe('pip-backtracking-resolver', () => {
 
         const resolver = new BacktrackingResolver(defaultConfig, mockFetcher);
         const requirements: Requirement[] = [
-          { name: 'pkg-a', specifier: '>=1.0.0' },
-          { name: 'pkg-b', specifier: '>=1.0.0' },
+          { name: 'pkg-a', versionSpec: '>=1.0.0' },
+          { name: 'pkg-b', versionSpec: '>=1.0.0' },
         ];
 
         const result = await resolver.resolve(requirements);
 
-        // 백트래킹이 발생했거나 충돌로 실패
-        expect(result.backtrackCount >= 0).toBe(true);
+        expect(result.backtrackCount).toBeGreaterThan(0);
+        expect(backtrackTrigger).toBe(true);
       });
 
       it('maxRounds 초과 시 실패', async () => {
@@ -234,7 +249,7 @@ describe('pip-backtracking-resolver', () => {
         vi.mocked(PipProvider).mockImplementation(function (this: any) {
           this.identify = vi.fn((req: Requirement) => req.name);
           this.getDependencies = vi.fn().mockResolvedValue([]);
-          this.findMatches = vi.fn().mockResolvedValue([{ name: 'test', version: '1.0.0', extras: [] }]);
+          this.findMatches = vi.fn().mockResolvedValue([createCandidate('test', '1.0.0')]);
           this.isSatisfiedBy = vi.fn().mockReturnValue(true);
           this.narrowRequirementSelection = vi.fn((ids: string[]) => ids);
           this.getPreference = vi.fn().mockReturnValue({ depth: 0, requestCount: 1 });
@@ -251,7 +266,7 @@ describe('pip-backtracking-resolver', () => {
         // 해결되지 않는 요구사항 생성
         vi.mocked(PipProvider).mock.results[0]?.value?.narrowRequirementSelection.mockReturnValue([]);
 
-        const result = await resolver.resolve([{ name: 'test', specifier: '>=1.0.0' }]);
+        const result = await resolver.resolve([{ name: 'test', versionSpec: '>=1.0.0' }]);
 
         // narrowRequirementSelection이 빈 배열을 반환하면 실패
         // 또는 성공하면 그것도 괜찮음
@@ -264,8 +279,8 @@ describe('pip-backtracking-resolver', () => {
           this.getDependencies = vi.fn().mockResolvedValue([]);
           this.findMatches = vi.fn()
             .mockResolvedValueOnce([
-              { name: 'pkg', version: '3.0.0', extras: [] },
-              { name: 'pkg', version: '2.0.0', extras: [] },
+              createCandidate('pkg', '3.0.0'),
+              createCandidate('pkg', '2.0.0'),
             ]) // 여러 후보
             .mockResolvedValue([]); // 이후엔 후보 없음
           this.isSatisfiedBy = vi.fn().mockReturnValue(true);
@@ -281,8 +296,8 @@ describe('pip-backtracking-resolver', () => {
 
         const resolver = new BacktrackingResolver(config, mockFetcher);
         const result = await resolver.resolve([
-          { name: 'pkg', specifier: '>=1.0.0' },
-          { name: 'other', specifier: '>=1.0.0' },
+          { name: 'pkg', versionSpec: '>=1.0.0' },
+          { name: 'other', versionSpec: '>=1.0.0' },
         ]);
 
         // 후보가 없으면 백트래킹 시도하지만 maxBacktracks=0이면 실패
@@ -290,15 +305,14 @@ describe('pip-backtracking-resolver', () => {
       });
 
       it('이미 해결된 의존성과 호환되지 않으면 백트래킹', async () => {
-        const pkgA: Candidate = { name: 'pkg-a', version: '1.0.0', extras: [] };
-        const pkgB: Candidate = { name: 'pkg-b', version: '1.0.0', extras: [] };
+        const pkgA = createCandidate('pkg-a', '1.0.0');
+        const pkgB = createCandidate('pkg-b', '1.0.0');
 
-        let callCount = 0;
         vi.mocked(PipProvider).mockImplementation(function (this: any) {
           this.identify = vi.fn((req: Requirement) => req.name);
           this.getDependencies = vi.fn().mockImplementation((candidate: Candidate) => {
             if (candidate.name === 'pkg-a') {
-              return [{ name: 'pkg-b', specifier: '>=2.0.0' }]; // pkg-b 2.0.0 이상 필요
+              return [{ name: 'pkg-b', versionSpec: '>=2.0.0' }]; // pkg-b 2.0.0 이상 필요
             }
             return [];
           });
@@ -308,7 +322,7 @@ describe('pip-backtracking-resolver', () => {
             .mockResolvedValue([]);
           this.isSatisfiedBy = vi.fn().mockImplementation((req: Requirement, candidate: Candidate) => {
             // pkg-b 1.0.0은 >=2.0.0 요구사항 불만족
-            if (req.specifier === '>=2.0.0' && candidate.version === '1.0.0') {
+            if (req.versionSpec === '>=2.0.0' && candidate.version === '1.0.0') {
               return false;
             }
             return true;
@@ -319,7 +333,7 @@ describe('pip-backtracking-resolver', () => {
         });
 
         const resolver = new BacktrackingResolver(defaultConfig, mockFetcher);
-        const result = await resolver.resolve([{ name: 'pkg-a', specifier: '>=1.0.0' }]);
+        const result = await resolver.resolve([{ name: 'pkg-a', versionSpec: '>=1.0.0' }]);
 
         // 충돌로 인해 실패할 수 있음
         expect(result).toBeDefined();
@@ -334,7 +348,7 @@ describe('pip-backtracking-resolver', () => {
         this.identify = vi.fn((req: Requirement) => req.name);
         this.getDependencies = vi.fn().mockResolvedValue([]);
         this.findMatches = vi.fn().mockResolvedValue([
-          { name: 'requests', version: '2.28.0', extras: [] },
+          createCandidate('requests', '2.28.0'),
         ]);
         this.isSatisfiedBy = vi.fn().mockReturnValue(true);
         this.narrowRequirementSelection = vi.fn((ids: string[]) => ids);
@@ -343,7 +357,7 @@ describe('pip-backtracking-resolver', () => {
       });
 
       const requirements: Requirement[] = [
-        { name: 'requests', specifier: '>=2.0.0' },
+        { name: 'requests', versionSpec: '>=2.0.0' },
       ];
 
       const result = await resolveDependencies(requirements, defaultConfig, mockFetcher);
@@ -377,12 +391,13 @@ describe('pip-backtracking-resolver', () => {
       };
 
       const result = await resolveDependencies(
-        [{ name: 'test', specifier: '>=1.0.0' }],
+        [{ name: 'test', versionSpec: '>=1.0.0' }],
         config,
         mockFetcher
       );
 
       // PipProvider가 config를 받았는지 확인
+      expect(result).toBeDefined();
       expect(PipProvider).toHaveBeenCalledWith(config, mockFetcher);
     });
   });
@@ -393,7 +408,7 @@ describe('pip-backtracking-resolver', () => {
         this.identify = vi.fn((req: Requirement) => req.name);
         this.getDependencies = vi.fn().mockResolvedValue([]);
         this.findMatches = vi.fn().mockResolvedValue([
-          { name: 'pkg', version: '1.0.0', extras: [] },
+          createCandidate('pkg', '1.0.0'),
         ]);
         this.isSatisfiedBy = vi.fn().mockReturnValue(true);
         this.narrowRequirementSelection = vi.fn((ids: string[]) => ids);
@@ -402,7 +417,7 @@ describe('pip-backtracking-resolver', () => {
       });
 
       const resolver = new BacktrackingResolver(defaultConfig, mockFetcher);
-      const result = await resolver.resolve([{ name: 'pkg', specifier: '>=1.0.0' }]);
+      const result = await resolver.resolve([{ name: 'pkg', versionSpec: '>=1.0.0' }]);
 
       expect(result).toHaveProperty('success', true);
       expect(result).toHaveProperty('mapping');
@@ -422,7 +437,7 @@ describe('pip-backtracking-resolver', () => {
       });
 
       const resolver = new BacktrackingResolver(defaultConfig, mockFetcher);
-      const result = await resolver.resolve([{ name: 'nonexistent', specifier: '>=1.0.0' }]);
+      const result = await resolver.resolve([{ name: 'nonexistent', versionSpec: '>=1.0.0' }]);
 
       expect(result).toHaveProperty('success', false);
       expect(result).toHaveProperty('mapping');
@@ -445,7 +460,7 @@ describe('pip-backtracking-resolver', () => {
       });
 
       const resolver = new BacktrackingResolver(defaultConfig, mockFetcher);
-      const result = await resolver.resolve([{ name: 'missing-pkg', specifier: '>=1.0.0' }]);
+      const result = await resolver.resolve([{ name: 'missing-pkg', versionSpec: '>=1.0.0' }]);
 
       expect(result.success).toBe(false);
       expect(result.conflicts).toBeDefined();

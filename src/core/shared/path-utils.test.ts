@@ -9,7 +9,6 @@ import {
   toUnixPath,
   stripLeadingDotSlash,
   ensureForwardSlashForArchive,
-  getRelativePath,
   joinAndNormalize,
   toPowerShellPath,
   psJoinPath,

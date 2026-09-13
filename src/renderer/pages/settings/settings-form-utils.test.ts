@@ -5,6 +5,7 @@ import {
   getSmtpTestMode,
   normalizeSettingsFormValues,
 } from './settings-form-utils';
+import type { SettingsFormSubmission } from './settings-form-utils';
 
 describe('settings-form-utils', () => {
   it('스토어 설정을 SettingsPage 폼 필드로 펼쳐야 함', () => {
@@ -125,7 +126,7 @@ describe('settings-form-utils', () => {
   });
 
   it('초기화 경로는 동기화 키가 같아도 폼 값을 즉시 다시 써야 함', () => {
-    const synchronizedValues = buildSettingsFormValues({
+    const synchronizedValues: SettingsFormSubmission = { ...buildSettingsFormValues({
       concurrentDownloads: 3,
       enableCache: true,
       cachePath: '/tmp/cache',
@@ -161,7 +162,7 @@ describe('settings-form-utils', () => {
       autoUpdate: false,
       autoDownloadUpdate: false,
       downloadRenderInterval: 100,
-    });
+    }) };
     const synchronizedValuesKey = JSON.stringify(synchronizedValues);
     const form = { setFieldsValue: vi.fn() };
     const setInitialValues = vi.fn();
@@ -187,7 +188,7 @@ describe('settings-form-utils', () => {
   });
 
   it('초기화 동기화는 숨겨진 조건부 필드를 먼저 비워야 함', () => {
-    const synchronizedValues = buildSettingsFormValues({
+    const synchronizedValues: SettingsFormSubmission = { ...buildSettingsFormValues({
       concurrentDownloads: 3,
       enableCache: true,
       cachePath: '/tmp/cache',
@@ -223,22 +224,23 @@ describe('settings-form-utils', () => {
       autoUpdate: false,
       autoDownloadUpdate: false,
       downloadRenderInterval: 100,
-    });
-    const formState = {
+    }) };
+    let formState: SettingsFormSubmission = {
       pipTargetPlatform: {
-        os: 'darwin',
+        os: 'macos',
         arch: 'arm64',
         macosVersion: '14.0',
       },
     };
     const form = {
       resetFields: vi.fn(() => {
-        formState.pipTargetPlatform = {};
+        formState = {};
       }),
       setFieldsValue: vi.fn((nextValues: typeof synchronizedValues) => {
-        formState.pipTargetPlatform = {
-          ...formState.pipTargetPlatform,
-          ...nextValues.pipTargetPlatform,
+        if (!nextValues.pipTargetPlatform) throw new Error('missing pip target platform');
+        formState = {
+          ...formState,
+          pipTargetPlatform: nextValues.pipTargetPlatform,
         };
       }),
       getFieldsValue: vi.fn(() => formState),

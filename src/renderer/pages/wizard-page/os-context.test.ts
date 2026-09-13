@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { PackageType, Architecture } from '../../stores/cart-store';
 import type {
   DefaultArchitecture,
   DockerArchitecture,

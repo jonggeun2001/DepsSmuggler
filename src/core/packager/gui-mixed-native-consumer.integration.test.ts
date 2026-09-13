@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { getArchivePackager } from './archive-packager';
 import { getFileSplitter } from './file-splitter';
 import { createDeliveryPipeline } from '../../../electron/services/download/delivery-pipeline';
+import { createDownloadProgressEmitter } from '../../../electron/services/download-progress';
 import { initializeEmailSender } from '../mailer/email-sender';
 import { generateInstallScripts } from '../shared';
 import type { PackageInfo } from '../../types';
@@ -136,7 +137,7 @@ describe('GUI mixed pip/npm native archive consumer', () => {
       packageInfos,
       results: packages.map(({ id, filePath }) => ({ id, success: true, filePath })),
       failedDownloadCount: 0,
-      progressEmitter: { emitDownloadStatus: () => undefined },
+      progressEmitter: createDownloadProgressEmitter(() => null),
       isCancelled: () => false,
     });
     expect(result.success, JSON.stringify(result)).toBe(true);

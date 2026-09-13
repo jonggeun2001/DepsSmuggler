@@ -9,6 +9,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { groupDownloadItems } from '../utils';
 import type { DownloadStoreItem } from '../../../stores/download-store';
+import type {
+  AllCompleteData,
+  DepsResolvedData,
+  DownloadProgressData,
+  DownloadStatusData,
+} from '../../../../types/electron';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -62,10 +68,10 @@ vi.mock('../../../../../electron/utils/logger', () => ({
 }));
 
 type DownloadListenerMap = {
-  progress?: (payload: Record<string, unknown>) => void;
-  status?: (payload: Record<string, unknown>) => void;
-  depsResolved?: (payload: Record<string, unknown>) => void;
-  allComplete?: (payload: Record<string, unknown>) => void;
+  progress?: (payload: DownloadProgressData) => void;
+  status?: (payload: DownloadStatusData) => void;
+  depsResolved?: (payload: DepsResolvedData) => void;
+  allComplete?: (payload: AllCompleteData) => void;
 };
 
 const createStorageMock = () => {
@@ -94,16 +100,38 @@ const createElectronApi = () => {
   const listeners: DownloadListenerMap = {};
 
   const electronAPI = {
+    getAppVersion: vi.fn().mockResolvedValue('0.0.0'),
+    getAppPath: vi.fn().mockResolvedValue('/tmp/depssmuggler'),
+    selectDirectory: vi.fn().mockResolvedValue('/tmp/selected'),
+    saveFile: vi.fn().mockResolvedValue('/tmp/saved'),
     config: {
       get: vi.fn().mockResolvedValue(null),
       set: vi.fn().mockResolvedValue(undefined),
       reset: vi.fn().mockResolvedValue(undefined),
+      getPath: vi.fn().mockResolvedValue('/tmp/depssmuggler/config.json'),
     },
     history: {
       load: vi.fn().mockResolvedValue([]),
+      save: vi.fn().mockResolvedValue({ success: true }),
       add: vi.fn().mockResolvedValue({ success: true }),
       delete: vi.fn().mockResolvedValue({ success: true }),
       clear: vi.fn().mockResolvedValue({ success: true }),
+    },
+    cache: {
+      getSize: vi.fn().mockResolvedValue(0),
+      getStats: vi.fn().mockResolvedValue({
+        scope: 'all',
+        excludes: [],
+        totalSize: 0,
+        entryCount: 0,
+        details: { pip: null, npm: null, maven: null, conda: null },
+      }),
+      clear: vi.fn().mockResolvedValue({ success: true }),
+    },
+    search: {
+      packages: vi.fn().mockResolvedValue({ results: [] }),
+      suggest: vi.fn().mockResolvedValue([]),
+      versions: vi.fn().mockResolvedValue({ versions: [] }),
     },
     dependency: {
       resolve: vi.fn(),
@@ -160,7 +188,7 @@ const loadController = async (options?: {
   vi.resetModules();
   const localStorage = createStorageMock();
   const { electronAPI, listeners } = createElectronApi();
-  (window as typeof window & { electronAPI?: typeof electronAPI }).electronAPI = electronAPI;
+  window.electronAPI = electronAPI;
   vi.stubGlobal('localStorage', localStorage);
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
@@ -310,7 +338,7 @@ describe('useDownloadPageController', () => {
   });
 
   afterEach(() => {
-    delete (window as typeof window & { electronAPI?: unknown }).electronAPI;
+    Reflect.deleteProperty(window, 'electronAPI');
   });
 
   it('의존성 확인에서 트리 밖 부모 POM까지 71개 항목을 원본 장바구니 ID 아래 표시한다', async () => {
@@ -634,9 +662,9 @@ describe('useDownloadPageController', () => {
       });
       const { createDownloadOrchestrator } = await import('../../../../../electron/services/download-orchestrator');
       const dispatch = (channel: string, data: unknown) => {
-        if (channel === 'download:progress') listeners.progress?.(data as Record<string, unknown>);
-        if (channel === 'download:status') listeners.status?.(data as Record<string, unknown>);
-        if (channel === 'download:all-complete') listeners.allComplete?.(data as Record<string, unknown>);
+        if (channel === 'download:progress') listeners.progress?.(data as DownloadProgressData);
+        if (channel === 'download:status') listeners.status?.(data as DownloadStatusData);
+        if (channel === 'download:all-complete') listeners.allComplete?.(data as AllCompleteData);
       };
       const orchestrator = createDownloadOrchestrator({
         getMainWindow: () => ({

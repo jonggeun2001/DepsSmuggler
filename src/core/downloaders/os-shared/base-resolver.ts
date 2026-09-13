@@ -29,7 +29,7 @@ export interface DependencyResolverOptions {
   /** 대상 아키텍처 */
   architecture: OSArchitecture;
   /** 캐시 관리자 (선택) */
-  cacheManager?: OsPackageCache;
+  cacheManager?: Pick<OsPackageCache, 'get' | 'set'>;
   /** 선택적 의존성 포함 여부 */
   includeOptional: boolean;
   /** 권장 의존성 포함 여부 */

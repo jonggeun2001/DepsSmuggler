@@ -7,7 +7,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
 import * as nodemailer from 'nodemailer';
-import { EmailSender, SmtpConfig, EmailOptions, initializeEmailSender, getEmailSender } from './email-sender';
+import { EmailSender, SmtpConfig, EmailOptions } from './email-sender';
 
 // nodemailer 모킹
 vi.mock('nodemailer', () => {

@@ -6,9 +6,9 @@ import { Readable } from 'stream';
 import { gunzipSync } from 'zlib';
 import * as tar from 'tar';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { OSRepoPackager } from './repo-packager';
-import type { OSPackageInfo } from './types';
 import { getDownloadedFileKey } from './package-file-utils';
+import { OSRepoPackager } from './repo-packager';
+import type { OSPackageInfo, PackageDependency } from './types';
 
 vi.mock('tar', async () => {
   const actual = await vi.importActual<typeof import('tar')>('tar');
@@ -351,7 +351,7 @@ describe('OSRepoPackager', () => {
     expect(members.get('APKINDEX')).toContain('k:50');
   });
 
-  it.each([
+  it.each<[string, PackageDependency, string]>([
     ['version만 있으면 제약 없이 이름만 기록한다', { name: 'foo', version: '1.0' }, 'foo'],
     ['operator만 있으면 제약 없이 이름만 기록한다', { name: 'foo', operator: '>=' }, 'foo'],
     ['operator와 version이 없으면 이름만 기록한다', { name: 'foo' }, 'foo'],

@@ -706,7 +706,7 @@ describe('CondaResolver 대상 아티팩트 선택', () => {
       subdir,
       downloadUrl: `${base}demo-1.0.0-${subdir}.conda`,
     });
-    expect(result.root.package.metadata.downloadUrl).not.toContain('conda.anaconda.org/defaults');
+    expect(result.root.package.metadata?.downloadUrl).not.toContain('conda.anaconda.org/defaults');
   });
 
   it('대상 OS가 없으면 linux-64 대신 noarch만 조회한다', async () => {

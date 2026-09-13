@@ -26,6 +26,7 @@ npm run test:coverage
 npm run lint
 npx tsc --noEmit
 npx tsc --noEmit -p tsconfig.electron.json
+npm run typecheck:tests
 
 # 보안/의존성 점검
 npm audit
@@ -37,7 +38,19 @@ CLI 버전 회귀 테스트(`src/cli/version.integration.test.ts`)는 실제 하
 
 `INTEGRATION_TEST=true` 표기는 POSIX shell 예시입니다. PowerShell에서는 `$env:INTEGRATION_TEST='true'`를 지정한 뒤 `npm run test`를 실행합니다. 이 환경 변수는 외부 저장소 호출을 활성화하므로 기본 mock 테스트 실행과 구분합니다.
 
-두 TypeScript 설정 모두 `noUnusedLocals`와 `noUnusedParameters`를 활성화합니다. 죽은 코드·미사용 인수 정리 후 재유입을 검사하며, 외부 호출 규약을 유지할 인수에는 `_` 접두어를 붙입니다. `retry-utils.test.ts`는 `unknown` 오류 처리에서도 HTTP 상태 코드·타임아웃 판정과 비정형 값의 기존 결과가 유지되는지 확인합니다.
+운영 설정 두 개와 `tsconfig.tests.json` 모두 `strict`, `noUnusedLocals`, `noUnusedParameters`를 활성화합니다. 죽은 코드·미사용 인수 정리 후 재유입을 검사하며, 외부 호출 규약을 유지할 인수에는 `_` 접두어를 붙입니다. `retry-utils.test.ts`는 `unknown` 오류 처리에서도 HTTP 상태 코드·타임아웃 판정과 비정형 값의 기존 결과가 유지되는지 확인합니다.
+
+### 테스트 타입 검사
+
+Vitest는 TypeScript를 실행할 수 있는 코드로 변환하지만 mock·fixture의 정적 타입 일치를 보장하지 않습니다. `npm run typecheck:tests`를 runtime 테스트와 별도로 실행합니다. 일반 CI의 Type Check 잡과 릴리스 CI의 테스트 잡 모두 이 명령을 필수 단계로 사용합니다.
+
+`tsconfig.tests.json`은 `src/`, `electron/`, `tests/`의 모든 `.ts`·`.tsx`를 포함합니다. 구현 옆 test/spec, `src/test-utils`, `tests/unit` 및 Playwright E2E도 대상이며, 조건부로 실행을 건너뛰는 네트워크·네이티브 테스트 역시 타입 검사합니다. 제외하는 경로는 `node_modules`, `dist`, `build`뿐입니다. JavaScript·CJS·MJS 스크립트는 이 TypeScript 검사 대상이 아니며 기존 runtime 테스트에서 실행합니다. 루트 도구 설정 파일은 테스트 소스 include 범위 밖입니다.
+
+테스트 설정은 Node 22/24와 DOM 테스트가 사용하는 `ES2022`/`DOM` lib, Node·Vitest globals를 선언하며 `noEmit`으로 출력하지 않습니다. 운영 빌드의 ES2020/CJS 출력 계약은 바꾸지 않습니다. 불필요한 declaration 출력을 끄고, 외부 `.d.ts`의 `skipLibCheck`는 기존 운영 설정 값을 상속합니다.
+
+fixture는 실제 DTO와 함수 인수를 기준으로 작성하고, 부분 mock은 소비자가 사용하는 public 메서드만 가진 인터페이스로 표현합니다. 타입 오류를 `any`, 광범위한 단언, 파일 제외로 숨기지 않습니다. 의도적인 잘못된 입력 테스트가 필요하면 해당 입력에만 이유를 적은 `@ts-expect-error`를 사용해 오류가 더 이상 발생하지 않을 때도 검사가 실패하게 합니다.
+
+검사 자체를 검증하려면 임시 `tests/unit/typecheck-probe.test.ts`에 `export const probe: number = 'invalid';`를 넣어 `npm run typecheck:tests`가 실패하는지 확인하고 파일을 제거한 뒤 다시 통과시킵니다. 타입 검사 통과는 조건부 integration/E2E 테스트가 실제 실행됐다는 의미가 아니므로 실행 결과·skip 사유를 별도로 기록합니다.
 
 보안/의존성 유지보수 작업에서는 `npm audit --audit-level=high`와 `npm audit --omit=dev --audit-level=high`를 각각 실행하고, [보안 의존성 갱신 기록](security-dependencies.md)에 잔여 항목과 적용 버전을 남깁니다. 함께 `npm test`, `npm run test:e2e`, `npx tsc --noEmit`를 묶어 확인합니다. direct dependency를 올린 뒤 transitive 취약점이 남으면, 가능한 한 patch/minor 범위에서 lockfile 재해결이나 `overrides`로 먼저 정리합니다.
 
@@ -50,7 +63,7 @@ CLI 버전 회귀 테스트(`src/cli/version.integration.test.ts`)는 실제 하
 - 기본 exclude: `node_modules`, `dist`, `tests/e2e/**`
 - 기본 실행 환경: `node`
 
-테스트 timeout과 hook timeout은 각각 30초이며 `forks` pool을 사용합니다. `tests/unit`은 include 패턴으로 예약되어 있지만 현재 테스트 파일은 주로 구현 옆의 `src/`와 `electron/`에 있습니다.
+테스트 timeout과 hook timeout은 각각 30초이며 `forks` pool을 사용합니다. 테스트 파일은 주로 구현 옆의 `src/`와 `electron/`에 있으며, `tests/unit`에는 macOS 릴리스 산출물·업데이트 지원·패키징 명령 및 보안 의존성 검증이 있습니다.
 
 렌더러 훅처럼 DOM이 필요한 일부 테스트는 파일 상단 `// @vitest-environment jsdom` 주석으로 개별 override 합니다. 다운로드 페이지 controller, `use-os-download-flow`, `use-settings-form-actions` 테스트가 이 방식을 사용합니다. Electron preload API와 외부 경계는 mock하고 실제 React 훅의 상태 전이와 정리 동작을 검증합니다. 실행에는 `package.json`에 선언된 `jsdom`과 `@testing-library/react`가 필요하며, 일부 의존성이 빠진 기존 `node_modules`를 재사용한 결과를 전체 테스트 통과로 간주하지 않습니다.
 
@@ -478,7 +491,7 @@ UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
 - `test`: Ubuntu/Windows/macOS + Node 24에서 `npm ci`, `npm test`, `npm run build`, CLI `--version`, `--help`
 - `runtime-contract`: Ubuntu + Node 22.13.0/24에서 엄격한 engines 설치 검사와 소스·빌드·배포 형태 CLI, macOS ESM 패키징 스크립트 회귀 실행
 - `lint`: `npm run lint`로 ESLint 실행
-- `typecheck`: `npx tsc --noEmit`과 `npx tsc --noEmit -p tsconfig.electron.json`
+- `typecheck`: 운영 설정 두 개의 `npx tsc --noEmit`, `npx tsc --noEmit -p tsconfig.electron.json` 및 별도 `npm run typecheck:tests`
 - `e2e`: Chromium 설치 후 `npm run test:e2e`, 실패 시 Playwright 보고서와 결과 artifact 업로드
 - `coverage`: 전체 suite의 core 커버리지 하한 검사, 비어 있지 않은 LCOV 확인, 필수 Codecov 업로드 및 LCOV artifact 보존
 

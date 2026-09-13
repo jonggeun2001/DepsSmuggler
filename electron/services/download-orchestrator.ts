@@ -1,7 +1,11 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
 import { createConcurrencyLimiter } from './download/concurrency-limiter';
-import { createDeliveryPipeline } from './download/delivery-pipeline';
+import {
+  createDeliveryPipeline,
+  type ArchivePackager,
+  type FileStat,
+} from './download/delivery-pipeline';
 import { createDownloadSessionRunner } from './download/download-session';
 import {
   bindSessionProgressEmitter,
@@ -32,14 +36,14 @@ export interface DownloadOrchestratorDeps {
   pathExists?: (targetPath: string) => Promise<boolean>;
   emptyDir?: (targetPath: string) => Promise<void>;
   readdir?: typeof fse.readdir;
-  stat?: typeof fse.stat;
+  stat?: FileStat;
   createLimiter?: ConcurrencyLimiterFactory;
   scheduleTask?: (task: () => Promise<void>) => Promise<void> | void;
   createPackageRouter?: () => DownloadPackageRouter;
   createProgressEmitter?: (
     getMainWindow: () => Electron.BrowserWindow | null
   ) => DownloadProgressEmitter;
-  archivePackager?: ReturnType<typeof getArchivePackager>;
+  archivePackager?: ArchivePackager;
   generateInstallScripts?: typeof generateInstallScripts;
   initializeEmailSender?: typeof initializeEmailSender;
   getFileSplitter?: typeof getFileSplitter;
@@ -67,7 +71,7 @@ export function createDownloadOrchestrator(
   const pathExists = deps.pathExists ?? ((targetPath) => fse.pathExists(targetPath));
   const emptyDir = deps.emptyDir ?? ((targetPath) => fse.emptyDir(targetPath));
   const readdir = deps.readdir ?? fse.readdir.bind(fse);
-  const stat = deps.stat ?? fse.stat.bind(fse);
+  const stat = deps.stat ?? ((targetPath: string) => fse.stat(targetPath));
   const createLimiter = deps.createLimiter ?? createConcurrencyLimiter;
   const scheduleTask =
     deps.scheduleTask ??

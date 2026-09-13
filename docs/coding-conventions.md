@@ -133,7 +133,7 @@ expect(testable.isRunning).toBe(true);
 }
 ```
 
-`tsconfig.json`과 `tsconfig.electron.json` 모두 미사용 선언을 검사합니다. 사용되지 않는 내부 함수·인수는 호출부와 함께 제거하고, 공개 API나 콜백의 인수 순서를 유지해야 하는 경우에만 `_` 접두어를 사용합니다. 타입 검사와 기존 동작 테스트로 정리 전후를 확인합니다.
+`tsconfig.json`, `tsconfig.electron.json`, `tsconfig.tests.json` 모두 미사용 선언을 검사합니다. 사용되지 않는 내부 함수·인수는 호출부와 함께 제거하고, 공개 API나 콜백의 인수 순서를 유지해야 하는 경우에만 `_` 접두어를 사용합니다. 테스트의 mock·fixture도 `npm run typecheck:tests`로 검사하며, 구체적인 포함 범위와 runtime 검증의 차이는 [테스트 문서](testing.md#테스트-타입-검사)를 참고합니다. 타입 검사와 기존 동작 테스트로 정리 전후를 확인합니다.
 
 `noImplicitAny`와 `strictNullChecks`는 별도 키로 선언하지 않고 `strict: true`로 활성화됩니다. 기본 설정은 renderer와 Electron/core/CLI 소스를 포함하며 테스트 파일은 제외합니다. `tsconfig.electron.json`은 renderer를 제외하고 CommonJS 산출물을 만들며, 개발 CLI의 `tsconfig.cli.json`은 기본 설정에 ts-node의 CommonJS module override를 추가합니다.
 

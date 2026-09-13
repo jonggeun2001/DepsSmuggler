@@ -4,16 +4,14 @@ import * as fs from 'fs-extra';
 import * as tar from 'tar';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DockerDownloader } from './docker';
+import type { DockerBlobDownloader } from './docker-blob-downloader';
 
 const roots: string[] = [];
 
 type DockerInternals = {
   authClient: { getTokenForRegistry: (...args: unknown[]) => Promise<string> };
   manifestService: { getManifestForArchitecture: (...args: unknown[]) => Promise<unknown> };
-  blobDownloader: {
-    downloadBlob: (...args: unknown[]) => Promise<void>;
-    createImageTar: (source: string, target: string) => Promise<void>;
-  };
+  blobDownloader: Pick<DockerBlobDownloader, 'downloadBlob' | 'createImageTar'>;
 };
 
 function internals(downloader: DockerDownloader): DockerInternals {
@@ -106,7 +104,7 @@ describe('DockerDownloader output publication controls', () => {
     const { blobDownloader } = internals(downloader);
     let releaseBoth: () => void = () => undefined;
     const bothReady = new Promise<void>((resolve) => { releaseBoth = resolve; });
-    blobDownloader.downloadBlob = async (...args: [string, string, string, string, string, unknown, { signal?: AbortSignal }]) => {
+    blobDownloader.downloadBlob = async (...args: Parameters<DockerBlobDownloader['downloadBlob']>) => {
       const dir = path.dirname(args[2]);
       if (!imageDirs.includes(dir)) imageDirs.push(dir);
       if (args[6]?.signal === firstController.signal) firstDir = dir;

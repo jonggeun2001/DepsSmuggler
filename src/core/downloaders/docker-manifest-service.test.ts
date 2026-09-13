@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DockerAuthClient } from './docker-auth-client';
 import { DockerManifestService } from './docker-manifest-service';
@@ -192,9 +192,9 @@ describe('DockerManifestService', () => {
 
   it('does not request the selected digest after aborting the index request', async () => {
     const controller = new AbortController();
-    get.mockImplementationOnce(async (_url, options?: { signal?: AbortSignal }) => {
+    get.mockImplementationOnce(async (_url: string, options?: AxiosRequestConfig) => {
       controller.abort();
-      options?.signal?.throwIfAborted();
+      if (options?.signal?.aborted) throw new Error('request aborted');
       return { data: index([entry('amd64')]) };
     });
 
@@ -228,8 +228,8 @@ describe('DockerManifestService', () => {
     const controller = new AbortController();
     get
       .mockResolvedValueOnce({ data: index([entry('amd64')]) })
-      .mockImplementationOnce((_url, options: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
-        options.signal?.addEventListener('abort', () => reject(new Error('manifest aborted')), { once: true });
+      .mockImplementationOnce((_url: string, options?: AxiosRequestConfig) => new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener?.('abort', () => reject(new Error('manifest aborted')), { once: true });
       }));
     const pending = service.getManifestForArchitecture(
       'team/image', 'v1', '', 'ghcr.io', 'amd64', undefined, { signal: controller.signal }

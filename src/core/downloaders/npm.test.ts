@@ -277,20 +277,6 @@ describe('NpmDownloader 클래스 메서드 테스트', () => {
   });
 
   describe('verifyIntegrity', () => {
-    it('ssri 무결성 검증 로직', () => {
-      // ssri.checkData의 동작 검증 (실제 ssri 사용하지 않고 로직만 테스트)
-      const fileContent = Buffer.from('test content');
-
-      // ssri는 sha512-base64형식 무결성 문자열 확인
-      // 올바른 무결성: checkData가 object를 반환
-      // 잘못된 무결성: checkData가 false를 반환
-      const validResult = { algorithm: 'sha512' }; // object
-      const invalidResult = false;
-
-      expect(validResult !== false).toBe(true);
-      expect(invalidResult !== false).toBe(false);
-    });
-
     it('무결성 형식 파싱', () => {
       // sha512-base64hash 형식
       const integrity = 'sha512-n4cQ...';

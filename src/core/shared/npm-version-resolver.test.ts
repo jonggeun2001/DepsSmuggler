@@ -18,6 +18,7 @@ const asTestable = (resolver: NpmResolver): NpmResolverTestable =>
   resolver as unknown as NpmResolverTestable;
 
 const createPackument = (name = 'shared'): NpmPackument => ({
+  _id: name,
   name,
   'dist-tags': { latest: '1.2.0' },
   versions: {

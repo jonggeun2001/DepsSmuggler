@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DockerAuthClient } from './docker-auth-client';
 import {
@@ -203,7 +203,7 @@ describe('Docker registry authentication strategies', () => {
   ])('$type rejects a pending token request when its signal aborts', async ({ type, strategy, config }) => {
     const controller = new AbortController();
     let calls = 0;
-    get.mockImplementation((_url, options: { signal?: AbortSignal }) => {
+    get.mockImplementation((_url: string, options?: AxiosRequestConfig) => {
       calls += 1;
       if (type === 'quay.io' && calls === 1) {
         return Promise.resolve({
@@ -211,7 +211,7 @@ describe('Docker registry authentication strategies', () => {
         });
       }
       return new Promise((_resolve, reject) => {
-        options.signal?.addEventListener('abort', () => reject(new Error('request aborted')), { once: true });
+        options?.signal?.addEventListener?.('abort', () => reject(new Error('request aborted')), { once: true });
       });
     });
     const pending = strategy.getToken(config, 'team/image', { signal: controller.signal });
@@ -225,8 +225,8 @@ describe('Docker registry authentication strategies', () => {
   it('Quay aborts the pending initial challenge without anonymous fallback', async () => {
     const controller = new AbortController();
     get
-      .mockImplementationOnce((_url, options: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
-        options.signal?.addEventListener('abort', () => reject(new Error('challenge aborted')), { once: true });
+      .mockImplementationOnce((_url: string, options?: AxiosRequestConfig) => new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener?.('abort', () => reject(new Error('challenge aborted')), { once: true });
       }));
     const pending = new QuayAuthStrategy().getToken(REGISTRY_CONFIGS['quay.io'], 'team/image', {
       signal: controller.signal,
