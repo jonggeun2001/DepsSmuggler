@@ -3,9 +3,24 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OsPackageCache } from './cache-manager';
+import type { Repository } from './types';
 
 describe('OsPackageCache', () => {
   let tempDir: string;
+
+  function repo(overrides: Partial<Repository> = {}): Repository {
+    return {
+      id: 'baseos',
+      name: 'BaseOS',
+      baseUrl: 'https://example.test/baseos',
+      enabled: true,
+      gpgCheck: false,
+      gpgKeyUrl: undefined,
+      priority: undefined,
+      isOfficial: true,
+      ...overrides,
+    };
+  }
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'depssmuggler-os-cache-'));
@@ -71,6 +86,81 @@ describe('OsPackageCache', () => {
 
     await expect(reader.get<typeof cacheValue>(key)).resolves.toEqual(cacheValue);
     expect(fs.existsSync(path.join(tempDir, filename))).toBe(true);
+  });
+
+  it('캐시 키는 v2 sha256 repository identity와 기존 구분자를 사용한다', () => {
+    const key = OsPackageCache.createKey('yum', repo(), 'x86_64', 'primary');
+
+    expect(key).toMatch(/^yum:v2-[a-f0-9]{64}:x86_64:primary$/);
+  });
+
+  it.each([
+    ['id', { id: 'changed-id' }],
+    ['name', { name: 'Changed name' }],
+    ['baseUrl', { baseUrl: 'http://example.test/baseos' }],
+    ['enabled', { enabled: false }],
+    ['gpgCheck', { gpgCheck: true }],
+    ['gpgKeyUrl', { gpgKeyUrl: 'https://example.test/key.asc' }],
+    ['priority', { priority: 10 }],
+    ['isOfficial', { isOfficial: false }],
+  ])('repository %s 변경은 캐시 키를 분리한다', (_field, change) => {
+    const first = OsPackageCache.createKey('yum', repo(), 'x86_64', 'primary');
+    const changed = OsPackageCache.createKey('yum', repo(change), 'x86_64', 'primary');
+
+    expect(changed).not.toBe(first);
+  });
+
+  it('protocol, trailing slash, and slash-versus-underscore URL changes do not collide', () => {
+    const identities = [
+      repo({ baseUrl: 'http://mirror.example/repo' }),
+      repo({ baseUrl: 'https://mirror.example/repo' }),
+      repo({ baseUrl: 'https://mirror.example/repo/' }),
+      repo({ baseUrl: 'https://mirror.example/repo_a' }),
+      repo({ baseUrl: 'https://mirror.example/repo/a' }),
+    ];
+    const keys = identities.map((identity) =>
+      OsPackageCache.createKey('yum', identity, 'x86_64', 'primary')
+    );
+
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('repository 객체 복제본은 같은 캐시 키를 재사용한다', () => {
+    const original = repo();
+    const clone = { ...original };
+
+    expect(OsPackageCache.createKey('yum', original, 'x86_64', 'primary'))
+      .toBe(OsPackageCache.createKey('yum', clone, 'x86_64', 'primary'));
+  });
+
+  it('persistent cache는 identity가 바뀐 repository에 이전 metadata를 반환하지 않는다', async () => {
+    const original = repo();
+    const changed = repo({ gpgCheck: true, gpgKeyUrl: 'https://example.test/key.asc' });
+    const originalKey = OsPackageCache.createKey('yum', original, 'x86_64', 'primary');
+    const changedKey = OsPackageCache.createKey('yum', changed, 'x86_64', 'primary');
+    const writer = new OsPackageCache({ type: 'persistent', directory: tempDir });
+
+    await writer.set(originalKey, { packages: ['old-metadata'] });
+
+    const reader = new OsPackageCache({ type: 'persistent', directory: tempDir });
+    await expect(reader.get(changedKey)).resolves.toBeNull();
+    await expect(reader.get(originalKey)).resolves.toEqual({ packages: ['old-metadata'] });
+  });
+
+  it('persistent cache는 v1 base64url metadata 파일을 로드하지 않고 제거한다', () => {
+    const oldKey = 'yum:example.test_baseos:x86_64:primary';
+    const oldPath = path.join(tempDir, `${Buffer.from(oldKey, 'utf8').toString('base64url')}.json`);
+    fs.writeFileSync(oldPath, JSON.stringify({
+      data: { packages: ['old'] },
+      timestamp: Date.now(),
+      size: 32,
+      lastAccess: Date.now(),
+    }));
+
+    const cacheManager = new OsPackageCache({ type: 'persistent', directory: tempDir });
+
+    expect(cacheManager.getStats().entryCount).toBe(0);
+    expect(fs.existsSync(oldPath)).toBe(false);
   });
 
   it.each([

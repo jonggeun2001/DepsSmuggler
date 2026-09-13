@@ -3,9 +3,11 @@
  * 메타데이터 캐싱으로 반복 요청 최소화
  */
 
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
+import { getRepositoryIdentity } from './repository-identity';
 import type { CacheMode, Repository, OSArchitecture } from './types';
 
 /**
@@ -112,8 +114,10 @@ export class OsPackageCache {
     architecture: OSArchitecture,
     dataType: 'repomd' | 'primary' | 'packages' | 'apkindex' | 'release'
   ): string {
-    const repoUrl = repo.baseUrl.replace(/https?:\/\//, '').replace(/\//g, '_');
-    return `${type}:${repoUrl}:${architecture}:${dataType}`;
+    const repositoryHash = createHash('sha256')
+      .update(getRepositoryIdentity(repo), 'utf8')
+      .digest('hex');
+    return `${type}:v2-${repositoryHash}:${architecture}:${dataType}`;
   }
 
   /**
@@ -374,7 +378,7 @@ export class OsPackageCache {
     const dataType = key.slice(lastSeparator + 1);
     return (
       (packageManager === 'yum' || packageManager === 'apt' || packageManager === 'apk') &&
-      repositoryToken.length > 0 &&
+      /^v2-[a-f0-9]{64}$/.test(repositoryToken) &&
       VALID_ARCHITECTURES.has(architecture) &&
       VALID_DATA_TYPES.has(dataType)
     );

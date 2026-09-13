@@ -180,6 +180,8 @@ GUI 설정은 전달/출력, 캐시, 업데이트 등의 섹션으로 나뉩니�
 
 Renderer의 Python 버전 캐시, 설정 백업과 브라우저 히스토리는 `localStorage`도 사용합니다. 상세 저장 방식은 [히스토리](docs/download-history.md), [캐시](docs/shared-cache.md), [Electron / Renderer](docs/electron-renderer.md)를 참고하세요.
 
+OS 저장소의 URL·활성 상태·GPG 설정 등이 바뀌면 이전 resolver와 메타데이터 캐시를 재사용하지 않습니다. 이전 형식의 OS 메타데이터 캐시는 다시 수집하며 다운로드한 패키지와 아카이브는 유지합니다. [OS 캐시 형식](docs/shared-cache.md#os-메타데이터-캐시-설정)을 참고하세요.
+
 ## 개발 명령어
 
 ```bash

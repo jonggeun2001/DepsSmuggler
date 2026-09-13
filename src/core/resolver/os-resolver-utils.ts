@@ -8,6 +8,7 @@ import type {
   OSPackageSearchResult,
 } from '../downloaders/os-shared/types';
 import type { DependencyResolverOptions } from '../downloaders/os-shared/base-resolver';
+import { getRepositoryIdentity } from '../downloaders/os-shared/repository-identity';
 import { compareVersions } from '../shared/version-utils';
 
 export type { DependencyResolverOptions };
@@ -106,7 +107,7 @@ export function searchPackagesCommon(
 
 /**
  * Resolver 싱글톤 팩토리 생성
- * 배포판 ID가 변경되면 새 인스턴스를 생성
+ * 설정 스냅샷이 같을 때만 재사용하고 요청별 signal/callback은 분리한다.
  */
 export function createResolverFactory<T>(
   ResolverClass: new (options: DependencyResolverOptions) => T,
@@ -114,28 +115,52 @@ export function createResolverFactory<T>(
 ): (options?: DependencyResolverOptions) => T {
   let instance: T | null = null;
   let cacheKey: string | null = null;
+  let cachedCacheManager: DependencyResolverOptions['cacheManager'];
 
   return (options?: DependencyResolverOptions): T => {
     if (!options) {
       throw new Error(`${name} requires DependencyResolverOptions`);
     }
 
-    const bypassCache = Boolean(options.abortSignal) || Boolean(options.onProgress);
-    const currentKey = JSON.stringify({
-      distributionId: options.distribution?.id ?? null,
-      architecture: options.architecture,
-      includeOptional: options.includeOptional,
-      includeRecommends: options.includeRecommends,
-      repositories: options.repositories.map((repo) => repo.id),
-    });
+    // Repositories are mutable input data. Keep a resolver's loaded metadata and
+    // configuration attached to the same snapshot after the caller edits options.
+    const distribution = options.distribution;
+    const snapshot: DependencyResolverOptions = {
+      ...options,
+      repositories: options.repositories.map(repo => ({ ...repo })),
+      distribution: {
+        ...distribution,
+        architectures: [...distribution.architectures],
+        defaultRepos: distribution.defaultRepos.map(repo => ({ ...repo })),
+        extendedRepos: distribution.extendedRepos.map(repo => ({ ...repo })),
+      },
+    };
 
-    if (bypassCache) {
-      return new ResolverClass(options);
+    if (snapshot.abortSignal || snapshot.onProgress) {
+      return new ResolverClass(snapshot);
     }
 
-    if (!instance || cacheKey !== currentKey) {
-      instance = new ResolverClass(options);
+    const currentKey = JSON.stringify({
+      distribution: {
+        id: snapshot.distribution.id,
+        name: snapshot.distribution.name,
+        version: snapshot.distribution.version,
+        codename: snapshot.distribution.codename ?? null,
+        packageManager: snapshot.distribution.packageManager,
+        architectures: snapshot.distribution.architectures,
+        defaultRepos: snapshot.distribution.defaultRepos.map(getRepositoryIdentity),
+        extendedRepos: snapshot.distribution.extendedRepos.map(getRepositoryIdentity),
+      },
+      architecture: snapshot.architecture,
+      includeOptional: snapshot.includeOptional,
+      includeRecommends: snapshot.includeRecommends,
+      repositories: snapshot.repositories.map(getRepositoryIdentity),
+    });
+
+    if (!instance || cacheKey !== currentKey || cachedCacheManager !== snapshot.cacheManager) {
+      instance = new ResolverClass(snapshot);
       cacheKey = currentKey;
+      cachedCacheManager = snapshot.cacheManager;
     }
 
     return instance;
