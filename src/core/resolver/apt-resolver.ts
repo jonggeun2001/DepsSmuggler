@@ -59,12 +59,10 @@ export class AptDependencyResolver extends BaseOSDependencyResolver {
           this.parsers.set(key, parser);
           const cacheKey = OsPackageCache.createKey(
             'apt',
-            {
-              ...repo,
-              baseUrl: `${repo.baseUrl.replace(/\/$/, '')}/${component}`,
-            },
+            repo,
             this.options.architecture,
-            'packages'
+            'packages',
+            component
           );
           const cached = await this.options.cacheManager?.get<unknown>(cacheKey);
           let packages = this.readCacheEnvelope(cached);

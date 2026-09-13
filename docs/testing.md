@@ -271,7 +271,15 @@ Control continuation과 필드 의미는 [Debian Policy](https://www.debian.org/
 
 대체 제공자 선택은 `so:`, `cmd:`, `pc:`, `/bin/sh` fixture로 검증하며, 같은 제공 패키지의 여러 버전은 기존 충돌로 남는지도 확인합니다. 기본 테스트에 포함되는 `src/cli/apk-cached-capability.integration.test.ts`는 격리된 실제 캐시 파일에 이전 형식의 결과를 저장하고, 별도 CLI 프로세스가 로컬 HTTP 서버의 APKINDEX를 다시 파싱하는지 검사합니다. 이어지는 다운로드 프로세스는 새 캐시를 재사용하면서 루트와 제공 APK를 모두 아카이브에 넣어야 합니다. 이 로컬 회귀의 APK 응답은 다운로드 경로 검사용 fixture이며, 실제 APK 내용은 아래 네트워크 테스트로 확인합니다.
 
-이 CLI 캐시 회귀는 실제 loopback 포트가 포함된 저장소 URL로 캐시 키를 만들고, 검색·다운로드의 두 프로세스를 통틀어 인덱스 요청이 한 번인지 확인합니다. `src/core/downloaders/os-shared/cache-manager.test.ts`는 별도 캐시 인스턴스로 다시 읽어 일반 URL·포트 URL·IPv6 URL의 값과 인코딩된 파일명이 유지되는지, 잘못된 키와 이전 파일명은 제거되는지 검증합니다.
+이 CLI 캐시 회귀는 실제 loopback 포트가 포함된 저장소 URL로 캐시 키를 만들고, 검색·다운로드의 두 프로세스를 통틀어 인덱스 요청이 한 번인지 확인합니다. `src/core/downloaders/os-shared/cache-manager.test.ts`는 별도 캐시 인스턴스로 다시 읽어 일반 URL·포트 URL·IPv6 URL의 v2 키와 Base64url 파일명이 유지되는지, 잘못된 키와 이전 v1 메타데이터 파일명은 제거되는지 검증합니다. 저장소의 8개 식별 필드, HTTP/HTTPS와 경로 구분자 차이가 다른 키가 되는지도 확인합니다.
+
+`src/core/resolver/os-resolver-utils.test.ts`는 같은 값의 복제본 재사용, 저장소 설정/순서와 cache manager 참조 변경, 외부 옵션 변경으로부터의 스냅샷 분리, signal/progress 요청의 bypass를 검증합니다. `os-repository-identity.integration.test.ts`는 실제 loopback YUM 저장소·resolver·persistent cache를 연결해 같은 ID의 URL 변경이 새 endpoint를 조회하고, 같은 URL의 GPG/priority 변경이 이전 repository 정보를 재사용하지 않는지 확인합니다. 새 캐시 인스턴스로 같은 설정을 다시 읽을 때는 HTTP 요청이 늘지 않아야 합니다. fixture는 인덱스 파싱과 출처 정보 검증용이며 네이티브 RPM 설치 검증은 아닙니다.
+
+`apt-repository-identity.integration.test.ts`는 실제 APT parser·resolver·persistent cache를 연결해 원본 URL의 trailing slash 변경이 옛 출처 정보를 재사용하지 않는지 검증합니다. component별 키 분리는 공통 캐시 단위 테스트에서 검사합니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/resolver/os-resolver-utils.test.ts src/core/downloaders/os-shared/cache-manager.test.ts src/core/resolver/os-repository-identity.integration.test.ts src/core/resolver/apt-repository-identity.integration.test.ts
+```
 
 `src/core/downloaders/apk.integration.test.ts`는 현재 OS backend API로 실제 Alpine 3.20의 `zlib`와 제공 패키지를 내려받고 APK 내부 `.PKGINFO` 및 TAR.GZ의 파일 목록을 비교합니다. 기본 의존성 포함 경로와 `--no-deps`를 구분하며, 오래된 다운로더 API 호출과 조용한 조기 성공 처리를 사용하지 않습니다. 임시 캐시·출력을 정리하며 네이티브 `apk` 설치는 수행하지 않습니다.
 
