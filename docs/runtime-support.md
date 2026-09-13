@@ -37,7 +37,7 @@ CLI 테스트는 소스 실행, 빌드, 배포와 같은 디렉터리 구조에�
 
 Electron의 최신 3개 안정 major 지원 정책과 [공식 일정](https://releases.electronjs.org/schedule)을 확인합니다. 39는 지원이 종료돼 44로 전환했으며 보안 의존성 변경과 최소 macOS 조건은 [갱신 기록](security-dependencies.md)에 남겼습니다.
 
-1. lockfile을 새로 설치하고 각 OS에서 `npx electron --version`으로 실제 플랫폼 바이너리를 확인합니다. Electron 설치 패키지의 lazy download 때문에 `npm ci` 성공만으로 바이너리 준비를 판정하지 않습니다.
+1. lockfile을 새로 설치하고 각 OS에서 `ELECTRON_RUN_AS_NODE=1`을 해당 확인 단계에만 지정하고 Electron의 `process.versions.electron`을 설치 패키지 버전과 대조합니다. 내장 Node 버전도 기록합니다. Linux runner의 SUID sandbox 설정에 의존하지 않고 실제 바이너리를 실행하기 위한 모드이며 GUI 실행 확인은 아래 별도 smoke로 수행합니다. [Electron 환경 변수](https://www.electronjs.org/docs/latest/api/environment-variables#electron_run_as_node) Electron 설치 패키지의 lazy download 때문에 `npm ci` 성공만으로 바이너리 준비를 판정하지 않습니다.
 2. 3개 OS 테스트·빌드와 두 TypeScript 설정 검사를 통과시킵니다. Electron·Node 변경으로 추가된 타입 오류를 단언이나 테스트 제외로 숨기지 않습니다.
 3. macOS에서 `npm run package:mac`으로 DMG·ZIP·피드를 만들고 자동 posthook의 크기·SHA512·최소 OS 검증을 통과시킵니다. Windows/Linux도 해당 runner의 빌드 결과를 확인합니다.
 4. 실제 packaged 앱을 별도 `userData`와 테스트용 홈 디렉터리로 실행합니다. preload의 앱 버전·히스토리 IPC, 창 로딩을 확인합니다.

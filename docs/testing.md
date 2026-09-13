@@ -484,7 +484,7 @@ UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
 
 그 후 Windows/macOS/Linux 패키징과 draft release 생성이 이어집니다.
 
-각 OS 테스트 잡은 Electron 바이너리의 버전을 실제 실행해 확인합니다. Electron 설치 패키지가 존재하는 것과 플랫폼 바이너리 준비가 완료된 것은 다르며, 이 단계의 다운로드 실패도 CI 실패로 처리합니다. 이 버전 확인은 GUI 실행 검증을 대신하지 않습니다. 런타임 major 갱신 시 패키징된 앱의 IPC와 updater 다운로드까지 확인하는 절차는 [런타임 지원 정책](runtime-support.md)을 따릅니다.
+각 OS 테스트 잡은 `ELECTRON_RUN_AS_NODE=1`로 Electron 바이너리를 실행하고 `process.versions.electron`을 설치 패키지 버전과 대조합니다. 이 모드는 버전 확인 단계에만 적용하며 Linux runner의 SUID sandbox 설정 없이도 내장 Node 버전까지 확인합니다. Electron 설치 패키지가 존재하는 것과 플랫폼 바이너리 준비가 완료된 것은 다르며, 이 단계의 다운로드 실패도 CI 실패로 처리합니다. 이 버전 확인은 GUI 실행 검증을 대신하지 않습니다. 런타임 major 갱신 시 패키징된 앱의 IPC와 updater 다운로드까지 확인하는 절차는 [런타임 지원 정책](runtime-support.md)을 따릅니다.
 
 macOS는 DMG와 ZIP을 생성한 뒤 `node scripts/verify-macos-update.mjs build`로 안정 채널의 `latest-mac.yml`과 시험 채널의 `beta-mac.yml` 등 `*-mac.yml`을 검사합니다. ZIP 참조, DMG/ZIP 파일의 존재, 메타데이터의 크기·SHA512와 실제 파일의 일치가 필수입니다. 업데이트 피드는 `scripts/macos-update-policy.json`에 지정된 Darwin 커널 `22.0.0` 조건도 포함해야 합니다. 앱 번들의 macOS `13.0.0` 값과 혼동하지 않습니다. 파일 경로가 출력 폴더를 벗어나거나 메타데이터가 누락·손상되면 실패합니다. macOS 패키징 단계는 `--publish never`를 사용하며, 검증이 끝난 산출물과 `*-mac.yml`, blockmap을 artifact로 넘겨 최종 릴리스 단계에서 게시합니다.
 
