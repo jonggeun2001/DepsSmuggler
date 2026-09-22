@@ -46,6 +46,8 @@ depssmuggler config ca set "C:\Certificates\company-ca.pem"
 
 OpenSSL 저장소의 CA는 `getCACertificates('default')`로 전부 열거할 수 없어 CLI에서는 런타임 목록 교체를 사용하지 않습니다. Electron은 OpenSSL CA 실행 옵션을 지원하지 않으며 기본 목록 확장 방식을 사용합니다. [Node 구현](https://raw.githubusercontent.com/nodejs/node/v22.19.0/lib/tls.js), [Electron 지원 환경 변수](https://www.electronjs.org/docs/latest/api/environment-variables#node_options)
 
+CLI 부모 프로세스가 받는 `SIGINT`/`SIGTERM`/`SIGHUP`은 실행 중인 자식에 전달합니다. 자식 종료와 임시 CA 파일 정리를 기다린 뒤 종료 코드를 반환하며, POSIX 신호 종료는 `128 + 신호 번호`로 전달합니다. 강제 종료(`SIGKILL` 또는 운영체제의 강제 프로세스 종료)는 이 정리 절차를 실행할 수 없습니다.
+
 ## 검증
 
 ```bash

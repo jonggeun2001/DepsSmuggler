@@ -1,5 +1,5 @@
-import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import * as https from 'node:https';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -60,20 +60,24 @@ afterAll(async () => {
   rmSync(home, { recursive: true, force: true });
 });
 
+function runEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    NODE_TLS_REJECT_UNAUTHORIZED: '1',
+    NODE_EXTRA_CA_CERTS: '',
+    DEPS_SMUGGLER_TEST_USER_DIR: home,
+    DEPS_TEST_CA_URL: url,
+    TS_NODE_TRANSPILE_ONLY: 'true',
+    NODE_OPTIONS: `--require ${JSON.stringify(fixture('isolate-home.cjs'))}`,
+    ...extra,
+  };
+}
+
 async function run(args: string[], extra: NodeJS.ProcessEnv = {}) {
   return exec(process.execPath, args, {
     cwd: project,
     timeout: 60_000,
-    env: {
-      ...process.env,
-      NODE_TLS_REJECT_UNAUTHORIZED: '1',
-      NODE_EXTRA_CA_CERTS: '',
-      DEPS_SMUGGLER_TEST_USER_DIR: home,
-      DEPS_TEST_CA_URL: url,
-      TS_NODE_TRANSPILE_ONLY: 'true',
-      NODE_OPTIONS: `--require ${JSON.stringify(fixture('isolate-home.cjs'))}`,
-      ...extra,
-    },
+    env: runEnv(extra),
   });
 }
 
@@ -140,3 +144,44 @@ it('persists CLI registration, trusts it in Axios/https/fetch, and rejects again
   await expect(run(search, { NODE_OPTIONS: route })).rejects.toMatchObject({ code: 1 });
   expect((await run(['scripts/cli.cjs', 'config', 'ca', 'get'])).stdout.trim()).toBe('[]');
 }, 120_000);
+
+it.skipIf(process.platform === 'win32')(
+  'forwards parent termination to the command and removes its temporary CA bundle',
+  async () => {
+    await run(['scripts/cli.cjs', 'config', 'ca', 'set', 'electron/test-fixtures/tls-cert.pem']);
+    const parent = spawn(process.execPath, [fixture('root-ca-signal.cjs')], {
+      cwd: project,
+      env: runEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const closed = new Promise<number | null>((resolve) => parent.once('close', resolve));
+    let childPid: number | undefined;
+    try {
+      const ready = await new Promise<{ pid: number; bundle: string }>((resolve, reject) => {
+        let output = '';
+        parent.stdout.on('data', (data: Buffer) => {
+          output += data.toString();
+          if (output.includes('\n')) resolve(JSON.parse(output.trim()));
+        });
+        parent.once('error', reject);
+        parent.once('exit', () => reject(new Error('Command exited before reporting readiness')));
+      });
+      childPid = ready.pid;
+      expect(childPid).not.toBe(parent.pid);
+      expect(existsSync(ready.bundle)).toBe(true);
+      parent.kill('SIGTERM');
+      expect(await closed).toBe(128 + os.constants.signals.SIGTERM);
+      expect(existsSync(path.dirname(ready.bundle))).toBe(false);
+      expect(() => process.kill(ready.pid, 0)).toThrow();
+    } finally {
+      if (parent.exitCode === null) parent.kill('SIGKILL');
+      if (childPid) {
+        try {
+          process.kill(childPid, 'SIGKILL');
+        } catch {
+          /* already terminated */
+        }
+      }
+    }
+  }
+);

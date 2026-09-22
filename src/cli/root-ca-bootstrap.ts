@@ -21,6 +21,7 @@ export async function initializeCliRootCa(): Promise<boolean> {
     ? await readFile(process.env.NODE_EXTRA_CA_CERTS, 'utf8')
     : '';
   const temporaryDir = await mkdtemp(path.join(os.tmpdir(), 'depssmuggler-ca-'));
+  const signalHandlers: Array<[NodeJS.Signals, () => void]> = [];
   try {
     const bundlePath = path.join(temporaryDir, 'extra-ca.pem');
     await writeFile(
@@ -37,12 +38,25 @@ export async function initializeCliRootCa(): Promise<boolean> {
           DEPSSMUGGLER_CA_BOOTSTRAP: bundlePath,
         },
       });
+      for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+        const forward = () => {
+          child.kill(signal);
+        };
+        signalHandlers.push([signal, forward]);
+        process.on(signal, forward);
+      }
       child.once('error', reject);
-      child.once('exit', (exitCode) => resolve(exitCode ?? 1));
+      child.once('close', (exitCode, signal) =>
+        resolve(exitCode ?? (signal ? 128 + os.constants.signals[signal] : 1))
+      );
     });
     process.exitCode = code;
     return false;
   } finally {
-    await rm(temporaryDir, { recursive: true, force: true });
+    try {
+      await rm(temporaryDir, { recursive: true, force: true });
+    } finally {
+      for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
+    }
   }
 }
