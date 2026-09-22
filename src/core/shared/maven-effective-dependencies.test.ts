@@ -25,6 +25,55 @@ function processorFor(models: Record<string, PomProject>) {
 }
 
 describe('Maven effective ordinary dependencies', () => {
+  it.each(['project.parent', 'pom.parent', 'parent'])(
+    'resolves %s coordinates against the immediate parent after inheritance',
+    async (prefix) => {
+      const { processor } = processorFor({
+        'parent:2.0': { parent: coordinate('grandparent', '1.0') },
+        'grandparent:1.0': {},
+      });
+      const result = await processor.processModel({
+        parent: coordinate('parent', '${selectedParentVersion}'),
+        properties: { selectedParentVersion: '2.0' },
+        dependencies: {
+          dependency: {
+            groupId: `\${${prefix}.groupId}`,
+            artifactId: `\${${prefix}.artifactId}`,
+            version: `\${${prefix}.version}`,
+          },
+        },
+      }, coordinate('child', '9.0'), new Map());
+
+      expect(result.dependencies).toEqual([coordinate('parent', '2.0')]);
+      expect(result.properties['project.version']).toBe('9.0');
+    },
+  );
+
+  it('resolves imported BOM management against its own parent coordinates', async () => {
+    const { processor } = processorFor({
+      'parent:2.0': {},
+      'bom-parent:5.0': {},
+      'bom:7.0': {
+        parent: coordinate('bom-parent', '5.0'),
+        dependencyManagement: {
+          dependencies: { dependency: dependency('library', '${project.parent.version}') },
+        },
+      },
+    });
+    const result = await processor.processModel({
+      parent: coordinate('parent', '2.0'),
+      dependencyManagement: {
+        dependencies: {
+          dependency: { ...coordinate('bom', '7.0'), type: 'pom', scope: 'import' },
+        },
+      },
+      dependencies: { dependency: dependency('library') },
+    }, coordinate('child', '9.0'), new Map());
+
+    expect(result.dependencies).toEqual([dependency('library', '5.0')]);
+    expect(result.properties['project.parent.version']).toBe('2.0');
+  });
+
   it('inherits parent dependencies, resolves them in child context, and merges child overrides', async () => {
     const parentDependency = dependency('inherited', '${project.version}');
     const parent = {

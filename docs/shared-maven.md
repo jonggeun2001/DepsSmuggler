@@ -321,6 +321,8 @@ POM 파일 파싱 및 속성 해석 유틸리티:
 
 Maven 관리 버전은 G:A:type:classifier가 같은 의존성에만 적용합니다. 일반 JAR의 관리 버전으로 별도 classifier의 배포되지 않은 파일을 만들어 요청하지 않습니다.
 
+`${project.parent.version}`과 `project.parent.groupId`·`project.parent.artifactId`는 현재 모델의 직계 부모를 조회할 때 확정한 좌표로 치환합니다. `pom.parent.*`, `parent.*` 별칭도 지원합니다. 부모의 부모 좌표가 자식의 직계 부모 값을 덮어쓰지 않으며, 현재 모델의 `project.version`은 그대로 유지합니다. import BOM은 가져오는 프로젝트와 별도로 자신의 부모 좌표를 사용합니다. 이 처리는 Janino의 `commons-compiler:${project.parent.version}` 같은 의존성이 미해결 문자열로 조회되는 것을 막습니다.
+
 모델 해석 중 필요한 Parent POM과 import BOM의 좌표도 수집합니다. 부모 체인, BOM의 부모 및 중첩 import를 포함하고, `groupId:artifactId:version` 전체 좌표로 중복을 제거합니다. resolver는 모델 POM을 `metadata.type: 'pom'`인 다운로드 항목으로 추가하며, 충돌 경로에서 실제로 발견한 원래 JAR/POM과 하위 closure도 별도 항목으로 보존합니다. 관리 맵의 일반 라이브러리 항목 전체를 다운로드 의존성으로 확장하는 것은 아닙니다.
 
 탐색은 재귀 호출 대신 반복 처리하며 현재 탐색 경로의 Parent/BOM 순환을 감지합니다. 여러 경로가 같은 모델 POM을 참조하는 정상적인 공유 구조는 순환으로 처리하지 않습니다. 필요한 모델의 조회 실패, 해결할 수 없는 좌표, 순환 참조는 `MavenPomResolutionError`로 호출자에게 전달합니다. BOM import는 선언 순서대로 처리하여 먼저 등록된 관리 버전을 유지합니다. 처리 완료된 import는 재사용하되 활성 조상으로 이어질 수 있으면 다시 탐색하고, 부모의 속성은 자식 문맥별로 재평가합니다. `clearDependencyManagement()`는 관리 맵, 수집된 모델 좌표, 처리기 내부 모델 조회 캐시, 완료 import 및 참조 그래프를 함께 초기화합니다. 원시 POM 공용 캐시의 재사용과 해당 resolver 호출의 다운로드 항목 수집은 별개입니다.

@@ -598,6 +598,8 @@ Maven 관리 버전은 G:A:type:classifier가 같은 의존성에만 적용합�
 
 전이 패키지의 부모/BOM 관리 맵은 모델별로 분리합니다. 한 형제의 미사용 관리 항목이 다른 형제의 버전을 바꾸지 않으며, 필요한 모델 POM의 수집과 조회 캐시는 요청 전체에서 공유합니다.
 
+`project.parent.*`, `pom.parent.*`, `parent.*`의 `groupId`·`artifactId`·`version`은 각 모델의 확정된 직계 부모 좌표로 치환합니다. 따라서 Deequ의 전이 의존성인 Janino가 사용하는 `${project.parent.version}`도 실제 버전으로 해결합니다. import BOM의 부모 값은 해당 BOM 안에서 해석하며, 현재 프로젝트의 버전이나 다른 모델의 부모 값과 섞지 않습니다.
+
 ```typescript
 // Parent POM 예시 (dependencies 없음)
 const result = await resolver.resolveDependencies(

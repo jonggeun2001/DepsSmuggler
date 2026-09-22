@@ -28,6 +28,7 @@ interface ModelFrame {
   imports: PomDependency[];
   importIndex: number;
   parentResult?: ModelResult;
+  parentCoordinate?: MavenCoordinate;
   isParent: boolean;
   isImport: boolean;
   managementDeclarations: PomDependency[];
@@ -139,16 +140,25 @@ export class MavenBomProcessor {
     return `${coordinate.groupId}:${coordinate.artifactId}:${coordinate.version}`;
   }
 
-  private projectProperties(coordinate?: MavenCoordinate): Properties {
-    if (!coordinate) return {};
-    return {
-      'project.version': coordinate.version,
-      'project.groupId': coordinate.groupId,
-      'project.artifactId': coordinate.artifactId,
-      version: coordinate.version,
-      groupId: coordinate.groupId,
-      artifactId: coordinate.artifactId,
-    };
+  private projectProperties(coordinate?: MavenCoordinate, parent?: MavenCoordinate): Properties {
+    const properties: Properties = coordinate
+      ? {
+          'project.version': coordinate.version,
+          'project.groupId': coordinate.groupId,
+          'project.artifactId': coordinate.artifactId,
+          version: coordinate.version,
+          groupId: coordinate.groupId,
+          artifactId: coordinate.artifactId,
+        }
+      : {};
+    if (parent) {
+      for (const prefix of ['project.parent', 'pom.parent', 'parent']) {
+        properties[`${prefix}.groupId`] = parent.groupId;
+        properties[`${prefix}.artifactId`] = parent.artifactId;
+        properties[`${prefix}.version`] = parent.version;
+      }
+    }
+    return properties;
   }
 
   private frame(
@@ -431,6 +441,7 @@ export class MavenBomProcessor {
             ...current.pom.parent,
             groupId: current.pom.parent.groupId || current.coordinate?.groupId,
           }, current.properties, 'parent');
+          current.parentCoordinate = parent;
           await pushReference(parent, current.properties, true);
           continue;
         }
@@ -441,7 +452,7 @@ export class MavenBomProcessor {
           current.properties = {
             ...current.parentResult.properties,
             ...current.pom.properties,
-            ...this.projectProperties(current.coordinate),
+            ...this.projectProperties(current.coordinate, current.parentCoordinate),
           };
           current.dependencies = this.mergeDependencies(
             current.parentResult.dependencies,

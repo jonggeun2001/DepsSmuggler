@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizePath,
+  sanitizePath,
   toWindowsPath,
   toUnixPath,
   stripLeadingDotSlash,
@@ -24,6 +25,16 @@ import {
 } from './path-utils';
 
 describe('path-utils', () => {
+  describe('sanitizePath', () => {
+    it('정상 파일명을 보존하고 사용자 지정 금지문자를 제거', () => {
+      expect(sanitizePath('test-1.0.0-py3-none-any.whl')).toBe('test-1.0.0-py3-none-any.whl');
+
+      const sanitized = sanitizePath('test<script>.whl', /[^a-zA-Z0-9._-]/g);
+      expect(sanitized).not.toContain('<');
+      expect(sanitized).not.toContain('>');
+    });
+  });
+
   describe('normalizePath', () => {
     it('Windows 경로를 forward slash로 변환', () => {
       expect(normalizePath('C:\\Users\\test\\file.txt')).toBe('C:/Users/test/file.txt');

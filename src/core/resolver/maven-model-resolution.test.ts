@@ -59,6 +59,38 @@ describe('Maven 필수 모델 POM 다운로드 목록', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
+  it('resolves Deequ transitive Janino dependencies using project.parent.version', async () => {
+    const janino = (artifactId: string): MavenCoordinate => ({
+      groupId: 'org.codehaus.janino', artifactId, version: '3.1.9',
+    });
+    serveModels({
+      'deequ:3.0.3-spark-3.5': {
+        dependencies: { dependency: janino('janino') },
+      },
+      'janino:3.1.9': {
+        parent: janino('janino-parent'),
+        dependencies: {
+          dependency: { ...janino('commons-compiler'), version: '${project.parent.version}' },
+        },
+      },
+      'janino-parent:3.1.9': { packaging: 'pom' },
+      'commons-compiler:3.1.9': { parent: janino('janino-parent') },
+    });
+
+    const result = await new MavenResolver().resolveDependencies(
+      'com.amazon.deequ:deequ', '3.0.3-spark-3.5', { maxDepth: 5 },
+    );
+
+    expect(result.flatList).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'org.codehaus.janino:commons-compiler', version: '3.1.9' }),
+      expect.objectContaining({
+        name: 'org.codehaus.janino:janino-parent', version: '3.1.9',
+        metadata: expect.objectContaining({ type: 'pom' }),
+      }),
+    ]));
+    expect(fetchPomMock.mock.calls.every(([coord]) => !coord.version.includes('${'))).toBe(true);
+  });
+
   it('자식이 import한 BOM으로 전이 버전을 해결하고 필요한 모델 POM을 포함한다', async () => {
     serveModels({
       'root:1.0': { dependencies: { dependency: coordinate('child') } },

@@ -9,6 +9,7 @@
 - 루트의 명시적 `metadata.type`은 `artifactType`으로 전달되며 원격 POM packaging이 이를 덮어쓰지 않습니다. 아티팩트 키는 type을 포함합니다. classifier는 사용자가 선택하며 OS/아키텍처만으로 자동 생성하지 않습니다.
 - `dependencyManagement`와 BOM은 버전 관리에 사용하고, 그 목록 전체를 실제 다운로드 의존성으로 펼치지 않습니다. 부모 관리 속성은 자식 문맥에서 해석합니다. 직접 관리 선언은 자식, 부모 순으로 우선하고, 그 뒤 자식의 import BOM, 상속된 import BOM 순으로 관리 값을 채웁니다. 같은 BOM GA의 다른 버전 import는 자식 선언을 사용합니다. `MavenQueueProcessor`는 `processModel()`이 반환한 부모 상속을 포함한 일반 의존성을 탐색합니다.
 - 선택된 패키지의 모델 해석에 필요한 Parent POM과 import BOM은 전체 GAV로 중복 제거하여 `metadata.type: 'pom'`인 다운로드 항목으로 포함합니다. Parent/BOM 탐색과 그래프 평탄화는 반복 처리하며, 필수 모델의 누락이나 순환 참조는 해당 루트의 해결 실패로 보고합니다.
+- `project.parent.*`, `pom.parent.*`, `parent.*`의 좌표 속성은 모델별 직계 부모의 확정된 `groupId`·`artifactId`·`version`으로 치환합니다. import BOM은 자신의 부모 문맥을 사용합니다. Deequ → Janino → `commons-compiler:${project.parent.version}` 경로도 실제 버전의 POM으로 조회합니다.
 - 하나의 BFS에서 발견된 모든 버전의 JAR 등 원래 아티팩트, POM과 하위 의존성을 수집합니다. scope·optional·exclusion·깊이 제한을 적용하고, type/classifier·scope·exclusion·최소 깊이별 방문을 기록합니다. 의존성 탐색 컨텍스트 10,000개를 넘으면 오류를 반환합니다. `conflicts`는 버전 발견 정보이며 반출 버전을 줄이지 않습니다. 프리페치 캐시와 실제 반출 목록은 별개입니다.
 - `MavenDownloader.downloadPackage()`는 `metadata.packaging` → `metadata.type` → POM의 `<packaging>` → `jar` 순서로 파일 타입을 정합니다. 메인 아티팩트와 POM, 사용 가능한 `.sha1` 파일을 내려받습니다. source/javadoc은 classifier 또는 type으로 선택하며 자동으로 모두 포함하지 않습니다.
 - 9절의 구현 권장사항과 10.4절의 축약 코드는 설계 설명입니다. 예시의 모든 타입·체크섬 알고리즘이 호출 옵션으로 노출되는 것은 아닙니다. 12–13절은 현재 구현의 크기 조회·POM 처리·요청 재사용을 설명합니다.

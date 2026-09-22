@@ -71,7 +71,6 @@ import {
   createRequestCondaResolver,
   getCondaResolver,
 } from '../resolver/conda-resolver';
-import { getYumResolver } from '../resolver/yum-resolver';
 import {
   createRequestNpmResolver,
   getNpmResolver,
@@ -981,51 +980,6 @@ describe('dependency-resolver', () => {
           requestSource: 'cli',
         },
       });
-    });
-
-    // yum, apt, apk는 별도 IPC 핸들러(os:resolveDependencies)에서 처리되므로 스킵
-    it.skip('yum 패키지 의존성 해결', async () => {
-      const mockYumResult = {
-        root: {
-          package: { type: 'yum', name: 'httpd', version: '2.4.6' },
-          dependencies: [],
-        },
-        flatList: [
-          { type: 'yum', name: 'httpd', version: '2.4.6', metadata: { downloadUrl: 'http://example.com/httpd.rpm' } },
-          { type: 'yum', name: 'apr', version: '1.4.8', metadata: { downloadUrl: 'http://example.com/apr.rpm' } },
-        ],
-        conflicts: [],
-        totalSize: 5000000,
-      };
-
-      const mockResolver = {
-        resolveDependencies: vi.fn().mockResolvedValue(mockYumResult),
-      };
-      vi.mocked(getYumResolver).mockReturnValue(mockResolver as any);
-
-      const packages: DownloadPackage[] = [
-        { id: 'test-1', type: 'yum', name: 'httpd', version: '2.4.6' },
-      ];
-
-      const options: DependencyResolverOptions = {
-        yumRepoUrl: 'http://custom-repo.example.com',
-        architecture: 'x86_64',
-      };
-
-      const result = await resolveAllDependencies(packages, options);
-
-      expect(mockResolver.resolveDependencies).toHaveBeenCalledWith(
-        'httpd',
-        '2.4.6',
-        expect.objectContaining({
-          repoUrl: 'http://custom-repo.example.com',
-          architecture: 'x86_64',
-        })
-      );
-      expect(result.allPackages).toHaveLength(2);
-      // downloadUrl이 전달되는지 확인
-      const aprPkg = result.allPackages.find(p => p.name === 'apr');
-      expect(aprPkg?.downloadUrl).toBe('http://example.com/apr.rpm');
     });
 
     it('npm 패키지 의존성 해결 (특수 반환 형식)', async () => {
