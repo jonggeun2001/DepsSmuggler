@@ -98,7 +98,7 @@ jobs:
         run: npm run build
 
       - name: Package for Windows
-        run: npm run package:win
+        run: npm run package:win -- --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -109,7 +109,9 @@ jobs:
           path: |
             build/*.exe
             build/*.msi
-          if-no-files-found: warn
+            build/*.yml
+            build/*.blockmap
+          if-no-files-found: error
 
   # macOS 빌드
   build-macos:
@@ -228,7 +230,7 @@ jobs:
         run: npm run build
 
       - name: Package for Linux
-        run: npm run package:linux
+        run: npm run package:linux -- --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -241,7 +243,9 @@ jobs:
             build/*.deb
             build/*.rpm
             build/*.tar.gz
-          if-no-files-found: warn
+            build/*.yml
+            build/*.blockmap
+          if-no-files-found: error
 
   # GitHub Release 생성
   create-release:
@@ -272,7 +276,8 @@ jobs:
           fi
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        id: release
+        uses: softprops/action-gh-release@v2
         with:
           name: DepsSmuggler v${{ steps.get_version.outputs.version }}
           tag_name: ${{ github.ref_name }}
@@ -325,3 +330,11 @@ jobs:
 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" |
+            jq -e '.body | strings | test("[^[:space:]]")'
