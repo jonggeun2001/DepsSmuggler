@@ -2,6 +2,9 @@ import type { DownloadHistory } from '../../types';
 import type { OSPackageInfo } from '../../core/downloaders/os-shared/types';
 import type { SearchResult } from '../pages/wizard-page/types';
 import type { PackageType } from '../stores/cart-store';
+import type { QueryFailure } from '../../types/query-error';
+import { QueryRequestError } from '../../utils/query-error';
+import { requestQueryJson } from './query-http';
 
 export interface RendererSearchOptions {
   channel?: string;
@@ -30,12 +33,12 @@ interface RendererDataClientElectronAPI {
       type: string,
       query: string,
       options?: RendererSearchOptions
-    ) => Promise<{ results: SearchResult[] }>;
+    ) => Promise<{ results: SearchResult[]; error?: QueryFailure }>;
     versions?: (
       type: string,
       packageName: string,
       options?: RendererSearchOptions
-    ) => Promise<{ versions: string[] }>;
+    ) => Promise<{ versions: string[]; error?: QueryFailure }>;
   };
   os?: {
     search?: (options: RendererOSSearchRequest) => Promise<{ packages: unknown[]; totalCount: number }>;
@@ -147,50 +150,32 @@ async function searchViaHttp(
   switch (type) {
     case 'pip':
     case 'conda': {
-      const response = await fetchImpl(`/api/pypi/pypi/${encodeURIComponent(query)}/json`);
-      if (!response.ok) {
-        return [];
-      }
-      const data = await response.json() as {
-        info: { name: string; version: string; summary?: string };
-        releases: Record<string, unknown>;
-      };
+      const data = await requestQueryJson(fetchImpl, `/api/pypi/pypi/${encodeURIComponent(query)}/json`);
+      if (!isRecord(data.info) || typeof data.info.name !== 'string' || typeof data.info.version !== 'string' || !isRecord(data.releases)) throw new QueryRequestError('INVALID_RESPONSE');
 
       return [
         {
           name: data.info.name,
           version: data.info.version,
-          description: data.info.summary || '',
+          description: typeof data.info.summary === 'string' ? data.info.summary : '',
           versions: Object.keys(data.releases).sort(compareVersionsDescending).slice(0, 20),
         },
       ];
     }
     case 'maven': {
-      const response = await fetchImpl(`/api/maven/search?q=${encodeURIComponent(query)}`);
-      if (!response.ok) {
-        return [];
-      }
-      const data = await response.json() as { results?: SearchResult[] };
-      return data.results || [];
+      const data = await requestQueryJson(fetchImpl, `/api/maven/search?q=${encodeURIComponent(query)}`);
+      return readSearchResults(data.results);
     }
     case 'npm': {
-      const response = await fetchImpl(`/api/npm/search?q=${encodeURIComponent(query)}`);
-      if (!response.ok) {
-        return [];
-      }
-      const data = await response.json() as { results?: SearchResult[] };
-      return data.results || [];
+      const data = await requestQueryJson(fetchImpl, `/api/npm/search?q=${encodeURIComponent(query)}`);
+      return readSearchResults(data.results);
     }
     case 'docker': {
       const registry = options?.registry || 'docker.io';
-      const response = await fetchImpl(
+      const data = await requestQueryJson(fetchImpl,
         `/api/docker/search?q=${encodeURIComponent(query)}&registry=${encodeURIComponent(registry)}`
       );
-      if (!response.ok) {
-        return [];
-      }
-      const data = await response.json() as { results?: SearchResult[] };
-      return (data.results || []).map((item) => ({
+      return readSearchResults(data.results).map((item) => ({
         ...item,
         registry,
       }));
@@ -210,52 +195,38 @@ async function getVersionsViaHttp(
   switch (type) {
     case 'pip':
     case 'conda': {
-      const response = await fetchImpl(`/api/pypi/pypi/${encodeURIComponent(packageName)}/json`);
-      if (!response.ok) {
-        return fallbackVersions;
-      }
-      const data = await response.json() as { releases: Record<string, unknown> };
+      const data = await requestQueryJson(fetchImpl, `/api/pypi/pypi/${encodeURIComponent(packageName)}/json`);
+      if (!isRecord(data.releases)) throw new QueryRequestError('INVALID_RESPONSE');
       return Object.keys(data.releases).sort(compareVersionsDescending);
     }
     case 'maven': {
-      const response = await fetchImpl(
+      const data = await requestQueryJson(fetchImpl,
         `/api/maven/versions?package=${encodeURIComponent(packageName)}`
       );
-      if (!response.ok) {
-        return fallbackVersions;
-      }
-      const data = await response.json() as { versions?: string[] };
-      return data.versions && data.versions.length > 0 ? data.versions : fallbackVersions;
+      const versions = readVersions(data.versions);
+      return versions.length > 0 ? versions : fallbackVersions;
     }
     case 'npm': {
-      const response = await fetchImpl(`/api/npm/${encodeURIComponent(packageName)}`);
-      if (!response.ok) {
-        return fallbackVersions;
-      }
-      const data = await response.json() as {
-        versions?: Record<string, unknown>;
-        'dist-tags'?: Record<string, string>;
-      };
-      const versions = Object.keys(data.versions || {}).sort(compareVersionsDescending);
-      if (data['dist-tags']?.latest) {
+      const data = await requestQueryJson(fetchImpl, `/api/npm/${encodeURIComponent(packageName)}`);
+      if (!isRecord(data.versions)) throw new QueryRequestError('INVALID_RESPONSE');
+      const versions = Object.keys(data.versions).sort(compareVersionsDescending);
+      const latest = isRecord(data['dist-tags']) ? data['dist-tags'].latest : undefined;
+      if (typeof latest === 'string' && latest) {
         return [
-          data['dist-tags'].latest,
-          ...versions.filter((version) => version !== data['dist-tags']?.latest),
+          latest,
+          ...versions.filter((version) => version !== latest),
         ];
       }
       return versions.length > 0 ? versions : fallbackVersions;
     }
     case 'docker': {
       const registry = options?.registry || 'docker.io';
-      const response = await fetchImpl(
+      const data = await requestQueryJson(fetchImpl,
         `/api/docker/tags?image=${encodeURIComponent(packageName)}&registry=${encodeURIComponent(registry)}`
       );
-      if (!response.ok) {
-        return fallbackVersions.length > 0 ? fallbackVersions : ['latest'];
-      }
-      const data = await response.json() as { tags?: string[] };
-      return data.tags && data.tags.length > 0
-        ? data.tags
+      const tags = readVersions(data.tags);
+      return tags.length > 0
+        ? tags
         : (fallbackVersions.length > 0 ? fallbackVersions : ['latest']);
     }
     default:
@@ -280,7 +251,17 @@ function getHistoryStorage(
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readSearchResults(value: unknown): SearchResult[] {
+  if (!Array.isArray(value) || value.some((item) => !isRecord(item) || typeof item.name !== 'string' || typeof item.version !== 'string')) throw new QueryRequestError('INVALID_RESPONSE');
+  return value as SearchResult[];
+}
+
+function readVersions(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some((version) => typeof version !== 'string')) throw new QueryRequestError('INVALID_RESPONSE');
+  return value;
 }
 
 function normalizeStoredHistories(parsed: unknown): {
@@ -401,11 +382,12 @@ export function createRendererDataClient({
     async searchPackages(type, query, options) {
       if (electronAPI?.search?.packages) {
         const response = await electronAPI.search.packages(type, query, options);
-        return response.results || [];
+        if (response.error) throw new QueryRequestError(response.error.code, response.error.status);
+        return readSearchResults(response.results);
       }
 
       if (!fetchImpl) {
-        return [];
+        throw new QueryRequestError('UNAVAILABLE');
       }
 
       return searchViaHttp(fetchImpl, type, query, options);
@@ -413,7 +395,7 @@ export function createRendererDataClient({
 
     async searchOSPackages(request) {
       if (!electronAPI?.os?.search) {
-        return [];
+        throw new QueryRequestError('UNAVAILABLE');
       }
 
       const response = await electronAPI.os.search(request);
@@ -428,20 +410,19 @@ export function createRendererDataClient({
     async getVersionsWithSource(type, packageName, options, fallbackVersions) {
       if (electronAPI?.search?.versions) {
         const response = await electronAPI.search.versions(type, packageName, options);
+        if (response.error) throw new QueryRequestError(response.error.code, response.error.status);
+        const versions = readVersions(response.versions);
         return {
           versions:
-            response.versions && response.versions.length > 0
-              ? response.versions
+            versions.length > 0
+              ? versions
               : (fallbackVersions || []),
           source: 'electron',
         };
       }
 
       if (!fetchImpl) {
-        return {
-          versions: fallbackVersions || [],
-          source: 'fallback',
-        };
+        throw new QueryRequestError('UNAVAILABLE');
       }
 
       return {

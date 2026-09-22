@@ -51,7 +51,7 @@ describe('renderer-data-client', () => {
 
     const results = await client.searchPackages('npm', 'vite');
 
-    expect(fetchImpl).toHaveBeenCalledWith('/api/npm/search?q=vite');
+    expect(fetchImpl).toHaveBeenCalledWith('/api/npm/search?q=vite', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(results).toEqual([{ name: 'vite', version: '7.3.2', description: 'build tool' }]);
   });
 

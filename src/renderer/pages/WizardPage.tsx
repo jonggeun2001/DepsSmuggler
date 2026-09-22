@@ -43,6 +43,7 @@ import {
   stripWizardTypeParam,
 } from './wizard-page/query-params';
 import { useWizardSearchFlow } from './wizard-page/useWizardSearchFlow';
+import { QueryFailureAlert } from './wizard-page/QueryFailureAlert';
 import {
   LIBRARY_PACKAGE_TYPES,
   OS_PACKAGE_TYPES,
@@ -237,6 +238,9 @@ const WizardPage: React.FC = () => {
   const {
     searchQuery,
     searching,
+    searchError,
+    searchEmpty,
+    versionError,
     selectedPackage,
     suggestions,
     showSuggestions,
@@ -256,6 +260,8 @@ const WizardPage: React.FC = () => {
     resetSearch,
     handleInputChange,
     handleSuggestionSelect,
+    handleSearch,
+    handleSelectPackage,
   } = useWizardSearchFlow({
     packageType,
     searchContext: {
@@ -817,6 +823,7 @@ const WizardPage: React.FC = () => {
                 size="large"
                 value={searchQuery}
                 onChange={(e) => handleInputChange(e.target.value)}
+                onPressEnter={() => { void handleSearch(searchQuery); }}
                 onBlur={() => {
                   // 드롭다운 위에 마우스가 있으면 blur 무시 (Windows Electron 스크롤 문제 해결)
                   if (!isOverDropdown) {
@@ -828,8 +835,8 @@ const WizardPage: React.FC = () => {
                 style={{ marginBottom: 16 }}
               />
             </Dropdown>
-
-
+            {searchError && <QueryFailureAlert failure={searchError} loading={searching} onRetry={() => { void handleSearch(searchQuery); }} />}
+            {searchEmpty && <Alert type="info" showIcon title="검색 결과가 없습니다. 다른 검색어로 다시 검색하세요." />}
             <div style={{ marginTop: 24 }}>
               <Button onClick={() => setCurrentStep(1)}>이전</Button>
             </div>
@@ -854,7 +861,7 @@ const WizardPage: React.FC = () => {
                   )}
                 </Text>
                 <Divider />
-
+                {versionError && <QueryFailureAlert version failure={versionError} loading={loadingVersions} onRetry={() => { void handleSelectPackage(selectedPackage); }} />}
                 <div style={{ marginBottom: 16 }}>
                   <Text strong>{packageType === 'docker' ? '태그 선택' : '버전 선택'}</Text>
                   {loadingVersions ? (
@@ -876,7 +883,7 @@ const WizardPage: React.FC = () => {
                         value: v,
                         label: packageType === 'docker'
                           ? (v === 'latest' ? `${v} (권장)` : v)
-                          : (index === 0 ? `${v} (최신)` : v),
+                          : (index === 0 && !versionError ? `${v} (최신)` : v),
                       }))}
                     />
                   )}

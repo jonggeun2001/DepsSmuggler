@@ -85,6 +85,8 @@ electron/
 
 일반 패키지 검색과 OS 패키지 검색이 모두 이 모듈에 있으며, 핸들러 본체는 채널 등록과 인자 전달만 담당합니다.
 
+`search:packages`는 `{ results, error? }`, `search:versions`는 `{ versions, error? }`를 반환합니다. 실패 시 `error: QueryFailure`를 포함하므로 빈 배열만으로 정상 0건을 판단하지 않습니다. renderer facade는 이 오류를 예외로 전달하고 위자드는 한국어 안내와 재시도를 표시합니다. 코드·메시지·선택적 HTTP 상태를 사용하는 [검색 오류 계약](search-errors.md)을 참고하세요.
+
 검색 사전 로딩 실패는 `SearchOrchestrator` 경고로 기록하고 일반 검색은 계속 사용할 수 있습니다. 사전 로딩이 성공했다고 보고하거나 빈 검색 결과를 미리 확정하지 않습니다. `search-orchestrator.test.ts`가 실패 후 정상 검색을 검증합니다.
 
 주요 위임 대상:
@@ -98,7 +100,7 @@ electron/
 |------|------|
 | `search:packages` | `pip`, `conda`, `maven`, `npm`, `docker` 검색 |
 | `search:versions` | 타입별 버전 목록 조회 |
-| `search:suggest` | 자동완성 제안 |
+| `search:suggest` | 문자열 제안 API (실제 위자드 자동 검색은 `search:packages` 사용) |
 | `dependency:resolve` | 일반 패키지 의존성 해결 |
 | `maven:isNativeArtifact` | Maven 네이티브 아티팩트 여부 |
 | `maven:getAvailableClassifiers` | Maven classifier 목록 |

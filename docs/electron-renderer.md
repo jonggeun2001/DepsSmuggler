@@ -2,7 +2,7 @@
 
 ## 개요
 
-데스크톱 앱은 Electron main process와 React renderer가 `window.electronAPI` IPC 브리지로 통신하는 구조입니다. 검색/버전조회/히스토리 I/O 같은 renderer data access는 `src/renderer/lib/renderer-data-client.ts` facade를 통해 한곳으로 모았습니다. 일반 검색/버전 조회는 해당 IPC 메서드가 없으면 HTTP fallback을 사용하고, OS 검색은 IPC가 없으면 빈 목록을 반환합니다. 브라우저의 제한된 fallback을 Electron 전체 기능과 동일하게 취급하지 않습니다.
+데스크톱 앱은 Electron main process와 React renderer가 `window.electronAPI` IPC 브리지로 통신하는 구조입니다. 검색/버전조회/히스토리 I/O 같은 renderer data access는 `src/renderer/lib/renderer-data-client.ts` facade를 통해 한곳으로 모았습니다. 일반 검색/버전 조회는 해당 IPC 메서드가 없으면 HTTP fallback을 사용하고, OS 검색은 IPC가 없으면 사용 불가 오류를 전달합니다. 브라우저의 제한된 fallback을 Electron 전체 기능과 동일하게 취급하지 않습니다.
 
 현재 구조의 핵심은 다음과 같습니다.
 
@@ -77,6 +77,8 @@ main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 
   - 버전 선택 전략, Docker tag 선택, Maven classifier 부가 조회
 - `src/renderer/pages/wizard-page/useWizardSearchFlow.ts`
   - 검색 입력/제안/선택/버전조회 오케스트레이션
+
+자동 검색과 수동 Enter/재시도는 같은 검색 경로를 사용합니다. `useWizardSearchFlow`는 검색 실패·정상 0건·버전 실패를 구분하고 이전 요청의 늦은 응답을 무시합니다. `QueryFailureAlert`는 단일 인라인 안내와 재시도를 제공하며 인증서 오류에는 CA 설정 링크를 표시합니다. 버전 실패 시 검색 결과의 대체 버전을 제공하되 최신 표시를 하지 않습니다. IPC/HTTP 오류 계약과 회귀 테스트는 [검색 오류](search-errors.md)를 참고하세요.
 
 ## Electron main process
 

@@ -295,7 +295,7 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
       }
       userMessage += `잠시 후 다시 시도해주세요. (${errorMessage.substring(0, 100)})`;
 
-      throw new Error(userMessage);
+      throw Object.assign(new Error(userMessage), { cause: error });
     }
   }
 

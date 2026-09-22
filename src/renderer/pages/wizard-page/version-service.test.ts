@@ -83,7 +83,7 @@ describe('version-service', () => {
 
     expect(fetchImpl).toHaveBeenCalledWith(
       '/api/maven/versions?package=org.springframework%3Aspring-core'
-    );
+    , expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(result.versions).toEqual(['5.3.0', '5.2.9']);
     expect(result.selectedVersion).toBe('5.3.0');
   });
@@ -113,7 +113,7 @@ describe('version-service', () => {
       }
     );
 
-    expect(fetchImpl).toHaveBeenCalledWith('/api/pypi/pypi/requests/json');
+    expect(fetchImpl).toHaveBeenCalledWith('/api/pypi/pypi/requests/json', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(result.usedIndexUrl).toBeUndefined();
     expect(result.versions).toEqual(['2.32.0', '2.31.0']);
     expect(result.selectedVersion).toBe('2.32.0');
@@ -141,7 +141,7 @@ describe('version-service', () => {
 
     expect(fetchImpl).toHaveBeenCalledWith(
       '/api/docker/tags?image=org%2Fapp&registry=registry.example.internal'
-    );
+    , expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(result.selectedVersion).toBe('latest');
     expect(result.versions).toEqual(['1.0.0', 'latest', '0.9.0']);
   });

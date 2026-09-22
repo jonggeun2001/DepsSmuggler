@@ -1,3 +1,4 @@
+import type { QueryFailure } from '../src/types/query-error';
 import type { DownloadStatusData } from '../src/types/electron';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { UpdateReleaseNotes } from '../src/types/updater';
@@ -260,6 +261,7 @@ const electronAPI = {
         description?: string;
         registry?: string;
       }>;
+      error?: QueryFailure;
     }> => ipcRenderer.invoke('search:packages', type, query, options),
     suggest: (type: string, query: string, options?: { channel?: string }): Promise<string[]> =>
       ipcRenderer.invoke('search:suggest', type, query, options),
@@ -267,7 +269,7 @@ const electronAPI = {
       type: string,
       packageName: string,
       options?: { channel?: string; registry?: string; indexUrl?: string }
-    ): Promise<{ versions: string[] }> =>
+    ): Promise<{ versions: string[]; error?: QueryFailure }> =>
       ipcRenderer.invoke('search:versions', type, packageName, options),
   },
 

@@ -10,6 +10,20 @@ vi.mock('../utils/logger', () => ({
 }));
 
 describe('createSearchOrchestrator', () => {
+  it.each(['pip', 'conda', 'maven', 'npm', 'docker'])('%s 검색 및 버전 실패와 정상 0건을 구분한다', async (type) => {
+    const { createSearchOrchestrator } = await import('./search-orchestrator');
+    const router = {
+      prime: vi.fn(), suggest: vi.fn(),
+      searchPackages: vi.fn().mockRejectedValue({ response: { status: 503 } }),
+      getVersions: vi.fn().mockRejectedValue({ code: 'ETIMEDOUT' }),
+    };
+    const orchestrator = createSearchOrchestrator({ packageRouter: router });
+    expect(await orchestrator.searchPackages(type, 'test')).toMatchObject({ results: [], error: { code: 'HTTP', status: 503 } });
+    expect(await orchestrator.getVersions(type, 'test')).toMatchObject({ versions: [], error: { code: 'TIMEOUT' } });
+    router.searchPackages.mockResolvedValue([]);
+    expect(await orchestrator.searchPackages(type, 'absent')).toEqual({ results: [] });
+  });
+
   it('백그라운드 사전 로딩 실패가 일반 검색을 막지 않는다', async () => {
     const { createSearchOrchestrator } = await import('./search-orchestrator');
     const orchestrator = createSearchOrchestrator({ packageRouter: {
