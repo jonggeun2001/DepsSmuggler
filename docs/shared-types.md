@@ -9,6 +9,7 @@
 | 타입 | 공통 정의 | 재사용 위치 |
 |------|-----------|------------|
 | `DownloadPackageResult` | `src/core/shared/types.ts` | Electron 다운로드 라우터 |
+| `ArchiveProgress`, `PackagingDetails` | `src/types/packaging.ts` | 일반·OS 압축 진행률과 IPC/화면의 생성 단계 |
 | `ArchiveType` (`ArchiveFormat`) | `src/types/packaging.ts` | 일반·OS 패키저 |
 | `OSDistributionSetting` | `src/types/platform/os-target.ts` | 설정 스토어·의존성 해결 |
 | `WheelTags`, `SupportedTag` | `src/core/shared/pip-types.ts` | PyPI 태그 유틸리티 |

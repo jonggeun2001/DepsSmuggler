@@ -1,5 +1,6 @@
 // Electron API 타입 정의 (렌더러 프로세스용)
 
+import type { PackagingDetails } from './packaging';
 import type { UpdateReleaseNotes } from './updater';
 import type { PackageInfo } from './package-manager/metadata';
 import type { RootCaResult } from './root-ca';
@@ -15,7 +16,7 @@ export interface DownloadProgressData {
   error?: string;
 }
 
-export interface DownloadStatusData {
+export interface DownloadStatusData extends PackagingDetails {
   sessionId?: number;
   phase: 'resolving' | 'downloading' | 'packaging' | 'complete';
   message: string;

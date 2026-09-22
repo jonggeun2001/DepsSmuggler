@@ -1,3 +1,4 @@
+import type { DownloadStatusData } from '../src/types/electron';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { UpdateReleaseNotes } from '../src/types/updater';
 import type { PackageInfo } from '../src/types/package-manager/metadata';
@@ -110,10 +111,10 @@ const electronAPI = {
       return () => ipcRenderer.removeListener('download:progress', handler);
     },
     // 의존성 해결 상태 이벤트
-    onStatus: (callback: (status: { sessionId?: number; phase: string; message: string }) => void): () => void => {
+    onStatus: (callback: (status: DownloadStatusData) => void): () => void => {
       const handler = (
         _event: Electron.IpcRendererEvent,
-        status: { sessionId?: number; phase: string; message: string }
+        status: DownloadStatusData
       ) => callback(status);
       ipcRenderer.on('download:status', handler);
       return () => ipcRenderer.removeListener('download:status', handler);

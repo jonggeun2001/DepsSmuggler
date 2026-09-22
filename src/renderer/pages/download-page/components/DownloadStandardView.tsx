@@ -22,6 +22,8 @@ import {
   Tag,
   Typography,
 } from 'antd';
+import { PackagingProgressView } from '../../../components/PackagingProgressView';
+import type { PackagingDetails } from '../../../../types/packaging';
 import { DownloadItemsTable } from './DownloadItemsTable';
 import { DownloadLogsCard } from './DownloadLogsCard';
 import { formatBytes } from '../utils';
@@ -49,7 +51,7 @@ interface DownloadStandardViewProps {
   totalProgress: number;
   isPaused: boolean;
   packagingStatus: PackagingStatus;
-  packagingProgress: number;
+  packagingDetails: PackagingDetails | null;
   totalSpeed: number;
   remainingTime: string | null;
   includeDependencies: boolean;
@@ -86,7 +88,7 @@ export function DownloadStandardView({
   totalProgress,
   isPaused,
   packagingStatus,
-  packagingProgress,
+  packagingDetails,
   totalSpeed,
   remainingTime,
   includeDependencies,
@@ -204,7 +206,7 @@ export function DownloadStandardView({
           style={{ marginBottom: 16 }}
         />
 
-        {isDownloading && (
+        {isDownloading && packagingStatus !== 'packaging' && (
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={8}>
               <Statistic
@@ -233,10 +235,10 @@ export function DownloadStandardView({
         )}
 
         {packagingStatus === 'packaging' && (
-          <div style={{ marginBottom: 16 }}>
-            <Text strong>패키징 진행 중...</Text>
-            <Progress percent={packagingProgress} status="active" />
-          </div>
+          <PackagingProgressView
+            message={packagingDetails?.message || '파일 생성 준비 중...'}
+            archiveProgress={packagingDetails?.archiveProgress}
+          />
         )}
 
         <DownloadItemsTable
@@ -289,6 +291,7 @@ export function DownloadStandardView({
                 icon={isPaused ? <CaretRightOutlined /> : <PauseOutlined />}
                 size="large"
                 onClick={onPauseResume}
+                disabled={packagingStatus === 'packaging'}
               >
                 {isPaused ? '재개' : '일시정지'}
               </Button>
@@ -302,7 +305,7 @@ export function DownloadStandardView({
               </Button>
             </>
           )}
-          {allCompleted && (
+          {allCompleted && !isDownloading && packagingStatus !== 'packaging' && (
             <Button
               type="primary"
               icon={<CheckCircleOutlined />}

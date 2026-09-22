@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
 import { createScopedLogger } from '../utils/logger';
+import type { PackagingDetails } from '../../src/types/packaging';
 import { OSArchivePackager } from '../../src/core/downloaders/os-shared/archive-packager';
 import { OSRepoPackager } from '../../src/core/downloaders/os-shared/repo-packager';
 import type {
@@ -244,15 +245,17 @@ export function createOSDownloadOrchestrator(params: {
         }
 
         if (!osDownloadCancelled && successfulPackages.length > 0) {
-          progressEmitter.emitOSProgress({
+          const emitPackaging = (packagingDetails: PackagingDetails) => progressEmitter.emitOSProgress({
             currentPackage: '결과 패키징',
             currentIndex: successfulPackages.length,
             totalPackages: successfulPackages.length,
-            bytesDownloaded: successfulPackages.length,
-            totalBytes: successfulPackages.length,
+            bytesDownloaded: 0,
+            totalBytes: 0,
             speed: 0,
             phase: 'packaging',
+            packagingDetails,
           });
+          emitPackaging({ message: '파일 생성 준비 중...' });
 
           try {
             if (outputOptions.type === 'archive' || outputOptions.type === 'both') {
@@ -272,6 +275,13 @@ export function createOSDownloadOrchestrator(params: {
                 scriptTypes: outputOptions.scriptTypes,
                 packageManager: distribution.packageManager,
                 repoName: 'depssmuggler-local',
+                onStage: (message) => emitPackaging({ message }),
+                onProgress: (archiveProgress) => emitPackaging({
+                  message: archiveProgress.percentage >= 99
+                    ? '압축 파일 저장 마무리 중...'
+                    : `${(outputOptions.archiveFormat || 'zip').toUpperCase()} 압축 중...`,
+                  archiveProgress,
+                }),
               });
 
               if (osDownloadCancelled) {
@@ -286,6 +296,7 @@ export function createOSDownloadOrchestrator(params: {
               !osDownloadCancelled &&
               (outputOptions.type === 'repository' || outputOptions.type === 'both')
             ) {
+              emitPackaging({ message: '로컬 저장소 생성 중...' });
               const repoPath = path.join(outputDir, 'repository');
               const repoPackager = new OSRepoPackager();
               generatedOutputs.push({
@@ -303,6 +314,7 @@ export function createOSDownloadOrchestrator(params: {
               });
 
               if (outputOptions.generateScripts) {
+                emitPackaging({ message: '저장소 설치 스크립트 생성 중...' });
                 await writeRepositoryScripts(
                   repoPath,
                   successfulPackages,

@@ -91,7 +91,7 @@ function DownloadPage() {
       totalProgress={controller.totalProgress}
       isPaused={controller.isPaused}
       packagingStatus={controller.packagingStatus}
-      packagingProgress={controller.packagingProgress}
+      packagingDetails={controller.packagingDetails}
       totalSpeed={controller.totalSpeed}
       remainingTime={controller.remainingTime}
       includeDependencies={controller.includeDependencies}

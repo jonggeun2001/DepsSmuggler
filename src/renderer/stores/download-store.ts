@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { PackagingDetails } from '../../types/packaging';
 
 // 다운로드 상태
 export type DownloadStoreStatus =
@@ -63,6 +64,7 @@ interface DownloadState {
   outputFormat: 'zip' | 'tar.gz';
   packagingStatus: PackagingStatus;
   packagingProgress: number;
+  packagingDetails: PackagingDetails | null;
   logs: LogEntry[];
   startTime: number | null;
   currentItemIndex: number;
@@ -78,6 +80,7 @@ interface DownloadState {
   setOutputPath: (path: string) => void;
   setOutputFormat: (format: 'zip' | 'tar.gz') => void;
   setPackagingStatus: (status: PackagingStatus) => void;
+  setPackagingDetails: (details: PackagingDetails | null) => void;
   setPackagingProgress: (progress: number) => void;
   addLog: (level: LogEntry['level'], message: string, details?: string) => void;
   clearLogs: () => void;
@@ -102,6 +105,7 @@ export const useDownloadStore = create<DownloadState>()((set) => ({
   outputFormat: 'zip',
   packagingStatus: 'idle',
   packagingProgress: 0,
+  packagingDetails: null,
   logs: [],
   startTime: null,
   currentItemIndex: 0,
@@ -148,7 +152,12 @@ export const useDownloadStore = create<DownloadState>()((set) => ({
 
   setOutputFormat: (outputFormat) => set({ outputFormat }),
 
-  setPackagingStatus: (packagingStatus) => set({ packagingStatus }),
+  setPackagingStatus: (packagingStatus) => set((state) => ({
+    packagingStatus,
+    packagingDetails: packagingStatus === 'packaging' ? state.packagingDetails : null,
+  })),
+
+  setPackagingDetails: (packagingDetails) => set({ packagingDetails }),
 
   setPackagingProgress: (packagingProgress) => set({ packagingProgress }),
 
@@ -197,6 +206,7 @@ export const useDownloadStore = create<DownloadState>()((set) => ({
       isPaused: false,
       packagingStatus: 'idle',
       packagingProgress: 0,
+      packagingDetails: null,
       logs: [],
       startTime: null,
       currentItemIndex: 0,

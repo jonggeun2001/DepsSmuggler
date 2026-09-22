@@ -2,7 +2,9 @@ import archiver from 'archiver';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { PackageInfo } from '../../types';
-import type { ArchiveType } from '../../types/packaging';
+import type { ArchiveType, ArchiveProgress } from '../../types/packaging';
+import { trackArchiveProgress } from './archive-progress';
+export type { ArchiveProgress } from '../../types/packaging';
 import type { ArchivePackageManifest } from '../../types/manifest/package-manifest';
 import logger from '../../utils/logger';
 import { resolvePath, toUnixPath } from '../shared/path-utils';
@@ -34,15 +36,6 @@ export interface ArchiveOptions {
   includeReadme?: boolean;
   rootFiles?: string[]; // createArchive 전용: packages/ 밖에 파일명으로 포함할 파일
   onProgress?: (progress: ArchiveProgress) => void;
-}
-
-// 압축 진행률
-export interface ArchiveProgress {
-  processedFiles: number;
-  totalFiles: number;
-  processedBytes: number;
-  totalBytes: number;
-  percentage: number;
 }
 
 export class ArchivePackager {
@@ -122,9 +115,11 @@ export class ArchivePackager {
     await fs.ensureDir(path.dirname(outputPath));
 
     if (options.format === 'zip') {
-      await this.createZipFromDirectory(sourceDir, outputPath, options.compressionLevel ?? 6, metadataEntries);
+      await this.createZipFromDirectory(sourceDir, outputPath, options.compressionLevel ?? 6, metadataEntries,
+        { totalBytes, totalFiles }, options.onProgress);
     } else {
-      await this.createTarGzFromDirectory(sourceDir, outputPath, options.compressionLevel ?? 6, metadataEntries);
+      await this.createTarGzFromDirectory(sourceDir, outputPath, options.compressionLevel ?? 6, metadataEntries,
+        { totalBytes, totalFiles }, options.onProgress);
     }
 
     logger.info('압축 파일 생성 완료', {
@@ -145,7 +140,9 @@ export class ArchivePackager {
     sourceDir: string,
     outputPath: string,
     compressionLevel: number,
-    metadataEntries: Array<{ name: string; content: string }>
+    metadataEntries: Array<{ name: string; content: string }>,
+    totals: { totalBytes: number; totalFiles: number },
+    onProgress?: (progress: ArchiveProgress) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const normalizedSourceDir = resolvePath(sourceDir);
@@ -156,6 +153,7 @@ export class ArchivePackager {
         zlib: { level: compressionLevel },
       });
 
+      trackArchiveProgress(archive, output, totals, onProgress);
       output.on('close', () => resolve());
       output.on('error', (err) => reject(err));
       archive.on('error', (err) => reject(err));
@@ -176,7 +174,9 @@ export class ArchivePackager {
     sourceDir: string,
     outputPath: string,
     compressionLevel: number,
-    metadataEntries: Array<{ name: string; content: string }>
+    metadataEntries: Array<{ name: string; content: string }>,
+    totals: { totalBytes: number; totalFiles: number },
+    onProgress?: (progress: ArchiveProgress) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const normalizedSourceDir = resolvePath(sourceDir);
@@ -188,6 +188,7 @@ export class ArchivePackager {
         gzipOptions: { level: compressionLevel },
       });
 
+      trackArchiveProgress(archive, output, totals, onProgress);
       output.on('close', () => resolve());
       output.on('error', (err) => reject(err));
       archive.on('error', (err) => reject(err));
@@ -238,9 +239,11 @@ export class ArchivePackager {
     await fs.ensureDir(path.dirname(outputPath));
 
     if (options.format === 'zip') {
-      await this.createZipFromFileEntries(files, outputPath, options.compressionLevel ?? 6, metadataEntries);
+      await this.createZipFromFileEntries(files, outputPath, options.compressionLevel ?? 6, metadataEntries,
+        { totalBytes, totalFiles }, options.onProgress);
     } else {
-      await this.createTarGzFromFileEntries(files, outputPath, options.compressionLevel ?? 6, metadataEntries);
+      await this.createTarGzFromFileEntries(files, outputPath, options.compressionLevel ?? 6, metadataEntries,
+        { totalBytes, totalFiles }, options.onProgress);
     }
 
     logger.info('압축 파일 생성 완료', {
@@ -258,29 +261,12 @@ export class ArchivePackager {
     onProgress?: (progress: ArchiveProgress) => void
   ): Promise<{ totalBytes: number; totalFiles: number }> {
     let totalBytes = 0;
-    const sizes: number[] = [];
-
     for (const file of files) {
-      const stat = await fs.stat(file);
-      sizes.push(stat.size);
-      totalBytes += stat.size;
+      totalBytes += (await fs.stat(file)).size;
     }
-
-    if (onProgress && files.length > 0) {
-      let processedBytes = 0;
-      files.forEach((_, index) => {
-        processedBytes += sizes[index];
-        onProgress({
-          processedFiles: index + 1,
-          totalFiles: files.length,
-          processedBytes,
-          totalBytes,
-          percentage: totalBytes === 0 ? 100 : (processedBytes / totalBytes) * 100,
-        });
-      });
-    }
-
-    return { totalBytes, totalFiles: files.length };
+    const totals = { totalBytes, totalFiles: files.length };
+    onProgress?.({ ...totals, processedFiles: 0, processedBytes: 0, percentage: 0, outputBytes: 0 });
+    return totals;
   }
 
   private buildMetadataEntries(
@@ -313,7 +299,9 @@ export class ArchivePackager {
     files: Array<{ sourcePath: string; archivePath: string }>,
     outputPath: string,
     compressionLevel: number,
-    metadataEntries: Array<{ name: string; content: string }>
+    metadataEntries: Array<{ name: string; content: string }>,
+    totals: { totalBytes: number; totalFiles: number },
+    onProgress?: (progress: ArchiveProgress) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const output = fs.createWriteStream(resolvePath(outputPath));
@@ -321,6 +309,7 @@ export class ArchivePackager {
         zlib: { level: compressionLevel },
       });
 
+      trackArchiveProgress(archive, output, totals, onProgress);
       output.on('close', () => resolve());
       output.on('error', (err) => reject(err));
       archive.on('error', (err) => reject(err));
@@ -340,7 +329,9 @@ export class ArchivePackager {
     files: Array<{ sourcePath: string; archivePath: string }>,
     outputPath: string,
     compressionLevel: number,
-    metadataEntries: Array<{ name: string; content: string }>
+    metadataEntries: Array<{ name: string; content: string }>,
+    totals: { totalBytes: number; totalFiles: number },
+    onProgress?: (progress: ArchiveProgress) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const output = fs.createWriteStream(resolvePath(outputPath));
@@ -349,6 +340,7 @@ export class ArchivePackager {
         gzipOptions: { level: compressionLevel },
       });
 
+      trackArchiveProgress(archive, output, totals, onProgress);
       output.on('close', () => resolve());
       output.on('error', (err) => reject(err));
       archive.on('error', (err) => reject(err));

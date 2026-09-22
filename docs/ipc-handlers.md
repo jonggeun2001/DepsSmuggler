@@ -146,7 +146,7 @@ electron/
 
 | 이벤트 | 설명 |
 |--------|------|
-| `download:status` | 전체 단계 상태 |
+| `download:status` | 전체 단계 상태. `phase: packaging`은 단계 메시지와 선택적 `archiveProgress`를 포함 |
 | `download:progress` | 개별 패키지 진행률 |
 | `download:deps-resolved` | preload의 의존성 해결 결과 구독 API는 남아 있지만 현재 main service에는 이 이벤트 발행 경로가 없음. UI는 `dependency:resolve` 응답을 사용 |
 | `download:all-complete` | 전체 다운로드 완료. `outputPath`는 대표 산출물 경로를, `artifactPaths`는 실제 산출물 목록을 담음. 이메일 전달 시 `deliveryMethod`, `deliveryResult`가 함께 전달됨 |
@@ -157,6 +157,8 @@ electron/
 일반 `download:start`의 런타임 응답은 시작 접수를 뜻하는 `{ success: true, started: true }`이고 실제 최종 결과는 `download:all-complete`로 전달됩니다. 일반 의존성 계산은 renderer가 먼저 `dependency:resolve`로 수행하며, `download:start`의 세션 실행기는 전달받은 패키지 목록을 다운로드합니다. OS 전용 `os:download:start`는 이와 달리 의존성 계산부터 최종 결과 반환까지 기다리는 요청입니다.
 
 일반 다운로드 요청과 진행률·상태·완료 이벤트에는 선택적인 `sessionId`가 포함됩니다. 렌더러는 이를 사용해 취소 또는 재시작 이후 도착한 이전 세션 이벤트를 구분합니다. 이벤트 구독 API는 각각 listener 제거 함수를 반환합니다.
+
+파일 생성 상태는 공통 `PackagingDetails` (`message`, 선택적 `archiveProgress`)로 표현합니다. `archiveProgress`는 `processedFiles`, `totalFiles`, `processedBytes`, `totalBytes`, `percentage`, 선택적 `outputBytes`를 담습니다. 일반 `download:status`는 이 필드를 최상위에, OS `os:download:progress`는 `packagingDetails`에 전달합니다. 기존 채널과 세션 구분은 유지되며 추가 필드는 선택적입니다. 파일 크기 조사 단계는 0%, 실제 압축 진행은 250ms 간격, 정상 출력 종료는 100%로 보고합니다. 스크립트 생성과 저장소 생성 등에서는 `archiveProgress` 없이 메시지만 전달해 부정확한 퍼센트를 표시하지 않습니다.
 
 `download:start`는 비어 있거나 잘못된 패키지 목록, 필수 문자열, 출력 경로, 동시 다운로드 수를 세션 생성 전에 거부하고 경고를 남깁니다. 초기 limiter 생성 실패도 `DownloadSession`의 실패 완료 이벤트와 오류 로그로 전달됩니다. 정상 요청의 반환값·완료 결과·취소 정책은 유지합니다.
 

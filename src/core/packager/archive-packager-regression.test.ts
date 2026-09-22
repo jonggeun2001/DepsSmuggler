@@ -20,6 +20,28 @@ describe('ArchivePackager regression', () => {
     }
   });
 
+  it.each(['zip', 'tar.gz'] as const)('%s 진행률은 압축 전 0%이며 결과 파일이 기록된 뒤에만 100%가 된다', async (format) => {
+    const sourceDir = path.join(tempDir, 'input');
+    await fs.outputFile(path.join(sourceDir, 'packages/example.bin'), Buffer.alloc(1024 * 1024, 7));
+    const outputPath = path.join(tempDir, `bundle.${format}`);
+    const progress: number[] = [];
+    await getArchivePackager().createArchiveFromDirectory(sourceDir, outputPath, [], {
+      format,
+      onProgress: (value) => {
+        progress.push(value.percentage);
+        if (value.percentage === 100) {
+          expect(fs.statSync(outputPath).size).toBeGreaterThan(0);
+          expect(value.outputBytes).toBe(fs.statSync(outputPath).size);
+          expect(value.processedFiles).toBe(1);
+          expect(value.processedBytes).toBe(1024 * 1024);
+        }
+      },
+    });
+    expect(progress[0]).toBe(0);
+    expect(progress.at(-1)).toBe(100);
+    expect(progress.slice(0, -1).every(value => value < 100)).toBe(true);
+  });
+
   it('준비된 다운로드 디렉터리에서 tar.gz를 만들 때 scripts/packages/manifest/readme를 모두 포함해야 함', async () => {
     const sourceDir = path.join(tempDir, 'download-output');
     const packagesDir = path.join(sourceDir, 'packages');

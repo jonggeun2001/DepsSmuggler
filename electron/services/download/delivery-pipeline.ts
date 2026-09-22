@@ -63,6 +63,10 @@ export function createDeliveryPipeline(deps: DeliveryPipelineDeps): DeliveryPipe
       }
 
       if (includeScripts) {
+        progressEmitter.emitDownloadStatus({
+          phase: 'packaging',
+          message: '설치 스크립트 생성 중...',
+        });
         try {
           const npmPackageFiles = deliveredPackages.filter(pkg => pkg.type === 'npm').map(pkg => {
             const filePath = results.find(result => result.id === pkg.id && result.success)?.filePath;
@@ -130,7 +134,7 @@ export function createDeliveryPipeline(deps: DeliveryPipelineDeps): DeliveryPipe
       try {
         progressEmitter.emitDownloadStatus({
           phase: 'packaging',
-          message: `${outputFormat.toUpperCase()} 패키징 중...`,
+          message: `${outputFormat.toUpperCase()} 압축 준비 중...`,
         });
 
         const archivePath = `${outputDir}.${outputFormat === 'zip' ? 'zip' : 'tar.gz'}`;
@@ -142,6 +146,13 @@ export function createDeliveryPipeline(deps: DeliveryPipelineDeps): DeliveryPipe
             format: outputFormat,
             includeManifest: true,
             includeReadme: true,
+            onProgress: (archiveProgress) => progressEmitter.emitDownloadStatus({
+              phase: 'packaging',
+              message: archiveProgress.percentage >= 99
+                ? '압축 파일 저장 마무리 중...'
+                : `${outputFormat.toUpperCase()} 압축 중...`,
+              archiveProgress,
+            }),
           }
         );
         artifactPaths = [finalOutputPath];
@@ -353,6 +364,7 @@ async function deliverByEmail(params: {
         };
       }
 
+      progressEmitter.emitDownloadStatus({ phase: 'packaging', message: '첨부 파일 분할 및 병합 스크립트 생성 중...' });
       const splitter = deps.getFileSplitter();
       const splitResult = await splitter.splitFile(finalOutputPath, {
         maxSizeMB: options.fileSplit.maxSizeMB,
@@ -369,6 +381,7 @@ async function deliverByEmail(params: {
       return cancelledBeforeEmailSetup;
     }
 
+    progressEmitter.emitDownloadStatus({ phase: 'packaging', message: '이메일 전송 중...' });
     const emailSender = deps.initializeEmailSender(
       {
         host: smtpOptions.host,
