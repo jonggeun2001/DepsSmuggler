@@ -218,9 +218,10 @@ OS 전용 흐름의 전달 방식은 로컬 저장이며, 일반 다운로드의
 
 ## 자동 업데이트
 
-- `UpdateNotification.tsx`가 `updater:status` 이벤트를 구독합니다.
+- `UpdateNotification.tsx`가 `updater:status` 이벤트를 구독하고 초기 상태를 조회합니다. 구독 전에 새 버전 발견·다운로드 시작·설치 준비가 완료되어도 최초 상태로 모달을 복원합니다. 초기 조회보다 진행 이벤트가 먼저 와도 복원하며, 늦게 도착한 초기 응답은 최신 이벤트나 사용자의 모달 닫기를 덮어쓰지 않습니다.
 - 새 버전 발견, 다운로드 진행률, 설치 준비 완료를 모달로 노출합니다.
 - 패치 노트는 GitHub updater가 전달하는 HTML의 제목·목록·강조·코드·표를 서식에 맞게 표시합니다. 일반 텍스트는 줄바꿈을 유지하며, 버전별 노트 배열은 버전과 함께 표시하고 빈 노트는 생략합니다. Markdown을 직접 파싱하는 화면은 아닙니다.
+- `릴리스 이력` 영역에 표시할 노트가 전혀 없으면 변경 사항 미제공 안내와 해당 버전의 `GitHub 릴리스 보기` 링크를 표시합니다. GitHub Release 본문이 비어 있으면 Atom의 `No content.`가 updater에서 빈 문자열로 변환됩니다. 배포 시 본문 생성과 검증 절차는 [테스트·릴리스 CI](testing.md#releaseyml)를 참고하세요.
 - 외부 HTML은 DOMPurify의 태그·속성 허용 목록으로 정제합니다. 스크립트, 이벤트 속성, 스타일, 이미지와 iframe은 표시하지 않습니다. HTTP(S) 링크는 updater IPC에서 주소를 다시 검증한 뒤 시스템 브라우저로 열며 앱 화면은 이동하지 않습니다.
 - 패키징된 앱은 시작 후 약 3초 뒤 업데이트를 확인합니다. 자동 다운로드 기본값은 `false`이며, 사용자가 다운로드와 설치/재시작을 선택할 수 있고 내려받은 업데이트는 앱 종료 시 설치하도록 설정되어 있습니다.
 - Electron 44 앱 번들의 `mac.minimumSystemVersion`은 macOS `13.0.0`입니다. 업데이트 피드의 `minimumSystemVersion`은 updater가 `os.release()`와 비교하므로 Darwin 커널 `22.0.0`을 사용합니다. `postpackage:mac`이 생성된 피드에 이 조건을 기록하고 검증합니다. 정책 값은 `scripts/macos-update-policy.json`에 있습니다. 마케팅 OS 버전 `13.0.0`을 피드에 넣으면 macOS 12 차단이 되지 않습니다. 생성된 모든 `*-mac.yml`은 이 조건도 검사합니다.
@@ -228,7 +229,7 @@ OS 전용 흐름의 전달 방식은 로컬 저장이며, 일반 다운로드의
 - 설정 화면의 `autoUpdate`/`autoDownloadUpdate` 값은 저장·복원되지만 현재 updater 동작과 연결되어 있지 않습니다. 시작 검사에서는 `autoUpdate`를 읽지 않으며, 설정 저장은 `updater.setAutoDownload`를 호출하지 않습니다. `지금 확인` 버튼은 실제 `updater.check`를 호출합니다.
 - 개발 모드에서는 업데이트 확인·다운로드·설치가 no-op 응답을 반환합니다. 패치 노트 링크 열기는 배포 앱과 같은 주소 검증을 사용합니다.
 
-검증: `bash scripts/verify-worktree.sh src/renderer/components/ReleaseNotes.test.tsx src/renderer/components/UpdateNotification.test.tsx electron/updater.test.ts`와 `npm run test:e2e -- tests/e2e/updater-release-notes.spec.ts`로 서식·유해 HTML 제거·노트 형식·링크 및 모달 상태 전환을 확인합니다. 브라우저 E2E는 실제 GitHub Atom 노트 형식과 모의 Electron bridge를 사용하며 업데이트 파일을 설치하지 않습니다.
+검증: `bash scripts/verify-worktree.sh src/renderer/components/ReleaseNotes.test.tsx src/renderer/components/UpdateNotification.test.tsx electron/updater.test.ts`와 `npm run test:e2e -- tests/e2e/updater-release-notes.spec.ts`로 서식·유해 HTML 제거·빈 노트의 안내/링크·초기 상태 복원·응답 순서 및 모달 상태 전환을 확인합니다. 단위 테스트는 실제 GitHubProvider의 빈 Atom 본문 변환을 사용합니다. 브라우저 E2E는 모의 Electron bridge를 사용하며 업데이트 파일을 설치하지 않습니다.
 
 ## 버전 선택의 현재 방식
 

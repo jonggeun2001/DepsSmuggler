@@ -218,6 +218,8 @@ Java/Node 런타임 버전 목록 IPC와 해당 런타임 선택 단계는 현�
 
 `updater:status.updateInfo.releaseNotes`는 `electron-updater`와 동일하게 HTML/일반 텍스트 문자열, `{ version, note }[]`, `null` 또는 미설정을 허용합니다. 렌더러는 외부 HTML을 정제한 뒤 표시합니다. `updater.openReleaseNotesLink(url)`는 메인 프로세스에서 HTTP(S) URL인지 검증하고 `shell.openExternal`을 호출하며 `{ success, error? }`로 결과를 반환합니다.
 
+렌더러는 이벤트 구독과 초기 `getStatus()` 조회를 함께 사용해 구독 전 업데이트도 표시합니다. 진행 이벤트가 먼저 도착해도 최초 상태로 모달을 복원하고, 이전 초기 응답은 무시합니다. 노트가 비어 있어도 `updateInfo.version`으로 만든 GitHub 릴리스 링크를 같은 링크 열기 IPC에 전달합니다. IPC 자료형이나 채널은 변경하지 않습니다.
+
 패키징된 앱은 전체 updater를 초기화하며, 개발 모드에는 업데이트 작업의 no-op 핸들러를 등록합니다. 패치 노트 링크 열기 핸들러는 양쪽에서 같은 검증을 사용합니다. `updater:set-auto-download` 채널은 구현되어 있지만 설정 화면의 `autoDownloadUpdate` 저장에서 호출하지 않습니다. 시작 시 업데이트 확인도 저장된 `autoUpdate` 값을 참조하지 않습니다.
 
 ## Preload 표면
