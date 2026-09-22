@@ -1,3 +1,4 @@
+import type { PackagingDetails } from '../../src/types/packaging';
 import type { BrowserWindow } from 'electron';
 import type { OSDownloadProgress } from '../../src/core/downloaders/os-shared/types';
 import { createScopedLogger } from '../utils/logger';
@@ -14,7 +15,7 @@ export interface PackageProgressPayload {
   error?: string;
 }
 
-export interface DownloadStatusPayload {
+export interface DownloadStatusPayload extends PackagingDetails {
   sessionId?: number;
   phase: string;
   message: string;

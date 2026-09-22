@@ -1,7 +1,10 @@
+import type { QueryFailure } from './query-error';
 // Electron API 타입 정의 (렌더러 프로세스용)
 
+import type { PackagingDetails } from './packaging';
 import type { UpdateReleaseNotes } from './updater';
 import type { PackageInfo } from './package-manager/metadata';
+import type { RootCaResult } from './root-ca';
 
 export interface DownloadProgressData {
   sessionId?: number;
@@ -14,7 +17,7 @@ export interface DownloadProgressData {
   error?: string;
 }
 
-export interface DownloadStatusData {
+export interface DownloadStatusData extends PackagingDetails {
   sessionId?: number;
   phase: 'resolving' | 'downloading' | 'packaging' | 'complete';
   message: string;
@@ -162,9 +165,10 @@ export interface SearchAPI {
       description?: string;
       registry?: string;
     }>;
+    error?: QueryFailure;
   }>;
   suggest: (type: string, query: string, options?: SearchOptions) => Promise<string[]>;
-  versions: (type: string, packageName: string, options?: SearchOptions) => Promise<{ versions: string[] }>;
+  versions: (type: string, packageName: string, options?: SearchOptions) => Promise<{ versions: string[]; error?: QueryFailure }>;
 }
 
 export interface DependencyResolveResult {
@@ -314,6 +318,11 @@ export interface OSPackageAPI {
 }
 
 export interface ElectronAPI {
+  rootCa: {
+    get: () => Promise<RootCaResult>;
+    import: () => Promise<RootCaResult>;
+    clear: () => Promise<RootCaResult>;
+  };
   // 렌더러 로그를 메인 프로세스로 전달
   log?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]) => void;
   getAppVersion: () => Promise<string>;

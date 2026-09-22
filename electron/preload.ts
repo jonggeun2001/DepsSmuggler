@@ -1,9 +1,17 @@
+import type { QueryFailure } from '../src/types/query-error';
+import type { DownloadStatusData } from '../src/types/electron';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { UpdateReleaseNotes } from '../src/types/updater';
 import type { PackageInfo } from '../src/types/package-manager/metadata';
+import type { RootCaResult } from '../src/types/root-ca';
 
 // 렌더러 프로세스에 노출할 API 정의
 const electronAPI = {
+  rootCa: {
+    get: (): Promise<RootCaResult> => ipcRenderer.invoke('root-ca:get'),
+    import: (): Promise<RootCaResult> => ipcRenderer.invoke('root-ca:import'),
+    clear: (): Promise<RootCaResult> => ipcRenderer.invoke('root-ca:clear'),
+  },
   // 렌더러 로그를 메인 프로세스로 전달
   log: (level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]): void => {
     ipcRenderer.send('renderer:log', { level, message, args });
@@ -104,10 +112,10 @@ const electronAPI = {
       return () => ipcRenderer.removeListener('download:progress', handler);
     },
     // 의존성 해결 상태 이벤트
-    onStatus: (callback: (status: { sessionId?: number; phase: string; message: string }) => void): () => void => {
+    onStatus: (callback: (status: DownloadStatusData) => void): () => void => {
       const handler = (
         _event: Electron.IpcRendererEvent,
-        status: { sessionId?: number; phase: string; message: string }
+        status: DownloadStatusData
       ) => callback(status);
       ipcRenderer.on('download:status', handler);
       return () => ipcRenderer.removeListener('download:status', handler);
@@ -253,6 +261,7 @@ const electronAPI = {
         description?: string;
         registry?: string;
       }>;
+      error?: QueryFailure;
     }> => ipcRenderer.invoke('search:packages', type, query, options),
     suggest: (type: string, query: string, options?: { channel?: string }): Promise<string[]> =>
       ipcRenderer.invoke('search:suggest', type, query, options),
@@ -260,7 +269,7 @@ const electronAPI = {
       type: string,
       packageName: string,
       options?: { channel?: string; registry?: string; indexUrl?: string }
-    ): Promise<{ versions: string[] }> =>
+    ): Promise<{ versions: string[]; error?: QueryFailure }> =>
       ipcRenderer.invoke('search:versions', type, packageName, options),
   },
 

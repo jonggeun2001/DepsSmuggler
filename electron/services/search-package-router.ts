@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { XMLValidator } from 'fast-xml-parser';
+import { QueryRequestError } from '../../src/utils/query-error';
 import { createScopedLogger } from '../utils/logger';
 import { sortByRelevance } from '../../src/core/shared';
 import {
@@ -211,6 +213,7 @@ export function createSearchPackageRouter(): SearchPackageRouter {
   async function searchPyPI(query: string, indexUrl?: string): Promise<SearchPackageResult[]> {
     const results: SearchPackageResult[] = [];
     const lowerQuery = query.toLowerCase();
+    let detailFailure: unknown;
 
     if (indexUrl) {
       const indexResults = await getPipDownloader().searchPackages(query, indexUrl);
@@ -235,7 +238,10 @@ export function createSearchPackageRouter(): SearchPackageRouter {
             version: response.data.info.version,
             description: response.data.info.summary || '',
           };
-        } catch {
+        } catch (error) {
+          if ((error as { response?: { status?: number } })?.response?.status !== 404) {
+            detailFailure ??= error;
+          }
           return null;
         }
       });
@@ -253,7 +259,10 @@ export function createSearchPackageRouter(): SearchPackageRouter {
           version: exactResponse.data.info.version,
           description: exactResponse.data.info.summary || '',
         });
-      } catch {
+      } catch (error) {
+        // PyPI's exact lookup uses 404 for a missing package, not for a transport failure.
+        if ((error as { response?: { status?: number } })?.response?.status !== 404) throw error;
+        if (detailFailure) throw detailFailure;
         return results;
       }
     }
@@ -299,26 +308,18 @@ function compareVersions(a: string, b: string): number {
 }
 
 async function searchMaven(query: string): Promise<SearchPackageResult[]> {
-  try {
-    const results = await getMavenDownloader().searchPackages(query);
-    return results.map((pkg) => {
-      const [groupId = '', artifactId = pkg.name] = pkg.name.split(':');
-      return {
-        name: pkg.name,
-        version: pkg.version,
-        description: `Maven artifact: ${pkg.name}`,
-        popularityCount: pkg.metadata?.popularityCount,
-        groupId,
-        artifactId,
-      };
-    });
-  } catch (error) {
-    throw new Error(
-      error instanceof Error
-        ? error.message
-        : 'Maven 검색 중 알 수 없는 오류가 발생했습니다.'
-    );
-  }
+  const results = await getMavenDownloader().searchPackages(query);
+  return results.map((pkg) => {
+    const [groupId = '', artifactId = pkg.name] = pkg.name.split(':');
+    return {
+      name: pkg.name,
+      version: pkg.version,
+      description: `Maven artifact: ${pkg.name}`,
+      popularityCount: pkg.metadata?.popularityCount,
+      groupId,
+      artifactId,
+    };
+  });
 }
 
 async function getMavenVersions(packageName: string): Promise<string[]> {
@@ -344,6 +345,9 @@ async function getMavenVersionsFromMetadata(
       timeout: 10000,
     }
   );
+  if (typeof response.data !== 'string' || !/<metadata(?:\s|>)/.test(response.data) || XMLValidator.validate(response.data) !== true) {
+    throw new QueryRequestError('INVALID_RESPONSE');
+  }
   const versions: string[] = [];
   const versionRegex = /<version>([^<]+)<\/version>/g;
   let match: RegExpExecArray | null;

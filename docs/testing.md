@@ -6,6 +6,8 @@
 
 ## 로컬 검증 명령
 
+추가 CA 검증은 `root-ca-store.test.ts`, `root-ca.integration.test.ts`, `root-ca-handlers.test.ts`, `RootCaSettingsSection.test.tsx`로 구성합니다. CLI 통합 테스트는 실제 로컬 TLS 서버와 새 프로세스를 사용해 등록 전/후 및 해제 후의 신뢰, 기존 환경·OpenSSL CA 보존, Axios/HTTPS/fetch와 CLI 재실행을 확인합니다. `main-lifecycle.test.ts`는 CA 적용과 사전 조회의 순서도 검증합니다. Node 22.13/24 runtime-contract에도 포함합니다. [상세 실행 방법](root-ca.md#검증)
+
 `package.json`의 `engines.node`는 `^22.13.0 || ^24.0.0`, `packageManager`는 `npm@11.8.0`입니다. 테스트·릴리스 CI는 Node 24와 npm 11.8.0을 사용하며, 별도 runtime-contract 잡은 Node 22.13.0과 24에서 의존성 설치와 실제 CLI/CJS·ESM 경계를 검사합니다. Node 22 타입을 기준으로 컴파일합니다. 전체 도구의 최소 조건과 Electron 내장 Node의 차이는 [런타임 지원 정책](runtime-support.md)에 정리했습니다.
 
 ```bash
@@ -492,6 +494,7 @@ npx playwright test tests/e2e/maven-pom-preview.spec.ts --project=chromium
 
 현재 포함 시나리오:
 
+- `tests/e2e/search-errors.spec.ts`: 실제 위자드 자동 입력의 IPC 인증서 오류·재시도, 버전 실패·복구, HTTP 오류·파싱 실패·정상 0건 구분, 빠른 재시도 후 후보 유지, 네이티브 classifier 장바구니 보존
 - `tests/e2e/settings-regression.spec.ts`: 설정 저장, SMTP 연결 테스트 호출, 새로고침 후 값 유지
 - `tests/e2e/settings-cache-breakdown.spec.ts`: 패키지 타입별 캐시 통계와 비우기 후 갱신
 - `tests/e2e/download-smoke.spec.ts`: 장바구니에서 일반 다운로드 완료 화면까지의 smoke flow
@@ -501,7 +504,7 @@ npx playwright test tests/e2e/maven-pom-preview.spec.ts --project=chromium
 - `tests/e2e/maven-pom-preview.spec.ts`: 의존성 해결 응답을 대체한 Chromium 화면에서 부모 POM을 포함한 전체 다운로드 목록·그룹 개수·파일명 표시
 - `tests/e2e/download-cancel-retry.spec.ts`: 실제 시작·패키지 완료 상태를 기다린 뒤 취소와 새 세션 재시도를 검증
 
-빈 다운로드 화면의 `UI-DL-003`은 `cart-input-regression.spec.ts`에서 이미 검증합니다. 홈 진입·일반 위자드 검색과 전달 방식 왕복 전환은 전용 E2E의 추가 후보이며, 기존 완료/히스토리 테스트가 일부 상태만 검증합니다.
+빈 다운로드 화면의 `UI-DL-003`은 `cart-input-regression.spec.ts`에서 이미 검증합니다. 일반 위자드 검색 오류·재시도는 `search-errors.spec.ts`에서 검증합니다. 홈 진입과 전달 방식 왕복 전환은 전용 E2E의 추가 후보이며, 기존 완료/히스토리 테스트가 일부 상태만 검증합니다.
 
 구성 동작:
 
@@ -604,3 +607,7 @@ DEPS_SMUGGLER_NATIVE_MAVEN_PROJECT=1 bash scripts/verify-worktree.sh \
 이 검사는 POM collector → 공통 의존성 resolver → 다운로드 → 압축 → 생성 Bash 설치 스크립트를 실행한 뒤, 새 빈 local-m2를 사용하여 `mvn --offline package`로 Jupiter API와 JUnit 4의 혼합 테스트를 실제 실행합니다. 부모보다 우선하는 자식 관리 선언과 commons-text의 전이 commons-lang3 관리 버전도 별도 native fixture로 확인합니다. Jupiter API 5.10.1과 Platform Commons 1.10.2를 함께 사용해 launcher 1.10.2도 반출되는지 검증합니다. Maven의 온라인 빌드로 플러그인을 미리 준비하지 않고 사용자 `~/.m2`도 복사하지 않습니다. 대상 Maven 버전은 `mvn --version`에서 읽으며, GUI와 같은 기본 의존성 탐색 옵션을 사용합니다. 실패한 native bundle은 경로를 출력해 재현할 수 있게 남깁니다.
 
 기존 `maven-native-consumer.integration.test.ts`는 격리 저장소에 빌드 플러그인을 미리 준비하고 라이브러리의 모든 버전 반출을 검증하는 별도 검사입니다. 새 프로젝트 검사의 빈 저장소 성공을 기존 검사의 성공으로 대체하지 않습니다.
+
+### 검색 실패 회귀 (#173)
+
+[검색 오류와 재시도](search-errors.md)의 명령으로 오류 분류·HTTP 상태/파싱/15초 중단·IPC 핸들러와 facade 전달·입력 경쟁 상태·버전 대체 안내를 검증합니다. `useWizardSearchFlow.async.test.tsx`는 실제 service/facade를 사용하는 훅에서 새 입력 전후의 늦은 성공/실패, 환경 변경, 초기화, Enter 중복 방지와 버전 재시도를 검사합니다. E2E는 mock Electron API 및 HTTP 응답을 사용하며 회사망 연결 자체를 검증하지 않습니다.

@@ -57,7 +57,7 @@ describe('search-service', () => {
 
     const results = await service.searchPackages(baseContext, 'vite');
 
-    expect(fetchImpl).toHaveBeenCalledWith('/api/npm/search?q=vite');
+    expect(fetchImpl).toHaveBeenCalledWith('/api/npm/search?q=vite', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(results).toEqual([{ name: 'vite', version: '7.2.0', description: 'build tool' }]);
   });
 

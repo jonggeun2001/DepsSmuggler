@@ -2,7 +2,7 @@
 
 ## 개요
 
-데스크톱 앱은 Electron main process와 React renderer가 `window.electronAPI` IPC 브리지로 통신하는 구조입니다. 검색/버전조회/히스토리 I/O 같은 renderer data access는 `src/renderer/lib/renderer-data-client.ts` facade를 통해 한곳으로 모았습니다. 일반 검색/버전 조회는 해당 IPC 메서드가 없으면 HTTP fallback을 사용하고, OS 검색은 IPC가 없으면 빈 목록을 반환합니다. 브라우저의 제한된 fallback을 Electron 전체 기능과 동일하게 취급하지 않습니다.
+데스크톱 앱은 Electron main process와 React renderer가 `window.electronAPI` IPC 브리지로 통신하는 구조입니다. 검색/버전조회/히스토리 I/O 같은 renderer data access는 `src/renderer/lib/renderer-data-client.ts` facade를 통해 한곳으로 모았습니다. 일반 검색/버전 조회는 해당 IPC 메서드가 없으면 HTTP fallback을 사용하고, OS 검색은 IPC가 없으면 사용 불가 오류를 전달합니다. 브라우저의 제한된 fallback을 Electron 전체 기능과 동일하게 취급하지 않습니다.
 
 현재 구조의 핵심은 다음과 같습니다.
 
@@ -30,6 +30,14 @@
 `DownloadPage.tsx` 자체는 현재 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `src/renderer/pages/download-page/hooks/*`, `components/*`, `utils.ts`, `view-state.ts`로 분리되어 있습니다.
 
 main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 생성·파일 크기 조회를 주입받습니다. 주입 계약은 `createArchiveFromDirectory`와 `(path: string) => Promise<{ size: number }>`로 제한해 실제 구현과 부분 테스트 대역을 같은 public 계약으로 검사합니다. IPC payload와 다운로드 처리 흐름은 이 타입 분리로 바뀌지 않습니다. 서비스·화면 테스트는 `npm run typecheck:tests`에서도 검사합니다.
+
+## 다운로드 후 파일 생성 표시
+
+다운로드가 100%에 도달해도 스크립트와 압축 파일이 생성 중일 수 있습니다. 일반 화면은 `download:status`의 `packaging` 이벤트를 받아 현재 작업과 경과 시간을 표시합니다. 압축 중에는 파일 처리 수, 압축률, 실제 기록 용량을 추가로 보여줍니다. 스크립트·저장소·메일 등 비율을 알 수 없는 작업은 회전 표시와 단계명으로 안내합니다. OS 전용 화면도 `PackagingProgressView`를 공유하며 다운로드 완료율과 파일 생성 진행을 구분합니다.
+
+생성 중에는 다운로드 속도/남은 시간 대신 생성 상태를 보여주고 일시정지를 비활성화합니다. 모든 패키지 전송이 끝났다는 이유로 완료 버튼을 먼저 표시하지 않습니다. 일반 다운로드 완료 화면은 최종 완료 이벤트를 받은 뒤 전환하며, 이전 세션의 진행 이벤트는 기존 `sessionId` 검사로 제외합니다. 단계 전환만 로그에 남겨 250ms 진행률 갱신이 로그를 채우지 않게 합니다. 진행 상태는 store에 보관하고 시작/재시도 실패 시 이전 상태와 함께 복원합니다.
+
+검증: `PackagingProgressView.test.tsx`, `use-download-page-controller.test.tsx`, `tests/e2e/download-smoke.spec.ts`에서 생성 단계·실제 진행률·완료 전 버튼 상태와 최종 화면 전환을 확인합니다.
 
 ## 패키지 매니저 노출 범위
 
@@ -69,6 +77,8 @@ main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 
   - 버전 선택 전략, Docker tag 선택, Maven classifier 부가 조회
 - `src/renderer/pages/wizard-page/useWizardSearchFlow.ts`
   - 검색 입력/제안/선택/버전조회 오케스트레이션
+
+자동 검색과 수동 Enter/재시도는 같은 검색 경로를 사용합니다. `useWizardSearchFlow`는 검색 실패·정상 0건·버전 실패를 구분하고 이전 요청의 늦은 응답을 무시합니다. `QueryFailureAlert`는 단일 인라인 안내와 재시도를 제공하며 인증서 오류에는 CA 설정 링크를 표시합니다. 버전 실패 시 검색 결과의 대체 버전을 제공하되 최신 표시를 하지 않습니다. IPC/HTTP 오류 계약과 회귀 테스트는 [검색 오류](search-errors.md)를 참고하세요.
 
 ## Electron main process
 
@@ -151,6 +161,8 @@ main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 
 - 다운로드 표의 의존성 그룹은 목록 변경 시 부모 ID로 한 번 인덱싱하고 재사용합니다. 행마다 전체 목록을 검색하던 비용을 `O(원본 수 × 전체 항목 수)`에서 `O(전체 항목 수)`로 줄입니다. 원본 그룹에 연결되지 않은 항목도 독립 행으로 표시하여 전체 다운로드 목록에서 사라지지 않게 합니다. `download-page/utils.test.ts`가 그룹 결과와 조회 횟수를 검증합니다.
 
 ## 사용자 흐름
+
+설정의 `RootCaSettingsSection`은 `rootCa` IPC로 추가 CA의 등록/해제 결과를 기다린 뒤 목록과 성공 메시지를 갱신합니다. 실패는 오류 메시지를 보여주고 기존 목록을 유지하며, 파일 선택 취소는 저장하지 않습니다. 인증서 변경은 일반 설정 폼과 별도로 즉시 저장하고 앱 재시작 후 적용합니다. 브라우저에서는 등록을 비활성화합니다. 메인 프로세스는 첫 창과 버전 사전 조회 전에 Node 신뢰 목록을 초기화하고, 실패하면 오류를 알리면서 설정 화면은 열어 복구할 수 있게 합니다. [추가 루트 CA](root-ca.md)
 
 ### 일반 패키지 흐름
 

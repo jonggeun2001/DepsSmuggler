@@ -88,6 +88,7 @@ export function useDownloadPageController() {
     outputPath,
     packagingStatus,
     packagingProgress,
+    packagingDetails,
     logs,
     startTime,
     depsResolved,
@@ -100,6 +101,7 @@ export function useDownloadPageController() {
     setOutputPath,
     setPackagingStatus,
     setPackagingProgress,
+    setPackagingDetails,
     addLog,
     clearLogs,
     setStartTime,
@@ -692,6 +694,15 @@ export function useDownloadPageController() {
         scheduleLogBatch('info', '의존성 분석 중...');
       } else if (status.phase === 'downloading') {
         scheduleLogBatch('info', '다운로드 시작...');
+      } else if (status.phase === 'packaging') {
+        const previousMessage = useDownloadStore.getState().packagingDetails?.message;
+        if (batchTimerRef.current !== null) clearTimeout(batchTimerRef.current);
+        flushPendingUpdates();
+        setIsPaused(false);
+        setPackagingStatus('packaging');
+        setPackagingProgress(status.archiveProgress?.percentage ?? 0);
+        setPackagingDetails({ message: status.message, archiveProgress: status.archiveProgress });
+        if (status.message !== previousMessage) scheduleLogBatch('info', status.message);
       }
     });
 
@@ -744,6 +755,10 @@ export function useDownloadPageController() {
     applyDownloadCompletion,
     downloadRenderInterval,
     queuePreviousCompletionDuringProvisionalSession,
+    setPackagingProgress,
+    setPackagingStatus,
+    setPackagingDetails,
+    setIsPaused,
     setItems,
     updateItemsBatch,
   ]);
@@ -1004,6 +1019,7 @@ export function useDownloadPageController() {
         isPaused,
         packagingStatus,
         packagingProgress,
+        packagingDetails,
         completedOutputPath,
         completedArtifactPaths: [...completedArtifactPaths],
         completedDeliveryResult,
@@ -1045,6 +1061,7 @@ export function useDownloadPageController() {
         setIsPaused(previousSessionState.isPaused);
         setPackagingStatus(previousSessionState.packagingStatus);
         setPackagingProgress(previousSessionState.packagingProgress);
+        setPackagingDetails(previousSessionState.packagingDetails);
         setCompletedOutputPath(previousSessionState.completedOutputPath);
         setCompletedArtifactPaths([...previousSessionState.completedArtifactPaths]);
         setCompletedDeliveryResult(previousSessionState.completedDeliveryResult);
@@ -1168,11 +1185,13 @@ export function useDownloadPageController() {
     outputDir,
     outputFormat,
     packagingProgress,
+    packagingDetails,
     packagingStatus,
     startTime,
     setIsDownloading,
     setIsPaused,
     setPackagingProgress,
+    setPackagingDetails,
     setPackagingStatus,
     setStartTime,
     smtpFrom,
@@ -1185,6 +1204,7 @@ export function useDownloadPageController() {
   ]);
 
   const handlePauseResume = useCallback(async () => {
+    if (useDownloadStore.getState().packagingStatus === 'packaging') return;
     if (isPaused) {
       downloadPausedRef.current = false;
       setIsPaused(false);
@@ -1270,6 +1290,7 @@ export function useDownloadPageController() {
       isPaused,
       packagingStatus,
       packagingProgress,
+      packagingDetails,
       completedOutputPath,
       completedArtifactPaths: [...completedArtifactPaths],
       completedDeliveryResult,
@@ -1328,6 +1349,7 @@ export function useDownloadPageController() {
       setIsPaused(previousRetryState.isPaused);
       setPackagingStatus(previousRetryState.packagingStatus);
       setPackagingProgress(previousRetryState.packagingProgress);
+      setPackagingDetails(previousRetryState.packagingDetails);
       setCompletedOutputPath(previousRetryState.completedOutputPath);
       setCompletedArtifactPaths([...previousRetryState.completedArtifactPaths]);
       setCompletedDeliveryResult(previousRetryState.completedDeliveryResult);
@@ -1442,11 +1464,13 @@ export function useDownloadPageController() {
     outputDir,
     outputFormat,
     packagingProgress,
+    packagingDetails,
     packagingStatus,
     retryItem,
     setIsDownloading,
     setIsPaused,
     setPackagingProgress,
+    setPackagingDetails,
     setPackagingStatus,
     setStartTime,
     smtpFrom,
@@ -1540,6 +1564,7 @@ export function useDownloadPageController() {
     isResolvingDeps,
     packagingStatus,
     packagingProgress,
+    packagingDetails,
     completedCount,
     failedCount,
     skippedCount,

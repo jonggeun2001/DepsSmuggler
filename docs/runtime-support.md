@@ -26,13 +26,17 @@ Node 22.13.0은 jsdom의 22 계열 최소 조건과 Electron 설치기·Vite·�
 node --version
 npm --version # 11.8.0
 npm ci --engine-strict
-bash scripts/verify-worktree.sh src/cli/version.integration.test.ts tests/unit/macos-release-artifacts.test.ts tests/unit/macos-update-support.test.ts tests/unit/macos-package-command.test.ts
+bash scripts/verify-worktree.sh src/cli/version.integration.test.ts src/cli/root-ca.integration.test.ts tests/unit/macos-release-artifacts.test.ts tests/unit/macos-update-support.test.ts tests/unit/macos-package-command.test.ts
 npx tsc --noEmit
 npx tsc --noEmit -p tsconfig.electron.json
 npm run typecheck:tests
 ```
 
 CLI 테스트는 소스 실행, 빌드, 배포와 같은 디렉터리 구조에서 실제 명령을 실행하고 버전을 대조합니다. 프로필·설정·출력은 임시 폴더에 격리합니다. macOS 스크립트 테스트는 실제 Node ESM 프로세스를 실행하지만 DMG 생성이나 업데이트 설치는 수행하지 않습니다. Node 24의 Ubuntu·Windows·macOS 잡이 전체 테스트와 renderer/CJS 빌드를 담당합니다.
+
+## 추가 CA 런타임 호환성
+
+Electron의 추가 CA는 내장 Node의 기본 CA 설정 API를 사용합니다. CLI는 기존 지원 하한을 유지하고 모든 지원 버전에서 CA를 합친 임시 PEM과 `NODE_EXTRA_CA_CERTS`로 같은 명령을 다시 실행합니다. OpenSSL CA 옵션과 환경을 그대로 전달해 기존 신뢰도 보존합니다. `root-ca.integration.test.ts`를 runtime-contract 잡에서도 실행해 실제 Node 22.13의 신뢰 확장·OpenSSL 신뢰 보존·종료 코드 전달을 확인합니다. [추가 루트 CA](root-ca.md)
 
 ## Electron major 갱신 검증
 

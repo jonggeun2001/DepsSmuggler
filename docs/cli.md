@@ -50,7 +50,11 @@ depssmuggler
 │   ├── get
 │   ├── set
 │   ├── list
-│   └── reset
+│   ├── reset
+│   └── ca
+│       ├── set <file>
+│       ├── get
+│       └── clear
 └── cache
     ├── size
     ├── clear
@@ -298,6 +302,10 @@ depssmuggler config reset
 설정 파일에는 캐시 여부를 GUI와 같은 `enableCache`로 저장합니다. 기존 파일은 `enableCache`, `cachingEnabled`, `cacheEnabled` 순서로 처음 나온 null/undefined가 아닌 값을 읽고 불리언인지 확인합니다. 캐시 여부를 명시적으로 저장하면 이전 별칭을 제거하며 다른 설정은 보존합니다. CLI 조회 이름은 계속 `cacheEnabled`입니다.
 
 `config set`은 문자열 `true`/`false`와 숫자를 변환하고 나머지는 문자열로 저장합니다. JSON 객체 입력이나 점 표기법으로 중첩 SMTP 설정을 만드는 명령은 아닙니다. 일반 `download`의 동시성 기본값은 명령에 선언된 `3`이므로 `config set concurrentDownloads 5`만으로 기본 다운로드 병렬도가 바뀌지는 않습니다.
+
+### `config ca`
+
+추가 회사 CA는 `config ca set <file>`, `config ca get`, `config ca clear`로 관리합니다. PEM/DER를 검증해 사본을 저장하며 GUI와 공유합니다. 다음 CLI 실행부터 적용하고, 실행 중인 앱은 재시작해야 합니다. 일반 설정 초기화는 CA를 해제하지 않습니다. [CA 사용법과 런타임 호환성](root-ca.md)을 참고하세요.
 
 ## `cache`
 

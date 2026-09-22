@@ -657,6 +657,17 @@ describe('Maven 검색 안정성 - Fallback API 및 재시도', () => {
       );
     });
 
+    it('검색 오류 원인을 보존해 renderer에서 인증서 오류를 구분할 수 있다', async () => {
+      const certificateError = Object.assign(new Error('self signed certificate in certificate chain'), {
+        code: 'SELF_SIGNED_CERT_IN_CHAIN',
+      });
+      const mockClient = { post: vi.fn().mockRejectedValue(certificateError) };
+      (downloader as any).client = mockClient;
+      await expect(downloader.searchPackages('deequ')).rejects.toMatchObject({
+        cause: certificateError,
+      });
+    });
+
     it('모든 API 실패 시 명확한 에러 메시지', async () => {
       const mockClient = {
         post: vi.fn().mockRejectedValue({ response: { status: 504 } }),

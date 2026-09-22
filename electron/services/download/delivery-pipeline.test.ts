@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ArchiveOptions } from '../../../src/core/packager/archive-packager';
 import { createDeliveryPipeline, type FileStat } from './delivery-pipeline';
 import { createEmailSenderMock } from '../../../src/core/mailer/__mocks__/email-sender-mock';
 
@@ -45,6 +46,38 @@ const createBaseParams = () => ({
 });
 
 describe('createDeliveryPipeline', () => {
+  it('스크립트 대기부터 압축 중간 진행률까지 완료 전에 전달한다', async () => {
+    const scriptDeferred = createDeferred<void>();
+    const archiveDeferred = createDeferred<string>();
+    const emitDownloadStatus = vi.fn();
+    const archiveProgress = { processedFiles: 1, totalFiles: 2, processedBytes: 50, totalBytes: 100, percentage: 50, outputBytes: 20 };
+    const createArchiveFromDirectory = vi.fn(async (_dir, _path, _packages, options: ArchiveOptions) => {
+      options.onProgress?.(archiveProgress);
+      return archiveDeferred.promise;
+    });
+    const pipeline = createDeliveryPipeline({
+      archivePackager: { createArchiveFromDirectory },
+      generateInstallScripts: vi.fn(() => scriptDeferred.promise),
+      initializeEmailSender: vi.fn() as never,
+      getFileSplitter: vi.fn() as never,
+      stat: vi.fn<FileStat>(),
+    });
+    const base = createBaseParams();
+    const result = pipeline.finalizeDownload({
+      ...base,
+      options: { ...base.options, includeScripts: true },
+      progressEmitter: { emitDownloadStatus } as never,
+      isCancelled: () => false,
+    });
+    expect(emitDownloadStatus).toHaveBeenLastCalledWith({ phase: 'packaging', message: '설치 스크립트 생성 중...' });
+    expect(createArchiveFromDirectory).not.toHaveBeenCalled();
+    scriptDeferred.resolve();
+    await Promise.resolve();
+    expect(emitDownloadStatus).toHaveBeenLastCalledWith({ phase: 'packaging', message: 'TAR.GZ 압축 중...', archiveProgress });
+    archiveDeferred.resolve('/tmp/out.tar.gz');
+    expect(await result).toMatchObject({ success: true });
+  });
+
   it('설치 스크립트 준비를 기다리고 비동기 실패 시 압축하지 않는다', async () => {
     const scriptDeferred = createDeferred<void>();
     const createArchiveFromDirectory = vi.fn();

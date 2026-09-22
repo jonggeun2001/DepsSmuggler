@@ -6,6 +6,8 @@ import { registerOSCommands } from './commands/os';
 import { getPackageVersion } from './version';
 import { logger } from '../utils/logger';
 import { maskString } from '../utils/mask';
+import { createCaCommand } from './commands/ca';
+import { initializeCliRootCa } from './root-ca-bootstrap';
 
 // 버전 정보
 const VERSION = getPackageVersion();
@@ -61,6 +63,7 @@ program
 program
   .command('config')
   .description('설정 관리')
+  .addCommand(createCaCommand())
   .addCommand(
     new Command('get')
       .description('설정값 조회')
@@ -156,6 +159,15 @@ program.exitOverride((err) => {
 
 // OS 패키지 명령어 등록
 registerOSCommands(program);
+
+program.hook('preAction', async (_command, actionCommand) => {
+  let topLevel = actionCommand;
+  while (topLevel.parent && topLevel.parent !== program) topLevel = topLevel.parent;
+  // Keep local configuration and recovery commands usable even if the CA store is damaged.
+  if (['search', 'download', 'os'].includes(topLevel.name())) {
+    if (!await initializeCliRootCa()) process.exit(process.exitCode ?? 0);
+  }
+});
 
 // 로거 초기화 후 파싱 및 실행
 initializeLogger().then(async () => {

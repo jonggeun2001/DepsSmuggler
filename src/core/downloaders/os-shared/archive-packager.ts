@@ -6,6 +6,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import archiver from 'archiver';
+import type { ArchiveProgress } from '../../../types/packaging';
+import { trackArchiveProgress } from '../../packager/archive-progress';
 import type { OSPackageInfo, OSPackageManager, ArchiveFormat } from './types';
 import { getDownloadedFileKey, getPackageFilename } from './package-file-utils';
 import { OSScriptGenerator } from './script-generator';
@@ -14,6 +16,8 @@ import { OSScriptGenerator } from './script-generator';
  * 아카이브 옵션
  */
 export interface ArchiveOptions {
+  onProgress?: (progress: ArchiveProgress) => void;
+  onStage?: (message: string) => void;
   /** 아카이브 형식 */
   format: ArchiveFormat;
   /** 출력 경로 */
@@ -104,13 +108,25 @@ export class OSArchivePackager {
     archivePath: string,
     options: ArchiveOptions
   ): Promise<void> {
+    const totals = { totalFiles: 0, totalBytes: 0 };
+    if (options.onProgress) {
+      for (const pkg of packages) {
+        const filePath = downloadedFiles.get(getDownloadedFileKey(pkg));
+        if (filePath && fs.existsSync(filePath)) {
+          totals.totalBytes += (await fs.promises.stat(filePath)).size;
+          totals.totalFiles += 1;
+        }
+      }
+    }
     return new Promise((resolve, reject) => {
       const output = fs.createWriteStream(archivePath);
       const archive = options.format === 'zip'
         ? archiver('zip', { zlib: { level: 9 } })
         : archiver('tar', { gzip: true, gzipOptions: { level: 9 } });
 
+      trackArchiveProgress(archive, output, totals, options.onProgress);
       output.on('close', () => resolve());
+      output.on('error', reject);
       archive.on('error', (err) => reject(err));
 
       archive.pipe(output);
@@ -120,6 +136,7 @@ export class OSArchivePackager {
 
       // 스크립트 추가
       if (options.includeScripts) {
+        options.onStage?.('설치 스크립트 생성 중...');
         this.addScripts(archive, packages, options);
       }
 
@@ -133,6 +150,7 @@ export class OSArchivePackager {
         this.addReadme(archive, packages, options);
       }
 
+      options.onProgress?.({ ...totals, processedFiles: 0, processedBytes: 0, percentage: 0, outputBytes: 0 });
       archive.finalize();
     });
   }

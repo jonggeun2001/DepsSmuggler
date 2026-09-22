@@ -120,6 +120,7 @@ jobs:
         run: |
           bash scripts/verify-worktree.sh \
             src/cli/version.integration.test.ts \
+            src/cli/root-ca.integration.test.ts \
             tests/unit/macos-release-artifacts.test.ts \
             tests/unit/macos-update-support.test.ts \
             tests/unit/macos-package-command.test.ts

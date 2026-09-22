@@ -50,6 +50,10 @@ electron/
 | `config:reset` | 설정 초기화 |
 | `config:getPath` | 설정 파일 경로 조회 |
 
+### `root-ca-handlers.ts`
+
+`root-ca:get/import/clear`는 `window.electronAPI.rootCa.get/import/clear`로 노출합니다. `import`는 네이티브 파일 선택창에서 받은 경로만 사용해 PEM/DER CA 파일을 검증·복사하고 기존 등록을 교체합니다. 성공은 `{ success: true, status: { certificates, restartRequired }, canceled? }`, 실패는 `{ success: false, error }`입니다. 목록에는 이름·발급자·지문·만료일만 반환하며 PEM은 renderer에 전달하지 않습니다. `clear`는 손상된 등록도 해제할 수 있습니다. [저장·재시작 계약](root-ca.md)을 참고하세요.
+
 ### `cache-handlers.ts`
 
 | 채널 | 설명 |
@@ -81,6 +85,8 @@ electron/
 
 일반 패키지 검색과 OS 패키지 검색이 모두 이 모듈에 있으며, 핸들러 본체는 채널 등록과 인자 전달만 담당합니다.
 
+`search:packages`는 `{ results, error? }`, `search:versions`는 `{ versions, error? }`를 반환합니다. 실패 시 `error: QueryFailure`를 포함하므로 빈 배열만으로 정상 0건을 판단하지 않습니다. renderer facade는 이 오류를 예외로 전달하고 위자드는 한국어 안내와 재시도를 표시합니다. 코드·메시지·선택적 HTTP 상태를 사용하는 [검색 오류 계약](search-errors.md)을 참고하세요.
+
 검색 사전 로딩 실패는 `SearchOrchestrator` 경고로 기록하고 일반 검색은 계속 사용할 수 있습니다. 사전 로딩이 성공했다고 보고하거나 빈 검색 결과를 미리 확정하지 않습니다. `search-orchestrator.test.ts`가 실패 후 정상 검색을 검증합니다.
 
 주요 위임 대상:
@@ -94,7 +100,7 @@ electron/
 |------|------|
 | `search:packages` | `pip`, `conda`, `maven`, `npm`, `docker` 검색 |
 | `search:versions` | 타입별 버전 목록 조회 |
-| `search:suggest` | 자동완성 제안 |
+| `search:suggest` | 문자열 제안 API (실제 위자드 자동 검색은 `search:packages` 사용) |
 | `dependency:resolve` | 일반 패키지 의존성 해결 |
 | `maven:isNativeArtifact` | Maven 네이티브 아티팩트 여부 |
 | `maven:getAvailableClassifiers` | Maven classifier 목록 |
@@ -142,7 +148,7 @@ electron/
 
 | 이벤트 | 설명 |
 |--------|------|
-| `download:status` | 전체 단계 상태 |
+| `download:status` | 전체 단계 상태. `phase: packaging`은 단계 메시지와 선택적 `archiveProgress`를 포함 |
 | `download:progress` | 개별 패키지 진행률 |
 | `download:deps-resolved` | preload의 의존성 해결 결과 구독 API는 남아 있지만 현재 main service에는 이 이벤트 발행 경로가 없음. UI는 `dependency:resolve` 응답을 사용 |
 | `download:all-complete` | 전체 다운로드 완료. `outputPath`는 대표 산출물 경로를, `artifactPaths`는 실제 산출물 목록을 담음. 이메일 전달 시 `deliveryMethod`, `deliveryResult`가 함께 전달됨 |
@@ -153,6 +159,8 @@ electron/
 일반 `download:start`의 런타임 응답은 시작 접수를 뜻하는 `{ success: true, started: true }`이고 실제 최종 결과는 `download:all-complete`로 전달됩니다. 일반 의존성 계산은 renderer가 먼저 `dependency:resolve`로 수행하며, `download:start`의 세션 실행기는 전달받은 패키지 목록을 다운로드합니다. OS 전용 `os:download:start`는 이와 달리 의존성 계산부터 최종 결과 반환까지 기다리는 요청입니다.
 
 일반 다운로드 요청과 진행률·상태·완료 이벤트에는 선택적인 `sessionId`가 포함됩니다. 렌더러는 이를 사용해 취소 또는 재시작 이후 도착한 이전 세션 이벤트를 구분합니다. 이벤트 구독 API는 각각 listener 제거 함수를 반환합니다.
+
+파일 생성 상태는 공통 `PackagingDetails` (`message`, 선택적 `archiveProgress`)로 표현합니다. `archiveProgress`는 `processedFiles`, `totalFiles`, `processedBytes`, `totalBytes`, `percentage`, 선택적 `outputBytes`를 담습니다. 일반 `download:status`는 이 필드를 최상위에, OS `os:download:progress`는 `packagingDetails`에 전달합니다. 기존 채널과 세션 구분은 유지되며 추가 필드는 선택적입니다. 파일 크기 조사 단계는 0%, 실제 압축 진행은 250ms 간격, 정상 출력 종료는 100%로 보고합니다. 스크립트 생성과 저장소 생성 등에서는 `archiveProgress` 없이 메시지만 전달해 부정확한 퍼센트를 표시하지 않습니다.
 
 `download:start`는 비어 있거나 잘못된 패키지 목록, 필수 문자열, 출력 경로, 동시 다운로드 수를 세션 생성 전에 거부하고 경고를 남깁니다. 초기 limiter 생성 실패도 `DownloadSession`의 실패 완료 이벤트와 오류 로그로 전달됩니다. 정상 요청의 반환값·완료 결과·취소 정책은 유지합니다.
 
@@ -217,7 +225,7 @@ Java/Node 런타임 버전 목록 IPC와 해당 런타임 선택 단계는 현�
 `window.electronAPI`는 다음 그룹으로 정리되어 있습니다.
 
 - `download`, `search`, `dependency`
-- `config`, `cache`, `history`
+- `config`, `rootCa`, `cache`, `history`
 - `os`, `docker.cache`, `maven`
 - `updater`, `versions`
 - `getAppVersion`, `getAppPath`, `selectFolder`, `selectDirectory`, `saveFile`, `openFolder`, `testSmtpConnection`, `log`

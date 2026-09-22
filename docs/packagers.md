@@ -70,6 +70,7 @@ interface ArchiveProgress {
   processedBytes: number;
   totalBytes: number;
   percentage: number;
+  outputBytes?: number; // 압축 결과로 실제 기록된 바이트
 }
 
 interface ArchivePackageManifest {
@@ -85,6 +86,16 @@ archive 전용 canonical 정의는 `src/types/manifest/package-manifest.ts`의 `
 `src/types`의 공개 `PackageManifest`는 기존 packaging contract를 유지하는 compatibility surface입니다.
 
 manifest는 완료된 다운로드 항목의 `PackageInfo`를 기록합니다. npm의 `latest` 같은 버전 선택자는 다운로드 성공 시 실제 버전으로 갱신되므로, CLI `--no-deps` 아카이브에도 tarball과 일치하는 버전이 들어갑니다.
+
+### 압축 진행률
+
+`ArchiveProgress`의 공통 정의는 `src/types/packaging.ts`에 있으며 기존 `archive-packager.ts` 경로에서도 재수출합니다. `onProgress`는 파일 크기 조사 후 0%를 알리고, 실제 압축 중에는 250ms 간격으로 처리 완료된 원본 파일 수·바이트와 출력 파일에 기록된 `outputBytes`를 전달합니다. 메타데이터와 디렉터리 항목은 원본 처리량에 포함하지 않습니다. 입력 파일을 조사하는 것만으로 100%를 보고하지 않습니다.
+
+퍼센트는 원본 바이트 중 **처리가 끝난 파일**의 비율입니다. 큰 파일 하나를 처리하는 동안 퍼센트는 그대로일 수 있지만 기록 용량과 화면의 경과 시간은 갱신됩니다. 파일 저장 종료 전에는 최대 99%이며 출력 스트림이 정상 종료된 뒤에만 100%입니다. 오류·종료 시 진행률 타이머와 리스너를 정리합니다. 빈 파일/빈 목록도 저장 종료 후 완료됩니다.
+
+일반 GUI는 설치 스크립트 생성 전부터 `download:status`로 단계명을 보내고, 압축·저장·파일 분할 및 병합 스크립트 생성·메일 전달까지 현재 작업을 표시합니다. 전체 작업의 완료는 압축 퍼센트가 아니라 `download:all-complete`로 결정합니다. OS 압축도 같은 진행률 추적기를 사용하고, 저장소 생성은 별도 단계명으로 표시합니다.
+
+검증: `bash scripts/verify-worktree.sh src/core/packager/archive-progress.test.ts src/core/packager/archive-packager-regression.test.ts electron/services/download/delivery-pipeline.test.ts`로 실제 ZIP/tar.gz 저장 완료 시점, 큰 파일 처리 중 갱신, 오류 시 정리와 IPC 전달을 확인합니다.
 
 ### 사용 예시
 ```typescript

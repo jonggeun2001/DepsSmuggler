@@ -7,6 +7,7 @@ interface MockDownloadScenario {
   mode?: 'success' | 'slow' | 'fail-once';
   stepDelayMs?: number;
   completeDelayMs?: number;
+  packagingDelayMs?: number;
   cancelledCompletionDelayMs?: number;
   startErrorMessage?: string;
   startErrorDelayMs?: number;
@@ -682,22 +683,34 @@ export async function setupMockElectronApp(
               }
             });
 
+            const packagingDelay = scenario.packagingDelayMs ?? 0;
             emit(downloadStatusListeners, {
               sessionId,
               phase: 'packaging',
-              message: '패키징',
+              message: '설치 스크립트 생성 중...',
             });
-
-            emit(downloadAllCompleteListeners, {
-              sessionId,
-              success: true,
-              outputPath: artifactPath,
-              artifactPaths: [artifactPath],
-              deliveryMethod,
-              deliveryResult,
-              results: downloadResults,
-            });
-            activeDownload = null;
+            if (packagingDelay > 0) {
+              scheduleDownloadStep(currentSequence, packagingDelay / 3, () => {
+                emit(downloadStatusListeners, {
+                  sessionId, phase: 'packaging', message: 'ZIP 압축 중...',
+                  archiveProgress: { processedFiles: 1, totalFiles: 2, processedBytes: 1024, totalBytes: 2048, percentage: 50, outputBytes: 512 },
+                });
+              });
+            }
+            const complete = () => {
+              emit(downloadAllCompleteListeners, {
+                sessionId,
+                success: true,
+                outputPath: artifactPath,
+                artifactPaths: [artifactPath],
+                deliveryMethod,
+                deliveryResult,
+                results: downloadResults,
+              });
+              activeDownload = null;
+            };
+            if (packagingDelay > 0) scheduleDownloadStep(currentSequence, packagingDelay, complete);
+            else complete();
           });
         },
       },

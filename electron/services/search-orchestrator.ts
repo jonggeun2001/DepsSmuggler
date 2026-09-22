@@ -1,3 +1,5 @@
+import { toQueryFailure } from '../../src/utils/query-error';
+import type { QueryFailure } from '../../src/types/query-error';
 import { createScopedLogger } from '../utils/logger';
 import { createSearchPackageRouter, type SearchPackageRouter } from './search-package-router';
 import {
@@ -43,13 +45,13 @@ export function createSearchOrchestrator(deps: SearchOrchestratorDeps = {}) {
       type: string,
       query: string,
       options?: { channel?: string; registry?: string; indexUrl?: string }
-    ): Promise<{ results: Awaited<ReturnType<SearchPackageRouter['searchPackages']>> }> {
+    ): Promise<{ results: Awaited<ReturnType<SearchPackageRouter['searchPackages']>>; error?: QueryFailure }> {
       log.debug(`Searching ${type} packages: ${query}`, options);
       try {
         return { results: await packageRouter.searchPackages(type, query, options) };
       } catch (error) {
         log.error(`Search error for ${type}:`, error);
-        return { results: [] };
+        return { results: [], error: toQueryFailure(error) };
       }
     },
 
@@ -57,13 +59,13 @@ export function createSearchOrchestrator(deps: SearchOrchestratorDeps = {}) {
       type: string,
       packageName: string,
       options?: { channel?: string; registry?: string; indexUrl?: string }
-    ): Promise<{ versions: string[] }> {
+    ): Promise<{ versions: string[]; error?: QueryFailure }> {
       log.debug(`Getting versions for ${type} package: ${packageName}`, options);
       try {
         return { versions: await packageRouter.getVersions(type, packageName, options) };
       } catch (error) {
         log.error(`Version fetch error for ${type}/${packageName}:`, error);
-        return { versions: [] };
+        return { versions: [], error: toQueryFailure(error) };
       }
     },
 

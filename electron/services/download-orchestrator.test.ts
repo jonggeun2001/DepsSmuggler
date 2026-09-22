@@ -215,7 +215,7 @@ describe('createDownloadOrchestrator', () => {
       expect.objectContaining({
         sessionId: 14,
         phase: 'packaging',
-        message: 'ZIP 패키징 중...',
+        message: 'ZIP 압축 준비 중...',
       }),
     ]);
     expect(progressEmitter.emitAllComplete).toHaveBeenCalledWith(
