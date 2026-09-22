@@ -107,6 +107,29 @@ describe('UpdateNotification release notes', () => {
     }
   );
 
+  it('restores a download when its progress event precedes the initial snapshot', async () => {
+    let resolveSnapshot!: (status: UpdaterStatus) => void;
+    const updater = installUpdater(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        })
+    );
+    renderNotification();
+    act(() =>
+      updater.emit({
+        ...available,
+        downloading: true,
+        progress: { percent: 42, bytesPerSecond: 1, total: 100, transferred: 42 },
+      })
+    );
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.getByText('안전한 노트')).toBeTruthy();
+    await act(async () => resolveSnapshot({ ...available, available: false, updateInfo: null }));
+    expect(screen.getByRole('button', { name: /다운로드 중/ })).toBeTruthy();
+    expect(screen.getByText('42%')).toBeTruthy();
+  });
+
   it('ignores a pending initial response after unmount and unsubscribes', async () => {
     let resolveSnapshot!: (status: UpdaterStatus) => void;
     const updater = installUpdater(

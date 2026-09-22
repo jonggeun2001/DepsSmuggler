@@ -39,8 +39,11 @@ export function UpdateNotification() {
 
     let disposed = false;
     let receivedStatusEvent = false;
-    const applyStatus = (s: UpdateStatus, initial = false) => {
+    let receivedStatus = false;
+    const applyStatus = (s: UpdateStatus) => {
       if (disposed) return;
+      const initial = !receivedStatus;
+      receivedStatus = true;
       setStatus(s);
 
       // 구독 전에 발견된 업데이트와 진행 중인 다운로드도 초기 조회로 복원한다.
@@ -67,7 +70,7 @@ export function UpdateNotification() {
     void window.electronAPI.updater
       .getStatus()
       .then((s) => {
-        if (!receivedStatusEvent) applyStatus(s as UpdateStatus, true);
+        if (!receivedStatusEvent) applyStatus(s as UpdateStatus);
       })
       .catch(() => {
         if (!disposed && !receivedStatusEvent) {

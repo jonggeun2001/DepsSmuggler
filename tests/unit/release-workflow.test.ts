@@ -23,6 +23,13 @@ describe('release publication contract', () => {
         (step) => step.name === `Package for ${platform === 'windows' ? 'Windows' : 'Linux'}`
       );
       expect(packaging?.run).toMatch(/npm run package:(win|linux) -- --publish never$/);
+      const verification = steps.findIndex(
+        (step) => step.run === `node scripts/verify-update-artifacts.mjs build ${platform}`
+      );
+      const upload = steps.findIndex((step) => step.uses?.startsWith('actions/upload-artifact'));
+      expect(verification).toBeGreaterThan(steps.indexOf(packaging as Step));
+      expect(upload).toBeGreaterThan(verification);
+      expect(String(steps[upload].with?.path)).toContain('!build/builder-debug.yml');
       expect(steps.some((step) => step.uses?.startsWith('softprops/action-gh-release'))).toBe(
         false
       );

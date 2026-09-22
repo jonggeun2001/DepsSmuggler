@@ -565,9 +565,11 @@ LCOV는 `core-coverage-lcov` artifact로 14일간 보존합니다. 측정 성공
 
 세 플랫폼 모두 패키징 단계에서는 게시하지 않습니다. Windows/Linux는 `--publish never`를 명시하고 macOS는 래퍼에서 강제합니다. 설치 파일과 함께 Windows/Linux의 `*.yml`, macOS의 `*-mac.yml`, 각 플랫폼의 `*.blockmap`을 artifact로 넘깁니다. Windows/Linux 자동 게시를 끄면서 피드를 누락하면 앱의 업데이트 확인·다운로드가 깨지므로 메타데이터를 함께 전달해야 합니다.
 
+Windows 설치 파일은 `build.win.artifactName`으로 `DepsSmuggler-Setup-${version}.${ext}`를 지정합니다. 공백이 들어간 기본 로컬 이름을 사용하면 electron-builder가 피드에 기록하는 GitHub용 이름과 최종 게시기가 올리는 파일명이 달라집니다. `node scripts/verify-update-artifacts.mjs build windows`와 `node scripts/verify-update-artifacts.mjs build linux`는 업로드 전에 피드가 참조하는 정확한 파일명(대소문자 포함), GitHub 허용 문자, 크기·SHA512, Windows blockmap과 legacy `path`/`sha512`의 일치를 검사합니다. 빌더 진단 로그인 `builder-debug.yml`은 피드 검사와 업로드에서 제외합니다.
+
 최종 `Create Release` 단계만 `softprops/action-gh-release@v2`로 본문과 자동 생성 변경 이력, 모든 플랫폼 파일을 등록합니다. 새 릴리스는 기존 정책대로 draft이며 확인 후 게시합니다. 기존 릴리스를 재실행해도 본문이 갱신되고, 마지막 단계는 release ID로 저장된 본문이 비어 있지 않은지 검증합니다. v1은 `draft: true`일 때 같은 태그의 릴리스가 이미 있으면 본문 갱신 전에 반환합니다. 이 때문에 빌더가 빈 릴리스를 먼저 공개했던 v0.2.28~v0.2.30은 성공한 CI에서도 본문이 비어 있었습니다. [v1 구현](https://github.com/softprops/action-gh-release/blob/v1/src/github.ts), [v2 구현](https://github.com/softprops/action-gh-release/blob/v2/src/github.ts)
 
-`bash scripts/verify-worktree.sh tests/unit/release-workflow.test.ts tests/unit/macos-package-command.test.ts`는 조기 게시 차단·업데이트 피드 전달·본문 갱신과 검증 계약을 확인합니다. 기존 공개 릴리스의 본문은 이 소스 변경으로 소급 복구되지 않습니다. 복구가 필요하면 해당 태그 사이의 실제 변경을 기준으로 본문을 작성하고, 태그·설치 파일을 재생성하지 않고 릴리스 본문만 수정한 뒤 공개 `releases.atom`의 해당 항목에 변경 이력이 나오는지 확인합니다.
+`bash scripts/verify-worktree.sh tests/unit/release-workflow.test.ts tests/unit/update-artifacts.test.ts tests/unit/macos-package-command.test.ts`는 조기 게시 차단·업데이트 피드 전달·본문 갱신과 검증 계약을 확인합니다. 실제 임시 파일로 Windows/Linux 피드를 검사하며 이름·대소문자 불일치, blockmap 누락, 같은 크기의 파일 변조와 잘못된 legacy 경로를 거부합니다. NSIS 파일명은 실제 electron-builder의 게시용 이름 처리에도 전달해 변경되지 않는지 확인합니다. 기존 공개 릴리스의 본문은 이 소스 변경으로 소급 복구되지 않습니다. 복구가 필요하면 해당 태그 사이의 실제 변경을 기준으로 본문을 작성하고, 태그·설치 파일을 재생성하지 않고 릴리스 본문만 수정한 뒤 공개 `releases.atom`의 해당 항목에 변경 이력이 나오는지 확인합니다.
 
 각 OS 테스트 잡은 `ELECTRON_RUN_AS_NODE=1`로 Electron 바이너리를 실행하고 `process.versions.electron`을 설치 패키지 버전과 대조합니다. 이 모드는 버전 확인 단계에만 적용하며 Linux runner의 SUID sandbox 설정 없이도 내장 Node 버전까지 확인합니다. Electron 설치 패키지가 존재하는 것과 플랫폼 바이너리 준비가 완료된 것은 다르며, 이 단계의 다운로드 실패도 CI 실패로 처리합니다. 이 버전 확인은 GUI 실행 검증을 대신하지 않습니다. 런타임 major 갱신 시 패키징된 앱의 IPC와 updater 다운로드까지 확인하는 절차는 [런타임 지원 정책](runtime-support.md)을 따릅니다.
 

@@ -102,6 +102,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify Windows update artifacts
+        run: node scripts/verify-update-artifacts.mjs build windows
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -110,6 +113,7 @@ jobs:
             build/*.exe
             build/*.msi
             build/*.yml
+            !build/builder-debug.yml
             build/*.blockmap
           if-no-files-found: error
 
@@ -234,6 +238,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify Linux update artifacts
+        run: node scripts/verify-update-artifacts.mjs build linux
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -244,6 +251,7 @@ jobs:
             build/*.rpm
             build/*.tar.gz
             build/*.yml
+            !build/builder-debug.yml
             build/*.blockmap
           if-no-files-found: error
 
