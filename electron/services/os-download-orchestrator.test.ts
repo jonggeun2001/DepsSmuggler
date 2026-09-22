@@ -306,6 +306,8 @@ describe('OS download orchestration', () => {
       ['curl-1.0', path.join(stagingDir, 'curl.deb')],
     ]);
     expect(mocks.archive).toHaveBeenCalledWith([second, first], downloadedFiles, {
+      onStage: expect.any(Function),
+      onProgress: expect.any(Function),
       format: 'tar.gz',
       outputPath: path.join(outputDir, 'os-packages'),
       includeScripts: true,
@@ -338,6 +340,23 @@ describe('OS download orchestration', () => {
       ],
     });
     expect(mocks.remove).toHaveBeenCalledExactlyOnceWith(stagingDir);
+  });
+
+  it('forwards archive progress and script stages without using download bytes as packaging percent', async () => {
+    const archiveProgress = { processedFiles: 1, totalFiles: 2, processedBytes: 50, totalBytes: 100, percentage: 50, outputBytes: 20 };
+    mocks.archive.mockImplementationOnce(async (_packages, _files, archiveOptions) => {
+      archiveOptions.onStage('설치 스크립트 생성 중...');
+      archiveOptions.onProgress(archiveProgress);
+      return archivePath;
+    });
+    await createOSDownloadOrchestrator({ getMainWindow: () => null }).startDownload(options());
+    expect(mocks.osProgress).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'packaging', packagingDetails: { message: '설치 스크립트 생성 중...' },
+    }));
+    expect(mocks.osProgress).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: 'packaging', bytesDownloaded: 0, totalBytes: 0,
+      packagingDetails: { message: 'ZIP 압축 중...', archiveProgress },
+    }));
   });
 
   it('packages only successful downloads and retains failure and skipped details', async () => {

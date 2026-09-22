@@ -1,3 +1,4 @@
+import type { PackagingDetails } from '../../../types/packaging';
 /**
  * OS Package Downloader Types
  * OS 패키지(yum/rpm, apt/deb, apk)를 위한 공통 타입 정의
@@ -212,6 +213,7 @@ export interface OSDownloadProgress {
   speed: number;
   /** 현재 단계 */
   phase: 'resolving' | 'downloading' | 'verifying' | 'packaging';
+  packagingDetails?: PackagingDetails;
 }
 
 /**

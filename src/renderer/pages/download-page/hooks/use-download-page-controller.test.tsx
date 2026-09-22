@@ -480,6 +480,30 @@ describe('useDownloadPageController', () => {
     );
   });
 
+  it('활성 세션의 파일 생성 상태와 진행률을 표시하고 완료 이벤트까지 대기한다', async () => {
+    const { listeners, rendered, stores, electronAPI } = await loadController();
+    await act(async () => { await rendered.result.current.handleStartDownload(); });
+    const sessionId = electronAPI.download.start.mock.calls[0][0].sessionId;
+    act(() => listeners.status?.({ sessionId, phase: 'packaging', message: '설치 스크립트 생성 중...' }));
+    expect(rendered.result.current.packagingStatus).toBe('packaging');
+    expect(rendered.result.current.packagingDetails?.message).toBe('설치 스크립트 생성 중...');
+    expect(rendered.result.current.packagingDetails?.archiveProgress).toBeUndefined();
+    expect(rendered.result.current.isDownloading).toBe(true);
+    const archiveProgress = { processedFiles: 1, totalFiles: 2, processedBytes: 50, totalBytes: 100, percentage: 50, outputBytes: 20 };
+    act(() => listeners.status?.({ sessionId, phase: 'packaging', message: 'ZIP 압축 중...', archiveProgress }));
+    expect(rendered.result.current.packagingProgress).toBe(50);
+    act(() => listeners.status?.({ sessionId: sessionId - 1, phase: 'packaging', message: '오래된 상태' }));
+    expect(rendered.result.current.packagingDetails?.message).toBe('ZIP 압축 중...');
+    await act(async () => { await rendered.result.current.handlePauseResume(); });
+    expect(electronAPI.download.pause).not.toHaveBeenCalled();
+    act(() => listeners.status?.({ sessionId, phase: 'packaging', message: '압축 파일 저장 마무리 중...', archiveProgress: { ...archiveProgress, percentage: 100 } }));
+    expect(rendered.result.current.viewMode).toBe('active');
+    expect(rendered.result.current.isDownloading).toBe(true);
+    act(() => listeners.allComplete?.({ sessionId, success: true, outputPath: '/tmp/out.zip' }));
+    await waitFor(() => expect(rendered.result.current.viewMode).toBe('completed'));
+    expect(stores.useDownloadStore.getState().packagingDetails).toBeNull();
+  });
+
   it('resume 시 상태와 IPC 호출을 재개로 바꾼다', async () => {
     const { electronAPI, rendered, stores } = await loadController({
       downloadState: {

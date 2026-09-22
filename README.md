@@ -153,7 +153,7 @@ depssmuggler os cache clear
 
 | 항목 | 현재 동작 |
 |------|-----------|
-| 압축·설치 스크립트 | 일반 GUI와 CLI에서 ZIP/tar.gz 지원. 일반 GUI는 설치 스크립트 포함 여부를 선택하고, CLI는 생성한 `install.sh`·`install.ps1`을 출력 폴더와 아카이브 최상위에 포함합니다. OS 출력에는 전용 스크립트 생성기가 있습니다. |
+| 압축·설치 스크립트 | 일반 GUI와 CLI에서 ZIP/tar.gz 지원. GUI는 다운로드 후 생성 단계, 압축 진행률·처리 파일 수·기록 용량·경과 시간을 표시합니다. 일반 GUI는 설치 스크립트 포함 여부를 선택하고, CLI는 생성한 `install.sh`·`install.ps1`을 출력 폴더와 아카이브 최상위에 포함합니다. OS 출력에는 전용 스크립트 생성기가 있습니다. |
 | 설치 스크립트 범위 | CLI와 GUI의 npm 스크립트는 실제로 다운로드된 `.tgz`와 직접 요청한 확정 버전을 공통 설치 계획에 전달해 오프라인으로 `npm-project/node_modules`에 설치하며, 전이 의존성의 여러 버전을 함께 보존합니다. CLI와 GUI의 Conda 스크립트는 실제로 완료된 Conda 아카이브 경로를 전달받아 오프라인 `conda create/install`을 실행합니다. pip와 npm 또는 Conda가 함께 있는 묶음은 각 설치가 모두 성공할 때만 전체 성공으로 처리합니다. 기본 Conda 환경 경로는 `SCRIPT_DIR/conda-env`이며 `DEPS_SMUGGLER_CONDA_PREFIX`로 바꿀 수 있습니다. Python noarch 패키지는 호환되는 Python 환경이 필요합니다. 생성기별 범위는 [Packagers](docs/packagers.md)를 참고하세요. |
 | 파일 분할 | 일반 GUI의 이메일 전달 중 첨부 한도를 초과하고 분할 설정이 켜진 경우 적용합니다. 로컬 저장 경로에서 자동 분할하지 않습니다. |
 | SMTP 테스트 | Electron IPC로 실제 연결을 테스트합니다. 브라우저 개발 환경에서는 시뮬레이션이며, Electron API가 일부 누락되면 안내 후 비활성화됩니다. |

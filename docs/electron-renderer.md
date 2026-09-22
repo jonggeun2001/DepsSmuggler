@@ -31,6 +31,14 @@
 
 main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 생성·파일 크기 조회를 주입받습니다. 주입 계약은 `createArchiveFromDirectory`와 `(path: string) => Promise<{ size: number }>`로 제한해 실제 구현과 부분 테스트 대역을 같은 public 계약으로 검사합니다. IPC payload와 다운로드 처리 흐름은 이 타입 분리로 바뀌지 않습니다. 서비스·화면 테스트는 `npm run typecheck:tests`에서도 검사합니다.
 
+## 다운로드 후 파일 생성 표시
+
+다운로드가 100%에 도달해도 스크립트와 압축 파일이 생성 중일 수 있습니다. 일반 화면은 `download:status`의 `packaging` 이벤트를 받아 현재 작업과 경과 시간을 표시합니다. 압축 중에는 파일 처리 수, 압축률, 실제 기록 용량을 추가로 보여줍니다. 스크립트·저장소·메일 등 비율을 알 수 없는 작업은 회전 표시와 단계명으로 안내합니다. OS 전용 화면도 `PackagingProgressView`를 공유하며 다운로드 완료율과 파일 생성 진행을 구분합니다.
+
+생성 중에는 다운로드 속도/남은 시간 대신 생성 상태를 보여주고 일시정지를 비활성화합니다. 모든 패키지 전송이 끝났다는 이유로 완료 버튼을 먼저 표시하지 않습니다. 일반 다운로드 완료 화면은 최종 완료 이벤트를 받은 뒤 전환하며, 이전 세션의 진행 이벤트는 기존 `sessionId` 검사로 제외합니다. 단계 전환만 로그에 남겨 250ms 진행률 갱신이 로그를 채우지 않게 합니다. 진행 상태는 store에 보관하고 시작/재시도 실패 시 이전 상태와 함께 복원합니다.
+
+검증: `PackagingProgressView.test.tsx`, `use-download-page-controller.test.tsx`, `tests/e2e/download-smoke.spec.ts`에서 생성 단계·실제 진행률·완료 전 버튼 상태와 최종 화면 전환을 확인합니다.
+
 ## 패키지 매니저 노출 범위
 
 ### 홈/위자드에서 노출되는 타입

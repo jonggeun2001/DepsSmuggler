@@ -1,4 +1,5 @@
 import React from 'react';
+import { PackagingProgressView } from '../PackagingProgressView';
 import type { OSDownloadProgress as OSDownloadProgressData } from '../../../core/downloaders/os-shared/types';
 
 interface OSDownloadProgressProps {
@@ -53,7 +54,7 @@ export const OSDownloadProgress: React.FC<OSDownloadProgressProps> = ({
 
       <div className="metric-grid">
         <div className="metric-card">
-          <span className="metric-label">전체 진행</span>
+          <span className="metric-label">다운로드 진행</span>
           <strong>{overallPercent}%</strong>
         </div>
         <div className="metric-card">
@@ -66,6 +67,12 @@ export const OSDownloadProgress: React.FC<OSDownloadProgressProps> = ({
         </div>
       </div>
 
+      {progress?.phase === 'packaging' ? (
+        <PackagingProgressView
+          message={progress.packagingDetails?.message || '파일 생성 준비 중...'}
+          archiveProgress={progress.packagingDetails?.archiveProgress}
+        />
+      ) : <>
       <div className="progress-block">
         <div className="progress-row">
           <span>현재 단계</span>
@@ -88,15 +95,17 @@ export const OSDownloadProgress: React.FC<OSDownloadProgressProps> = ({
         </div>
       </div>
 
+      </>}
+
       <div className="progress-footer">
         <div>
           <span className="footer-label">출력 위치</span>
           <code>{outputDir}</code>
         </div>
-        <div>
+        {progress?.phase !== 'packaging' && <div>
           <span className="footer-label">속도</span>
           <strong>{formatBytes(progress?.speed || 0)}/s</strong>
-        </div>
+        </div>}
       </div>
 
       <style>{`

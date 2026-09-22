@@ -562,6 +562,7 @@ class OSScriptGenerator {
 
 - **위치**: `src/core/downloaders/os-shared/archive-packager.ts`
 - **기능**: 패키지를 zip 또는 tar.gz 아카이브로 패키징
+- `ArchiveOptions.onProgress`는 실제 압축 파일 처리량과 기록 용량을 250ms 간격으로 전달하며 저장 종료 후에만 100%를 보고합니다. `onStage`는 설치 스크립트 생성 단계를 알립니다. Electron은 이를 `os:download:progress.packagingDetails`에 담아 화면에 표시합니다. 저장소 출력은 저장소·스크립트 생성 단계명과 경과 시간을 표시합니다. 자세한 진행률 의미와 검증은 [패키저 문서](packagers.md#압축-진행률)를 참고하세요.
 
 ```typescript
 interface ArchiveOptions {
@@ -573,6 +574,8 @@ interface ArchiveOptions {
   repoName?: string;
   includeMetadata?: boolean;    // 기본 true
   includeReadme?: boolean;      // 기본 true
+  onProgress?: (progress: ArchiveProgress) => void;
+  onStage?: (message: string) => void;
 }
 
 class OSArchivePackager {
