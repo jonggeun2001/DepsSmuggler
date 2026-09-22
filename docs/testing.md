@@ -6,6 +6,8 @@
 
 ## 로컬 검증 명령
 
+추가 CA 검증은 `root-ca-store.test.ts`, `root-ca.integration.test.ts`, `root-ca-handlers.test.ts`, `RootCaSettingsSection.test.tsx`로 구성합니다. CLI 통합 테스트는 실제 로컬 TLS 서버와 새 프로세스를 사용해 등록 전/후 및 해제 후의 신뢰, 기존 환경 CA 보존, Axios/HTTPS/fetch와 구형 Node 재실행을 확인합니다. Node 22.13/24 runtime-contract에도 포함합니다. [상세 실행 방법](root-ca.md#검증)
+
 `package.json`의 `engines.node`는 `^22.13.0 || ^24.0.0`, `packageManager`는 `npm@11.8.0`입니다. 테스트·릴리스 CI는 Node 24와 npm 11.8.0을 사용하며, 별도 runtime-contract 잡은 Node 22.13.0과 24에서 의존성 설치와 실제 CLI/CJS·ESM 경계를 검사합니다. Node 22 타입을 기준으로 컴파일합니다. 전체 도구의 최소 조건과 Electron 내장 Node의 차이는 [런타임 지원 정책](runtime-support.md)에 정리했습니다.
 
 ```bash

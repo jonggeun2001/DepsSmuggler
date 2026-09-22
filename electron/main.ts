@@ -30,6 +30,8 @@ coreLogger.initialize().catch(() => {
 
 // 분리된 핸들러 모듈 import
 import { registerConfigHandlers } from './config-handlers';
+import { registerRootCaHandlers } from './root-ca-handlers';
+import { initializeRootCaTrust } from '../src/core/root-ca-trust';
 import { registerCacheHandlers } from './cache-handlers';
 import { registerHistoryHandlers } from './history-handlers';
 import { registerSearchHandlers } from './search-handlers';
@@ -121,6 +123,13 @@ async function createWindow(): Promise<void> {
 
 // Electron 앱 준비 완료
 app.whenReady().then(async () => {
+  try {
+    initializeRootCaTrust();
+  } catch (error) {
+    // Leave settings reachable so a damaged registration can be replaced or cleared.
+    log.error('추가 CA 인증서 초기화 실패:', error);
+    dialog.showErrorBox('추가 CA 인증서 오류', '설정 화면에서 CA 인증서를 다시 등록하거나 등록 해제하세요.');
+  }
   await createWindow();
 
   // 버전 목록 사전 로딩 (백그라운드, 비차단)
@@ -168,6 +177,7 @@ app.on('window-all-closed', () => {
 
 // 설정 핸들러 등록
 registerConfigHandlers();
+registerRootCaHandlers();
 
 // 캐시 핸들러 등록
 registerCacheHandlers();

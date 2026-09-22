@@ -8,6 +8,7 @@
 |------|------|
 | [프로젝트 README](../README.md) | 소개, 설치·빠른 시작, 지원 범위, GUI/CLI 예시, 설정, 개발 명령 |
 | [CLI](cli.md) | download/search/config/cache/os 명령, 대상 환경 옵션, 오류 처리 |
+| [추가 루트 CA](root-ca.md) | 회사 CA 등록·해제, PEM/DER, CLI/설정 화면, 재시작과 신뢰 범위 |
 | [아키텍처 개요](architecture-overview.md) | 모듈, 데이터 흐름, 프로세스 경계 |
 | [Electron / Renderer](electron-renderer.md) | 화면, 상태, renderer data client, 설정·업데이트 |
 | [IPC 핸들러](ipc-handlers.md) | preload API와 main 채널·서비스 연결 |

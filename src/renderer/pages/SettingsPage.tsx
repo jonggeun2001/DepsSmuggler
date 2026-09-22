@@ -31,6 +31,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSettingsStore } from '../stores/settings-store';
 import { CacheSettingsSection } from './settings/CacheSettingsSection';
+import { RootCaSettingsSection } from './settings/RootCaSettingsSection';
 import { DeliverySettingsSection } from './settings/DeliverySettingsSection';
 import {
   SETTINGS_CARD_BODY_PADDING,
@@ -569,6 +570,8 @@ const SettingsPage: React.FC = () => {
           smtpTestResult={smtpTestResult}
           testingSmtp={testingSmtp}
         />
+
+        <RootCaSettingsSection />
 
         {/* Python 버전 설정 */}
         <div

@@ -18,6 +18,8 @@ vi.mock('./utils/logger', () => ({ createScopedLogger: () => ({
 }) }));
 vi.mock('../src/utils/logger', () => ({ logger: { initialize: async () => undefined } }));
 vi.mock('./config-handlers', () => ({ registerConfigHandlers: vi.fn() }));
+vi.mock('./root-ca-handlers', () => ({ registerRootCaHandlers: vi.fn() }));
+vi.mock('../src/core/root-ca-trust', () => ({ initializeRootCaTrust: vi.fn() }));
 vi.mock('./cache-handlers', () => ({ registerCacheHandlers: vi.fn() }));
 vi.mock('./history-handlers', () => ({ registerHistoryHandlers: vi.fn() }));
 vi.mock('./search-handlers', () => ({ registerSearchHandlers: vi.fn() }));

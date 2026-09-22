@@ -172,6 +172,11 @@ const createElectronApi = () => {
         };
       }),
     },
+    rootCa: {
+      get: vi.fn().mockResolvedValue({ success: true, status: { certificates: [], restartRequired: false } }),
+      import: vi.fn(),
+      clear: vi.fn(),
+    },
     openFolder: vi.fn().mockResolvedValue(undefined),
     selectFolder: vi.fn().mockResolvedValue('/tmp/selected'),
   };

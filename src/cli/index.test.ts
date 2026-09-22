@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('../utils/logger', () => ({ logger: mocks }));
 vi.mock('./commands/download', () => ({ downloadCommand: mocks.downloadCommand }));
+vi.mock('./root-ca-bootstrap', () => ({ initializeCliRootCa: vi.fn().mockResolvedValue(true) }));
 vi.mock('./commands/os', () => ({
   registerOSCommands: (program: Command) => {
     program.command('boundary-test').action(mocks.action);

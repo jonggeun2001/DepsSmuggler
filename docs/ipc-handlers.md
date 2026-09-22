@@ -50,6 +50,10 @@ electron/
 | `config:reset` | 설정 초기화 |
 | `config:getPath` | 설정 파일 경로 조회 |
 
+### `root-ca-handlers.ts`
+
+`root-ca:get/import/clear`는 `window.electronAPI.rootCa.get/import/clear`로 노출합니다. `import`는 네이티브 파일 선택창에서 받은 경로만 사용해 PEM/DER CA 파일을 검증·복사하고 기존 등록을 교체합니다. 성공은 `{ success: true, status: { certificates, restartRequired }, canceled? }`, 실패는 `{ success: false, error }`입니다. 목록에는 이름·발급자·지문·만료일만 반환하며 PEM은 renderer에 전달하지 않습니다. `clear`는 손상된 등록도 해제할 수 있습니다. [저장·재시작 계약](root-ca.md)을 참고하세요.
+
 ### `cache-handlers.ts`
 
 | 채널 | 설명 |
@@ -217,7 +221,7 @@ Java/Node 런타임 버전 목록 IPC와 해당 런타임 선택 단계는 현�
 `window.electronAPI`는 다음 그룹으로 정리되어 있습니다.
 
 - `download`, `search`, `dependency`
-- `config`, `cache`, `history`
+- `config`, `rootCa`, `cache`, `history`
 - `os`, `docker.cache`, `maven`
 - `updater`, `versions`
 - `getAppVersion`, `getAppPath`, `selectFolder`, `selectDirectory`, `saveFile`, `openFolder`, `testSmtpConnection`, `log`

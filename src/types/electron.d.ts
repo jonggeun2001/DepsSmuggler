@@ -2,6 +2,7 @@
 
 import type { UpdateReleaseNotes } from './updater';
 import type { PackageInfo } from './package-manager/metadata';
+import type { RootCaResult } from './root-ca';
 
 export interface DownloadProgressData {
   sessionId?: number;
@@ -314,6 +315,11 @@ export interface OSPackageAPI {
 }
 
 export interface ElectronAPI {
+  rootCa: {
+    get: () => Promise<RootCaResult>;
+    import: () => Promise<RootCaResult>;
+    clear: () => Promise<RootCaResult>;
+  };
   // 렌더러 로그를 메인 프로세스로 전달
   log?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]) => void;
   getAppVersion: () => Promise<string>;

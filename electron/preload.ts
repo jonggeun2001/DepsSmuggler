@@ -1,9 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { UpdateReleaseNotes } from '../src/types/updater';
 import type { PackageInfo } from '../src/types/package-manager/metadata';
+import type { RootCaResult } from '../src/types/root-ca';
 
 // 렌더러 프로세스에 노출할 API 정의
 const electronAPI = {
+  rootCa: {
+    get: (): Promise<RootCaResult> => ipcRenderer.invoke('root-ca:get'),
+    import: (): Promise<RootCaResult> => ipcRenderer.invoke('root-ca:import'),
+    clear: (): Promise<RootCaResult> => ipcRenderer.invoke('root-ca:clear'),
+  },
   // 렌더러 로그를 메인 프로세스로 전달
   log: (level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]): void => {
     ipcRenderer.send('renderer:log', { level, message, args });
