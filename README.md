@@ -166,6 +166,8 @@ depssmuggler os cache clear
 
 ## 설정과 저장 위치
 
+회사 CA가 필요한 네트워크에서는 **설정 → 추가 루트 CA 인증서** 또는 `depssmuggler config ca set "company-ca.cer"`로 PEM/DER 인증서를 등록합니다. CLI에는 다음 실행부터, 앱에는 재시작 후 적용됩니다. 조회는 `config ca get`, 해제는 `config ca clear`를 사용합니다. [추가 CA 사용법](docs/root-ca.md)
+
 GUI 설정은 전달/출력, 캐시, 업데이트 등의 섹션으로 나뉩니다. 출력 경로·압축 형식·설치 스크립트, SMTP와 수신자·첨부 크기·파일 분할, 동시 다운로드 수·캐시 사용 여부를 관리합니다. CLI 설정은 `config list/get/set/reset`으로 조회·변경합니다.
 
 기본 파일 저장 위치는 다음과 같습니다. 다운로드 출력 경로와 캐시 경로는 별도로 지정할 수 있습니다.
