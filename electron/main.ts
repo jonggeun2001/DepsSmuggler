@@ -130,6 +130,9 @@ app.whenReady().then(async () => {
     log.error('추가 CA 인증서 초기화 실패:', error);
     dialog.showErrorBox('추가 CA 인증서 오류', '설정 화면에서 CA 인증서를 다시 등록하거나 등록 해제하세요.');
   }
+  // These handlers start background HTTPS requests during registration.
+  registerSearchHandlers();
+  registerVersionHandlers();
   await createWindow();
 
   // 버전 목록 사전 로딩 (백그라운드, 비차단)
@@ -184,12 +187,6 @@ registerCacheHandlers();
 
 // 히스토리 핸들러 등록
 registerHistoryHandlers();
-
-// 검색 및 의존성 해결 핸들러 등록
-registerSearchHandlers();
-
-// 버전 정보 핸들러 등록
-registerVersionHandlers();
 
 // 다운로드 핸들러 등록 (mainWindow getter 전달)
 registerDownloadHandlers(getMainWindow);

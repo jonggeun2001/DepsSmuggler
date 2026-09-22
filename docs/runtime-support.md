@@ -36,7 +36,7 @@ CLI 테스트는 소스 실행, 빌드, 배포와 같은 디렉터리 구조에�
 
 ## 추가 CA 런타임 호환성
 
-추가 CA는 Node 22.19+/24.5+의 기본 CA 설정 API를 사용합니다. CLI의 기존 지원 하한은 유지하며, 이전 지원 런타임에서는 CA를 합친 임시 PEM과 `NODE_EXTRA_CA_CERTS`로 같은 명령을 다시 실행합니다. `root-ca.integration.test.ts`를 runtime-contract 잡에서도 실행해 실제 Node 22.13의 신뢰 확장과 종료 코드 전달을 확인합니다. [추가 루트 CA](root-ca.md)
+Electron의 추가 CA는 내장 Node의 기본 CA 설정 API를 사용합니다. CLI는 기존 지원 하한을 유지하고 모든 지원 버전에서 CA를 합친 임시 PEM과 `NODE_EXTRA_CA_CERTS`로 같은 명령을 다시 실행합니다. OpenSSL CA 옵션과 환경을 그대로 전달해 기존 신뢰도 보존합니다. `root-ca.integration.test.ts`를 runtime-contract 잡에서도 실행해 실제 Node 22.13의 신뢰 확장·OpenSSL 신뢰 보존·종료 코드 전달을 확인합니다. [추가 루트 CA](root-ca.md)
 
 ## Electron major 갱신 검증
 

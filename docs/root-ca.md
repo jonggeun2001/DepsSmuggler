@@ -42,7 +42,9 @@ depssmuggler config ca set "C:\Certificates\company-ca.pem"
 - 앱이 시작할 때 Node 기본 신뢰 목록에 추가합니다. 기본 공개 CA와 이미 적용된 시스템 CA·`NODE_EXTRA_CA_CERTS`는 유지하며 TLS 인증서·호스트 이름 검증을 끄지 않습니다. 진행 중인 연결의 신뢰를 바꾸지 않도록 저장과 적용을 분리합니다.
 - 적용 대상은 앱/CLI의 Node 네트워크 요청(Axios, HTTPS, fetch 등)입니다. Chromium 네트워크를 사용하는 자동 업데이트와 외부 브라우저, 생성된 설치 스크립트가 실행되는 다른 PC의 신뢰 설정은 별도입니다.
 
-Node 22.19+/24.5+와 현재 Electron 런타임은 `tls.setDefaultCACertificates()`로 기본 신뢰를 확장합니다. 지원되는 이전 CLI Node 22.13–22.18/24.0–24.4는 기존 환경 CA와 등록 CA를 합친 임시 PEM을 만들어 `NODE_EXTRA_CA_CERTS`를 지정한 자식 프로세스에서 같은 명령을 실행합니다. 임시 파일은 명령 종료 후 제거하고 자식의 종료 코드를 반환합니다. [Node TLS 문서](https://nodejs.org/api/tls.html#tlssetdefaultcacertificatescerts)
+현재 Electron 런타임은 검색·버전 사전 조회와 창 생성 전에 `tls.setDefaultCACertificates()`로 기본 신뢰를 확장합니다. CLI는 지원하는 모든 Node 버전에서 기존 환경 CA와 등록 CA를 합친 임시 PEM을 만들어 `NODE_EXTRA_CA_CERTS`를 지정한 자식 프로세스에서 같은 명령을 실행합니다. Node 옵션·환경을 그대로 전달하므로 `--use-openssl-ca`와 `SSL_CERT_FILE`/`SSL_CERT_DIR`의 기존 신뢰도 보존합니다. 임시 파일은 명령 종료 후 제거하고 자식의 종료 코드를 반환합니다. 등록 CA가 없으면 재실행하지 않습니다. [Node TLS 문서](https://nodejs.org/api/tls.html#tlssetdefaultcacertificatescerts)
+
+OpenSSL 저장소의 CA는 `getCACertificates('default')`로 전부 열거할 수 없어 CLI에서는 런타임 목록 교체를 사용하지 않습니다. Electron은 OpenSSL CA 실행 옵션을 지원하지 않으며 기본 목록 확장 방식을 사용합니다. [Node 구현](https://raw.githubusercontent.com/nodejs/node/v22.19.0/lib/tls.js), [Electron 지원 환경 변수](https://www.electronjs.org/docs/latest/api/environment-variables#node_options)
 
 ## 검증
 
@@ -54,4 +56,4 @@ bash scripts/verify-worktree.sh \
   src/renderer/pages/settings/RootCaSettingsSection.test.tsx
 ```
 
-실제 로컬 HTTPS 서버를 사용해 미등록 실패 → CLI 등록 → Axios/HTTPS/fetch 성공 → 해제 후 실패를 확인합니다. 기존 환경 CA 보존, 호스트 이름 불일치 거부, PEM/DER 및 손상 입력, IPC 취소/실패, UI 저장 결과와 재시작 안내도 검증합니다. CI의 Node 22.13 런타임 검사에도 CA 통합 테스트를 포함합니다.
+실제 로컬 HTTPS 서버를 사용해 미등록 실패 → CLI 등록 → Axios/HTTPS/fetch 성공 → 해제 후 실패를 확인합니다. 기존 환경·OpenSSL CA 보존, 호스트 이름 불일치 거부, PEM/DER 및 손상 입력, IPC 취소/실패, UI 저장 결과와 재시작 안내도 검증합니다. `electron/main-lifecycle.test.ts`는 검색·버전 사전 조회와 창 로드보다 CA 적용이 먼저인지 확인합니다. CI의 Node 22.13 런타임 검사에도 CA 통합 테스트를 포함합니다.

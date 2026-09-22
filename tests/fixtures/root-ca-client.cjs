@@ -1,6 +1,5 @@
 const path = require('node:path');
 const tls = require('node:tls');
-if (process.env.DEPS_TEST_LEGACY_CA === '1') tls.setDefaultCACertificates = undefined;
 require('ts-node').register({ project: path.resolve('tsconfig.cli.json'), transpileOnly: true });
 const { initializeCliRootCa } = require('../../src/cli/root-ca-bootstrap');
 const { initializeRootCaTrust, getRootCaStatus } = require('../../src/core/root-ca-trust');

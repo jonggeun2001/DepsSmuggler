@@ -87,30 +87,49 @@ it('persists CLI registration, trusts it in Axios/https/fetch, and rejects again
   expect(registered.stdout).toContain('CN=localhost');
   expect((await run(search, { NODE_OPTIONS: route })).stdout).toContain('trusted-ca-fixture');
   expect((await run([fixture('root-ca-client.cjs')])).stdout).toContain('"success":true');
-  // Exercise the startup fallback on current Node as well as the actual Node 22.13 CI job.
-  expect((await run(search, { NODE_OPTIONS: route, DEPS_TEST_LEGACY_CA: '1' })).stdout).toContain(
-    'trusted-ca-fixture'
-  );
+  // The startup extension preserves the existing environment bundle on all supported runtimes.
   expect(
-    (await run([fixture('root-ca-client.cjs')], { DEPS_TEST_LEGACY_CA: '1' })).stdout
+    (
+      await run([fixture('root-ca-client.cjs')], {
+        NODE_EXTRA_CA_CERTS: path.join(project, 'electron/test-fixtures/extra-ca-cert.pem'),
+        DEPS_TEST_CA_URL: extraUrl,
+      })
+    ).stdout
   ).toContain('"success":true');
-  // An existing NODE_EXTRA_CA_CERTS bundle remains trusted in both runtime paths.
-  for (const legacy of ['0', '1']) {
-    expect(
-      (
-        await run([fixture('root-ca-client.cjs')], {
-          NODE_EXTRA_CA_CERTS: path.join(project, 'electron/test-fixtures/extra-ca-cert.pem'),
-          DEPS_TEST_CA_URL: extraUrl,
-          DEPS_TEST_LEGACY_CA: legacy,
-        })
-      ).stdout
-    ).toContain('"success":true');
-  }
+  // OpenSSL's lazy trust store is not enumerable through getCACertificates('default').
+  // Preserve it whether the flag came from argv or NODE_OPTIONS (Electron does not support it).
+  if (!process.versions.electron)
+    for (const mode of ['argv', 'environment']) {
+      const args = mode === 'argv' ? ['--use-openssl-ca'] : [];
+      const extra = {
+        SSL_CERT_FILE: path.join(project, 'electron/test-fixtures/extra-ca-cert.pem'),
+        NODE_OPTIONS: `--require ${JSON.stringify(fixture('isolate-home.cjs'))}${mode === 'environment' ? ' --use-openssl-ca' : ''}`,
+      };
+      for (const target of [url, extraUrl]) {
+        expect(
+          (
+            await run([...args, fixture('root-ca-client.cjs')], {
+              ...extra,
+              DEPS_TEST_CA_URL: target,
+            })
+          ).stdout
+        ).toContain('"success":true');
+      }
+    }
   if (typeof tls.setDefaultCACertificates === 'function') {
     const desktop = await run([fixture('root-ca-client.cjs')], { DEPS_TEST_DESKTOP_CA: '1' });
     const result = JSON.parse(desktop.stdout.trim());
     expect(result.status.restartRequired).toBe(false);
     expect(result.defaultCount).toBeGreaterThan(result.bundledCount);
+    expect(
+      (
+        await run([fixture('root-ca-client.cjs')], {
+          DEPS_TEST_DESKTOP_CA: '1',
+          NODE_EXTRA_CA_CERTS: path.join(project, 'electron/test-fixtures/extra-ca-cert.pem'),
+          DEPS_TEST_CA_URL: extraUrl,
+        })
+      ).stdout
+    ).toContain('"success":true');
   }
   await expect(
     run([fixture('root-ca-client.cjs')], {

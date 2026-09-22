@@ -1,6 +1,6 @@
 # HTTP 클라이언트
 
-CLI/앱의 추가 CA 등록은 개별 HTTP client가 아닌 시작 시 Node TLS 신뢰 목록에 적용합니다. 이 때문에 Axios와 Node HTTPS, OS 패키지에서 사용하는 fetch도 같은 CA를 사용하며 기본 인증서와 호스트 이름 검증을 유지합니다. 기존 공개 CA·환경 CA를 보존하는 초기화와 이전 Node CLI의 재실행 처리는 [추가 루트 CA](root-ca.md)를 참고하세요.
+CLI/앱의 추가 CA 등록은 개별 HTTP client가 아닌 시작 시 Node TLS 신뢰 목록에 적용합니다. 이 때문에 Axios와 Node HTTPS, OS 패키지에서 사용하는 fetch도 같은 CA를 사용하며 기본 인증서와 호스트 이름 검증을 유지합니다. 기존 공개 CA·환경 CA를 보존하는 Electron 초기화와 OpenSSL 신뢰도 유지하는 CLI 재실행 처리는 [추가 루트 CA](root-ca.md)를 참고하세요.
 
 ## 개요
 - 목적: HTTP 요청을 위한 추상화 레이어로, 구현체 교체 및 테스트 용이성 제공
