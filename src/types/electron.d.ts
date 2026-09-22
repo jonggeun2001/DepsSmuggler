@@ -1,3 +1,4 @@
+import type { QueryFailure } from './query-error';
 // Electron API 타입 정의 (렌더러 프로세스용)
 
 import type { PackagingDetails } from './packaging';
@@ -164,9 +165,10 @@ export interface SearchAPI {
       description?: string;
       registry?: string;
     }>;
+    error?: QueryFailure;
   }>;
   suggest: (type: string, query: string, options?: SearchOptions) => Promise<string[]>;
-  versions: (type: string, packageName: string, options?: SearchOptions) => Promise<{ versions: string[] }>;
+  versions: (type: string, packageName: string, options?: SearchOptions) => Promise<{ versions: string[]; error?: QueryFailure }>;
 }
 
 export interface DependencyResolveResult {

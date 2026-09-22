@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import axios from 'axios';
+import { createRendererDataClient } from '../src/renderer/lib/renderer-data-client';
 import { registerSearchHandlers } from './search-handlers';
 import { resolveAllDependencies } from '../src/core/shared';
 
@@ -82,6 +84,7 @@ vi.mock('../src/core/shared/maven-utils', () => ({
 describe('registerSearchHandlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(axios.get).mockReset().mockResolvedValue({ data: { projects: [] } });
     mavenSearchPackagesMock.mockResolvedValue([]);
     vi.mocked(resolveAllDependencies).mockResolvedValue({
       originalPackages: [],
@@ -89,6 +92,48 @@ describe('registerSearchHandlers', () => {
       dependencyTrees: [],
       failedPackages: [],
     });
+  });
+
+  it('Maven 인증서 실패가 실제 IPC 어댑터와 renderer facade를 통과해 보존된다', async () => {
+    mavenSearchPackagesMock.mockRejectedValue(Object.assign(new Error('self signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' }));
+    registerSearchHandlers();
+    const handler = ipcHandle.mock.calls.find(([channel]) => channel === 'search:packages')![1];
+    const client = createRendererDataClient({ electronAPI: { search: {
+      packages: (type, query, options) => handler({}, type, query, options),
+    } } });
+    const payload = await handler({}, 'maven', 'deequ');
+    expect(JSON.parse(JSON.stringify(payload))).toMatchObject({ results: [], error: { code: 'TLS_CERTIFICATE' } });
+    await expect(client.searchPackages('maven', 'deequ')).rejects.toMatchObject({ failure: { code: 'TLS_CERTIFICATE' } });
+    mavenSearchPackagesMock.mockResolvedValue([]);
+    await expect(client.searchPackages('maven', 'absent')).resolves.toEqual([]);
+  });
+
+  it('PyPI 정확 검색의 404만 빈 결과로 처리하고 네트워크 실패는 전달한다', async () => {
+    registerSearchHandlers();
+    const handler = ipcHandle.mock.calls.find(([channel]) => channel === 'search:packages')![1];
+    vi.mocked(axios.get).mockRejectedValue({ response: { status: 404 } });
+    expect(await handler({}, 'pip', 'absent')).toEqual({ results: [] });
+    vi.mocked(axios.get).mockRejectedValue({ code: 'ECONNRESET' });
+    expect(await handler({}, 'pip', 'requests')).toMatchObject({ error: { code: 'NETWORK' } });
+  });
+
+  it('PyPI 캐시 후보가 모두 실패하면 정확 검색 404로 실패를 숨기지 않는다', async () => {
+    vi.mocked(axios.get).mockResolvedValueOnce({ data: '<a href="/simple/requests">requests</a>' });
+    registerSearchHandlers();
+    await Promise.resolve();
+    const handler = ipcHandle.mock.calls.find(([channel]) => channel === 'search:packages')![1];
+    vi.mocked(axios.get).mockImplementation(async (url) => {
+      if (url.includes('/requests/')) throw { code: 'ETIMEDOUT' };
+      throw { response: { status: 404 } };
+    });
+    expect(await handler({}, 'pip', 'requ')).toMatchObject({ error: { code: 'TIMEOUT' } });
+  });
+
+  it('Maven 버전 metadata와 fallback 응답이 모두 잘못되면 실패를 전달한다', async () => {
+    registerSearchHandlers();
+    vi.mocked(axios.get).mockResolvedValue({ data: '<html>company gateway</html>' });
+    const handler = ipcHandle.mock.calls.find(([channel]) => channel === 'search:versions')![1];
+    expect(await handler({}, 'maven', 'g:a')).toMatchObject({ versions: [], error: { code: 'INVALID_RESPONSE' } });
   });
 
   it('dependency:resolve에서 includeDependencies 옵션을 공통 리졸버로 전달한다', async () => {
