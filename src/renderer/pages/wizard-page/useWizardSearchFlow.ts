@@ -138,6 +138,7 @@ export function useWizardSearchFlow({
       try {
         const details = await versionServiceRef.current.loadVersionDetails(searchContext, record);
         if (!isCurrent()) return;
+        setVersionError(details.versionError ?? null);
         setAvailableVersions(details.versions);
         setSelectedVersion(details.selectedVersion);
         setUsedIndexUrl(details.usedIndexUrl);

@@ -494,7 +494,7 @@ npx playwright test tests/e2e/maven-pom-preview.spec.ts --project=chromium
 
 현재 포함 시나리오:
 
-- `tests/e2e/search-errors.spec.ts`: 실제 위자드 자동 입력의 IPC 인증서 오류·재시도, 버전 실패·복구, HTTP 오류·파싱 실패·정상 0건 구분
+- `tests/e2e/search-errors.spec.ts`: 실제 위자드 자동 입력의 IPC 인증서 오류·재시도, 버전 실패·복구, HTTP 오류·파싱 실패·정상 0건 구분, 빠른 재시도 후 후보 유지, 네이티브 classifier 장바구니 보존
 - `tests/e2e/settings-regression.spec.ts`: 설정 저장, SMTP 연결 테스트 호출, 새로고침 후 값 유지
 - `tests/e2e/settings-cache-breakdown.spec.ts`: 패키지 타입별 캐시 통계와 비우기 후 갱신
 - `tests/e2e/download-smoke.spec.ts`: 장바구니에서 일반 다운로드 완료 화면까지의 smoke flow

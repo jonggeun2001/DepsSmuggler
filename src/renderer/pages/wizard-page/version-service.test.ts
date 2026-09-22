@@ -82,8 +82,9 @@ describe('version-service', () => {
     );
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      '/api/maven/versions?package=org.springframework%3Aspring-core'
-    , expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      '/api/maven/versions?package=org.springframework%3Aspring-core',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.versions).toEqual(['5.3.0', '5.2.9']);
     expect(result.selectedVersion).toBe('5.3.0');
   });
@@ -140,8 +141,9 @@ describe('version-service', () => {
     );
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      '/api/docker/tags?image=org%2Fapp&registry=registry.example.internal'
-    , expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      '/api/docker/tags?image=org%2Fapp&registry=registry.example.internal',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.selectedVersion).toBe('latest');
     expect(result.versions).toEqual(['1.0.0', 'latest', '0.9.0']);
   });
@@ -204,6 +206,26 @@ describe('version-service', () => {
       'native-lib',
       '1.0.0'
     );
+  });
+
+  it('버전 실패가 대체 목록과 오류를 유지하면서 Maven classifier 조회를 막지 않는다', async () => {
+    const electronAPI = {
+      search: { versions: vi.fn().mockResolvedValue({ versions: [], error: { code: 'TIMEOUT' as const, message: '' } }) },
+      maven: {
+        isNativeArtifact: vi.fn().mockResolvedValue(true),
+        getAvailableClassifiers: vi.fn().mockResolvedValue(['natives-linux']),
+      },
+    };
+    const service = createVersionService({ electronAPI });
+    const result = await service.loadVersionDetails(
+      { ...baseContext, packageType: 'maven' },
+      { name: 'org.lwjgl:lwjgl', version: '3.3.6' }
+    );
+    expect(result.versions).toEqual(['3.3.6']);
+    expect(result.versionError?.code).toBe('TIMEOUT');
+    expect(result.isNativeLibrary).toBe(true);
+    expect(result.availableClassifiers).toEqual(['natives-linux']);
+    expect(electronAPI.maven.getAvailableClassifiers).toHaveBeenCalledWith('org.lwjgl', 'lwjgl', '3.3.6');
   });
 
   it('shared client가 Electron source를 보고하면 pip custom index를 유지한다', async () => {

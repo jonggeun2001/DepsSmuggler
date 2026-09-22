@@ -1,3 +1,5 @@
+import { toQueryFailure } from '../../../utils/query-error';
+import type { QueryFailure } from '../../../types/query-error';
 import type { SearchResult } from './types';
 import type { WizardSearchContext } from './search-service';
 import {
@@ -16,6 +18,7 @@ export interface VersionDetails {
   usedIndexUrl?: string;
   isNativeLibrary: boolean;
   availableClassifiers: string[];
+  versionError?: QueryFailure;
 }
 
 function buildVersionOptions(
@@ -84,12 +87,24 @@ export function createVersionService({
       }
 
       const versionOptions = buildVersionOptions(context);
-      const versionLookup = await rendererDataClient.getVersionsWithSource(
-        context.packageType,
-        record.name,
-        versionOptions,
-        record.versions || [record.version]
-      );
+      let versionLookup;
+      let versionError: QueryFailure | undefined;
+      try {
+        versionLookup = await rendererDataClient.getVersionsWithSource(
+          context.packageType,
+          record.name,
+          versionOptions,
+          record.versions || [record.version]
+        );
+      } catch (error) {
+        if (context.packageType !== 'maven') throw error;
+        // Version-list availability must not skip the independent native classifier lookup.
+        versionError = toQueryFailure(error);
+        versionLookup = {
+          versions: record.versions?.length ? record.versions : [record.version],
+          source: 'fallback' as const,
+        };
+      }
       const versions = versionLookup.versions;
 
       const selectedVersion = context.packageType === 'docker' && versions.includes('latest')
@@ -113,6 +128,7 @@ export function createVersionService({
             ? versionOptions.indexUrl
             : undefined,
         ...mavenDetails,
+        ...(versionError ? { versionError } : {}),
       };
     },
   };

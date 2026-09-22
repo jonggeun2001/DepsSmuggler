@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Steps,
@@ -143,6 +143,14 @@ const WizardPage: React.FC = () => {
 
   // 드롭다운 hover 상태 (Windows Electron 스크롤 문제 해결용)
   const [isOverDropdown, setIsOverDropdown] = useState(false);
+  const suggestionBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearSuggestionBlurTimer = () => {
+    if (suggestionBlurTimerRef.current) clearTimeout(suggestionBlurTimerRef.current);
+    suggestionBlurTimerRef.current = null;
+  };
+  useEffect(() => () => {
+    if (suggestionBlurTimerRef.current) clearTimeout(suggestionBlurTimerRef.current);
+  }, []);
 
   const { addItem, hasItem, items: cartItems } = useCartStore();
   const {
@@ -823,19 +831,20 @@ const WizardPage: React.FC = () => {
                 size="large"
                 value={searchQuery}
                 onChange={(e) => handleInputChange(e.target.value)}
-                onPressEnter={() => { void handleSearch(searchQuery); }}
+                onPressEnter={() => { clearSuggestionBlurTimer(); void handleSearch(searchQuery); }}
                 onBlur={() => {
                   // 드롭다운 위에 마우스가 있으면 blur 무시 (Windows Electron 스크롤 문제 해결)
                   if (!isOverDropdown) {
-                    setTimeout(() => setShowSuggestions(false), 200);
+                    clearSuggestionBlurTimer();
+                    suggestionBlurTimerRef.current = setTimeout(() => setShowSuggestions(false), 200);
                   }
                 }}
-                onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                onFocus={() => { clearSuggestionBlurTimer(); if (suggestions.length > 0) setShowSuggestions(true); }}
                 suffix={searching ? <Spin size="small" /> : <SearchOutlined style={{ color: '#999' }} />}
                 style={{ marginBottom: 16 }}
               />
             </Dropdown>
-            {searchError && <QueryFailureAlert failure={searchError} loading={searching} onRetry={() => { void handleSearch(searchQuery); }} />}
+            {searchError && <QueryFailureAlert failure={searchError} loading={searching} onRetry={() => { clearSuggestionBlurTimer(); void handleSearch(searchQuery); }} />}
             {searchEmpty && <Alert type="info" showIcon title="검색 결과가 없습니다. 다른 검색어로 다시 검색하세요." />}
             <div style={{ marginTop: 24 }}>
               <Button onClick={() => setCurrentStep(1)}>이전</Button>
