@@ -320,3 +320,7 @@ Maven 메모리 캐시와 중복 요청 관리는 `CacheStore<PomCacheEntry>` �
 - [Conda 유틸리티](./shared-conda.md)
 - [Maven 유틸리티](./shared-maven.md)
 - [npm 유틸리티](./shared-npm.md)
+
+## Python/CUDA 버전 조회의 진행 중 작업
+
+`version-fetcher.ts`의 Python/CUDA는 종류별 pending Promise를 공유하고 정상 응답·fallback resolve·예외 reject 모두 완료 시 해제합니다. 이는 완료된 결과의 TTL 캐시와 별개이며 Python 24시간/CUDA 7일, 저장 캐시·만료 캐시 fallback 규칙은 유지합니다. 일반 패키지 캐시 관리 IPC의 대상에 버전 캐시를 새로 포함하지 않습니다. handler의 fallback 세션 캐시와 직접 fetcher 재시도의 차이는 [버전 조회 공유](version-request-sharing.md)를 참고하세요.

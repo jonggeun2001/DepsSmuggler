@@ -717,3 +717,9 @@ bash scripts/verify-worktree.sh src/core/downloaders/npm-integrity-streaming.tes
 `npm-dependency-queue.test.ts`는 depth/parentPath/삽입 순서, 삽입·소비 교차, Unicode 경로, 초기화와 10,000개 비교 횟수를 검사합니다. `npm-queue-equivalence.test.ts`는 실제 공개 resolver에 기존 stable sort+shift 큐를 비교 기준으로 주입해 처리 순서·전체 결과·최종 버전·hoistedPath·충돌을 대조합니다. dev/optional/peer, preferDedupe, nested, 최대 깊이, 의도된 방문 키 중복 제거와 재사용을 포함합니다. `npm-resolver.test.ts`도 함께 실행합니다.
 
 네트워크/버전 service만 대체한 실제 resolver의 규모별 비교는 [npm 큐 순서와 성능](npm-queue-performance.md)의 스크립트로 재현합니다. 일반 프로젝트의 직접 의존성이 1만 개라고 가정하거나 시간 임계값으로 회귀를 판정하지 않습니다.
+
+## 시작 버전 조회 공유 회귀
+
+`electron/version-startup-sharing.integration.test.ts`는 실제 handler 등록·preloader·fetcher를 연결하고 지연 transport로 두 시작 경로와 조기 Python/CUDA IPC를 겹칩니다. 종류별 호출 1회, 동일 Promise와 완료 캐시 재사용, TTL 만료, 실제 파일 캐시 읽기 공유를 확인합니다. 하드코딩/만료 캐시 fallback resolve 뒤 fetcher 재조회, 기존 IPC fallback 세션 유지, 예외 reject 뒤 pending 해제도 포함합니다. 기존 `version-fetcher.test.ts`, `version-preloader.test.ts`, `version-handlers.test.ts`를 함께 실행합니다.
+
+실제 외부 네트워크를 호출하지 않는 전후 요청 수 재현은 [Python/CUDA 버전 조회 공유](version-request-sharing.md)의 `scripts/profile-version-preload.mjs`를 사용합니다. preloader의 success를 원격 조회 성공으로 해석하거나 IPC fallback 자동 회복을 구현했다고 주장하지 않습니다.
