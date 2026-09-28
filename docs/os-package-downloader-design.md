@@ -7,6 +7,7 @@
 | 설계 주제 | 현재 구현·차이 |
 |-----------|----------------|
 | `src/core/downloaders/os/`와 통합 `OSPackageDownloader` | 실제로는 [yum.ts](../src/core/downloaders/yum.ts), [apt.ts](../src/core/downloaders/apt.ts), [apk.ts](../src/core/downloaders/apk.ts)의 개별 다운로더와 `os-shared/base-downloader.ts`를 사용합니다. 초안의 통합 클래스는 없습니다. |
+| 파일 전송 | `BaseOSDownloader`는 Web 응답 → 파일 writer 스트리밍과 backpressure를 사용합니다. writer 종료 뒤 검증하며 실패·취소 파일을 정리합니다([현재 동작·측정](os-streaming-performance.md)). |
 | 공통 타입·CLI 실행 | `os-shared/types.ts`, `os-shared/cli-backend.ts`; `src/cli/commands/os.ts`에서 호출합니다. |
 | OS 프리셋·저장소 | `os-shared/repositories.ts`, `os-shared/repos/`, `os-shared/distribution-fetcher.ts`. 아래 고정 예시와 동적 조회 결과는 다를 수 있으며 `os list-distros`로 확인합니다. |
 | 메타데이터·의존성 해결 | 파서 클래스는 위 downloader 파일에 정의되며 resolver는 `src/core/shared/{yum,apt,apk}-metadata-parser.ts` 재내보내기로 참조합니다. 해결기는 [yum-resolver.ts](../src/core/resolver/yum-resolver.ts), [apt-resolver.ts](../src/core/resolver/apt-resolver.ts), [apk-resolver.ts](../src/core/resolver/apk-resolver.ts)와 `os-shared/base-resolver.ts`, `dependency-tree.ts`를 사용합니다. |
