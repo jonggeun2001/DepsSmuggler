@@ -421,7 +421,7 @@ const artifactResult = await downloader.downloadArtifact(
 
 ### 실행 클래스와 조합 경로
 
-`YumDownloader`, `AptDownloader`, `ApkDownloader`는 `BaseOSDownloader`를 상속합니다. 검색과 의존성 해결은 `*DependencyResolver`, CLI 작업 조합은 `os-shared/cli-backend.ts`가 맡습니다. `OSPackageDownloader`는 `os-shared/types.ts`의 계약 인터페이스이며 생성 가능한 통합 클래스가 아닙니다.
+`YumDownloader`, `AptDownloader`, `ApkDownloader`는 `BaseOSDownloader`를 상속합니다. 공용 파일 전송은 backpressure가 적용된 스트림을 사용하며 writer 종료 뒤 검증하고 실패·취소 파일을 정리합니다([측정·검증](os-streaming-performance.md)). 검색과 의존성 해결은 `*DependencyResolver`, CLI 작업 조합은 `os-shared/cli-backend.ts`가 맡습니다. `OSPackageDownloader`는 `os-shared/types.ts`의 계약 인터페이스이며 생성 가능한 통합 클래스가 아닙니다.
 
 | 소유 모듈 | 메서드 | 반환값 | 설명 |
 |-----------|--------|--------|------|

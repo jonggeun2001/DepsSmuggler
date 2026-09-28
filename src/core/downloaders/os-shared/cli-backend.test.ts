@@ -2,13 +2,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OSDistribution, OSPackageInfo } from './types';
+import { clearOSPackageCache, downloadOSPackages, getOSPackageCacheStats } from './cli-backend';
 import { getDownloadedFileKey } from './package-file-utils';
-import {
-  clearOSPackageCache,
-  downloadOSPackages,
-  getOSPackageCacheStats,
-} from './cli-backend';
+import type { OSDistribution, OSPackageInfo } from './types';
 
 const {
   searchPackages,
@@ -151,9 +147,7 @@ describe('OS CLI backend', () => {
     const aprUtilOld = createPackage('apr-util', '1.6.1');
     const aprUtilNew = createPackage('apr-util', '1.7.0');
 
-    searchPackages.mockResolvedValue([
-      { name: 'httpd', latest: httpd, versions: [httpd] },
-    ]);
+    searchPackages.mockResolvedValue([{ name: 'httpd', latest: httpd, versions: [httpd] }]);
     resolveDependencies.mockResolvedValue({
       packages: [httpd, apr],
       unresolved: [],
@@ -209,12 +203,7 @@ describe('OS CLI backend', () => {
     });
     expect(searchPackages).toHaveBeenCalledWith('httpd', 'exact');
     expect(resolveDependencies).toHaveBeenCalledWith([httpd]);
-    expect(downloadPackages).toHaveBeenCalledWith([
-      httpd,
-      apr,
-      aprUtilOld,
-      aprUtilNew,
-    ]);
+    expect(downloadPackages).toHaveBeenCalledWith([httpd, apr, aprUtilOld, aprUtilNew]);
     expect(createArchive).toHaveBeenCalledWith(
       [httpd, apr, aprUtilOld, aprUtilNew],
       expect.any(Map),
@@ -319,6 +308,47 @@ describe('OS CLI backend', () => {
     expect(downloadPackages).toHaveBeenCalledWith([stable]);
     expect(result.requestedPackages).toEqual([stable]);
   });
+
+  it.each(['result', 'throw'])(
+    '다운로드 실패(%s) 후 staging을 제거하고 패키징하지 않는다',
+    async (failure) => {
+      const pkg = createPackage('httpd', '2.4.57');
+      searchPackages.mockResolvedValue([{ name: pkg.name, latest: pkg, versions: [pkg] }]);
+      let stagingDir = '';
+      downloadPackages.mockImplementationOnce(async () => {
+        const [createdOptions] = YumDownloader.mock.calls[0] as unknown as [{ outputDir: string }];
+        stagingDir = createdOptions.outputDir;
+        fs.writeFileSync(path.join(stagingDir, 'partial.rpm'), 'partial');
+        if (failure === 'throw') throw new Error('writer failed');
+        return {
+          success: [],
+          failed: [{ package: pkg, error: new Error('writer failed') }],
+          downloadedFiles: new Map(),
+        };
+      });
+
+      await expect(
+        downloadOSPackages({
+          distribution: distro,
+          architecture: 'x86_64',
+          packageNames: [pkg.name],
+          outputPath: path.join(tempDir, 'bundle'),
+          outputType: 'archive',
+          archiveFormat: 'zip',
+          resolveDependencies: false,
+          includeScripts: false,
+          concurrency: 1,
+          cacheDirectory: path.join(tempDir, 'cache'),
+          cacheEnabled: true,
+        })
+      ).rejects.toThrow();
+
+      expect(stagingDir).not.toBe('');
+      expect(fs.existsSync(stagingDir)).toBe(false);
+      expect(createArchive).not.toHaveBeenCalled();
+      expect(createLocalRepo).not.toHaveBeenCalled();
+    }
+  );
 
   it('OS 메타데이터 캐시 통계와 삭제를 실제 디렉토리에 반영한다', async () => {
     const cacheDir = path.join(tempDir, 'cache');

@@ -165,6 +165,10 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 bash scripts/verify-worktree.sh src/core/shared/atomic-json-store.test.ts src/core/shared/settings-validation.test.ts src/core/config.test.ts src/core/config-persistence.test.ts electron/history-handlers.test.ts electron/history-realfile.test.ts electron/config-handlers.test.ts electron/config-handlers.integration.test.ts
 ```
 
+### OS 파일 스트리밍 회귀
+
+`src/core/downloaders/os-shared/base-downloader-stream.integration.test.ts`는 실제 Web stream과 파일 writer로 backpressure·writer 종료 후 검증·취소·응답/디스크 오류·재시도·검증 실패 정리와 삭제 실패 시 원인·취소 결과 보존을 확인합니다. CLI backend 테스트는 실제 staging 디렉터리의 실패 후 삭제를, GUI orchestrator 테스트는 downloader 경계에서 취소·skip·패키징·정리 계약을 검사합니다. 파일 크기별 메모리와 이벤트 루프 비교는 [OS 스트리밍 성능](os-streaming-performance.md)의 `scripts/profile-os-streaming.mjs`를 사용하며 앱 빌드/외부 네트워크는 필요하지 않습니다.
+
 ### HTTP 스트림 중단과 부분 파일 검증
 
 `src/core/shared/file-utils-interrupted.integration.test.ts`는 loopback HTTP 서버가 Content-Length를 선언한 200 응답의 첫 번째 chunk만 보낸 뒤 연결을 끊는 상황을 실제 `downloadFile`에 두 번 전달합니다. 응답의 `error`·`aborted`·정상 완료 전 `close`와 Content-Length 불일치는 성공으로 끝나지 않아야 하며, 이미 전달된 진행률은 남겨도 완료 진행률은 보고하지 않고 destination 부분 파일을 닫아 삭제해야 합니다. Content-Length가 없는 chunked 응답이 정상적으로 끝나는 경우와 헤더 오류, pause/resume, 명시적인 AbortSignal 취소도 같은 파일 경계에서 구분합니다.
