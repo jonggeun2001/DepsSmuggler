@@ -179,6 +179,8 @@ main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 
 
 `<dependency>` 조각은 기존 동기 파서로 처리합니다. 전체 POM의 `dependencyManagement`에 있는 import BOM 선언도 모델 POM으로 가져옵니다. 부모 관리 속성은 자식 POM의 최종 property/project.version 문맥으로 해석하고, 자식의 직접 관리 선언 및 child import를 우선합니다. 부모의 직접 관리 선언은 child import보다 우선하며, 같은 BOM GA의 다른 버전 import는 child 선언을 사용합니다. 장바구니 의존성 트리 미리보기와 실제 의존성 포함 다운로드 모두 선택한 type을 resolver에 전달하며, 원격 packaging보다 명시한 type을 우선합니다.
 
+의존성 트리는 원본 그래프를 변경하지 않고 표시용 데이터와 원본 lookup을 분리합니다. 공유 artifact의 모든 부모 관계를 유지하되 하위 트리는 한 번 펼치며, 재방문은 `↗ 참조` 말단으로 표시합니다. 처음에는 최대 200개를 표시하고 `200개 더 표시`로 확장합니다. 참조도 클릭/Enter/Space로 원본 상세를 열며 버전/type/classifier를 구분합니다. PNG/SVG는 현재 확대·이동 상태의 표시 영역과 참조·개수 안내만 저장합니다. 화면 밖·미표시 노드와 추가 POM 목록은 포함하지 않습니다. [표시 계약과 성능 검증](dependency-tree-performance.md)을 참고하세요.
+
 Maven 해결 결과의 `root`는 실행 의존성 그래프이고, `flatList`에는 그 그래프에 없는 부모 POM과 import BOM도 포함될 수 있습니다. 장바구니 미리보기의 `함께 다운로드할 POM` 목록을 펼치면 그래프 밖 모델의 좌표·버전·파일 상세를 확인할 수 있습니다. 그래프에 이미 있는 POM은 이 목록에 중복 표시하지 않으며, 같은 GAV의 JAR와 POM, 서로 다른 classifier를 구분합니다.
 
 다운로드 화면은 수동 의존성 확인(`handleResolveDependencies`)과 다운로드 시작 후 해결 이벤트(`onDepsResolved`)에서 `download-page/resolved-items.ts`의 공통 변환을 사용합니다. 각 루트의 `flatList`를 기준으로 원본 다운로드 항목의 실제 ID에 그룹을 연결하므로, `root.dependencies`에 없는 부모/BOM POM도 의존성 그룹에 표시됩니다. 원본 항목 판정과 그룹 연결은 Maven artifact type과 classifier를 구분하며, 그룹에 연결하지 못한 행도 표에서 유지합니다.
