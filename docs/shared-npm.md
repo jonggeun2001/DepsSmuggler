@@ -17,6 +17,10 @@ src/core/shared/
 
 ---
 
+## 저장 파일 검증
+
+tarball 무결성 검증은 shared packument 캐시가 아닌 `NpmDownloader`가 담당합니다. 저장 완료된 파일을 스트림으로 SRI 검증하며, integrity가 없으면 기존 SHA1 fallback을 사용합니다. [검증 계약과 성능 범위](npm-integrity-performance.md)를 참고하세요.
+
 ## npm 캐시 (`npm-cache.ts`)
 
 npm Registry packument 캐싱 (메모리)

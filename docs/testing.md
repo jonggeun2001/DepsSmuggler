@@ -697,3 +697,11 @@ router 테스트는 동시 오류의 재시도/건너뛰기 응답 연결, 취�
 `node scripts/profile-download-lists.mjs c72a765 /tmp/download-list-profile`은 앱 빌드 없이 production 브라우저 fixture를 실행합니다. 3회 갱신 시간·초기 렌더·layout·DOM 수와 캡처를 기록하고 마지막 페이지 재시도/로그 접근을 확인합니다. [결과 및 범위](download-list-performance.md)를 참고하세요.
 
 `tests/e2e/maven-pom-preview.spec.ts`는 의존성 70개를 10개씩 7페이지로 순회하며 전체 파일명 순서와 부모 POM 35개, 71개 기준 집계가 보존되는지 확인합니다. 전체 항목을 한 번에 DOM에 만드는 과거 기대값을 사용하지 않습니다.
+
+### npm 저장 파일 스트림 검증 (#191)
+
+```bash
+bash scripts/verify-worktree.sh src/core/downloaders/npm-integrity-streaming.test.ts src/core/downloaders/npm.test.ts src/core/downloaders/npm-download.test.ts src/core/downloaders/lang-shared/base-language-downloader.test.ts
+```
+
+실제 파일의 여러 알고리즘·복수 SRI 후보와 불일치, malformed/빈 SRI, 미지원 알고리즘, 파일 누락·읽기 오류의 false 반환과 reader 종료를 검사합니다. loopback HTTP로 저장 완료 후 검증, SRI와 SHA1의 배타적 선택, 검증 실패 파일 삭제를 확인합니다. 크기별 메모리·timer 비교는 `node scripts/profile-npm-integrity.mjs cf10291`로 별도 실행하며 [측정 범위와 CPU/메모리 tradeoff](npm-integrity-performance.md)를 함께 읽어야 합니다.
