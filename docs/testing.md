@@ -640,3 +640,22 @@ npm run test:e2e -- tests/e2e/settings-cache-breakdown.spec.ts tests/e2e/setting
 ```
 
 설정 훅 테스트에는 늦은 응답이 삭제·새 조회 결과를 덮어쓰지 않는 경우와 기존 저장·초기화·미저장 입력 보호가 포함됩니다. E2E는 수정된 렌더러와 mock IPC로 검증합니다. 실제 Electron 메인 프로세스와 13,000개 이상의 합성 파일을 사용하는 성능 검증은 [별도 측정 절차](settings-cache-performance.md)를 따릅니다.
+
+
+### Conda/YUM 메타데이터 Worker (#185)
+
+실제 Worker에서 캐시 TTL·304·강제 갱신·손상 복구·디스크 교체·재시작·이름별 반환과 Conda 빌드/플랫폼 선택을 검증합니다. YUM은 기존 버전 문자열·엔티티 제한·provides·파일 전달물 검사를 그대로 실행합니다. Worker client 검사는 직렬 큐·취소·비정상 종료·유휴 해제·메인 HTTP 전달을 확인합니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/shared/metadata/worker-client.test.ts \
+  src/core/shared/metadata/conda-worker-race.test.ts \
+  src/core/shared/conda-cache.test.ts src/core/shared/conda-utils.test.ts \
+  src/core/shared/package-cache-stats.integration.test.ts \
+  src/core/resolver/conda-resolver-target.test.ts src/core/downloaders/conda.test.ts \
+  src/core/downloaders/os-metadata-parsers.test.ts \
+  src/core/downloaders/yum-delivered-payload.integration.test.ts \
+  src/core/downloaders/yum-provides-repository.integration.test.ts \
+  src/core/downloaders/yum-file-provides.integration.test.ts
+```
+
+heartbeat와 Worker를 포함한 프로세스 RSS·CPU의 전후 측정은 [재현 스크립트와 한계](metadata-worker-performance.md#재현과-측정)를 참고하세요. 단위 테스트의 통과를 패키징된 Electron 앱의 성능 측정으로 대신하지 않습니다.

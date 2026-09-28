@@ -91,6 +91,7 @@ depssmuggler/
 - `downloaders/lang-shared/`: 언어 패키지 downloader가 공유하는 스트림 저장, 진행률 계산, 파일명 정규화, 검증 실패 정리 계층
 - `downloaders/os-shared/`: YUM/APT/APK 공용 저장소, 캐시, 스크립트, 아카이브, 로컬 저장소 패키징
 - `ports/`: downloader와 resolver 사이에 두는 패키지 메타데이터/파일 fetch 경계. orchestration 계층이 구현체를 조합합니다.
+- `shared/metadata/`: Conda repodata/YUM primary의 큰 파싱·인덱싱을 Worker에서 수행합니다. 네트워크는 호출 프로세스에 유지하고 Conda 이름별 레코드/YUM 정규화 목록만 돌려줍니다. [Worker 경계·수명](metadata-worker-performance.md)을 참고하세요.
 - `resolver/`: 타입별 의존성 계산
 - `packager/`: 일반 패키지용 아카이브/스크립트/분할 처리
 - `mailer/`: SMTP 발송

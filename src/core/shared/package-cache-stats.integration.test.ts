@@ -110,7 +110,7 @@ it('conda reuses metadata without reading repodata and invalidates on write, 304
   http.get.mockRejectedValueOnce(new Error('no zstd')).mockResolvedValue({
     status: 200,
     headers: {},
-    data: { packages: {}, info: { subdir: 'linux-64' } },
+    data: Buffer.from(JSON.stringify({ packages: {}, info: { subdir: 'linux-64' } })),
   });
   await conda.fetchRepodata('conda-forge', 'linux-64', { cacheDir: directory });
   const first = await conda.getCacheStatsAsync(directory);
@@ -132,6 +132,17 @@ it('conda reuses metadata without reading repodata and invalidates on write, 304
     .mockResolvedValue({ status: 304, headers: {} });
   await conda.fetchRepodata('conda-forge', 'linux-64', { cacheDir: directory });
   expect((await conda.getCacheStatsAsync(directory)).entries[0].meta.cachedAt).toBeGreaterThan(0);
+  const reference = (await conda.fetchRepodata('conda-forge', 'linux-64', { cacheDir: directory }))!
+    .data;
+  await conda.getCacheStatsAsync(directory);
+  await fs.writeFile(metaPath, JSON.stringify(expired));
+  http.get
+    .mockRejectedValueOnce(new Error('no zstd'))
+    .mockResolvedValue({ status: 304, headers: {} });
+  await conda.queryRepodata(reference, 'missing');
+  expect((await conda.getCacheStatsAsync(directory)).entries[0].meta.cachedAt).toBeGreaterThan(
+    first.entries[0].meta.cachedAt
+  );
   await fs.writeFile(metaPath, JSON.stringify(expired));
   conda.pruneExpiredCache(directory);
   expect((await conda.getCacheStatsAsync(directory)).entries).toEqual([]);

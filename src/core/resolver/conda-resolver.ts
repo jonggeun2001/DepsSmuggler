@@ -1,3 +1,4 @@
+import { queryRepodata } from '../shared/conda-cache';
 import * as yaml from 'js-yaml';
 import {
   IResolver,
@@ -309,7 +310,7 @@ export class CondaResolver implements IResolver {
     if (repodata) {
       const versionSpec = version === 'latest' ? undefined : `==${version}`;
       const candidates = this.repoDataProcessor.findPackageCandidates(
-        repodata,
+        await queryRepodata(repodata, name),
         name,
         versionSpec,
         targetCacheKey,
@@ -334,7 +335,7 @@ export class CondaResolver implements IResolver {
       const noarchRepodata = await this.repoDataProcessor.getRepoData(channel, 'noarch');
       if (noarchRepodata) {
         const candidates = this.repoDataProcessor.findPackageCandidates(
-          noarchRepodata,
+          await queryRepodata(noarchRepodata, name),
           name,
           version === 'latest' ? undefined : `==${version}`,
           noarchCacheKey,

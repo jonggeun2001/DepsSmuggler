@@ -302,6 +302,8 @@ console.log(downloadResult.downloadedFiles);
 
 #### 메타데이터 파싱 (YumMetadataParser)
 
+primary 압축 해제·XML 파싱·패키지 변환은 단일 YUM Worker에서 직렬 수행합니다. 메인에는 정규화된 패키지 목록만 한 번 반환하며, 취소 시 실행 중인 Worker를 종료합니다. HTTP/repomd 처리는 기존 경로를 유지합니다. 수명·메모리·파싱 오류 처리와 측정 범위는 [메타데이터 Worker](metadata-worker-performance.md)를 참고하세요.
+
 Rocky의 큰 primary XML에 포함된 표준 엔티티를 처리하도록 `fast-xml-parser`의 엔티티 처리를 유지하면서 파서가 집계하는 치환 횟수를 100,000회로 제한합니다. DTD 선언 수 100개, 단일 엔티티 크기 10,000, DTD 치환에 따른 누적 확장 길이 100,000의 기존 제한도 명시적으로 유지합니다. `&amp;` 같은 표준 XML 값은 디코딩되며, 제한을 넘는 입력은 파싱 오류로 보고합니다. 이 값은 전체 XML이나 압축 해제 크기의 상한이 아닙니다.
 
 XML 속성을 일괄 숫자 변환하지 않으므로 RPM 버전·release·의존성 버전의 `1.0`, `01`, `1.0.0~rc1` 같은 문자열을 그대로 보존합니다. 숫자 계약인 epoch·패키지 크기·설치 크기는 명시적으로 변환합니다. RPM 버전 비교나 의존성 선택 정책은 이 문자열 보존과 별개입니다.
