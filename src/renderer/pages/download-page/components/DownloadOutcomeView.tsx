@@ -15,6 +15,8 @@ import type { DownloadStoreItem, LogEntry } from '../../../stores/download-store
 
 const { Text, Paragraph } = Typography;
 
+const LOGS_STYLE = { marginTop: 24 };
+
 interface DownloadOutcomeViewProps {
   variant: 'completed' | 'failed';
   completedCount: number;
@@ -232,7 +234,7 @@ export function DownloadOutcomeView({
         />
       </Card>
 
-      <DownloadLogsCard logs={logs} style={{ marginTop: 24 }} />
+      <DownloadLogsCard logs={logs} style={LOGS_STYLE} />
     </div>
   );
 }

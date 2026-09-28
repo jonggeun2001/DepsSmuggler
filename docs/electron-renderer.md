@@ -29,6 +29,8 @@
 
 `DownloadPage.tsx` 자체는 현재 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `src/renderer/pages/download-page/hooks/*`, `components/*`, `utils.ts`, `view-state.ts`로 분리되어 있습니다.
 
+의존성 다운로드 목록은 그룹/하위 항목 각각 10개씩 페이지화하고 로그는 전체 기록을 보존하며 50개씩 표시합니다. 전체 완료/실패 집계는 모든 항목 기준이며, 진행 갱신 시 선택한 페이지·접힘 상태를 유지합니다. 변경 없는 하위 행·로그는 memo로 렌더를 생략하고 로그 카드에 전달하는 style 참조도 고정합니다. 일반 표는 진행 화면의 10행 페이지와 완료 화면의 전체 표시를 유지합니다. [계약·재현·측정 한계](download-list-performance.md)를 참고하세요.
+
 main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 생성·파일 크기 조회를 주입받습니다. 주입 계약은 `createArchiveFromDirectory`와 `(path: string) => Promise<{ size: number }>`로 제한해 실제 구현과 부분 테스트 대역을 같은 public 계약으로 검사합니다. IPC payload와 다운로드 처리 흐름은 이 타입 분리로 바뀌지 않습니다. 서비스·화면 테스트는 `npm run typecheck:tests`에서도 검사합니다.
 
 ## 다운로드 후 파일 생성 표시

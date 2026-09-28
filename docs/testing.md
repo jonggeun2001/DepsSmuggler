@@ -689,3 +689,11 @@ bash scripts/verify-worktree.sh \
 router 테스트는 동시 오류의 재시도/건너뛰기 응답 연결, 취소 신호, 오류 창 실패 후 대기 창 억제를 검증합니다. orchestrator 회귀는 기존 성공/실패/skip·출력 정리와 초기화/정리 실패 후 다음 세션을 확인합니다. pool·화면 검증은 완료 순서와 독립적인 결과 순서, 고정된 표시 패키지, 완료 수·활성 수, 종료 뒤 늦은 콜백 무시를 검사합니다. 실제 Electron native dialog나 외부 네트워크 속도를 측정한 결과는 아닙니다.
 
 `electron/download-handlers.test.ts`의 취소 회귀는 동시성 1/3을 각각 사용합니다. 순차 실행에서는 첫 성공 뒤 취소가 발생하지만, 병렬 실행에서는 첫 성공 결과를 기록하기 전에 취소될 수 있습니다. 두 경우 모두 성공 산출물이 없으며 각 skipped 목록과 출력물 미생성 경고를 확인합니다.
+
+### 다운로드 목록·로그 렌더 제한 (#190)
+
+`src/renderer/pages/download-page/components/download-lists.test.tsx`는 실제 Ant Design으로 그룹·의존성·로그의 행 제한, 마지막 항목 접근, 오류 상세와 최신 대상 재시도, 전체 집계, 페이지/접힘 유지와 로그 초기화를 검증합니다. 동일 객체 내용의 getter 관찰로 변경 없는 행·로그 재처리를 검사하며 일반 진행 10행/결과 전체 표 계약도 구분합니다. 기존 utils/resolved-items/download-store/controller 회귀를 함께 실행합니다.
+
+`node scripts/profile-download-lists.mjs c72a765 /tmp/download-list-profile`은 앱 빌드 없이 production 브라우저 fixture를 실행합니다. 3회 갱신 시간·초기 렌더·layout·DOM 수와 캡처를 기록하고 마지막 페이지 재시도/로그 접근을 확인합니다. [결과 및 범위](download-list-performance.md)를 참고하세요.
+
+`tests/e2e/maven-pom-preview.spec.ts`는 의존성 70개를 10개씩 7페이지로 순회하며 전체 파일명 순서와 부모 POM 35개, 71개 기준 집계가 보존되는지 확인합니다. 전체 항목을 한 번에 DOM에 만드는 과거 기대값을 사용하지 않습니다.
