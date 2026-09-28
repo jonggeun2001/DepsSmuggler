@@ -155,7 +155,7 @@ await downloader.searchPackages('numpy', 'all'); // 검색에서만 채널 필�
 ### 특징
 
 - **repodata.json.zst 지원**: zstd 압축 파일 우선 사용 (대역폭 절약)
-- **캐싱**: repodata 캐싱으로 중복 요청 방지
+- **캐싱**: repodata 캐싱으로 중복 요청 방지; Worker 이름 인덱스에서 필요한 이름의 원시 후보만 조회하고 완성된 인덱스의 miss는 빈 결과로 처리. 정확한 버전·최고 build number 선택과 noarch fallback은 유지 ([조회 계약](shared-conda.md#이름-인덱스의-hitmiss와-호환-경로-187))
 - **Python 버전 필터링**: CondaResolver에서 build 태그/의존성 조건에 맞는 파일을 선택하여 전달
 - **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
 - **Anaconda API fallback**: repodata에서 찾지 못한 경우 API 파일 목록에서 후보 선택 (엄격한 대상 환경 해결은 resolver 사용)
