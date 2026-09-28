@@ -16,6 +16,7 @@
 | [다운로드 의존성·로그 표시](download-list-performance.md) | 그룹/하위 목록·전체 로그 페이지화, 상태 보존과 브라우저 비교 |
 | [IPC 핸들러](ipc-handlers.md) | preload API와 main 채널·서비스 연결 |
 | [다운로드 히스토리](download-history.md) | 기록 모델·저장·재다운로드·전달 설정 복원 |
+| [장바구니 일괄 추가](cart-bulk-add.md) | 파일/이력 bulk 저장, 기존 중복 규칙·옵션 보존과 브라우저 비교 |
 | [코딩 규칙](coding-conventions.md) | 명명, 모듈 경계, 타입·로그·오류 처리 |
 | [보안 의존성](security-dependencies.md) | 직접·전이 의존성 보안 갱신, 버전 선택·예외·검증 방법 |
 | [런타임 지원](runtime-support.md) | CLI Node·npm·Electron 계약, 최소 버전 검증, 지원 종료 점검 |
