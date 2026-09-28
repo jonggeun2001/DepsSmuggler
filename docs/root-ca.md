@@ -1,11 +1,11 @@
 # 추가 루트 CA 인증서
 
-회사 네트워크에서 TLS 검사를 수행하면 패키지 검색·다운로드 시 `self signed certificate in certificate chain` 오류가 날 수 있습니다. 회사에서 제공한 CA 인증서를 DepsSmuggler에 등록하면 기본 인증서 검증을 유지하면서 해당 CA도 신뢰합니다.
+개발·테스트 환경이나 사용자 지정 CA를 사용하는 네트워크에서는 패키지 검색·다운로드 시 `self signed certificate in certificate chain` 오류가 날 수 있습니다. 해당 환경에서 사용하는 신뢰할 수 있는 CA 인증서를 DepsSmuggler에 등록하면 기본 인증서 검증을 유지하면서 해당 CA도 신뢰합니다.
 
 ## 데스크톱 앱
 
 1. **설정 → 추가 루트 CA 인증서 → 인증서 파일 등록**을 선택합니다.
-2. 회사의 `.pem`, `.crt`, `.cer` 파일을 선택합니다. 확장자가 아니라 실제 내용을 검사하며 PEM과 DER 형식을 지원합니다.
+2. 등록할 CA 인증서의 `.pem`, `.crt`, `.cer` 파일을 선택합니다. 확장자가 아니라 실제 내용을 검사하며 PEM과 DER 형식을 지원합니다.
 3. 표시된 인증서 이름·발급자·SHA-256 지문·만료일을 확인합니다.
 4. 앱을 완전히 종료한 뒤 다시 실행합니다. macOS에서는 창만 닫지 말고 앱을 종료해야 합니다.
 
@@ -19,7 +19,7 @@
 
 ```bash
 # PEM 또는 DER 인증서 파일 등록 (기존 등록 교체)
-depssmuggler config ca set "/path/to/company-ca.cer"
+depssmuggler config ca set "/path/to/custom-ca.cer"
 
 # 등록된 인증서의 이름·발급자·지문·만료일 조회
 depssmuggler config ca get
@@ -31,7 +31,7 @@ depssmuggler config ca clear
 Windows 경로도 따옴표로 감싸 전달할 수 있습니다.
 
 ```powershell
-depssmuggler config ca set "C:\Certificates\company-ca.pem"
+depssmuggler config ca set "C:\Certificates\custom-ca.pem"
 ```
 
 등록은 **다음 CLI 실행부터** 적용됩니다. 같은 사용자가 실행하는 데스크톱 앱과 CLI는 등록 정보를 공유합니다. 실행 중인 앱에는 재시작 후 적용됩니다. CA 설정이 손상되어 네트워크 명령이 실패해도 `config ca set/clear`로 복구할 수 있습니다. 잘못된 입력과 저장 실패는 CLI 종료 코드 `1`로 보고합니다.
@@ -57,6 +57,7 @@ bash scripts/verify-worktree.sh \
   src/core/root-ca-store.test.ts \
   src/cli/root-ca.integration.test.ts \
   electron/root-ca-handlers.test.ts \
+  src/utils/query-error.test.ts \
   src/renderer/pages/settings/RootCaSettingsSection.test.tsx
 ```
 

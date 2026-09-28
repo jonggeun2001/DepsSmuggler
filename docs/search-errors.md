@@ -6,7 +6,7 @@
 - **패키지 검색 실패**: 검색창 아래에 오류 원인과 **다시 시도** 버튼을 표시합니다. 입력을 바꾸면 이전 오류는 지워지며 알림이 쌓이지 않습니다.
 - **버전 목록 조회 실패**: 선택 화면에 경고와 재시도 버튼을 표시합니다. 검색 결과에 이미 포함된 버전은 계속 선택할 수 있지만 ‘최신’이라고 표시하지 않습니다. 재시도가 성공하면 경고를 지우고 조회한 목록을 사용합니다. Maven은 버전 목록 실패와 별개로 네이티브 classifier 정보를 조회하므로 대체 버전을 사용할 때도 classifier를 선택할 수 있습니다.
 
-인증서 오류에는 **CA 설정 열기** 링크를 제공합니다. 회사 IT에서 제공한 CA를 [추가 루트 CA 설정](root-ca.md)에 등록한 뒤 앱을 완전히 종료하고 다시 실행하세요. 다른 오류는 연결 상태를 확인하고 다시 시도하며, 반복되면 `~/.depssmuggler/logs/`의 `Search error for ...` 또는 `Version fetch error for ...` 기록을 확인합니다.
+인증서 오류에는 **CA 설정 열기** 링크를 제공합니다. 추가 CA가 필요한 환경에서는 신뢰할 수 있는 CA를 [추가 루트 CA 설정](root-ca.md)에 등록한 뒤 앱을 완전히 종료하고 다시 실행하세요. 다른 오류는 연결 상태를 확인하고 다시 시도하며, 반복되면 `~/.depssmuggler/logs/`의 `Search error for ...` 또는 `Version fetch error for ...` 기록을 확인합니다.
 
 ## 오류 전달 계약
 
@@ -38,4 +38,4 @@ bash scripts/verify-worktree.sh src/utils/query-error.test.ts \
 npm run test:e2e -- tests/e2e/search-errors.spec.ts
 ```
 
-단위 테스트는 오류 분류, IPC 실제 핸들러→facade 전달, HTTP 실패/타임아웃, 요청 순서 역전과 버전 대체 목록을 검증합니다. Playwright는 실제 위자드 입력→자동 검색→오류 안내→재시도와 버전 복구를 검사하며 Electron API와 외부 HTTP는 대체합니다. 실제 회사망의 CA/방화벽 상태를 검증하는 테스트는 아닙니다.
+단위 테스트는 오류 분류, IPC 실제 핸들러→facade 전달, HTTP 실패/타임아웃, 요청 순서 역전과 버전 대체 목록을 검증합니다. Playwright는 실제 위자드 입력→자동 검색→오류 안내→재시도와 버전 복구를 검사하며 Electron API와 외부 HTTP는 대체합니다. 실제 사용자 네트워크의 CA/방화벽 상태를 검증하는 테스트는 아닙니다.
