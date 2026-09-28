@@ -695,3 +695,5 @@ router 테스트는 동시 오류의 재시도/건너뛰기 응답 연결, 취�
 `src/renderer/pages/download-page/components/download-lists.test.tsx`는 실제 Ant Design으로 그룹·의존성·로그의 행 제한, 마지막 항목 접근, 오류 상세와 최신 대상 재시도, 전체 집계, 페이지/접힘 유지와 로그 초기화를 검증합니다. 동일 객체 내용의 getter 관찰로 변경 없는 행·로그 재처리를 검사하며 일반 진행 10행/결과 전체 표 계약도 구분합니다. 기존 utils/resolved-items/download-store/controller 회귀를 함께 실행합니다.
 
 `node scripts/profile-download-lists.mjs c72a765 /tmp/download-list-profile`은 앱 빌드 없이 production 브라우저 fixture를 실행합니다. 3회 갱신 시간·초기 렌더·layout·DOM 수와 캡처를 기록하고 마지막 페이지 재시도/로그 접근을 확인합니다. [결과 및 범위](download-list-performance.md)를 참고하세요.
+
+`tests/e2e/maven-pom-preview.spec.ts`는 의존성 70개를 10개씩 7페이지로 순회하며 전체 파일명 순서와 부모 POM 35개, 71개 기준 집계가 보존되는지 확인합니다. 전체 항목을 한 번에 DOM에 만드는 과거 기대값을 사용하지 않습니다.

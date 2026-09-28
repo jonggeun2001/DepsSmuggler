@@ -73,9 +73,19 @@ test('Flink 의존성 확인 화면에 부모 POM을 포함한 71개 항목을 �
   await expect(page.getByText('71개 패키지', { exact: true })).toBeVisible();
   await expect(page.getByText('+70 의존성', { exact: true })).toBeVisible();
   await expect(page.getByText('0/71 완료', { exact: true })).toBeVisible();
-  await expect(page.locator('.ant-list-item')).toHaveCount(70);
-  await expect(page.locator('.ant-list-item').filter({ hasText: /\.pom/ })).toHaveCount(35);
-  await expect(page.getByText('flink-metrics-1.20.5.pom', { exact: true })).toBeVisible();
-  await expect(page.getByText('flink-parent-33-1.20.5.pom', { exact: true })).toBeVisible();
+  const dependencies = page.getByRole('region', { name: 'org.apache.flink:flink-streaming-java 의존성 목록' });
+  const filenames: string[] = [];
+  for (let current = 1; current <= 7; current++) {
+    if (current > 1) await dependencies.locator('.ant-pagination-next').click();
+    await expect(dependencies.locator('.ant-pagination-item-active')).toHaveAttribute('title', String(current));
+    await expect(dependencies.locator('.ant-list-item')).toHaveCount(10);
+    const labels = await dependencies.locator('.ant-list-item .ant-typography').allTextContents();
+    filenames.push(...labels.filter((label) => /\.(jar|pom)$/.test(label)));
+    await expect(page.getByText('0/71 완료', { exact: true })).toBeVisible();
+  }
+  expect(filenames).toEqual(fixture.payload.allPackages.slice(1).map((item) => item.filename));
+  expect(filenames.filter((filename) => filename.endsWith('.pom'))).toHaveLength(35);
+  expect(filenames).toContain('flink-metrics-1.20.5.pom');
+  expect(filenames).toContain('flink-parent-33-1.20.5.pom');
   await page.screenshot({ path: testInfo.outputPath('maven-pom-preview.png'), fullPage: true });
 });
