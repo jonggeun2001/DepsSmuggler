@@ -110,7 +110,7 @@ it('conda reuses metadata without reading repodata and invalidates on write, 304
   http.get.mockRejectedValueOnce(new Error('no zstd')).mockResolvedValue({
     status: 200,
     headers: {},
-    data: { packages: {}, info: { subdir: 'linux-64' } },
+    data: Buffer.from(JSON.stringify({ packages: {}, info: { subdir: 'linux-64' } })),
   });
   await conda.fetchRepodata('conda-forge', 'linux-64', { cacheDir: directory });
   const first = await conda.getCacheStatsAsync(directory);

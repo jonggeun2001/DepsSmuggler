@@ -264,9 +264,9 @@ interface CacheStoreOptions<T> {
 | pip | O | O | 메모리 5분, 디스크 1시간 | [shared-pip.md](./shared-pip.md) |
 | npm | O | X | 5분 | [shared-npm.md](./shared-npm.md) |
 | Maven | O | O | 메모리 5분, 디스크 24시간 | [shared-maven.md](./shared-maven.md) |
-| Conda (`conda-cache.ts`) | 동시 요청만 | O | 서버 max-age와 24시간 중 큰 값 | [shared-conda.md](./shared-conda.md) |
+| Conda (`conda-cache.ts`) | 동시 요청 공유 + 제한된 Worker 인덱스 | O | 서버 max-age와 24시간 중 큰 값 | [shared-conda.md](./shared-conda.md) |
 
-`conda-cache.ts`는 완료 후 repodata payload를 메모리에 보존하지 않고 동시 요청만 합칩니다. 별도 URL 헬퍼 `conda-utils.ts`는 TTL 없는 메모리 Map을 사용하므로 두 경로를 구분해야 합니다.
+`conda-cache.ts`와 URL 헬퍼 `conda-utils.ts`는 디스크 캐시와 Worker 인덱스를 공유합니다. 메인에는 원본 대신 재조회용 참조만 저장합니다. Worker 인덱스의 원본 크기 예산·항목 수·유휴 종료와 갱신 정책은 [메타데이터 Worker](metadata-worker-performance.md)를 참고하세요.
 
 Maven 메모리 캐시와 중복 요청 관리는 `CacheStore<PomCacheEntry>` 어댑터로 통합되고, 디스크 캐시만 Maven 전용 파일 구조를 유지합니다.
 

@@ -284,7 +284,7 @@ torch-2.1.0+cu121-cp311-cp311-linux_x86_64.whl
 - 목적: Conda/Anaconda 패키지 의존성 해결
 - 위치: `src/core/resolver/conda-resolver.ts`
 - RepoData 처리: `src/core/resolver/conda-repodata-processor.ts` (분리된 모듈)
-- 캐시: `src/core/shared/conda-cache.ts` 모듈 사용 (repodata 디스크 캐시와 processor의 요청 중 메모리 캐시)
+- 캐시: `src/core/shared/conda-cache.ts` 모듈 사용 (repodata 디스크 캐시와 제한된 Worker 이름 인덱스)
 - **알고리즘**: BFS 큐 기반 (call stack overflow 방지)
 
 `defaults` 채널은 `https://repo.anaconda.com/pkgs/main`을 기준으로 대상 subdir와 `noarch`의 repodata를 조회하고 다운로드 URL을 생성합니다. `metadata.repository`에는 요청한 `defaults/<name>`을 유지합니다. 명시적인 `main` 등 일반 채널은 `https://conda.anaconda.org/<채널>`을 사용합니다. 채널 URL 변환은 [공유 헬퍼](shared-conda.md#채널-url-conda-channelts)에 모으며, 버전·빌드 선택은 계속 repodata에 한정합니다.
@@ -308,7 +308,6 @@ conda-repodata-processor.ts
 ├── RepoDataProcessorConfig 인터페이스
 └── CondaRepoDataProcessor 클래스
     ├── getRepoData() - repodata 로드 (캐싱 포함)
-    ├── buildPackageIndex() - 패키지 인덱스 생성 (O(1) 조회용)
     ├── findPackageCandidates() - 패키지 후보 검색 및 정렬
     ├── getPythonBuildTag() - Python 빌드 태그 생성
     ├── isBuildCompatibleWithPython() - Python 호환성 체크
@@ -376,8 +375,7 @@ interface QueueItem {
 | `defaultChannel` | string | 기본 채널 (conda-forge) |
 | `visited` | Map | 방문 캐시 |
 | `conflicts` | DependencyConflict[] | 충돌 목록 |
-| `repoDataProcessor.repodataCache` | Map<string, RepoData> | processor의 repodata 메모리 캐시 |
-| `repoDataProcessor.packageIndex` | Map<string, Map<string, Array>> | 패키지 이름별 인덱스 캐시 (O(1) 조회용) |
+| `repoDataProcessor.repodataCache` | Map | 운영 경로는 Worker 재조회용 참조만 보관 |
 | `repoDataProcessor.targetSubdir` | string | 타겟 subdir (예: 'linux-64') |
 | `pythonVersion` | string 또는 null | 타겟 Python 버전 |
 
@@ -394,26 +392,7 @@ interface QueueItem {
 
 #### 패키지 인덱스 캐시
 
-repodata 로드 시 패키지 이름별 인덱스를 생성하여 O(n) 전체 순회를 O(1) 해시맵 조회로 최적화합니다.
-
-```typescript
-// 인덱스 구조: Map<cacheKey, Map<packageName, Array<{filename, pkg}>>>
-const packageIndex: Map<string, Map<string, Array<{ filename: string; pkg: RepoDataPackage }>>> = new Map();
-
-// repodata 로드 시 인덱스 생성 (핵심 흐름)
-function buildPackageIndex(repodata: RepoData) {
-  const index = new Map<string, Array<{ filename: string; pkg: RepoDataPackage }>>();
-  const allPackages = { ...repodata.packages, ...repodata['packages.conda'] };
-  for (const [filename, pkg] of Object.entries(allPackages)) {
-    const normalizedName = pkg.name.toLowerCase();
-    if (!index.has(normalizedName)) {
-      index.set(normalizedName, []);
-    }
-    index.get(normalizedName)!.push({ filename, pkg });
-  }
-  return index;
-}
-```
+Worker에서 이름별 인덱스를 만들고 메인에는 조회한 이름의 레코드만 전달합니다. `findPackageCandidates()`는 이 부분집합에서 기존 플랫폼·Python·CUDA 필터와 정렬을 적용합니다. 작은 RepoData를 직접 전달하는 호출도 지원합니다. 참조 재조회·TTL/갱신·보관량·유휴 종료 정책과 응답성 측정은 [메타데이터 Worker](metadata-worker-performance.md)에 정리했습니다.
 
 #### 다운로드 URL 사전 생성
 
@@ -448,7 +427,6 @@ if (!downloadUrl) {
 [INFO] repodata 로드 시작: conda-forge/linux-64 (처음 로드 시 시간이 걸릴 수 있습니다)
 [INFO] repodata 다운로드 중: conda-forge/linux-64 (20.5MB / 102.3MB, 20%, 5.2초)
 [INFO] repodata 로드 완료: conda-forge/linux-64 (fromCache: 네트워크, packages: 285000)
-[INFO] 패키지 인덱스 생성 완료: conda-forge/linux-64 (45000개 패키지명, 850ms)
 [INFO] Conda 의존성 해결 완료: numpy@1.26.0 (15개 패키지, 2.3초)
 ```
 

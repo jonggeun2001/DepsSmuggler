@@ -13,7 +13,8 @@ src/core/shared/
 ├── conda-types.ts         # Conda 타입 정의 (shared-types.md 참조)
 ├── conda-channel.ts       # 논리 채널 → 저장소 URL / API 소유자
 ├── conda-utils.ts         # Conda 패키지 URL 조회
-├── conda-cache.ts         # repodata 캐싱 시스템
+├── conda-cache.ts         # repodata 참조·디스크 캐시 프로토콜
+├── metadata/              # Conda/YUM Worker·HTTP 전달·수명 관리
 ├── conda-matchspec.ts     # MatchSpec 파싱/매칭
 └── conda-validator.ts     # Conda 채널 검증
 ```
@@ -64,7 +65,7 @@ async function getCondaDownloadUrl(
 ### 특징
 
 - **repodata.json.zst 지원**: zstd 압축 파일 → `current_repodata.json` → `repodata.json` 순으로 시도합니다.
-- **캐싱**: 이 URL 헬퍼는 `conda-utils.ts`의 별도 메모리 `Map`에 채널/subdir별 repodata를 보관합니다. 아래 `conda-cache.ts`의 디스크 캐시와는 별도 경로이며 TTL/공개 초기화 API는 없습니다.
+- **캐싱**: URL 헬퍼도 아래 `conda-cache.ts`의 디스크 캐시와 수명이 제한된 Worker 인덱스를 공유합니다. 메인에는 채널/subdir 참조만 보관하고 필요한 이름의 아티팩트만 조회합니다.
 - **Python 버전 우선순위**: `py312`, `cp312` 같은 build 태그가 맞는 후보를 우선하고, 그다음 `.conda` 형식과 높은 build number를 선호합니다. 호환 빌드가 없으면 경고 후 다른 빌드를 선택할 수 있으므로 엄격한 필터는 아닙니다.
 - **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
 - **Anaconda API fallback**: RC 버전 등 특수 라벨 패키지 지원
@@ -113,45 +114,17 @@ console.log(result);
 
 ## Conda 캐시 (`conda-cache.ts`)
 
-repodata.json 캐싱 및 조회 시스템 (**디스크 캐시 전용** - 메모리 캐시 미사용)
+repodata 읽기·압축 해제·파싱·저장·이름 인덱싱은 Worker에서 실행합니다. 메인은 작은 참조를 받으며 `queryRepodata()`로 필요한 이름의 레코드만 조회합니다. 같은 옵션의 동시 로드 Promise를 공유하고 완료 후 제거합니다. Worker 인덱스는 최대 2개/원본 256 MiB 기준이며 30초 유휴 종료 정책을 적용합니다. 기존 350MB 이상 원본의 무제한 전역 캐시는 복원하지 않습니다. 상세 수명·메모리 한계와 측정은 [메타데이터 Worker](metadata-worker-performance.md)를 참고하세요.
 
-> **참고**: repodata는 채널에 따라 큰 메모리를 차지하므로, 이 모듈은 완료 후 재사용할 payload를 메모리 캐시에 보존하지 않습니다. 같은 base URL·캐시 경로·채널·subdir·옵션의 동시 요청은 `CacheStore.dedupeFetch()`로 합친 뒤 결과를 메모리 저장소에서 삭제합니다. 파싱/압축 해제 중에는 payload가 메모리에 존재합니다.
-
-유효기간은 `max(서버 max-age, 86400초)`로 최소 24시간입니다. TTL 안에서는 디스크만 읽고, 만료되면 기존 URL의 ETag/Last-Modified를 조건부 헤더로 보내 304 응답을 재사용합니다. `forceRefresh`는 TTL 조회와 조건부 요청을 생략합니다. `pruneExpiredCache()`의 기본 정리 기준은 저장된 `maxAge`의 10배입니다.
-
-### 다운로드 진행 상황 로깅
-
-전체 크기를 알 수 있을 때 마지막 로그보다 진행률이 20%p 이상 증가하면 로그를 남깁니다. 아래 코드는 계산부를 생략한 발췌입니다:
-
-```typescript
-onDownloadProgress: (progressEvent) => {
-  const { loaded, total } = progressEvent;
-  if (total) {
-    const percent = Math.floor((loaded / total) * 100);
-    // 20% 단위로 로그 출력 (너무 많은 로그 방지)
-    if (percent >= lastLoggedPercent + 20) {
-      lastLoggedPercent = percent;
-      logger.info(`repodata 다운로드 중: ${channel}/${subdir} (${loadedMB}MB / ${totalMB}MB, ${percent}%, ${elapsed}초)`);
-    }
-  }
-}
-```
-
-로그 출력 예시:
-```
-[INFO] repodata 다운로드 시작: conda-forge/linux-64
-[INFO] repodata 다운로드 중: conda-forge/linux-64 (20.5MB / 102.3MB, 20%, 5.2초)
-[INFO] repodata 다운로드 중: conda-forge/linux-64 (41.0MB / 102.3MB, 40%, 10.1초)
-[INFO] repodata 다운로드 중: conda-forge/linux-64 (61.4MB / 102.3MB, 60%, 15.3초)
-[INFO] repodata 다운로드 중: conda-forge/linux-64 (81.8MB / 102.3MB, 80%, 20.5초)
-[INFO] repodata 다운로드 완료: conda-forge/linux-64 (25.8초)
-```
+유효기간은 `max(서버 max-age, 86400초)`로 최소 24시간입니다. TTL 안에서는 디스크 또는 유효한 Worker 인덱스를 사용하고, 만료되면 기존 URL의 ETag/Last-Modified를 조건부 헤더로 보내 304 응답을 재사용합니다. `forceRefresh`는 TTL 조회와 조건부 요청을 생략합니다. `pruneExpiredCache()`의 기본 정리 기준은 저장된 `maxAge`의 10배입니다. 원본 HTTP는 메인의 axios로 수행하며 시작·완료·실패 로그를 메인의 기존 로거로 전달합니다. 전체 길이가 있으면 20%p 간격의 진행 로그도 남깁니다.
 
 ### 주요 함수
 
 | 함수명 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `fetchRepodata` | channel, subdir, options? | Promise<CacheResult \| null> | repodata 가져오기 (디스크 캐시 지원) |
+| `queryRepodata` | reference, name | Promise<RepoData> | 해당 이름의 레코드만 조회, 기존 작은 RepoData 입력도 지원 |
+| `closeRepodataWorker` | - | Promise<void> | 대기 작업 완료 후 Worker 종료 |
 | `getCacheStats` | cacheDir? | CacheStats | 캐시 통계 조회 |
 | `getCacheStatsAsync` | cacheDir?, forceRefresh? | Promise<CacheStats> | 데스크톱용 비동기 메타데이터 집계·결과 재사용 |
 | `clearCache` | cacheDir?, channel?, subdir? | void | 캐시 삭제 |
@@ -161,7 +134,7 @@ onDownloadProgress: (progressEvent) => {
 
 ```typescript
 interface CacheResult {
-  data: RepoData;               // repodata 내용
+  data: RepodataReference;      // channel/subdir/options/info를 가진 재조회용 참조
   fromCache: boolean;           // 캐시에서 로드 여부
   meta: RepodataCacheMeta;      // 캐시 메타데이터
 }
@@ -176,7 +149,7 @@ interface RepodataCacheMeta {
   lastModified?: string;    // HTTP Last-Modified
   maxAge: number;           // 서버 max-age와 86400 중 큰 값 (초)
   cachedAt: number;         // 캐시 저장 시간 (Unix timestamp ms)
-  fileSize: number;         // 압축 응답 바이트 수 또는 JSON 문자열 길이
+  fileSize: number;         // 압축 응답 또는 JSON 응답의 바이트 수
   packageCount: number;     // 패키지 수
   compressed: boolean;      // zstd 압축 여부
 }

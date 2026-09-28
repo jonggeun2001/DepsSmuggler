@@ -1,6 +1,6 @@
 // Conda 관련 유틸리티 함수 (repodata.json 기반 패키지 URL 조회)
 import axios from 'axios';
-import * as fzstd from 'fzstd';
+import { fetchRepodata, queryRepodata, type RepodataReference } from './conda-cache';
 import {
   CONDA_STANDARD_ORIGIN,
   getCondaApiOwner,
@@ -11,7 +11,7 @@ import type { RepoData, RepoDataPackage, AnacondaFileInfo } from './conda-types'
 import type { DownloadUrlResult } from './types';
 
 // repodata 캐시 (channel/subdir -> RepoData)
-const repodataCache = new Map<string, RepoData>();
+const repodataCache = new Map<string, RepodataReference>();
 
 const CONDA_URL = CONDA_STANDARD_ORIGIN;
 const ANACONDA_API_URL = 'https://api.anaconda.org';
@@ -40,66 +40,26 @@ export function getCondaSubdir(targetOS?: string, architecture?: string): string
 /**
  * repodata.json 가져오기 (zstd 압축 우선, 캐싱 포함)
  */
-async function getRepoData(channel: string, subdir: string): Promise<RepoData | null> {
-  const cacheKey = `${channel}/${subdir}`;
-
-  // 캐시 확인
-  if (repodataCache.has(cacheKey)) {
-    return repodataCache.get(cacheKey)!;
-  }
-
-  // 우선순위: zstd 압축 > current_repodata.json > repodata.json
-  const repositoryBase = getCondaRepositoryBase(channel, CONDA_URL);
-  const urls = [
-    { url: `${repositoryBase}/${subdir}/repodata.json.zst`, compressed: true },
-    { url: `${repositoryBase}/${subdir}/current_repodata.json`, compressed: false },
-    { url: `${repositoryBase}/${subdir}/repodata.json`, compressed: false },
-  ];
-
-  for (const { url, compressed } of urls) {
-    try {
-      logger.debug('[conda-utils] repodata 가져오기', { url });
-
-      if (compressed) {
-        // zstd 압축 파일 다운로드 및 해제
-        const response = await axios.get(url, {
-          responseType: 'arraybuffer',
-          headers: { 'User-Agent': 'DepsSmuggler/1.0' },
-          timeout: 120000,
-        });
-
-        const compressedData = new Uint8Array(response.data);
-        const decompressedData = fzstd.decompress(compressedData);
-        const jsonString = new TextDecoder().decode(decompressedData);
-        const repodata = JSON.parse(jsonString) as RepoData;
-
-        // 캐시에 저장
-        repodataCache.set(cacheKey, repodata);
-
-        logger.debug('[conda-utils] repodata 가져오기 성공 (zstd)', { packageCount: Object.keys(repodata.packages || {}).length });
-
-        return repodata;
-      } else {
-        // 일반 JSON
-        const response = await axios.get(url, {
-          headers: { 'User-Agent': 'DepsSmuggler/1.0' },
-          timeout: 120000,
-        });
-
-        const repodata = response.data as RepoData;
-        repodataCache.set(cacheKey, repodata);
-
-        logger.debug('[conda-utils] repodata 가져오기 성공', { packageCount: Object.keys(repodata.packages || {}).length });
-
-        return repodata;
-      }
-    } catch {
-      // 다음 URL 시도
-      continue;
+async function getRepoData(
+  channel: string,
+  subdir: string,
+  name: string
+): Promise<RepoData | null> {
+  const key = `${channel}/${subdir}`;
+  try {
+    let reference = repodataCache.get(key);
+    if (!reference) {
+      const result = await fetchRepodata(channel, subdir, { baseUrl: CONDA_URL });
+      if (!result) return null;
+      reference = result.data;
+      repodataCache.set(key, reference);
     }
+    return await queryRepodata(reference, name);
+  } catch (error) {
+    repodataCache.delete(key);
+    logger.warn('[conda-utils] repodata 조회 실패', { channel, subdir, error });
+    return null;
   }
-
-  return null;
 }
 
 /**
@@ -290,7 +250,7 @@ export async function getCondaDownloadUrl(
   logger.debug('[conda-utils] 패키지 검색', { packageName, version, subdir, pythonVersion: pythonVersion || 'any' });
 
   // repodata에서 패키지 찾기
-  const repodata = await getRepoData(channel, subdir);
+  const repodata = await getRepoData(channel, subdir, packageName);
   if (repodata) {
     const found = findPackageInRepoData(repodata, packageName, version, pythonVersion);
     if (found) {
@@ -306,7 +266,7 @@ export async function getCondaDownloadUrl(
   }
 
   // noarch에서도 확인 (Python 버전 무관)
-  const noarchRepodata = await getRepoData(channel, 'noarch');
+  const noarchRepodata = await getRepoData(channel, 'noarch', packageName);
   if (noarchRepodata) {
     const found = findPackageInRepoData(noarchRepodata, packageName, version);
     if (found) {

@@ -104,7 +104,7 @@ try {
 
 | 메서드 | 설명 |
 |--------|------|
-| `getRepoData` | repodata.json 가져오기 (zstd 압축 지원, 캐싱) |
+| `getRepoData` | Worker의 repodata 재조회용 참조 가져오기 (zstd/디스크 캐싱) |
 | `findPackageInRepoData` | repodata에서 패키지 검색 |
 | `selectBestFile` | Anaconda API fallback에서 버전/아키텍처에 맞는 파일 선택 |
 | `getPackageMetadataFallback` | Anaconda API fallback 조회 |
@@ -117,7 +117,7 @@ try {
 | `type` | PackageType | 'conda' |
 | `apiUrl` | string | Anaconda API URL |
 | `condaUrl` | string | Conda 패키지 저장소 URL |
-| `repodataCache` | Map<string, RepoData> | repodata 캐시 |
+| `repodataCache` | Map<string, RepoData | RepodataReference> | 운영 경로는 Worker 재조회용 참조만 보관 |
 | `client` | AxiosInstance | HTTP 클라이언트 |
 
 ### 다운로드 옵션
@@ -502,6 +502,8 @@ const downloadResult = await downloadOSPackages({
 | `downloadPackage` | pkg: OSPackageInfo | Promise<OSPackageDownloadResult> | RPM 단일 다운로드 (상속) |
 
 ### 메타데이터 파서 (YumMetadataParser)
+
+primary gzip 해제·XML 파싱·패키지 변환은 Worker에서 수행하고 정규화된 목록만 반환합니다. `repomd.xml` 조회와 파싱은 기존 경로입니다. 취소·오류·수명·성능의 상세 범위는 [메타데이터 Worker](metadata-worker-performance.md)를 참고하세요.
 
 | 메서드 | 설명 |
 |--------|------|

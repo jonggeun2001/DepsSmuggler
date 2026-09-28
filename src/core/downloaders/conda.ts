@@ -8,7 +8,7 @@ import {
 } from '../../types';
 import logger from '../../utils/logger';
 import { compareVersions, getCondaSubdir } from '../shared';
-import { fetchRepodata } from '../shared/conda-cache';
+import { fetchRepodata, queryRepodata, type RepodataReference } from '../shared/conda-cache';
 import {
   RepoData,
   RepoDataPackage,
@@ -43,7 +43,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
   private readonly condaUrl = 'https://conda.anaconda.org';
 
   // repodata 캐시 (channel/subdir -> RepoData)
-  private repodataCache: Map<string, RepoData> = new Map();
+  private repodataCache: Map<string, RepoData | RepodataReference> = new Map();
 
   constructor() {
     super();
@@ -58,7 +58,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
   /**
    * repodata.json 가져오기 (zstd 압축 우선)
    */
-  private async getRepoData(channel: string, subdir: string): Promise<RepoData | null> {
+  private async getRepoData(channel: string, subdir: string): Promise<RepoData | RepodataReference | null> {
     const cacheKey = `${channel}/${subdir}`;
 
     // 메모리 캐시 확인 (세션 내 재사용)
@@ -216,7 +216,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
       // repodata에서 먼저 시도
       const repodata = await this.getRepoData(channel, subdir);
       if (repodata) {
-        const found = this.findPackageInRepoData(repodata, name, version, subdir);
+        const found = this.findPackageInRepoData(await queryRepodata(repodata, name), name, version, subdir);
         if (found) {
           const { filename, pkg } = found;
           const downloadUrl = `${getCondaRepositoryBase(channel, this.condaUrl)}/${subdir}/${filename}`;
@@ -246,7 +246,7 @@ export class CondaDownloader extends BaseLanguageDownloader implements IDownload
       // noarch도 확인
       const noarchRepodata = await this.getRepoData(channel, 'noarch');
       if (noarchRepodata) {
-        const found = this.findPackageInRepoData(noarchRepodata, name, version, 'noarch');
+        const found = this.findPackageInRepoData(await queryRepodata(noarchRepodata, name), name, version, 'noarch');
         if (found) {
           const { filename, pkg } = found;
           const downloadUrl = `${getCondaRepositoryBase(channel, this.condaUrl)}/noarch/${filename}`;

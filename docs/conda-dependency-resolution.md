@@ -4,7 +4,7 @@
 
 ## 현재 구현 요약
 
-- `CondaResolver.resolveDependencies()`는 BFS로 탐색하고, `CondaRepoDataProcessor`가 repodata 로딩·후보 인덱스·빌드 선택을 담당합니다. MatchSpec과 버전 비교는 `src/core/shared/conda-matchspec.ts`를 사용합니다.
+- `CondaResolver.resolveDependencies()`는 BFS로 탐색하고, `CondaRepoDataProcessor`가 Worker 참조 로딩과 빌드 선택을 담당합니다. 대용량 파싱·이름 인덱스는 [메타데이터 Worker](metadata-worker-performance.md)에 두고 필요한 이름의 후보만 받습니다. MatchSpec과 버전 비교는 `src/core/shared/conda-matchspec.ts`를 사용합니다.
 - `PackageCandidate`는 `conda-repodata-processor.ts`에 정의되며 `build`, `buildNumber`, `isPythonMatch`, `size`, `filename`, `subdir`, `depends`를 포함합니다. 아래 축약 예시는 전체 인터페이스 선언을 대체하지 않습니다.
 - 대상 플랫폼에 후보가 없거나 Python이 맞지 않을 때 noarch를 조회합니다. noarch도 Python/Python ABI 제약을 검증하며 무조건 호환으로 처리하지 않습니다. 호환 파일을 찾지 못하면 실패합니다.
 - Python·Python ABI와 `__` 가상 패키지는 외부 환경 조건으로 취급합니다. OpenSSL·zlib·libgcc 같은 실제 런타임 패키지는 수집 대상입니다.
