@@ -618,4 +618,4 @@ DEPS_SMUGGLER_NATIVE_MAVEN_PROJECT=1 bash scripts/verify-worktree.sh \
 
 ### 검색 실패 회귀 (#173)
 
-[검색 오류와 재시도](search-errors.md)의 명령으로 오류 분류·HTTP 상태/파싱/15초 중단·IPC 핸들러와 facade 전달·입력 경쟁 상태·버전 대체 안내를 검증합니다. `useWizardSearchFlow.async.test.tsx`는 실제 service/facade를 사용하는 훅에서 새 입력 전후의 늦은 성공/실패, 환경 변경, 초기화, Enter 중복 방지와 버전 재시도를 검사합니다. E2E는 mock Electron API 및 HTTP 응답을 사용하며 회사망 연결 자체를 검증하지 않습니다.
+[검색 오류와 재시도](search-errors.md)의 명령으로 오류 분류·HTTP 상태/파싱/15초 중단·IPC 핸들러와 facade 전달·입력 경쟁 상태·버전 대체 안내를 검증합니다. `useWizardSearchFlow.async.test.tsx`는 실제 service/facade를 사용하는 훅에서 새 입력 전후의 늦은 성공/실패, 환경 변경, 초기화, Enter 중복 방지와 버전 재시도를 검사합니다. E2E는 mock Electron API 및 HTTP 응답을 사용하며 실제 사용자 네트워크 연결 자체를 검증하지 않습니다.
