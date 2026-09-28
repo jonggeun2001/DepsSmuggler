@@ -12,6 +12,7 @@
 | [추가 루트 CA](root-ca.md) | 사용자 지정 CA 등록·해제, PEM/DER, CLI/설정 화면, 재시작과 신뢰 범위 |
 | [아키텍처 개요](architecture-overview.md) | 모듈, 데이터 흐름, 프로세스 경계 |
 | [Electron / Renderer](electron-renderer.md) | 화면, 상태, renderer data client, 설정·업데이트 |
+| [의존성 트리 표시와 성능](dependency-tree-performance.md) | 공유 관계·참조 노드·단계적 표시, 이미지 저장 범위와 재현 |
 | [IPC 핸들러](ipc-handlers.md) | preload API와 main 채널·서비스 연결 |
 | [다운로드 히스토리](download-history.md) | 기록 모델·저장·재다운로드·전달 설정 복원 |
 | [코딩 규칙](coding-conventions.md) | 명명, 모듈 경계, 타입·로그·오류 처리 |

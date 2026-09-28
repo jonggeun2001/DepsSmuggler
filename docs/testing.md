@@ -449,8 +449,11 @@ Python noarch 사례는 호환 runtime archive를 별도 임시 prefix에 준비
 |--------|-----------|
 | `src/renderer/pages/download-page/resolved-items.test.ts` | flatList의 부모/BOM POM 연결, 실제 원본 ID와 다운로드 메타데이터 보존, GAV·type·classifier별 그룹, 공유 POM 중복 표시 방지, 이전 응답의 순환 트리 처리, 미연결 행 표시 |
 | `src/renderer/pages/download-page/hooks/use-download-page-controller.test.tsx` | 수동 의존성 확인과 `onDepsResolved` 이벤트 양쪽에서 71개 fixture 항목과 모델 POM의 그룹·ID·파일 정보 보존 |
-| `src/renderer/components/DependencyTree.test.tsx` | 그래프 밖 POM 목록 펼치기와 파일 상세, 중복·기존 그래프 POM 제외, 같은 GAV의 JAR/POM/classifier 구분, 원본 실행 그래프 유지 |
+| `src/renderer/components/DependencyTree.test.tsx` | 그래프 밖 POM 목록 펼치기와 파일 상세, 중복·기존 그래프 POM 제외, 같은 GAV의 JAR/POM/classifier 구분, 원본 실행 그래프 유지, 공유 DAG 39개 표시·참조 상세/키보드·200개씩 추가/초기화·PNG/SVG 범위 |
+| `src/renderer/components/dependency-tree-model.test.ts` | 모든 부모 관계와 문맥별 자식 합치기, 버전/type/classifier, 원본 불변, 순환·깊이 10,000 입력, 초기/추가 표시 한도 |
 | `tests/e2e/maven-pom-preview.spec.ts` | Chromium의 실제 의존성 확인 화면에서 전체 71개·하위 70개·POM 35개 표시, `flink-metrics-1.20.5.pom` 가시성 확인 |
+
+공유 DAG의 실제 브라우저 전후 비교와 PNG/SVG 저장 검증은 [의존성 트리 표시와 성능](dependency-tree-performance.md)의 `scripts/profile-dependency-tree.mjs`로 재현합니다. 원본 resolver의 방문·다운로드 정책을 바꾸지 않는 UI 변환 검증입니다.
 
 71개 fixture의 개수는 화면 회귀를 위한 고정 데이터이며 Maven Central의 실시간 의존성 개수가 아닙니다. 훅과 컴포넌트 테스트는 jsdom에서 Electron bridge 또는 트리 렌더링 경계를 모킹합니다. 그룹 상태 집계와 목록 스캔은 기존 `download-page/utils.test.ts`도 함께 확인합니다.
 

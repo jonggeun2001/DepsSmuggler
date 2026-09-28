@@ -58,6 +58,7 @@ depssmuggler/
 - React Router 기준 경로는 `/`, `/wizard`, `/cart`, `/download`, `/history`, `/settings`입니다.
 - 라우트 source of truth는 `src/renderer/router.tsx`이며, `src/renderer/index.tsx`는 `createAppRouter()`만 소비합니다.
 - `MainLayout.tsx`가 좌측 네비게이션과 공통 레이아웃을 담당합니다.
+- 의존성 트리의 표시 모델은 원본 resolver 그래프와 분리합니다. artifact 관계 인덱스에서 최대 200개의 초기 트리와 참조 노드를 만들고, 별도 lookup으로 원본 상세를 엽니다. [표시/내보내기 계약](dependency-tree-performance.md)을 참고하세요.
 - `HomePage.tsx`와 `WizardPage.tsx`는 패키지 타입 선택과 검색 진입을 담당합니다.
 - `CartPage.tsx`는 장바구니와 텍스트 입력 기반 패키지 추가를 담당하며, BOM을 포함한 Maven POM 입력의 artifact type metadata를 미리보기·의존성 해결·다운로드 경계까지 유지하고 같은 GAV라도 type이 다른 artifact를 구분합니다.
 - 장바구니의 Maven artifact type 정보는 Electron 다운로드 라우터까지 전달됩니다. 같은 출력 디렉터리·GAV의 다운로드와 복사는 main service에서 직렬화해 JAR의 부속 POM과 별도 POM 작업 간 파일 쓰기 충돌을 방지합니다.
