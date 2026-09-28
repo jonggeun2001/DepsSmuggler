@@ -30,24 +30,31 @@ export const OSDownloadProgress: React.FC<OSDownloadProgressProps> = ({
 }) => {
   const currentPhase = progress ? phaseLabels[progress.phase] : '대기';
   const totalPackages = progress?.totalPackages || packageCount || 1;
-  const completedPackages = progress?.phase === 'packaging'
-    ? totalPackages
-    : Math.max((progress?.currentIndex || 1) - 1, 0);
-  const overallPercent = progress?.phase === 'packaging'
-    ? 100
-    : Math.min(100, Math.round((completedPackages / totalPackages) * 100));
+  const completedPackages =
+    progress?.phase === 'packaging'
+      ? totalPackages
+      : (progress?.completedPackages ?? Math.max((progress?.currentIndex || 1) - 1, 0));
+  const overallPercent =
+    progress?.phase === 'packaging'
+      ? 100
+      : Math.min(100, Math.round((completedPackages / totalPackages) * 100));
   const currentPercent = progress?.totalBytes
     ? Math.min(100, Math.round((progress.bytesDownloaded / progress.totalBytes) * 100))
     : progress?.phase === 'packaging'
-    ? 100
-    : 0;
+      ? 100
+      : 0;
 
   return (
     <div className="os-download-progress">
       <div className="progress-header">
         <div>
           <h2>OS 패키지 다운로드</h2>
-          <p>{currentPhase} 단계가 진행 중입니다.</p>
+          <p>
+            {currentPhase} 단계가 진행 중입니다.
+            {progress?.activePackages
+              ? ` 동시에 ${progress.activePackages}개 패키지를 처리하고 있습니다.`
+              : ''}
+          </p>
         </div>
         <span className="phase-badge">{currentPhase}</span>
       </div>
@@ -58,12 +65,19 @@ export const OSDownloadProgress: React.FC<OSDownloadProgressProps> = ({
           <strong>{overallPercent}%</strong>
         </div>
         <div className="metric-card">
-          <span className="metric-label">현재 패키지</span>
+          <span className="metric-label">현재 표시 패키지</span>
           <strong>{progress?.currentPackage || '대기 중'}</strong>
         </div>
         <div className="metric-card">
-          <span className="metric-label">처리 패키지</span>
-          <strong>{Math.min(progress?.currentIndex || 0, totalPackages)} / {totalPackages}</strong>
+          <span className="metric-label">
+            {progress?.completedPackages === undefined
+              ? '처리 패키지'
+              : '처리 완료 (성공·실패·건너뛰기)'}
+          </span>
+          <strong>
+            {Math.min(progress?.completedPackages ?? progress?.currentIndex ?? 0, totalPackages)} /{' '}
+            {totalPackages}
+          </strong>
         </div>
       </div>
 
@@ -72,40 +86,44 @@ export const OSDownloadProgress: React.FC<OSDownloadProgressProps> = ({
           message={progress.packagingDetails?.message || '파일 생성 준비 중...'}
           archiveProgress={progress.packagingDetails?.archiveProgress}
         />
-      ) : <>
-      <div className="progress-block">
-        <div className="progress-row">
-          <span>현재 단계</span>
-          <span>{currentPhase}</span>
-        </div>
-        <div className="progress-track">
-          <div className="progress-bar overall" style={{ width: `${overallPercent}%` }} />
-        </div>
-      </div>
+      ) : (
+        <>
+          <div className="progress-block">
+            <div className="progress-row">
+              <span>현재 단계</span>
+              <span>{currentPhase}</span>
+            </div>
+            <div className="progress-track">
+              <div className="progress-bar overall" style={{ width: `${overallPercent}%` }} />
+            </div>
+          </div>
 
-      <div className="progress-block">
-        <div className="progress-row">
-          <span>{progress?.currentPackage || '현재 패키지'}</span>
-          <span>
-            {formatBytes(progress?.bytesDownloaded || 0)} / {formatBytes(progress?.totalBytes || 0)}
-          </span>
-        </div>
-        <div className="progress-track">
-          <div className="progress-bar current" style={{ width: `${currentPercent}%` }} />
-        </div>
-      </div>
-
-      </>}
+          <div className="progress-block">
+            <div className="progress-row">
+              <span>{progress?.currentPackage || '현재 패키지'}</span>
+              <span>
+                {formatBytes(progress?.bytesDownloaded || 0)} /{' '}
+                {formatBytes(progress?.totalBytes || 0)}
+              </span>
+            </div>
+            <div className="progress-track">
+              <div className="progress-bar current" style={{ width: `${currentPercent}%` }} />
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="progress-footer">
         <div>
           <span className="footer-label">출력 위치</span>
           <code>{outputDir}</code>
         </div>
-        {progress?.phase !== 'packaging' && <div>
-          <span className="footer-label">속도</span>
-          <strong>{formatBytes(progress?.speed || 0)}/s</strong>
-        </div>}
+        {progress?.phase !== 'packaging' && (
+          <div>
+            <span className="footer-label">속도</span>
+            <strong>{formatBytes(progress?.speed || 0)}/s</strong>
+          </div>
+        )}
       </div>
 
       <style>{`

@@ -1,6 +1,6 @@
 import * as path from 'path';
-import * as fse from 'fs-extra';
 import { dialog } from 'electron';
+import * as fse from 'fs-extra';
 import {
   getYumDownloader,
   getAptDownloader,
@@ -10,6 +10,7 @@ import {
   getApkResolver,
 } from '../../src/core';
 import { OSScriptGenerator } from '../../src/core/downloaders/os-shared/script-generator';
+import type { DownloadProgressEmitter } from './download-progress';
 import type {
   OSErrorAction,
   OSArchitecture,
@@ -19,7 +20,6 @@ import type {
   OSPackageOutputOptions,
   PackageDependency,
 } from '../../src/core/downloaders/os-shared/types';
-import type { DownloadProgressEmitter } from './download-progress';
 
 export interface OSDownloadStartOptions {
   packages: OSPackageInfo[];
@@ -70,28 +70,41 @@ export const DEFAULT_OS_OUTPUT_OPTIONS: OSPackageOutputOptions = {
 
 export function createOSDownloadErrorHandler(
   mainWindow: Electron.BrowserWindow | null,
-  onCancel: () => void
+  onCancel: () => void,
+  signal?: AbortSignal
 ): (error: { package?: OSPackageInfo; message: string }) => Promise<OSErrorAction> {
-  return async (error) => {
-    const packageName = error.package?.name || '알 수 없는 패키지';
-    const result = await dialog.showMessageBox(mainWindow!, {
-      type: 'error',
-      title: '다운로드 오류',
-      message: `패키지 다운로드 중 오류가 발생했습니다.\n\n${packageName}: ${error.message}`,
-      buttons: ['재시도', '건너뛰기', '취소'],
-      defaultId: 0,
-      cancelId: 2,
-    });
-
-    switch (result.response) {
-      case 0:
-        return 'retry';
-      case 1:
-        return 'skip';
-      default:
+  let previous: Promise<unknown> = Promise.resolve();
+  let stopped = false;
+  return (error) => {
+    const pending = previous.then(async (): Promise<OSErrorAction> => {
+      if (stopped || signal?.aborted) return 'skip';
+      try {
+        const packageName = error.package
+          ? `${error.package.name}@${error.package.version} (${error.package.architecture})`
+          : '알 수 없는 패키지';
+        const result = await dialog.showMessageBox(mainWindow!, {
+          type: 'error',
+          title: '다운로드 오류',
+          message: `패키지 다운로드 중 오류가 발생했습니다.\n\n${packageName}: ${error.message}`,
+          buttons: ['재시도', '건너뛰기', '취소'],
+          defaultId: 0,
+          cancelId: 2,
+          signal,
+        });
+        if (signal?.aborted) return 'skip';
+        if (result.response === 0) return 'retry';
+        if (result.response === 1) return 'skip';
+        stopped = true;
         onCancel();
         return 'skip';
-    }
+      } catch (failure) {
+        stopped = true;
+        if (signal?.aborted) return 'skip';
+        throw failure;
+      }
+    });
+    previous = pending.catch(() => undefined);
+    return pending;
   };
 }
 
@@ -170,6 +183,7 @@ export function createOSDownloaderForDistribution(params: {
   abortSignal?: AbortSignal;
   onCancel: () => void;
   mainWindow: Electron.BrowserWindow | null;
+  onError?: ReturnType<typeof createOSDownloadErrorHandler>;
 }) {
   const {
     distribution,
@@ -181,7 +195,7 @@ export function createOSDownloaderForDistribution(params: {
     onCancel,
     mainWindow,
   } = params;
-  const onError = createOSDownloadErrorHandler(mainWindow, onCancel);
+  const onError = params.onError ?? createOSDownloadErrorHandler(mainWindow, onCancel, abortSignal);
 
   const downloaderOptions = {
     distribution,
@@ -250,11 +264,9 @@ export async function writeRepositoryScripts(
     return;
   }
 
-  const scripts = scriptGenerator.generateDependencyOrderScript(
-    packages,
-    packageManager,
-    { packageDir: packageManager === 'yum' ? './Packages' : '.' }
-  );
+  const scripts = scriptGenerator.generateDependencyOrderScript(packages, packageManager, {
+    packageDir: packageManager === 'yum' ? './Packages' : '.',
+  });
   await fse.writeFile(path.join(outputDir, 'install.sh'), scripts.bash);
   await fse.writeFile(path.join(outputDir, 'install.ps1'), scripts.powershell);
 }
