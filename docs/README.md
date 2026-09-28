@@ -34,6 +34,7 @@
 | [메타데이터 Worker](metadata-worker-performance.md) | Conda/YUM 파싱 분리·캐시 수명·응답성 및 전체 메모리 측정 |
 | [OS 스트리밍 성능](os-streaming-performance.md) | 파일 스트리밍·실패 정리, 메모리/이벤트 루프 측정과 재현 |
 | [GUI OS 다운로드 동시 실행](os-download-concurrency.md) | 설정 반영·오류 선택 직렬화·전체 작업 종료 후 정리·병렬 진행률 |
+| [OS 진행률 전송 빈도](os-progress-performance.md) | 150ms 최신 값 병합·즉시 전환·종료 시 timer 정리·전송 호출 재현 |
 | [Docker 아키텍처](docker-architecture.md) | 레지스트리, 인증·검색·매니페스트·레이어 처리 |
 
 ## 공유 모듈과 타입

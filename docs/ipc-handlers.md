@@ -180,6 +180,8 @@ electron/
 
 OS 이벤트:
 
+`os:download:progress`의 같은 패키지/단계 바이트 값은 main에서 150ms 간격으로 최신 하나를 전달합니다. 패키지·단계·집계 수 변경, 완료는 즉시 보내고 오류 창 전에 대기 값을 flush합니다. 취소/종료/새 세션 시 timer와 이전 payload를 정리하며 최종 `os:download:start` 응답은 제한하지 않습니다. [전송 계약과 측정 범위](os-progress-performance.md)를 참고하세요.
+
 | 이벤트 | 설명 |
 |--------|------|
 | `os:resolveDependencies:progress` | OS 의존성 해결 진행률 |

@@ -209,7 +209,24 @@ describe('GUI OS bounded downloads with actual base streams and files', () => {
     result.then(() => {
       settled = true;
     });
+    // Queue a non-terminal update from the focused package, then cancel before its trailing send.
+    const focused = boundary.factory.mock.calls[0][0];
+    focused.onProgress({
+      currentPackage: 'package-0',
+      bytesDownloaded: 10,
+      totalBytes: 100,
+      speed: 1,
+    });
+    focused.onProgress({
+      currentPackage: 'package-0',
+      bytesDownloaded: 20,
+      totalBytes: 100,
+      speed: 2,
+    });
+    const countAtCancel = send.mock.calls.length;
     await service.cancelDownload();
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    expect(send).toHaveBeenCalledTimes(countAtCancel);
     await vi.waitFor(() => expect(stats.cancelled).toBe(3));
     expect(settled).toBe(false);
     expect((await fs.readdir(directory)).some((name) => name.startsWith('.depssmuggler-os-'))).toBe(
@@ -290,6 +307,81 @@ describe('GUI OS bounded downloads with actual base streams and files', () => {
     });
     expect(boundary.dialog).toHaveBeenCalledTimes(2);
     expect(new Set(boundary.factory.mock.calls.map(([options]) => options.onError)).size).toBe(1);
+  });
+
+  it('flushes the last packaging update before completion and ignores callbacks after completion/cancel', async () => {
+    transport();
+    const { service, send } = startService();
+    let lateProgress!: () => void;
+    let cancelDuringPackaging = false;
+    boundary.archive.mockImplementation(async (_packages, _files, options) => {
+      const update = (percentage: number) =>
+        options.onProgress({
+          processedFiles: 1,
+          totalFiles: 2,
+          processedBytes: percentage,
+          totalBytes: 100,
+          percentage,
+        });
+      update(10);
+      update(20);
+      update(30);
+      lateProgress = () => update(40);
+      if (cancelDuringPackaging) {
+        await service.cancelDownload();
+        const count = send.mock.calls.length;
+        lateProgress();
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        expect(send).toHaveBeenCalledTimes(count);
+      }
+      return path.join(directory, 'os-packages.zip');
+    });
+    await start(service, [pkg('first')], 1);
+    expect(send.mock.lastCall![1].packagingDetails.archiveProgress.percentage).toBe(30);
+    let count = send.mock.calls.length;
+    lateProgress();
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    expect(send).toHaveBeenCalledTimes(count);
+    cancelDuringPackaging = true;
+    const result = await start(service, [pkg('second')], 1);
+    expect(result.cancelled).toBe(true);
+    count = send.mock.calls.length;
+    lateProgress();
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    expect(send).toHaveBeenCalledTimes(count);
+  });
+
+  it('flushes pending bytes before opening an error dialog', async () => {
+    const { service, send } = startService();
+    boundary.factory.mockImplementation((options: BaseDownloaderOptions) => ({
+      async downloadPackage(item: OSPackageInfo) {
+        const progress: OSDownloadProgress = {
+          currentPackage: item.name,
+          currentIndex: 1,
+          totalPackages: 1,
+          bytesDownloaded: 10,
+          totalBytes: 100,
+          speed: 1,
+          phase: 'downloading',
+        };
+        options.onProgress?.(progress);
+        options.onProgress?.({ ...progress, bytesDownloaded: 20 });
+        await options.onError?.({
+          package: item,
+          message: 'fixture failure',
+          type: 'network',
+          retryable: true,
+        });
+        return { success: false, skipped: true };
+      },
+    }));
+    boundary.dialog.mockImplementation(async () => {
+      expect(send.mock.lastCall![1].bytesDownloaded).toBe(20);
+      return { response: 1 };
+    });
+    const result = await start(service, [pkg('error')], 1);
+    expect(result.skipped).toHaveLength(1);
+    expect(boundary.dialog).toHaveBeenCalledTimes(1);
   });
 
   it('isolates equal filenames across active slots', async () => {

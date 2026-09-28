@@ -682,6 +682,8 @@ bash scripts/verify-worktree.sh \
 
 ### GUI OS 동시 다운로드 (#188)
 
+#189의 `electron/services/download-progress-os.test.ts`는 가상 시계로 150ms 최신 값 병합, 전환/완료/flush, 취소·새 세션 정리를 검증합니다. 아래 통합 테스트는 오류 창 전 최신 값 전달, 실제 emitter의 완료/취소 후 예약 전송과 늦은 패키징 콜백 차단도 검사합니다. 전송 호출 수 비교는 [별도 재현 스크립트](os-progress-performance.md#재현과-측정)를 사용하며 Electron IPC/React 비용과 구분합니다.
+
 [동시 실행 문서](os-download-concurrency.md#검증과-한계)의 검증 명령은 실제 orchestrator·pool·BaseOSDownloader·스트림·파일 시스템에 12개/50ms 응답을 제공해 설정 1/3/6과 최대 활성 전송 수가 같은지 검사합니다. 취소 또는 한 슬롯의 예외 후 나머지 스트림의 종료를 지연시켜 staging이 먼저 삭제되지 않는지 확인합니다. 파일명이 같은 병렬 입력도 슬롯별 임시 폴더로 격리됩니다.
 
 router 테스트는 동시 오류의 재시도/건너뛰기 응답 연결, 취소 신호, 오류 창 실패 후 대기 창 억제를 검증합니다. orchestrator 회귀는 기존 성공/실패/skip·출력 정리와 초기화/정리 실패 후 다음 세션을 확인합니다. pool·화면 검증은 완료 순서와 독립적인 결과 순서, 고정된 표시 패키지, 완료 수·활성 수, 종료 뒤 늦은 콜백 무시를 검사합니다. 실제 Electron native dialog나 외부 네트워크 속도를 측정한 결과는 아닙니다.

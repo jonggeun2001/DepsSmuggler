@@ -114,8 +114,16 @@ export function bindSessionProgressEmitter(
       });
     },
 
-    emitOSProgress(progress) {
-      progressEmitter.emitOSProgress(progress);
+    emitOSProgress(progress, force = false) {
+      progressEmitter.emitOSProgress(progress, force);
+    },
+
+    flushOSProgress() {
+      progressEmitter.flushOSProgress();
+    },
+
+    clearOSProgress() {
+      progressEmitter.clearOSProgress();
     },
 
     emitOSResolveDependenciesProgress(payload) {

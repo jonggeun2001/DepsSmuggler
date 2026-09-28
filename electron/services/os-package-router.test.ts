@@ -57,6 +57,8 @@ function progressEmitter() {
     clearAllPackageProgress: vi.fn(),
     emitAllComplete: vi.fn(),
     emitOSProgress: vi.fn(),
+    flushOSProgress: vi.fn(),
+    clearOSProgress: vi.fn(),
     emitOSResolveDependenciesProgress: vi.fn(),
   };
 }
@@ -120,7 +122,8 @@ describe('OS package router boundaries', () => {
       const factory = mocks[`${manager}Resolver`];
       factory.mockReturnValue(resolver);
       const emitter = progressEmitter();
-      const abortSignal = new AbortController().signal;
+      const controller = new AbortController();
+      const abortSignal = controller.signal;
       const selectedDistribution = { ...distribution, packageManager: manager };
       expect(
         createOSResolverForDistribution({
@@ -156,6 +159,10 @@ describe('OS package router boundaries', () => {
         current: 2,
         total: 5,
       });
+      controller.abort();
+      factory.mock.calls[0][0].onProgress('late', 3, 5);
+      expect(emitter.emitOSProgress).toHaveBeenCalledTimes(1);
+      expect(emitter.emitOSResolveDependenciesProgress).toHaveBeenCalledTimes(1);
       for (const other of ['yum', 'apt', 'apk'] as const) {
         if (other !== manager) expect(mocks[`${other}Resolver`]).not.toHaveBeenCalled();
       }

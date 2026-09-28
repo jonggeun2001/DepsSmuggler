@@ -191,6 +191,8 @@ Electron 다운로드 라우터는 같은 출력 디렉터리·GAV의 Maven 작�
 
 ### OS 패키지 흐름
 
+OS 바이트 진행률은 main에서 최신 payload를 150ms 간격으로 병합합니다. renderer는 수신 값을 그대로 반영하며 패키지/단계 전환과 완료 이벤트는 즉시 받습니다. 취소 뒤 예약된 과거 전송이 화면을 되돌리지 않도록 main이 timer와 이전 payload를 정리합니다. [전송 빈도와 검증](os-progress-performance.md)을 참고하세요.
+
 1. `WizardPage`에서 `yum`, `apt`, `apk` 중 하나 선택
 2. 배포판과 아키텍처는 settings store와 `wizard-page/os-context.ts` helper를 통해 선택/적용됩니다.
 3. 검색은 `wizard-page/search-service.ts`가 `os:search` IPC를 통해 수행합니다.
