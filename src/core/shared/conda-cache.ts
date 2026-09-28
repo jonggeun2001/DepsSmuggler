@@ -5,6 +5,7 @@
  */
 
 import * as fs from 'fs';
+import { randomUUID } from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
 import axios, { AxiosResponse } from 'axios';
@@ -54,6 +55,7 @@ export interface RepodataCacheMeta {
  * 캐시 가져오기 결과
  */
 export interface WorkerCacheResult {
+  cacheVersion: string | null;
   dataSize: number;
   /** 데이터 */
   data: RepoData;
@@ -117,15 +119,39 @@ function readCacheMeta(metaPath: string): RepodataCacheMeta | null {
 /**
  * 캐시 메타데이터 저장
  */
-function writeCacheMeta(metaPath: string, meta: RepodataCacheMeta): void {
+function fileVersion(filePath: string): string | null {
   try {
-    const dir = path.dirname(metaPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    const stat = fs.statSync(filePath);
+    return `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return null;
+  }
+}
+
+function snapshotVersion(dataVersion: string | null, metaVersion: string | null): string | null {
+  return dataVersion && metaVersion ? JSON.stringify([dataVersion, metaVersion]) : null;
+}
+
+/** Fingerprint the bytes we wrote before publishing, never a subsequent replacement. */
+function writeCacheSnapshot(filePath: string, content: string): string | null {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporary = `${filePath}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, content, { flag: 'wx' });
+    const version = fileVersion(temporary);
+    fs.renameSync(temporary, filePath);
+    return version;
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+}
+
+function writeCacheMeta(metaPath: string, meta: RepodataCacheMeta): string | null {
+  try {
+    return writeCacheSnapshot(metaPath, JSON.stringify(meta, null, 2));
   } catch (error) {
     logger.warn('캐시 메타데이터 저장 실패', { metaPath, error });
+    return null;
   } finally {
     diskStatsReader.invalidate();
   }
@@ -149,15 +175,12 @@ function readCacheData(dataPath: string): { data: RepoData; dataSize: number } |
 /**
  * 캐시 데이터 저장
  */
-function writeCacheData(dataPath: string, data: RepoData): void {
+function writeCacheData(dataPath: string, data: RepoData): string | null {
   try {
-    const dir = path.dirname(dataPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(dataPath, JSON.stringify(data));
+    return writeCacheSnapshot(dataPath, JSON.stringify(data));
   } catch (error) {
     logger.warn('캐시 데이터 저장 실패', { dataPath, error });
+    return null;
   } finally {
     diskStatsReader.invalidate();
   }
@@ -254,9 +277,23 @@ export function fetchRepodata(
 }
 
 /** Raw fixtures remain usable by callers; production requests return only one name's artifacts. */
-export function queryRepodata(data: RepoData | RepodataReference, name: string): Promise<RepoData> {
+export async function queryRepodata(
+  data: RepoData | RepodataReference,
+  name: string
+): Promise<RepoData> {
   if (!('kind' in data)) return Promise.resolve(data);
-  return metadataWorker.run<RepoData>({ kind: 'query', reference: data, name });
+  const result = await metadataWorker.run<{
+    data: RepoData;
+    reference: RepodataReference;
+    cacheMayHaveChanged: boolean;
+  }>({
+    kind: 'query',
+    reference: data,
+    name,
+  });
+  if (result.cacheMayHaveChanged) diskStatsReader.invalidate();
+  data.options = result.reference.options;
+  return result.data;
 }
 
 export function closeRepodataWorker(): Promise<void> {
@@ -276,9 +313,7 @@ export function repodataCacheVersion(
       channel,
       subdir
     );
-    const data = fs.statSync(dataPath);
-    const meta = fs.statSync(metaPath);
-    return `${data.ino}:${data.mtimeMs}:${data.size}:${meta.ino}:${meta.mtimeMs}:${meta.size}`;
+    return snapshotVersion(fileVersion(dataPath), fileVersion(metaPath)) ?? 'missing';
   } catch {
     return 'missing';
   }
@@ -306,6 +341,7 @@ export async function fetchRepodataInWorker(
 
   // 1. 파일 시스템 캐시 확인 (forceRefresh가 아닐 때)
   if (useCache && !forceRefresh) {
+    const beforeRead = repodataCacheVersion(channel, subdir, options);
     const cachedMeta = readCacheMeta(metaPath);
 
     if (cachedMeta && isCacheValid(cachedMeta)) {
@@ -319,6 +355,11 @@ export async function fetchRepodataInWorker(
           maxAge: cachedMeta.maxAge,
         });
         return {
+          cacheVersion:
+            beforeRead !== 'missing' &&
+            beforeRead === repodataCacheVersion(channel, subdir, options)
+              ? beforeRead
+              : null,
           data: cachedData.data,
           dataSize: cachedData.dataSize,
           fromCache: true,
@@ -339,6 +380,7 @@ export async function fetchRepodataInWorker(
     ];
 
     // 기존 캐시 메타데이터 (조건부 요청용)
+    const existingVersion = repodataCacheVersion(channel, subdir, options);
     const existingMeta = useCache ? readCacheMeta(metaPath) : null;
 
     for (const { url, compressed } of urls) {
@@ -372,7 +414,12 @@ export async function fetchRepodataInWorker(
         // 304 Not Modified - 캐시 유효 (디스크에서 읽기)
         if (response.status === 304) {
           const cachedData = readCacheData(dataPath);
-          if (cachedData && existingMeta) {
+          if (
+            cachedData &&
+            existingMeta &&
+            existingVersion !== 'missing' &&
+            existingVersion === repodataCacheVersion(channel, subdir, options)
+          ) {
             // 캐시 시간 갱신
             const { maxAge } = extractCacheHeaders(response);
             const updatedMeta: RepodataCacheMeta = {
@@ -380,7 +427,8 @@ export async function fetchRepodataInWorker(
               maxAge,
               cachedAt: Date.now(),
             };
-            writeCacheMeta(metaPath, updatedMeta);
+            const metaVersion = writeCacheMeta(metaPath, updatedMeta);
+            const [dataVersion] = JSON.parse(existingVersion) as [string, string];
 
             logger.info('캐시 유효 (304 Not Modified)', {
               url,
@@ -388,6 +436,7 @@ export async function fetchRepodataInWorker(
             });
 
             return {
+              cacheVersion: snapshotVersion(dataVersion, metaVersion),
               data: cachedData.data,
               dataSize: cachedData.dataSize,
               fromCache: true,
@@ -436,9 +485,11 @@ export async function fetchRepodataInWorker(
         };
 
         // 캐시 저장 (디스크만)
+        let cacheVersion: string | null = 'nocache';
         if (useCache) {
-          writeCacheData(dataPath, repodata);
-          writeCacheMeta(metaPath, meta);
+          const dataVersion = writeCacheData(dataPath, repodata);
+          const metaVersion = dataVersion ? writeCacheMeta(metaPath, meta) : null;
+          cacheVersion = snapshotVersion(dataVersion, metaVersion);
         }
 
         logger.info('repodata 가져오기 성공', {
@@ -450,6 +501,7 @@ export async function fetchRepodataInWorker(
         });
 
         return {
+          cacheVersion,
           data: repodata,
           dataSize,
           fromCache: false,

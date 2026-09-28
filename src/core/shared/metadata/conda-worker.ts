@@ -27,8 +27,13 @@ function keyOf(reference: RepodataReference): string {
 async function load(
   reference: RepodataReference,
   refresh: boolean
-): Promise<{ entry: Entry; fromCache: boolean } | null> {
-  const key = keyOf(reference);
+): Promise<{
+  entry: Entry;
+  fromCache: boolean;
+  reference: RepodataReference;
+  reloaded: boolean;
+} | null> {
+  let key = keyOf(reference);
   const { channel, subdir, options } = reference;
   const version = repodataCacheVersion(channel, subdir, options);
   let previous = entries.get(key);
@@ -40,7 +45,7 @@ async function load(
     Date.now() - previous.meta.cachedAt < previous.meta.maxAge * 1000
   ) {
     entries.set(key, previous);
-    return { entry: previous, fromCache: true };
+    return { entry: previous, fromCache: true, reference, reloaded: false };
   }
   previous = undefined;
   // Release old indexes before the next large parse, limiting peak retained payloads.
@@ -54,7 +59,13 @@ async function load(
     forceRefresh: refresh,
   });
   if (!result) return null;
-  const loadedVersion = repodataCacheVersion(channel, subdir, options);
+  if (!result.fromCache && result.cacheVersion === null) {
+    // Best-effort disk persistence must not discard a successfully fetched snapshot.
+    // Keep a bounded no-cache reference; after eviction it fetches again instead of reading stale disk data.
+    reference = { ...reference, options: { ...options, useCache: false } };
+    key = keyOf(reference);
+    result.cacheVersion = 'nocache';
+  }
   const bytes = result.dataSize;
   const index = new Map<string, RepoData>();
   for (const format of ['packages', 'packages.conda'] as const) {
@@ -79,11 +90,11 @@ async function load(
   const entry: Entry = {
     index,
     meta: result.meta,
-    version: loadedVersion,
+    version: result.cacheVersion ?? 'unstable',
     bytes,
     info: result.data.info,
   };
-  if (bytes <= MAX_BYTES) {
+  if (bytes <= MAX_BYTES && result.cacheVersion !== null) {
     entries.set(key, entry);
     while (
       entries.size > MAX_ENTRIES ||
@@ -92,7 +103,7 @@ async function load(
       entries.delete(entries.keys().next().value!);
     }
   }
-  return { entry, fromCache: result.fromCache };
+  return { entry, fromCache: result.fromCache, reference, reloaded: true };
 }
 
 parentPort!.on(
@@ -110,8 +121,8 @@ parentPort!.on(
           result: loaded
             ? {
                 data: {
-                  ...message.reference,
-                  options: { ...message.reference.options, forceRefresh: false },
+                  ...loaded.reference,
+                  options: { ...loaded.reference.options, forceRefresh: false },
                   info: loaded.entry.info,
                 },
                 meta: loaded.entry.meta,
@@ -126,9 +137,13 @@ parentPort!.on(
           );
         parentPort!.postMessage({
           kind: 'result',
-          result: loaded.entry.index.get(message.name!.toLowerCase()) ?? {
-            info: loaded.entry.info,
-            packages: {},
+          result: {
+            data: loaded.entry.index.get(message.name!.toLowerCase()) ?? {
+              info: loaded.entry.info,
+              packages: {},
+            },
+            reference: loaded.reference,
+            cacheMayHaveChanged: loaded.reloaded,
           },
         });
       }

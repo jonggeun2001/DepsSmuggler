@@ -277,4 +277,35 @@ describe('conda-cache', () => {
     expect(await fs.pathExists(getCachePaths(cacheDir, 'fixture', 'noarch').dataPath)).toBe(false);
     expect(mockedAxiosGet).toHaveBeenCalledTimes(2);
   });
+  it('keeps successful network data usable when disk persistence fails', async () => {
+    await fs.remove(cacheDir);
+    await fs.writeFile(cacheDir, 'a file cannot hold a channel directory');
+    const data: RepoData = {
+      packages: {
+        'demo.conda': {
+          name: 'demo',
+          version: 'fresh',
+          build: '0',
+          build_number: 0,
+          depends: [],
+          subdir: 'noarch',
+        },
+      },
+    };
+    mockedAxiosGet.mockImplementation(async (url: string) => {
+      if (url.endsWith('.zst')) throw new Error('no zstd');
+      return { status: 200, data: Buffer.from(JSON.stringify(data)), headers: {} } as never;
+    });
+    const loaded = await fetchRepodata('fixture', 'noarch', { cacheDir });
+    expect(loaded!.data.options.useCache).toBe(false);
+    expect((await queryRepodata(loaded!.data, 'demo')).packages['demo.conda'].version).toBe(
+      'fresh'
+    );
+    expect(mockedAxiosGet).toHaveBeenCalledTimes(2);
+    await closeRepodataWorker();
+    expect((await queryRepodata(loaded!.data, 'demo')).packages['demo.conda'].version).toBe(
+      'fresh'
+    );
+    expect(mockedAxiosGet).toHaveBeenCalledTimes(4);
+  });
 });

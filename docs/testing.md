@@ -648,6 +648,7 @@ npm run test:e2e -- tests/e2e/settings-cache-breakdown.spec.ts tests/e2e/setting
 
 ```bash
 bash scripts/verify-worktree.sh src/core/shared/metadata/worker-client.test.ts \
+  src/core/shared/metadata/conda-worker-race.test.ts \
   src/core/shared/conda-cache.test.ts src/core/shared/conda-utils.test.ts \
   src/core/shared/package-cache-stats.integration.test.ts \
   src/core/resolver/conda-resolver-target.test.ts src/core/downloaders/conda.test.ts \

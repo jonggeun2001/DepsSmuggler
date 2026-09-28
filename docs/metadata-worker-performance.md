@@ -7,7 +7,7 @@ Conda repodata의 읽기·zstd 해제·JSON 파싱·저장·이름 인덱싱과 
 - Conda의 `fetchRepodata()`는 원본 대신 `RepodataReference`와 캐시 메타데이터를 반환합니다. `queryRepodata(reference, name)`으로 해당 이름의 `packages`/`packages.conda`만 받습니다. resolver, downloader, URL 헬퍼가 같은 경로를 사용합니다. 일반 이름 검색은 기존 Anaconda API 경로입니다.
 - HTTP는 호출 프로세스의 axios로 수행합니다. 기존 인증서 신뢰·axios 기본 설정·조건부 헤더·타임아웃을 유지하고 `arraybuffer` 응답을 Worker로 전달하므로 axios의 대용량 JSON 파싱도 메인에서 실행되지 않습니다. 전달할 독립 ArrayBuffer를 만들 때는 바이트 복사 비용이 남습니다. Worker 로그는 기존 메인 로거의 마스킹·파일 저장을 사용하고, 길이를 아는 HTTP 응답의 20%p 진행 로그도 유지합니다.
 - TTL은 `max(서버 max-age, 24시간)`이며 강제 갱신, ETag/Last-Modified와 304, 손상된 디스크 JSON의 네트워크 재시도, zstd → current JSON → full JSON 순서를 유지합니다. 같은 옵션의 진행 중인 로드는 하나로 합치고 완료 후 Promise를 제거합니다.
-- 데이터/메타 파일의 inode·mtime·크기를 확인하여 외부 교체·정리 뒤에는 인덱스도 다시 만듭니다. 새로고침이나 Worker 종료 이후에도 참조로 다시 조회할 수 있습니다. 참조는 고정된 과거 스냅샷이 아니며, 갱신된 디스크 데이터의 인덱스를 사용합니다.
+- 데이터/메타 파일의 inode·mtime·크기를 읽기 전후로 비교하여, 읽기 도중 삭제·교체된 스냅샷은 인덱스 캐시에 보관하지 않습니다. 저장은 같은 디렉터리의 임시 파일을 rename하고 발행 전 지문을 사용합니다. 외부 교체·정리 뒤에는 인덱스도 다시 만듭니다. 저장 실패 시 성공한 HTTP 결과는 예산이 제한된 비디스크 참조로 사용하고, 퇴출 뒤에는 다시 HTTP 조회합니다. Worker 재조회가 디스크를 갱신할 수 있는 경우 메인의 통계 캐시도 무효화합니다. 새로고침이나 Worker 종료 이후에도 참조로 다시 조회할 수 있습니다. 참조는 고정된 과거 스냅샷이 아니며, 갱신된 디스크 데이터의 인덱스를 사용합니다.
 - 플랫폼·noarch·Python·CUDA·build 필터와 정렬은 기존 processor가 수행합니다. downloader의 정확한 버전·최고 build 선택, URL 헬퍼의 Python 선호와 API fallback도 유지합니다. 두 선택 정책을 합치지 않습니다.
 - YUM의 작은 `repomd.xml`은 기존 경로이며 큰 primary만 Worker에서 처리합니다. 메인에는 resolver/저장소 생성에 필요한 `OSPackageInfo[]`를 한 번 전달합니다. 버전 문자열, 의존성, provides, primary 파일과 XML 엔티티 제한을 보존합니다. 비압축 primary 바이트도 UTF-8로 읽습니다.
 - YUM 취소는 실행 중인 Worker를 종료한 뒤 `AbortError`로 전달합니다. 실패한 작업의 뒤에 대기 중인 작업은 새 Worker에서 계속할 수 있습니다. 파싱 오류는 정상 빈 목록으로 바꾸지 않습니다.
@@ -34,15 +34,15 @@ REPODATA_FIXTURE=/path/to/repodata.json node scripts/profile-metadata-workers.mj
 
 | 경로 | 상태 | 첫 조회 ms | CPU ms | 최대 heartbeat 간격 ms | 최대 RSS 증가 MiB | 메인 heap 증가 MiB |
 |---|---|---:|---:|---:|---:|---:|
-| Conda 읽기+인덱스+six 후보 | 이전 | 594.5 | 745.7 | 594.5 | 430.5 | 378.6 |
-| Conda 읽기+인덱스+six 후보 | Worker | 723.7 | 992.9 | 12.1 | 485.2 | 0.4 |
-| YUM primary 20,000개 | 이전 | 305.5 | 421.1 | 305.6 | 141.3 | 63.1 |
-| YUM primary 20,000개 | Worker | 454.8 | 670.6 | 17.6 | 200.6 | 21.0 |
+| Conda 읽기+인덱스+six 후보 | 이전 | 562.7 | 710.7 | 562.8 | 431.0 | 378.6 |
+| Conda 읽기+인덱스+six 후보 | Worker | 765.9 | 1075.9 | 12.1 | 488.8 | 0.4 |
+| YUM primary 20,000개 | 이전 | 305.2 | 415.4 | 305.3 | 141.0 | 63.1 |
+| YUM primary 20,000개 | Worker | 471.5 | 692.8 | 24.4 | 183.8 | 21.0 |
 
 Conda의 `six` 후보 6개와 정렬 순서는 같고 Worker 응답은 2,225 bytes였습니다. 첫 Worker 시작 시 source용 ts-node 로더 비용도 포함됩니다. 메인 응답성은 개선되지만 이 측정에서는 첫 조회 시간·CPU·전체 RSS가 늘었습니다. 패키징된 앱의 평균 응답시간, 모든 채널의 메모리 감소, 네트워크 속도 개선으로 일반화하지 않습니다. YUM 정규화 목록의 메인 수신·후속 resolver 인덱싱과 별도 OS 캐시 JSON 읽기는 남아 있습니다.
 
 ## 검증과 배포
 
-`conda-cache.test.ts`, `conda-utils.test.ts`, `conda-resolver-target.test.ts`, `conda.test.ts`에서 실제 Worker와 바이트 fixture 또는 기존 선택 fixture를 사용합니다. `worker-client.test.ts`는 작업 직렬화·유휴 종료·취소·Worker 실패·HTTP 전달 계약을 검사합니다. `os-metadata-parsers.test.ts`와 YUM 전달물 통합 테스트는 실제 Worker 변환 뒤 버전·엔티티 제한·provides·파일 정보를 확인합니다.
+`conda-cache.test.ts`, `conda-utils.test.ts`, `conda-resolver-target.test.ts`, `conda.test.ts`에서 실제 Worker와 바이트 fixture 또는 기존 선택 fixture를 사용합니다. `conda-worker-race.test.ts`는 실제 Worker의 파일 읽기를 SharedArrayBuffer로 멈춘 뒤 메인에서 삭제/교체하여 읽기 경쟁을 재현합니다. `worker-client.test.ts`는 작업 직렬화·유휴 종료·취소·Worker 실패·HTTP 전달 계약을 검사합니다. `os-metadata-parsers.test.ts`와 YUM 전달물 통합 테스트는 실제 Worker 변환 뒤 버전·엔티티 제한·provides·파일 정보를 확인합니다.
 
 컴파일된 앱은 `dist/src/core/shared/metadata/*-worker.js`를 사용하며 기존 `tsconfig.electron.json`/패키지 `dist/**/*` 포함 규칙이 적용됩니다. 소스 CLI/테스트만 기존 개발 의존성 ts-node를 사용합니다. 새로운 설치 단계나 사용자 설정·IPC 계약·디스크 캐시 스키마 변경은 없습니다.
