@@ -139,6 +139,7 @@ MavenResolver와 MavenDownloader가 공유하여 중복 API 호출을 방지합�
 | `clearMemoryCache` | - | void | 메모리 캐시 초기화 |
 | `clearDiskCache` | cacheDir? | Promise<void> | 디스크 캐시 삭제 |
 | `getMavenCacheStats` | - | MavenCacheStats | 캐시 통계 조회 |
+| `getMavenCacheStatsAsync` | cacheDir?, forceRefresh? | Promise<MavenCacheStats> | 데스크톱용 비동기 디스크 통계·결과 재사용 |
 | `pruneExpiredMemoryCache` | ttl? | number | 만료 메모리 캐시 정리 |
 
 병렬 함수의 `options`는 `MavenCacheOptions & { batchSize?: number }`이며 기본 배치 크기는 5입니다. `prefetchPomsParallel()`은 완료를 기다릴 수 없는 `void` 반환 함수이고, 완료가 필요하면 `await fetchPomsParallel()`을 사용합니다. 조회 실패한 POM은 병렬 조회 결과에서 빠집니다.

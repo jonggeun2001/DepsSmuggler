@@ -496,7 +496,7 @@ npx playwright test tests/e2e/maven-pom-preview.spec.ts --project=chromium
 
 - `tests/e2e/search-errors.spec.ts`: 실제 위자드 자동 입력의 IPC 인증서 오류·재시도, 버전 실패·복구, HTTP 오류·파싱 실패·정상 0건 구분, 빠른 재시도 후 후보 유지, 네이티브 classifier 장바구니 보존
 - `tests/e2e/settings-regression.spec.ts`: 설정 저장, SMTP 연결 테스트 호출, 새로고침 후 값 유지
-- `tests/e2e/settings-cache-breakdown.spec.ts`: 패키지 타입별 캐시 통계와 비우기 후 갱신
+- `tests/e2e/settings-cache-breakdown.spec.ts`: 패키지 타입별 캐시 통계, 강제 새로고침 인자, 실패 시 이전 값 유지·재시도와 비우기 후 재조회
 - `tests/e2e/download-smoke.spec.ts`: 장바구니에서 일반 다운로드 완료 화면까지의 smoke flow
 - `tests/e2e/history-email-restore.spec.ts`: 이메일 전달 히스토리 재다운로드 시 수신자 복원과 전역 설정 보존
 - `tests/e2e/os-package-download.spec.ts`: OS 패키지 전용 검색/다운로드 흐름
@@ -619,3 +619,20 @@ DEPS_SMUGGLER_NATIVE_MAVEN_PROJECT=1 bash scripts/verify-worktree.sh \
 ### 검색 실패 회귀 (#173)
 
 [검색 오류와 재시도](search-errors.md)의 명령으로 오류 분류·HTTP 상태/파싱/15초 중단·IPC 핸들러와 facade 전달·입력 경쟁 상태·버전 대체 안내를 검증합니다. `useWizardSearchFlow.async.test.tsx`는 실제 service/facade를 사용하는 훅에서 새 입력 전후의 늦은 성공/실패, 환경 변경, 초기화, Enter 중복 방지와 버전 재시도를 검사합니다. E2E는 mock Electron API 및 HTTP 응답을 사용하며 실제 사용자 네트워크 연결 자체를 검증하지 않습니다.
+
+### 설정 캐시 통계 (#182)
+
+`cache-stats.test.ts`는 동시 요청 공유, 변경 없는 통계 재사용, 집계 도중 무효화·재집계, 실패 후 재시도, 비동기 파일 순회와 삭제·권한 오류를 검증합니다. `package-cache-stats.integration.test.ts`는 임시 디렉터리와 실제 pip/Maven/Conda 저장·삭제·만료 경로를 사용하고 HTTP만 대체합니다. 메모리 항목 수는 계속 갱신하며 Conda 통계에서 큰 repodata 본문을 읽지 않는 것도 확인합니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/shared/cache-stats.test.ts \
+  src/core/shared/package-cache-stats.integration.test.ts \
+  src/core/shared/pip-cache.test.ts src/core/shared/maven-cache.test.ts \
+  src/core/shared/conda-cache.test.ts electron/cache-handlers.test.ts \
+  src/renderer/pages/settings/use-settings-form-actions.test.ts \
+  src/renderer/pages/settings/settings-form-utils.test.ts \
+  src/renderer/stores/settings-store.test.ts
+npm run test:e2e -- tests/e2e/settings-cache-breakdown.spec.ts tests/e2e/settings-regression.spec.ts
+```
+
+설정 훅 테스트에는 늦은 응답이 삭제·새 조회 결과를 덮어쓰지 않는 경우와 기존 저장·초기화·미저장 입력 보호가 포함됩니다. E2E는 수정된 렌더러와 mock IPC로 검증합니다. 실제 Electron 메인 프로세스와 13,000개 이상의 합성 파일을 사용하는 성능 검증은 [별도 측정 절차](settings-cache-performance.md)를 따릅니다.

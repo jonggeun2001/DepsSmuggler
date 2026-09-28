@@ -61,7 +61,7 @@ function createApi() {
         entryCount: 3,
         details: { pip: { diskEntries: 2, diskSize: 4096 }, npm: { entries: 1 } },
       }),
-      clear: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn().mockResolvedValue({ success: true }),
     },
     selectDirectory: vi.fn().mockResolvedValue('/selected-downloads'),
     selectFolder: vi.fn().mockResolvedValue('/selected-cache'),
@@ -244,7 +244,7 @@ describe('useSettingsFormActions form and navigation', () => {
 
 describe('useSettingsFormActions cache and folders', () => {
   it('loads cache statistics, clears only after successful deletion, and releases loading state', async () => {
-    const pending = deferred<void>();
+    const pending = deferred<{ success: boolean }>();
     api.cache.clear.mockReturnValueOnce(pending.promise);
     const { result } = mountActions();
     await waitFor(() => expect(result.current.cacheSize).toBe(4096));
@@ -262,7 +262,8 @@ describe('useSettingsFormActions cache and folders', () => {
     expect(result.current.clearingCache).toBe(true);
     expect(result.current.cacheCount).toBe(3);
     await act(async () => {
-      pending.resolve();
+      api.cache.getStats.mockResolvedValueOnce({ totalSize: 0, entryCount: 0, details: {} });
+      pending.resolve({ success: true });
       await clearing;
     });
     expect(result.current.clearingCache).toBe(false);
@@ -282,17 +283,76 @@ describe('useSettingsFormActions cache and folders', () => {
     expect(result.current.clearingCache).toBe(false);
     expect(mocks.message.error).toHaveBeenCalledWith('패키지 캐시 삭제에 실패했습니다');
     expect(mocks.message.success).not.toHaveBeenCalled();
+    api.cache.getStats.mockResolvedValueOnce({ totalSize: 0, entryCount: 0, details: {} });
     await act(() => result.current.handleClearCache());
     expect(result.current.cacheCount).toBe(0);
   });
 
-  it('replaces stale statistics with an empty state if cache refresh fails', async () => {
+  it('reuses statistics on entry and preserves the displayed values if a forced refresh fails', async () => {
     const { result } = mountActions();
     await waitFor(() => expect(result.current.cacheCount).toBe(3));
+    expect(api.cache.getStats).toHaveBeenLastCalledWith({ forceRefresh: false });
     api.cache.getStats.mockRejectedValueOnce(new Error('cache unavailable'));
     await act(() => result.current.loadCacheInfo());
+    expect(api.cache.getStats).toHaveBeenLastCalledWith({ forceRefresh: true });
+    expect(result.current).toMatchObject({ cacheSize: 4096, cacheCount: 3, loadingCache: false });
+    expect(result.current.cacheError).toContain('새로고침');
+    await act(() => result.current.loadCacheInfo());
+    expect(result.current.cacheError).toBe('');
+  });
+
+  it('ignores a late refresh response after deletion and reloads authoritative totals', async () => {
+    const stale = deferred<{ totalSize: number; entryCount: number; details: object }>();
+    const { result } = mountActions();
+    await waitFor(() => expect(result.current.cacheCount).toBe(3));
+    api.cache.getStats.mockReturnValueOnce(stale.promise);
+    let refreshing!: Promise<void>;
+    act(() => {
+      refreshing = result.current.loadCacheInfo();
+    });
+    api.cache.getStats.mockResolvedValueOnce({ totalSize: 0, entryCount: 0, details: {} });
+    await act(() => result.current.handleClearCache());
+    expect(result.current.cacheCount).toBe(0);
+    await act(async () => {
+      stale.resolve({ totalSize: 999, entryCount: 99, details: {} });
+      await refreshing;
+    });
     expect(result.current).toMatchObject({ cacheSize: 0, cacheCount: 0, loadingCache: false });
-    expect(result.current.cacheDetails.every((detail) => detail.entryCount === 0)).toBe(true);
+  });
+
+  it('ignores a late initial response after a newer refresh', async () => {
+    const stale = deferred<{ totalSize: number; entryCount: number; details: object }>();
+    api.cache.getStats.mockReturnValueOnce(stale.promise);
+    const { result, unmount } = mountActions();
+    await act(() => result.current.loadCacheInfo());
+    expect(result.current.cacheCount).toBe(3);
+    await act(async () => {
+      stale.resolve({ totalSize: 999, entryCount: 99, details: {} });
+    });
+    expect(result.current.cacheCount).toBe(3);
+    unmount();
+  });
+
+  it('discards a pending response after the settings page unmounts', async () => {
+    const pending = deferred<{ totalSize: number; entryCount: number; details: object }>();
+    api.cache.getStats.mockReturnValueOnce(pending.promise);
+    const { result, unmount } = mountActions();
+    const beforeUnmount = result.current;
+    unmount();
+    await act(async () => {
+      pending.resolve({ totalSize: 999, entryCount: 99, details: {} });
+    });
+    expect(result.current).toBe(beforeUnmount);
+  });
+
+  it('does not report deletion success when the IPC response indicates failure', async () => {
+    const { result } = mountActions();
+    await waitFor(() => expect(result.current.cacheCount).toBe(3));
+    api.cache.clear.mockResolvedValueOnce({ success: false });
+    await act(() => result.current.handleClearCache());
+    expect(result.current.cacheCount).toBe(3);
+    expect(mocks.message.success).not.toHaveBeenCalled();
+    expect(mocks.message.error).toHaveBeenCalledWith('패키지 캐시 삭제에 실패했습니다');
   });
 
   it('reports unavailable cache and folder APIs in browser mode without changing the form', async () => {

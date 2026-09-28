@@ -67,6 +67,8 @@ electron/
 
 참고: `cache:*`는 현재 버전 목록 캐시(`versions:*`, 예: CUDA 버전 파일/메모리 캐시)나 renderer localStorage 캐시를 포함하지 않습니다.
 
+`cache:stats`는 선택 인자 `{ forceRefresh?: boolean }`을 받습니다. 기본 조회와 `cache:get-size`는 변경 없는 디스크 통계를 재사용하고, `forceRefresh: true`는 재집계합니다. 같은 경로의 진행 중 집계는 공유하며 파일 저장·삭제 후 무효화합니다. 응답 필드는 기존과 동일하고 오류는 reject합니다. [통계 재사용과 외부 변경 반영](shared-cache.md#설정-화면의-통계-조회)을 참고하세요.
+
 ### `history-handlers.ts`
 
 히스토리 파일 위치는 `~/.depssmuggler/history.json`입니다. 조회부터 변경 저장까지 파일별 큐에서 처리하고 JSON은 원자적으로 교체합니다. 추가는 최신순 100개를 유지하며 전체 저장은 명시적인 교체입니다. 손상 파일 조회는 로그와 빈 배열을 반환하지만 추가/삭제는 원본을 덮어쓰지 않고 실패합니다. 명시적인 전체 저장/전체 삭제로 복구할 수 있습니다. [히스토리 계약](download-history.md)을 참고하세요.

@@ -1,17 +1,28 @@
 import { DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons';
-import { Button, Card, Col, Form, Input, Popconfirm, Row, Space, Spin, Switch, Typography } from 'antd';
-import React from 'react';
-import type { CacheDetailItem } from './cache-stats-utils';
 import {
-  SETTINGS_CARD_BODY_PADDING,
-  SETTINGS_CARD_MARGIN,
-} from './settings-form-utils';
+  Alert,
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  Popconfirm,
+  Row,
+  Space,
+  Spin,
+  Switch,
+  Typography,
+} from 'antd';
+import React from 'react';
+import { SETTINGS_CARD_BODY_PADDING, SETTINGS_CARD_MARGIN } from './settings-form-utils';
+import type { CacheDetailItem } from './cache-stats-utils';
 
 const { Text } = Typography;
 
 interface CacheSettingsSectionProps {
   cacheCount: number;
   cacheDetails: CacheDetailItem[];
+  cacheError: string;
   cacheSize: number;
   clearingCache: boolean;
   formatBytes: (bytes: number) => string;
@@ -24,6 +35,7 @@ interface CacheSettingsSectionProps {
 export const CacheSettingsSection: React.FC<CacheSettingsSectionProps> = ({
   cacheCount,
   cacheDetails,
+  cacheError,
   cacheSize,
   clearingCache,
   formatBytes,
@@ -51,11 +63,7 @@ export const CacheSettingsSection: React.FC<CacheSettingsSectionProps> = ({
           </Form.Item>
         </Col>
         <Col span={16}>
-          <Form.Item
-            name="cachePath"
-            label="패키지 캐시 경로"
-            style={{ marginBottom: 8 }}
-          >
+          <Form.Item name="cachePath" label="패키지 캐시 경로" style={{ marginBottom: 8 }}>
             <Space.Compact style={{ width: '100%' }}>
               <Input size="small" placeholder="~/.depssmuggler/cache" />
               <Button
@@ -91,8 +99,10 @@ export const CacheSettingsSection: React.FC<CacheSettingsSectionProps> = ({
               <Space size={4}>
                 <Button
                   size="small"
+                  aria-label="캐시 통계 새로고침"
                   onClick={() => void onRefreshCacheInfo()}
                   loading={loadingCache}
+                  disabled={clearingCache}
                 >
                   새로고침
                 </Button>
@@ -110,13 +120,15 @@ export const CacheSettingsSection: React.FC<CacheSettingsSectionProps> = ({
                     aria-label="패키지 캐시 삭제"
                     icon={<DeleteOutlined />}
                     loading={clearingCache}
-                    disabled={cacheSize === 0 && cacheCount === 0}
+                    disabled={loadingCache || (cacheSize === 0 && cacheCount === 0)}
                   />
                 </Popconfirm>
               </Space>
             </Col>
           </Row>
         </Spin>
+        {loadingCache ? <Text role="status">캐시 통계를 갱신하고 있습니다.</Text> : null}
+        {cacheError ? <Alert type="warning" showIcon title={cacheError} /> : null}
         <Row gutter={[8, 8]} style={{ marginTop: 12 }}>
           {cacheDetails.map((detail) => (
             <Col key={detail.key} xs={24} sm={12} md={6}>
@@ -147,10 +159,9 @@ export const CacheSettingsSection: React.FC<CacheSettingsSectionProps> = ({
           ))}
         </Row>
         <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
-          이 영역은 패키지 메타데이터 캐시만 집계합니다. 크기는 디스크 기준이며, 캐시 항목
-          수에는 메모리 기반 npm 캐시도 포함될 수 있습니다. Python 버전 목록은
-          localStorage, CUDA/Java/Node 버전 파일은 같은 cache 루트의 별도
-          `*-versions.json` 파일로 관리됩니다.
+          이 영역은 패키지 메타데이터 캐시만 집계합니다. 크기는 디스크 기준이며, 캐시 항목 수에는
+          메모리 기반 npm 캐시도 포함될 수 있습니다. Python 버전 목록은 localStorage, CUDA/Java/Node
+          버전 파일은 같은 cache 루트의 별도 `*-versions.json` 파일로 관리됩니다.
         </Text>
       </div>
     </Card>

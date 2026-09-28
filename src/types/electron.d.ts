@@ -132,7 +132,7 @@ export interface ConfigAPI {
 
 export interface CacheAPI {
   getSize: () => Promise<number>;
-  getStats: () => Promise<{
+  getStats: (options?: { forceRefresh?: boolean }) => Promise<{
     scope: string;
     excludes: string[];
     totalSize: number;

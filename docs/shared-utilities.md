@@ -40,6 +40,7 @@ src/core/shared/
 │
 │   # 공유 캐시 모듈
 ├── cache-utils.ts                # 캐시 공통 유틸리티
+├── cache-stats.ts                # 비동기 디스크 통계, 동시 집계 공유와 무효화
 ├── cache-manager.ts              # cache/cache-store.ts 호환용 재내보내기
 ├── cache/
 │   ├── cache-store.ts            # 범용 메모리/디스크 캐시와 요청 합치기

@@ -7,12 +7,17 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import * as os from 'os';
+import * as path from 'path';
 import axios from 'axios';
-import logger from '../../utils/logger';
 import { createMemoryCache } from './cache/cache-store';
+import { createCacheStatsReader, getDirectoryStats } from './cache-stats';
 import { DEFAULT_MEMORY_TTL_MS, DEFAULT_DISK_TTL_MS } from './cache-utils';
+import logger from '../../utils/logger';
+
+const diskStatsReader = createCacheStatsReader((directory) =>
+  getDirectoryStats(directory, (name) => name.endsWith('.json'))
+);
 
 /**
  * PyPI 패키지 메타데이터 (JSON API 응답)
@@ -130,6 +135,8 @@ function writeDiskCache(cachePath: string, entry: DiskCacheEntry): void {
     fs.writeFileSync(cachePath, JSON.stringify(entry));
   } catch (error) {
     logger.debug('디스크 캐시 저장 실패', { cachePath, error });
+  } finally {
+    diskStatsReader.invalidate();
   }
 }
 
@@ -315,6 +322,8 @@ export function clearDiskCache(cacheDir: string = getDefaultCacheDir()): void {
     }
   } catch (error) {
     logger.error('PyPI 디스크 캐시 초기화 실패', { cacheDir, error });
+  } finally {
+    diskStatsReader.invalidate();
   }
 }
 
@@ -333,6 +342,15 @@ export interface PipCacheStats {
   memoryEntries: number;
   diskSize: number;
   diskEntries: number;
+}
+
+/** Cached asynchronous statistics for the desktop UI; memory counts stay live. */
+export async function getCacheStatsAsync(
+  cacheDir: string = getDefaultCacheDir(),
+  forceRefresh = false
+): Promise<PipCacheStats> {
+  const disk = await diskStatsReader.get(cacheDir, forceRefresh);
+  return { memoryEntries: memCacheManager.size, diskSize: disk.size, diskEntries: disk.fileCount };
 }
 
 export function getCacheStats(cacheDir: string = getDefaultCacheDir()): PipCacheStats {
@@ -407,6 +425,8 @@ export function pruneExpiredCache(cacheDir: string = getDefaultCacheDir()): numb
     }
   } catch (error) {
     logger.debug('만료된 캐시 정리 실패', { error });
+  } finally {
+    diskStatsReader.invalidate();
   }
 
   if (pruned > 0) {

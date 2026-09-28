@@ -10,14 +10,20 @@ import * as path from 'path';
 import axios, { AxiosResponse } from 'axios';
 import * as fzstd from 'fzstd';
 import { createMemoryCache } from './cache/cache-store';
+import { createCacheStatsReader, isMissingCachePath } from './cache-stats';
 import { CONDA_STANDARD_ORIGIN, getCondaRepositoryBase } from './conda-channel';
 import { RepoData } from './conda-types';
 import logger from '../../utils/logger';
 
+const diskStatsReader = createCacheStatsReader(scanCacheStats);
+
 /** DepsSmuggler용 기본 TTL: 24시간 (폐쇄망 전달 목적이므로 길게 설정) */
 const DEFAULT_MAX_AGE = 86400; // 24시간
 const REQUEST_DEDUPE_TTL_MS = 1000;
-const repodataRequestCache = createMemoryCache<CacheResult>('Conda repodata request', REQUEST_DEDUPE_TTL_MS);
+const repodataRequestCache = createMemoryCache<CacheResult>(
+  'Conda repodata request',
+  REQUEST_DEDUPE_TTL_MS
+);
 
 /**
  * 캐시 메타데이터
@@ -63,7 +69,11 @@ function getDefaultCacheDir(): string {
 /**
  * 채널/subdir에서 캐시 파일 경로 생성
  */
-function getCachePaths(cacheDir: string, channel: string, subdir: string): {
+function getCachePaths(
+  cacheDir: string,
+  channel: string,
+  subdir: string
+): {
   dataPath: string;
   metaPath: string;
 } {
@@ -112,6 +122,8 @@ function writeCacheMeta(metaPath: string, meta: RepodataCacheMeta): void {
     fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
   } catch (error) {
     logger.warn('캐시 메타데이터 저장 실패', { metaPath, error });
+  } finally {
+    diskStatsReader.invalidate();
   }
 }
 
@@ -142,6 +154,8 @@ function writeCacheData(dataPath: string, data: RepoData): void {
     fs.writeFileSync(dataPath, JSON.stringify(data));
   } catch (error) {
     logger.warn('캐시 데이터 저장 실패', { dataPath, error });
+  } finally {
+    diskStatsReader.invalidate();
   }
 }
 
@@ -290,7 +304,9 @@ export async function fetchRepodata(
                 const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
                 const loadedMB = (loaded / 1024 / 1024).toFixed(1);
                 const totalMB = (total / 1024 / 1024).toFixed(1);
-                logger.info(`repodata 다운로드 중: ${channel}/${subdir} (${loadedMB}MB / ${totalMB}MB, ${percent}%, ${elapsed}초)`);
+                logger.info(
+                  `repodata 다운로드 중: ${channel}/${subdir} (${loadedMB}MB / ${totalMB}MB, ${percent}%, ${elapsed}초)`
+                );
               }
             }
           },
@@ -413,6 +429,52 @@ export interface CacheStats {
   }>;
 }
 
+async function scanCacheStats(cacheDir: string): Promise<CacheStats> {
+  const stats: CacheStats = { totalSize: 0, channelCount: 0, entries: [] };
+  try {
+    const channels = await fs.promises.readdir(cacheDir, { withFileTypes: true });
+    stats.channelCount = channels.length;
+    for (const channel of channels) {
+      if (!channel.isDirectory()) continue;
+      let subdirs: fs.Dirent[];
+      try {
+        subdirs = await fs.promises.readdir(path.join(cacheDir, channel.name), {
+          withFileTypes: true,
+        });
+      } catch (error) {
+        if (isMissingCachePath(error)) continue;
+        throw error;
+      }
+      for (const subdir of subdirs) {
+        if (!subdir.isDirectory()) continue;
+        const { dataPath, metaPath } = getCachePaths(cacheDir, channel.name, subdir.name);
+        try {
+          const meta = JSON.parse(
+            await fs.promises.readFile(metaPath, 'utf-8')
+          ) as RepodataCacheMeta;
+          if (!meta) continue;
+          const dataSize = (await fs.promises.stat(dataPath)).size;
+          stats.totalSize += dataSize;
+          stats.entries.push({ channel: channel.name, subdir: subdir.name, meta, dataSize });
+        } catch (error) {
+          if (!isMissingCachePath(error) && !(error instanceof SyntaxError)) throw error;
+        }
+      }
+    }
+  } catch (error) {
+    if (!isMissingCachePath(error)) throw error;
+  }
+  return stats;
+}
+
+/** Read small metadata files and stat repodata without reading its payload. */
+export function getCacheStatsAsync(
+  cacheDir: string = getDefaultCacheDir(),
+  forceRefresh = false
+): Promise<CacheStats> {
+  return diskStatsReader.get(cacheDir, forceRefresh);
+}
+
 export function getCacheStats(cacheDir: string = getDefaultCacheDir()): CacheStats {
   const stats: CacheStats = {
     totalSize: 0,
@@ -487,6 +549,8 @@ export function clearCache(
     }
   } catch (error) {
     logger.error('캐시 삭제 실패', { cacheDir, channel, subdir, error });
+  } finally {
+    diskStatsReader.invalidate();
   }
 }
 
