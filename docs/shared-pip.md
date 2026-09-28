@@ -457,6 +457,7 @@ PipResolver와 PipDownloader가 공유하여 중복 API 호출을 방지합니�
 | `clearDiskCache` | cacheDir? | void | 디스크 캐시 삭제 |
 | `clearAllCache` | cacheDir? | void | 모든 캐시 삭제 |
 | `getCacheStats` | cacheDir? | PipCacheStats | 캐시 통계 조회 |
+| `getCacheStatsAsync` | cacheDir?, forceRefresh? | Promise<PipCacheStats> | 데스크톱용 비동기 디스크 통계·결과 재사용 |
 | `pruneExpiredCache` | cacheDir? | number | 만료 캐시 정리 |
 
 ### PipCacheOptions

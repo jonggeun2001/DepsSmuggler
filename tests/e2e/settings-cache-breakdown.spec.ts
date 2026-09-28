@@ -1,6 +1,58 @@
 import { expect, test } from '@playwright/test';
 import { setupMockElectronApp } from './fixtures/mock-electron-app';
 
+test('수동 새로고침은 재집계를 요청하고 실패 시 이전 통계와 재시도를 표시한다', async ({
+  page,
+}) => {
+  await setupMockElectronApp(page, { cacheStats: { totalSize: 4096, entryCount: 3 } });
+  const requests: Array<{ forceRefresh?: boolean }> = [];
+  await page.exposeFunction('trackCacheStats', (options: { forceRefresh?: boolean }) => {
+    requests.push(options);
+  });
+  await page.goto('/#/');
+  await page.evaluate(() => {
+    const cache = window.electronAPI?.cache;
+    if (!cache) throw new Error('Cache API missing');
+    const original = cache.getStats;
+    cache.getStats = async (options) => {
+      await (
+        window as unknown as {
+          trackCacheStats: (options: unknown) => Promise<void>;
+        }
+      ).trackCacheStats(options);
+      if (options?.forceRefresh) throw new Error('statistics unavailable');
+      return original(options);
+    };
+    window.location.hash = '/settings';
+  });
+  const card = page.locator('.ant-card').filter({ has: page.getByText('패키지 캐시 설정') });
+  await expect(card.getByText('4 KB', { exact: true })).toBeVisible();
+  expect(requests.length).toBeGreaterThan(0);
+  expect(requests.every((request) => request.forceRefresh === false)).toBe(true);
+  await card.getByRole('button', { name: '캐시 통계 새로고침', exact: true }).click();
+  await expect(
+    card.getByText('캐시 정보를 갱신하지 못했습니다. 새로고침으로 다시 시도하세요.')
+  ).toBeVisible();
+  await expect(card.getByText('4 KB', { exact: true })).toBeVisible();
+  expect(requests.at(-1)?.forceRefresh).toBe(true);
+  await page.evaluate(() => {
+    const cache = window.electronAPI?.cache;
+    if (!cache) throw new Error('Cache API missing');
+    cache.getStats = async () => ({
+      scope: 'package-metadata',
+      excludes: [],
+      totalSize: 8192,
+      entryCount: 9,
+      details: { pip: {}, npm: {}, maven: {}, conda: {} },
+    });
+  });
+  await card.getByRole('button', { name: '캐시 통계 새로고침', exact: true }).click();
+  await expect(card.getByText('8 KB', { exact: true })).toBeVisible();
+  await expect(
+    card.getByText('캐시 정보를 갱신하지 못했습니다. 새로고침으로 다시 시도하세요.')
+  ).toHaveCount(0);
+});
+
 test('설정 화면이 캐시 타입별 상세 통계와 삭제 후 갱신을 보여준다', async ({ page }) => {
   await setupMockElectronApp(page, {
     cacheStats: {

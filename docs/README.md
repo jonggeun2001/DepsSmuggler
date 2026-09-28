@@ -40,6 +40,7 @@
 | [공유 타입](shared-types.md) | 기본 타입, 다운로드·의존성·패키지별 계약 |
 | [HTTP](shared-http.md) | HTTP client, 파일 다운로드, 재시도·진행률 |
 | [캐시](shared-cache.md) | 메타데이터·아티팩트·요청 세션 캐시, 만료·설정 |
+| [설정 캐시 통계 성능](settings-cache-performance.md) | 비동기 집계·통계 재사용, 성능 측정과 재현 |
 | [의존성](shared-dependency.md) | 공통 resolver, artifact 식별자·병합, 결과 |
 | [파일과 경로](shared-file-path.md) | 파일명·경로·다운로드 디렉터리 관리 |
 | [pip](shared-pip.md) | 태그·wheel·후보·버전·Simple API·별도 backtracking 도구 |

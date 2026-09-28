@@ -11,6 +11,7 @@
 ```
 src/core/shared/
 ├── cache-utils.ts     # 캐시 공통 유틸리티
+├── cache-stats.ts     # 비동기 디스크 집계와 통계 재사용
 ├── cache-manager.ts   # compatibility shim
 ├── cache/
 │   ├── cache-store.ts     # 범용 CacheStore
@@ -299,6 +300,18 @@ Maven 메모리 캐시와 중복 요청 관리는 `CacheStore<PomCacheEntry>` �
 ---
 
 캐시 경로를 별도로 설정한 경우 위 기본 경로와 달라집니다. pip/Maven/Conda 메타데이터 함수의 `cacheDir` 옵션과 Simple API 클라이언트의 `configManager.getCacheDir()` 적용 범위는 각 상세 문서를 참고하세요.
+
+## 설정 화면의 통계 조회
+
+`cache:*` IPC는 pip·Maven·Conda의 비동기 통계 API를 사용합니다. `cache-stats.ts`는 디렉터리별 결과와 진행 중 요청을 메모리에 보관합니다. 변경 없는 재진입과 동시 요청은 같은 디스크 집계를 재사용하며, npm 및 pip·Maven의 메모리 항목 수는 조회할 때 갱신합니다.
+
+최초 pip·Maven 집계는 `fs.promises.opendir/stat`으로 순회하여 파일마다 이벤트 루프에 제어를 돌려줍니다. Conda는 비동기로 작은 메타데이터와 repodata 크기만 확인하며 repodata 본문을 읽지 않습니다. 비동기 집계는 심볼릭 링크를 따라가지 않습니다. 없는 경로와 집계 중 삭제된 파일은 건너뛰며 권한 오류 등은 호출자에게 전달합니다. 실패한 집계는 재사용하지 않습니다.
+
+각 패키지 캐시의 파일 저장·삭제·만료 정리는 통계 결과를 무효화합니다. 비동기 Maven 변경은 시작과 종료 시 모두 무효화합니다. 집계 중 변경이 발생하면 진행 중 요청을 유지한 채 다시 집계하여 이전 결과를 저장하지 않습니다. 기존 동기 통계 API와 CLI 계약은 유지합니다.
+
+설정 화면의 **새로고침**은 `cache.getStats({ forceRefresh: true })`로 재집계합니다. 외부 CLI나 다른 프로세스에서 바꾼 파일은 자동 감시하지 않으므로 새로고침 또는 앱 재시작으로 반영합니다. 조회 실패 시 화면의 이전 통계와 재시도 안내를 유지하고, 삭제 후에는 재조회한 통계를 표시합니다. 이 변경은 통계 조회에 한정되며 기존 동기 파일 저장·삭제 작업 전체를 비동기로 바꾸지는 않습니다.
+
+재현 명령과 동일 환경의 전후 측정은 [설정 캐시 통계 성능](settings-cache-performance.md)을 참고하세요.
 
 ## 관련 문서
 

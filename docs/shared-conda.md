@@ -153,6 +153,7 @@ onDownloadProgress: (progressEvent) => {
 |--------|----------|--------|------|
 | `fetchRepodata` | channel, subdir, options? | Promise<CacheResult \| null> | repodata 가져오기 (디스크 캐시 지원) |
 | `getCacheStats` | cacheDir? | CacheStats | 캐시 통계 조회 |
+| `getCacheStatsAsync` | cacheDir?, forceRefresh? | Promise<CacheStats> | 데스크톱용 비동기 메타데이터 집계·결과 재사용 |
 | `clearCache` | cacheDir?, channel?, subdir? | void | 캐시 삭제 |
 | `pruneExpiredCache` | cacheDir?, maxAgeMultiplier? | number | 만료 캐시 정리 |
 

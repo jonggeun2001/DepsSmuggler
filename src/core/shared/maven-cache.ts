@@ -10,8 +10,11 @@ import axios, { AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
 import * as fs from 'fs-extra';
 import { createMemoryCache } from './cache/cache-store';
+import { createCacheStatsReader, getDirectoryStats } from './cache-stats';
 import { PomProject, PomCacheEntry, MavenCoordinate, coordinateToString } from './maven-types';
 import logger from '../../utils/logger';
+
+const diskStatsReader = createCacheStatsReader(getDirectoryStats);
 
 /** 기본 메모리 TTL: 5분 */
 const DEFAULT_MEMORY_TTL = 5 * 60 * 1000;
@@ -167,6 +170,7 @@ async function writeToDiskCache(
   entry: PomCacheEntry,
   cacheDir: string = DEFAULT_CACHE_DIR
 ): Promise<void> {
+  diskStatsReader.invalidate();
   try {
     const { pomPath, metaPath } = getDiskCachePath(coordinate, cacheDir);
 
@@ -186,6 +190,8 @@ async function writeToDiskCache(
       coordinate: coordinateToString(coordinate),
       error,
     });
+  } finally {
+    diskStatsReader.invalidate();
   }
 }
 
@@ -395,10 +401,7 @@ export function prefetchPomsParallel(
   coordinates: MavenCoordinate[],
   options: MavenCacheOptions & { batchSize?: number } = {}
 ): void {
-  const {
-    batchSize = DEFAULT_BATCH_SIZE,
-    repoUrl = DEFAULT_REPO_URL,
-  } = options;
+  const { batchSize = DEFAULT_BATCH_SIZE, repoUrl = DEFAULT_REPO_URL } = options;
 
   // 이미 메모리 캐시된 것 제외. 진행 중인 요청은 CacheStore가 dedupe한다.
   const toFetch = coordinates.filter((coord) => {
@@ -431,6 +434,7 @@ export function clearMemoryCache(): void {
  * 디스크 캐시 초기화
  */
 export async function clearDiskCache(cacheDir: string = DEFAULT_CACHE_DIR): Promise<void> {
+  diskStatsReader.invalidate();
   try {
     if (await fs.pathExists(cacheDir)) {
       await fs.remove(cacheDir);
@@ -439,6 +443,8 @@ export async function clearDiskCache(cacheDir: string = DEFAULT_CACHE_DIR): Prom
   } catch (error) {
     logger.error('Maven 디스크 캐시 초기화 실패', { cacheDir, error });
     throw error;
+  } finally {
+    diskStatsReader.invalidate();
   }
 }
 
@@ -504,6 +510,23 @@ export function getMavenCacheStats(): MavenCacheStats {
     oldestEntry: oldest,
     newestEntry: newest,
     diskSize: diskStats.size,
+  };
+}
+
+/** Cached disk totals with current memory entries and pending requests. */
+export async function getMavenCacheStatsAsync(
+  cacheDir: string = DEFAULT_CACHE_DIR,
+  forceRefresh = false
+): Promise<MavenCacheStats> {
+  const disk = await diskStatsReader.get(cacheDir, forceRefresh);
+  const memory = memoryStore.getStats();
+  return {
+    memoryEntries: memory.memoryEntries,
+    pendingRequests: memory.pendingRequests,
+    oldestEntry: memory.oldestEntry,
+    newestEntry: memory.newestEntry,
+    diskEntries: disk.fileCount,
+    diskSize: disk.size,
   };
 }
 

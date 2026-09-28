@@ -21,7 +21,7 @@ vi.mock('./utils/logger', () => ({
   createScopedLogger: () => ({ info: vi.fn(), debug: vi.fn(), error: vi.fn() }),
 }));
 vi.mock('../src/core/shared/pip-cache', () => ({
-  getCacheStats: mocks.pipStats,
+  getCacheStatsAsync: mocks.pipStats,
   clearAllCache: mocks.clearPip,
 }));
 vi.mock('../src/core/shared/npm-cache', () => ({
@@ -29,12 +29,12 @@ vi.mock('../src/core/shared/npm-cache', () => ({
   clearNpmCache: mocks.clearNpm,
 }));
 vi.mock('../src/core/shared/maven-cache', () => ({
-  getMavenCacheStats: mocks.mavenStats,
+  getMavenCacheStatsAsync: mocks.mavenStats,
   clearMemoryCache: mocks.clearMavenMemory,
   clearDiskCache: mocks.clearMavenDisk,
 }));
 vi.mock('../src/core/shared/conda-cache', () => ({
-  getCacheStats: mocks.condaStats,
+  getCacheStatsAsync: mocks.condaStats,
   clearCache: mocks.clearConda,
 }));
 vi.mock('../src/core', () => ({
@@ -83,6 +83,17 @@ describe('cache IPC handlers', () => {
     mocks.mavenStats.mockReturnValue({});
     mocks.condaStats.mockResolvedValue({});
     await expect(invoke('cache:stats')).resolves.toMatchObject({ totalSize: 0, entryCount: 0 });
+  });
+
+  it('reuses disk snapshots normally and forwards explicit refresh to every disk cache', async () => {
+    await invoke('cache:stats');
+    for (const stats of [mocks.pipStats, mocks.mavenStats, mocks.condaStats]) {
+      expect(stats).toHaveBeenLastCalledWith(undefined, false);
+    }
+    await invoke('cache:stats', { forceRefresh: true });
+    for (const stats of [mocks.pipStats, mocks.mavenStats, mocks.condaStats]) {
+      expect(stats).toHaveBeenLastCalledWith(undefined, true);
+    }
   });
 
   it.each(['cache:stats', 'cache:get-size'])(
