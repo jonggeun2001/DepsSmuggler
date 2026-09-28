@@ -1,11 +1,11 @@
-import { BranchesOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons';
-import { Button, Collapse, List, Progress, Space, Table, Tag, Typography } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
+import { Button, Progress, Space, Table, Tag, Typography } from 'antd';
 import { useMemo } from 'react';
+import { DownloadDependencyGroups } from './DownloadDependencyGroups';
 import { statusColors, statusIcons, statusLabels } from '../presentation';
 import { formatBytes, groupDownloadItems } from '../utils';
 import type { DownloadStoreItem, DownloadStoreStatus } from '../../../stores/download-store';
 
-const { Panel } = Collapse;
 const { Text } = Typography;
 
 interface DownloadItemsTableProps {
@@ -130,135 +130,5 @@ export function DownloadItemsTable({
     );
   }
 
-  return (
-    <Collapse
-      bordered={false}
-      expandIcon={({ isActive }) => (
-        <RightOutlined rotate={isActive ? 90 : 0} style={{ fontSize: 12 }} />
-      )}
-      style={{ background: 'transparent' }}
-      defaultActiveKey={groups.map(({ parent }) => parent.id)}
-    >
-      {groups.map(({ parent: pkg, dependencies: deps, status: groupStatus }) => {
-        return (
-          <Panel
-            key={pkg.id}
-            header={
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <Space>
-                    {statusIcons[pkg.status]}
-                    <Text strong>{pkg.name}</Text>
-                    <Text type="secondary">{pkg.version}</Text>
-                    {pkg.type && <Tag>{pkg.type}</Tag>}
-                    {deps.length > 0 && (
-                      <Tag icon={<BranchesOutlined />} color="blue">
-                        +{deps.length} 의존성
-                      </Tag>
-                    )}
-                  </Space>
-                  {pkg.filename && (
-                    <Text type="secondary" style={{ fontSize: 11, marginLeft: 24 }}>
-                      {pkg.filename}
-                    </Text>
-                  )}
-                </div>
-                <Space style={{ marginRight: 24 }}>
-                  {groupStatus.hasFailures && (
-                    <Tag color="error">{groupStatus.failed} 실패</Tag>
-                  )}
-                  <Tag color={groupStatus.isAllCompleted ? 'success' : 'processing'}>
-                    {groupStatus.completed}/{groupStatus.total} 완료
-                  </Tag>
-                  <Text type="secondary" style={{ minWidth: 70, textAlign: 'right' }}>
-                    {formatBytes(pkg.totalBytes)}
-                  </Text>
-                  <Progress
-                    percent={Math.round(pkg.progress)}
-                    size="small"
-                    style={{ width: 100, marginBottom: 0 }}
-                    status={
-                      pkg.status === 'failed'
-                        ? 'exception'
-                        : pkg.status === 'completed'
-                        ? 'success'
-                        : 'active'
-                    }
-                  />
-                </Space>
-              </div>
-            }
-          >
-            {deps.length > 0 ? (
-              <List
-                size="small"
-                dataSource={deps}
-                renderItem={(dep) => (
-                  <List.Item
-                    style={{ padding: '8px 12px' }}
-                    extra={
-                      <Space>
-                        <Text type="secondary" style={{ minWidth: 70, textAlign: 'right' }}>
-                          {formatBytes(dep.totalBytes)}
-                        </Text>
-                        <Progress
-                          percent={Math.round(dep.progress)}
-                          size="small"
-                          style={{ width: 100, marginBottom: 0 }}
-                          status={
-                            dep.status === 'failed'
-                              ? 'exception'
-                              : dep.status === 'completed'
-                              ? 'success'
-                              : 'active'
-                          }
-                        />
-                        {dep.status === 'failed' && (
-                          <Button
-                            type="link"
-                            size="small"
-                            icon={<ReloadOutlined />}
-                            onClick={() => onRetry(dep)}
-                          >
-                            재시도
-                          </Button>
-                        )}
-                      </Space>
-                    }
-                  >
-                    <div>
-                      <Space>
-                        {statusIcons[dep.status]}
-                        <Text>{dep.name}</Text>
-                        <Text type="secondary">{dep.version}</Text>
-                        <Tag color={statusColors[dep.status]} style={{ marginLeft: 4 }}>
-                          {statusLabels[dep.status]}
-                        </Tag>
-                      </Space>
-                      {dep.filename && (
-                        <div style={{ marginLeft: 24, marginTop: 2 }}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>
-                            {dep.filename}
-                          </Text>
-                        </div>
-                      )}
-                      {dep.status === 'failed' && dep.error && (
-                        <div style={{ marginLeft: 24, marginTop: 4 }}>
-                          <Text type="danger" style={{ fontSize: 12 }}>
-                            {dep.error}
-                          </Text>
-                        </div>
-                      )}
-                    </div>
-                  </List.Item>
-                )}
-              />
-            ) : (
-              <Text type="secondary">의존성 없음</Text>
-            )}
-          </Panel>
-        );
-      })}
-    </Collapse>
-  );
+  return <DownloadDependencyGroups groups={groups} onRetry={onRetry} />;
 }

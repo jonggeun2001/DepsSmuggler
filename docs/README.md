@@ -13,6 +13,7 @@
 | [아키텍처 개요](architecture-overview.md) | 모듈, 데이터 흐름, 프로세스 경계 |
 | [Electron / Renderer](electron-renderer.md) | 화면, 상태, renderer data client, 설정·업데이트 |
 | [의존성 트리 표시와 성능](dependency-tree-performance.md) | 공유 관계·참조 노드·단계적 표시, 이미지 저장 범위와 재현 |
+| [다운로드 의존성·로그 표시](download-list-performance.md) | 그룹/하위 목록·전체 로그 페이지화, 상태 보존과 브라우저 비교 |
 | [IPC 핸들러](ipc-handlers.md) | preload API와 main 채널·서비스 연결 |
 | [다운로드 히스토리](download-history.md) | 기록 모델·저장·재다운로드·전달 설정 복원 |
 | [코딩 규칙](coding-conventions.md) | 명명, 모듈 경계, 타입·로그·오류 처리 |
