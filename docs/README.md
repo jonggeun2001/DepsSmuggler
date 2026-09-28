@@ -57,6 +57,7 @@
 | [Maven](shared-maven.md) | POM·BOM·좌표·classifier·중복 처리 |
 | [npm](shared-npm.md) | packument·버전·integrity·캐시 |
 | [기타 공통 기능](shared-misc.md) | 설정·버전 사전 로드·다운로더 라우팅·보조 기능 |
+| [Python/CUDA 버전 조회 공유](version-request-sharing.md) | 시작/조기 IPC 요청 공유, 완료·fallback·TTL과 재현 |
 
 ## 알고리즘 배경과 현재 구현의 대응
 

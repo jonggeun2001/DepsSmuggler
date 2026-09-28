@@ -205,6 +205,8 @@ GUI OS `os:download:start`는 `concurrency`만큼 제한된 실행 슬롯을 사
 
 Java/Node 런타임 버전 목록 IPC와 해당 런타임 선택 단계는 현재 없습니다. Python/CUDA는 설정 화면에서 위 채널을 사용하고, 패키지 자체의 버전 목록은 `search:versions`로 조회합니다.
 
+시작 조회와 조기 버전 IPC는 공통 fetcher의 진행 중 Promise를 공유합니다. handler의 세션 캐시는 기존대로 fallback 목록도 보관하므로, fetcher 직접 재조회가 회복되어도 IPC 목록을 자동 교체하지 않습니다. preloader 상태 집계와 cache-status 의미도 유지합니다. [동시 요청·완료/실패 계약](version-request-sharing.md)을 참고하세요.
+
 ### `updater.ts`
 
 | 채널 | 설명 |
