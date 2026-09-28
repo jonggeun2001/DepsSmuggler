@@ -81,7 +81,7 @@ const estimatedSizePerPackage: Record<PackageType, number> = {
 
 const CartPage: React.FC = () => {
   const navigate = useNavigate();
-  const { items, removeItem, clearCart, addItem, hasItem } = useCartStore();
+  const { items, removeItem, clearCart, addItems } = useCartStore();
   const settings = useSettingsStore();
   const resetDownload = useDownloadStore((state) => state.reset);
 
@@ -409,18 +409,14 @@ const CartPage: React.FC = () => {
       })
     );
 
-    let addedCount = 0;
-    resolvedPackages.forEach((pkg) => {
-      if (!hasItem(type, pkg.name, pkg.version, pkg.metadata)) {
-        addItem({
-          type,
-          name: pkg.name,
-          version: pkg.version,
-          metadata: pkg.metadata,
-        });
-        addedCount++;
-      }
-    });
+    const addedCount = addItems(
+      resolvedPackages.map((pkg) => ({
+        type,
+        name: pkg.name,
+        version: pkg.version,
+        metadata: pkg.metadata,
+      }))
+    );
 
     if (addedCount > 0) {
       message.success(`${addedCount}개 패키지가 추가되었습니다`);
