@@ -711,3 +711,9 @@ bash scripts/verify-worktree.sh src/core/downloaders/npm-integrity-streaming.tes
 `cart-store.test.ts`와 `cart-bulk-add.test.ts`는 실제 store에서 2,000개 추가의 구독 알림·persist 1회, 빈/전부 중복 입력의 0회와 실제 추가 수를 검증합니다. Maven 기본 type/원문 문자열·JAR/POM, 이름 대소문자, 옵션을 동일성에 추가하지 않는 규칙, 기존 항목·입력 내 최초 항목 우선과 순서·ID·옵션 보존을 포함합니다.
 
 `cart-bulk-add.spec.ts`는 Chromium에서 파일 재입력, 일부 파일 파싱 실패, 이력 복원의 저장 횟수와 실제 신규 수 안내를 검사합니다. 기존 `cart-input-regression.spec.ts`, `history-email-restore.spec.ts`로 latest 실패 대체값·파싱 오류·JAR/POM·전달 설정 복원을 함께 확인합니다. 실제 production store/localStorage의 전후 측정과 mock 경계는 [장바구니 일괄 추가](cart-bulk-add.md)를 참고하세요.
+
+## npm 대기 큐 순서 회귀
+
+`npm-dependency-queue.test.ts`는 depth/parentPath/삽입 순서, 삽입·소비 교차, Unicode 경로, 초기화와 10,000개 비교 횟수를 검사합니다. `npm-queue-equivalence.test.ts`는 실제 공개 resolver에 기존 stable sort+shift 큐를 비교 기준으로 주입해 처리 순서·전체 결과·최종 버전·hoistedPath·충돌을 대조합니다. dev/optional/peer, preferDedupe, nested, 최대 깊이, 의도된 방문 키 중복 제거와 재사용을 포함합니다. `npm-resolver.test.ts`도 함께 실행합니다.
+
+네트워크/버전 service만 대체한 실제 resolver의 규모별 비교는 [npm 큐 순서와 성능](npm-queue-performance.md)의 스크립트로 재현합니다. 일반 프로젝트의 직접 의존성이 1만 개라고 가정하거나 시간 임계값으로 회귀를 판정하지 않습니다.

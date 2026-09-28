@@ -23,6 +23,7 @@ import {
 } from '../shared/npm-types';
 import { NpmTreeManager, TreeManagerOptions } from './npm-tree-manager';
 import { NpmVersionResolver } from './npm-version-resolver';
+import { NpmDependencyQueue } from './npm-dependency-queue';
 import { NPM_CONSTANTS } from '../constants/npm';
 import logger from '../../utils/logger';
 import type { ResolutionSession } from '../shared/internal/resolution-session';
@@ -88,7 +89,7 @@ export class NpmResolver {
   private treeManager: NpmTreeManager;
 
   // BFS 탐색용
-  private depsQueue: DepsQueueItem[] = [];
+  private depsQueue = new NpmDependencyQueue();
   private depsSeen: Set<string> = new Set();
 
   // 플랫폼 필터링용
@@ -116,7 +117,7 @@ export class NpmResolver {
   ): Promise<NpmResolutionResult> {
     // 상태 초기화
     this.treeManager.clear();
-    this.depsQueue = [];
+    this.depsQueue.clear();
     this.depsSeen.clear();
 
     const {
@@ -208,13 +209,7 @@ export class NpmResolver {
    */
   private async buildDeps(options: BuildDepsOptions): Promise<void> {
     while (this.depsQueue.length > 0) {
-      // 깊이 순, 알파벳 순 정렬
-      this.depsQueue.sort((a, b) => {
-        if (a.depth !== b.depth) return a.depth - b.depth;
-        return a.path.localeCompare(b.path);
-      });
-
-      const item = this.depsQueue.shift()!;
+      const item = this.depsQueue.pop()!;
       const cacheKey = `${item.name}@${item.spec}@${item.depth}`;
 
       // 이미 처리됨
