@@ -118,6 +118,16 @@ repodata 읽기·압축 해제·파싱·저장·이름 인덱싱은 Worker에서
 
 유효기간은 `max(서버 max-age, 86400초)`로 최소 24시간입니다. TTL 안에서는 디스크 또는 유효한 Worker 인덱스를 사용하고, 만료되면 기존 URL의 ETag/Last-Modified를 조건부 헤더로 보내 304 응답을 재사용합니다. `forceRefresh`는 TTL 조회와 조건부 요청을 생략합니다. `pruneExpiredCache()`의 기본 정리 기준은 저장된 `maxAge`의 10배입니다. 원본 HTTP는 메인의 axios로 수행하며 시작·완료·실패 로그를 메인의 기존 로거로 전달합니다. 전체 길이가 있으면 20%p 간격의 진행 로그도 남깁니다.
 
+### 이름 인덱스의 hit/miss와 호환 경로 (#187)
+
+이름 인덱스가 완성된 Worker에서 없는 이름은 즉시 빈 `packages`를 반환합니다. 이름을 소문자로 정규화하며, hit도 그 이름의 `.tar.bz2`/`.conda` 원시 후보만 반환합니다. 조회마다 원본 전체를 복사·열거하지 않습니다. 이 경로는 #185의 Worker 전환(PR #196)에서 반영되었고 #187은 그 계약을 별도 회귀 테스트로 고정합니다.
+
+`queryRepodata()`에 인덱스 없는 `RepoData`를 직접 넘기는 호환 경로는 입력을 그대로 반환합니다. processor/downloader가 이 입력을 전체 열거하는 fallback은 유지합니다. 운영 경로는 작은 `RepodataReference`를 사용하므로 이 fallback과 구분해야 합니다. Worker 인덱스가 퇴출되거나 만료·갱신되면 원본을 다시 읽고 함께 재생성하며, 오래된 miss 결과를 따로 영구 캐시하지 않습니다.
+
+대상 플랫폼에서 이름이 없는 경우 noarch 탐색을 계속합니다. 인덱스는 환경 필터 없이 원시 후보를 공유하며 resolver의 Python/CUDA/플랫폼·버전·build 조건과 정렬을 유지합니다. downloader의 메타데이터 fallback은 정확한 버전의 최고 build number를 선택합니다. downloader에 resolver의 환경 선택 규칙을 추가하지 않습니다.
+
+`conda-worker-index.test.ts`는 실제 Worker 메시지 처리 함수를 사용하되 스레드·캐시 I/O 경계를 모킹합니다. 100,000개 기본 포맷 + 다른 포맷 1개를 처음 인덱싱할 때 포맷별 전체 열거 각 1회, 이후 hit 20회/miss 20회는 원본 열거 **0회**인지 검사합니다. 별도 `conda-index-consumers.test.ts`는 실제 Worker·임시 디스크 캐시로 platform miss → noarch와 resolver/downloader의 서로 다른 선택 정책을 검증하며, 인덱스 없는 입력의 전체 열거도 따로 계수합니다. 재현 명령과 캐시 교체·종료 검증은 [테스트 문서](testing.md#conda-이름-인덱스-miss-회귀-187)를 참고하세요. 이 검증은 작업 횟수 계약이며 새 시간 벤치마크나 전체 앱 CPU 측정은 아닙니다.
+
 ### 주요 함수
 
 | 함수명 | 파라미터 | 반환값 | 설명 |

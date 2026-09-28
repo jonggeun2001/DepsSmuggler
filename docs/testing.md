@@ -662,3 +662,20 @@ bash scripts/verify-worktree.sh src/core/shared/metadata/worker-client.test.ts \
 ```
 
 heartbeat와 Worker를 포함한 프로세스 RSS·CPU의 전후 측정은 [재현 스크립트와 한계](metadata-worker-performance.md#재현과-측정)를 참고하세요. 단위 테스트의 통과를 패키징된 Electron 앱의 성능 측정으로 대신하지 않습니다.
+
+### Conda 이름 인덱스 miss 회귀 (#187)
+
+```bash
+bash scripts/verify-worktree.sh \
+  src/core/shared/metadata/conda-worker-index.test.ts \
+  src/core/shared/conda-index-consumers.test.ts \
+  src/core/shared/conda-cache.test.ts \
+  src/core/shared/metadata/conda-worker-race.test.ts \
+  src/core/resolver/conda-resolver-target.test.ts \
+  src/core/downloaders/conda.test.ts \
+  src/core/shared/conda-utils.test.ts
+```
+
+`conda-worker-index.test.ts`는 production Worker handler의 스레드·캐시 경계를 모킹하고 Proxy의 `ownKeys`로 원본 열거 횟수를 셉니다. 처음 포맷별 1회 인덱싱 후 20 hit/20 miss가 추가 열거를 하지 않는지, 디스크 버전 교체·forceRefresh·TTL 만료가 데이터와 인덱스를 함께 교체하는지 검사합니다. 시간 임계값으로 성능을 판정하지 않습니다.
+
+`conda-index-consumers.test.ts`는 실제 Worker에서 임시 디스크 데이터를 읽고 조회합니다. 같은 참조를 resolver와 downloader에 제공해 platform miss → noarch, resolver의 Python/CUDA/버전/build 조건과 downloader의 최고 build 선택 차이를 보존하는지 확인합니다. 별도 raw 입력은 인덱스 없이 그대로 반환되고 소비자의 전체 열거 fallback이 유지되는지 계수합니다. 외부 HTTP/API는 호출하지 않습니다. 기존 cache/race 테스트는 실제 디스크 교체·삭제와 Worker 종료 후 재조회 계약을 함께 검증합니다. [상세 조회 계약](shared-conda.md#이름-인덱스의-hitmiss와-호환-경로-187)을 참고하세요.

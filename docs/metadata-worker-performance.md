@@ -46,3 +46,7 @@ Conda의 `six` 후보 6개와 정렬 순서는 같고 Worker 응답은 2,225 byt
 `conda-cache.test.ts`, `conda-utils.test.ts`, `conda-resolver-target.test.ts`, `conda.test.ts`에서 실제 Worker와 바이트 fixture 또는 기존 선택 fixture를 사용합니다. `conda-worker-race.test.ts`는 실제 Worker의 파일 읽기를 SharedArrayBuffer로 멈춘 뒤 메인에서 삭제/교체하여 읽기 경쟁을 재현합니다. `worker-client.test.ts`는 작업 직렬화·유휴 종료·취소·Worker 실패·HTTP 전달 계약을 검사합니다. `os-metadata-parsers.test.ts`와 YUM 전달물 통합 테스트는 실제 Worker 변환 뒤 버전·엔티티 제한·provides·파일 정보를 확인합니다.
 
 컴파일된 앱은 `dist/src/core/shared/metadata/*-worker.js`를 사용하며 기존 `tsconfig.electron.json`/패키지 `dist/**/*` 포함 규칙이 적용됩니다. 소스 CLI/테스트만 기존 개발 의존성 ts-node를 사용합니다. 새로운 설치 단계나 사용자 설정·IPC 계약·디스크 캐시 스키마 변경은 없습니다.
+
+## 이름 조회 비용 회귀 (#187)
+
+Worker 전환에는 완성된 이름 인덱스의 miss를 빈 결과로 반환하는 변경도 포함됩니다. [이름 인덱스 계약](shared-conda.md#이름-인덱스의-hitmiss와-호환-경로-187)은 100,000개 기본 포맷과 다른 포맷 1개의 fixture로, 인덱싱 이후 hit/miss 20회씩의 원본 열거가 0회임을 고정합니다. 캐시 교체·강제 갱신·만료 시 인덱스와 데이터를 함께 바꾸고 과거의 miss도 새로 조회합니다. raw RepoData 호환 입력과 noarch 탐색, resolver 필터와 downloader 최고 build 선택은 별도로 검증합니다. 앞 절의 전체 로드 시간 측정과 이 작업 횟수 검증을 구분하세요.
