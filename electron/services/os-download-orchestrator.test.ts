@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   repository: vi.fn(),
   generateScripts: vi.fn(),
   osProgress: vi.fn(),
+  flushOSProgress: vi.fn(),
+  clearOSProgress: vi.fn(),
   resolveProgress: vi.fn(),
 }));
 vi.mock('fs-extra', () => ({
@@ -58,6 +60,8 @@ vi.mock('../../src/core/downloaders/os-shared/script-generator', () => ({
 vi.mock('./download-progress', () => ({
   createDownloadProgressEmitter: () => ({
     emitOSProgress: mocks.osProgress,
+    flushOSProgress: mocks.flushOSProgress,
+    clearOSProgress: mocks.clearOSProgress,
     emitOSResolveDependenciesProgress: mocks.resolveProgress,
   }),
 }));

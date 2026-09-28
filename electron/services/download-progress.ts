@@ -29,15 +29,13 @@ export interface ResolveProgressPayload {
 
 export interface DownloadProgressEmitter {
   emitDownloadStatus(payload: DownloadStatusPayload): void;
-  emitPackageProgress(
-    packageId: string,
-    payload: PackageProgressPayload,
-    force?: boolean
-  ): void;
+  emitPackageProgress(packageId: string, payload: PackageProgressPayload, force?: boolean): void;
   clearPackageProgress(packageId: string): void;
   clearAllPackageProgress(): void;
   emitAllComplete(payload: Record<string, unknown>): void;
-  emitOSProgress(progress: OSDownloadProgress): void;
+  emitOSProgress(progress: OSDownloadProgress, force?: boolean): void;
+  flushOSProgress(): void;
+  clearOSProgress(): void;
   emitOSResolveDependenciesProgress(payload: ResolveProgressPayload): void;
 }
 
@@ -46,6 +44,11 @@ export function createDownloadProgressEmitter(
   throttleMs = 1000
 ): DownloadProgressEmitter {
   const lastProgressTime = new Map<string, number>();
+  const osIntervalMs = 150;
+  let osLastTime = 0;
+  let osLast: OSDownloadProgress | undefined;
+  let osPending: OSDownloadProgress | undefined;
+  let osTimer: ReturnType<typeof setTimeout> | undefined;
   const send = (channel: string, payload: unknown): void => {
     try {
       const window = getMainWindow();
@@ -56,6 +59,37 @@ export function createDownloadProgressEmitter(
       log.warn(`진행 이벤트 전달 실패 (${channel}):`, error);
     }
   };
+
+  const clearOSTimer = () => {
+    if (osTimer !== undefined) clearTimeout(osTimer);
+    osTimer = undefined;
+  };
+  const sendOS = (progress: OSDownloadProgress) => {
+    clearOSTimer();
+    osPending = undefined;
+    osLastTime = Date.now();
+    osLast = progress;
+    send('os:download:progress', progress);
+  };
+  const flushOSProgress = () => {
+    clearOSTimer();
+    if (osPending) sendOS(osPending);
+  };
+  const isComplete = (progress: OSDownloadProgress) =>
+    progress.totalBytes > 0 && progress.bytesDownloaded >= progress.totalBytes;
+  const isOSBoundary = (progress: OSDownloadProgress) =>
+    !osLast ||
+    progress.phase !== osLast.phase ||
+    progress.currentPackage !== osLast.currentPackage ||
+    progress.currentIndex !== osLast.currentIndex ||
+    progress.totalPackages !== osLast.totalPackages ||
+    progress.completedPackages !== osLast.completedPackages ||
+    progress.activePackages !== osLast.activePackages ||
+    progress.packagingDetails?.message !== osLast.packagingDetails?.message ||
+    progress.bytesDownloaded < osLast.bytesDownloaded ||
+    (isComplete(progress) && !isComplete(osLast)) ||
+    ((progress.packagingDetails?.archiveProgress?.percentage ?? 0) >= 100 &&
+      (osLast.packagingDetails?.archiveProgress?.percentage ?? 0) < 100);
 
   return {
     emitDownloadStatus(payload) {
@@ -88,8 +122,26 @@ export function createDownloadProgressEmitter(
       send('download:all-complete', payload);
     },
 
-    emitOSProgress(progress) {
-      send('os:download:progress', progress);
+    emitOSProgress(progress, force = false) {
+      if (force || isOSBoundary(progress) || Date.now() - osLastTime >= osIntervalMs) {
+        sendOS(progress);
+        return;
+      }
+      // Retain the latest aggregate payload, including its focused package's bytes and speed.
+      osPending = progress;
+      if (osTimer === undefined) {
+        osTimer = setTimeout(flushOSProgress, osIntervalMs - (Date.now() - osLastTime));
+        osTimer.unref?.();
+      }
+    },
+
+    flushOSProgress,
+
+    clearOSProgress() {
+      clearOSTimer();
+      osPending = undefined;
+      osLast = undefined;
+      osLastTime = 0;
     },
 
     emitOSResolveDependenciesProgress(payload) {

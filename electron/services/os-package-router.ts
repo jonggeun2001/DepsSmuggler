@@ -126,6 +126,7 @@ export function createOSResolverForDistribution(params: {
   } = params;
 
   const onProgress = (message: string, current: number, total: number) => {
+    if (abortSignal?.aborted) return;
     progressEmitter.emitOSProgress({
       currentPackage: message,
       currentIndex: current,

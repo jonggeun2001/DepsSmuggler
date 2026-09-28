@@ -92,6 +92,7 @@ export function createOSDownloadOrchestrator(params: {
       let conflicts: Array<{ package: string; versions: OSPackageInfo[] }> = [];
 
       if (osDownloadAbortController) throw new Error('이미 OS 패키지 다운로드가 진행 중입니다.');
+      progressEmitter.clearOSProgress();
       log.info(`Starting OS package download: ${packages.length} packages to ${outputDir}`);
       osDownloadCancelled = false;
       const controller = new AbortController();
@@ -100,6 +101,7 @@ export function createOSDownloadOrchestrator(params: {
       const cancel = () => {
         osDownloadCancelled = true;
         controller.abort();
+        progressEmitter.clearOSProgress();
       };
       try {
         await fse.ensureDir(outputDir);
@@ -181,11 +183,16 @@ export function createOSDownloadOrchestrator(params: {
 
         const downloadStagingDir = await fse.mkdtemp(path.join(outputDir, '.depssmuggler-os-'));
         stagingDir = downloadStagingDir;
-        const onError = createOSDownloadErrorHandler(
+        const handleError = createOSDownloadErrorHandler(
           params.getMainWindow(),
           cancel,
           controller.signal
         );
+        const onError: typeof handleError = (error) => {
+          // Native errors remain immediate; show the latest progress before the queued dialog.
+          progressEmitter.flushOSProgress();
+          return handleError(error);
+        };
         const downloadedFiles = new Map<string, string>();
         const successfulPackages: OSPackageInfo[] = [];
         const failedPackages: OSDownloadFailure[] = [];
@@ -235,7 +242,8 @@ export function createOSDownloadOrchestrator(params: {
         }
 
         if (!osDownloadCancelled && successfulPackages.length > 0) {
-          const emitPackaging = (packagingDetails: PackagingDetails) =>
+          const emitPackaging = (packagingDetails: PackagingDetails) => {
+            if (controller.signal.aborted) return;
             progressEmitter.emitOSProgress({
               currentPackage: '결과 패키징',
               currentIndex: successfulPackages.length,
@@ -246,6 +254,7 @@ export function createOSDownloadOrchestrator(params: {
               phase: 'packaging',
               packagingDetails,
             });
+          };
           emitPackaging({ message: '파일 생성 준비 중...' });
 
           try {
@@ -352,7 +361,9 @@ export function createOSDownloadOrchestrator(params: {
           cancelled: osDownloadCancelled,
         });
       } finally {
+        if (!osDownloadCancelled) progressEmitter.flushOSProgress();
         controller.abort();
+        progressEmitter.clearOSProgress();
         try {
           if (stagingDir) await fse.remove(stagingDir);
         } finally {
@@ -365,6 +376,7 @@ export function createOSDownloadOrchestrator(params: {
     async cancelDownload() {
       osDownloadCancelled = true;
       osDownloadAbortController?.abort();
+      progressEmitter.clearOSProgress();
       return { success: true };
     },
 
