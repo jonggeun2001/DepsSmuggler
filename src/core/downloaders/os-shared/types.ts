@@ -205,6 +205,10 @@ export interface OSDownloadProgress {
   currentIndex: number;
   /** 전체 패키지 수 */
   totalPackages: number;
+  /** GUI 병렬 세션에서 성공/실패/건너뛰기로 처리가 끝난 수 */
+  completedPackages?: number;
+  /** GUI 병렬 세션에서 실행 중인 패키지 수 */
+  activePackages?: number;
   /** 다운로드된 바이트 */
   bytesDownloaded: number;
   /** 전체 바이트 */

@@ -33,6 +33,7 @@
 | [OS 패키지](os-package-downloader.md) | yum/apt/apk, 배포판·저장소·캐시·출력·검증 제한 |
 | [메타데이터 Worker](metadata-worker-performance.md) | Conda/YUM 파싱 분리·캐시 수명·응답성 및 전체 메모리 측정 |
 | [OS 스트리밍 성능](os-streaming-performance.md) | 파일 스트리밍·실패 정리, 메모리/이벤트 루프 측정과 재현 |
+| [GUI OS 다운로드 동시 실행](os-download-concurrency.md) | 설정 반영·오류 선택 직렬화·전체 작업 종료 후 정리·병렬 진행률 |
 | [Docker 아키텍처](docker-architecture.md) | 레지스트리, 인증·검색·매니페스트·레이어 처리 |
 
 ## 공유 모듈과 타입

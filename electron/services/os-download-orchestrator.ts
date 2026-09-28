@@ -1,20 +1,12 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
-import { createScopedLogger } from '../utils/logger';
-import type { PackagingDetails } from '../../src/types/packaging';
-import { OSArchivePackager } from '../../src/core/downloaders/os-shared/archive-packager';
-import { OSRepoPackager } from '../../src/core/downloaders/os-shared/repo-packager';
-import type {
-  OSArchitecture,
-  OSDistribution,
-  OSPackageInfo,
-  PackageDependency,
-} from '../../src/core/downloaders/os-shared/types';
 import { createDownloadProgressEmitter } from './download-progress';
+import { runOSDownloadPool } from './os-download-pool';
 import {
   buildOSDownloadStartResult,
   cleanupGeneratedOutputs,
   createOSDownloaderForDistribution,
+  createOSDownloadErrorHandler,
   createOSResolverForDistribution,
   DEFAULT_OS_OUTPUT_OPTIONS,
   writeRepositoryScripts,
@@ -22,6 +14,16 @@ import {
   type OSGeneratedOutput,
   type OSDownloadStartOptions,
 } from './os-package-router';
+import { OSArchivePackager } from '../../src/core/downloaders/os-shared/archive-packager';
+import { OSRepoPackager } from '../../src/core/downloaders/os-shared/repo-packager';
+import { createScopedLogger } from '../utils/logger';
+import type {
+  OSArchitecture,
+  OSDistribution,
+  OSPackageInfo,
+  PackageDependency,
+} from '../../src/core/downloaders/os-shared/types';
+import type { PackagingDetails } from '../../src/types/packaging';
 
 const log = createScopedLogger('OSDownloadOrchestrator');
 
@@ -37,7 +39,9 @@ export interface OSDownloadOrchestrator {
     unresolved: PackageDependency[];
     conflicts: Array<{ package: string; versions: OSPackageInfo[] }>;
   }>;
-  startDownload(options: OSDownloadStartOptions): Promise<ReturnType<typeof buildOSDownloadStartResult>>;
+  startDownload(
+    options: OSDownloadStartOptions
+  ): Promise<ReturnType<typeof buildOSDownloadStartResult>>;
   cancelDownload(): Promise<{ success: true }>;
   getCacheStats(): Promise<{ size: number; count: number; path: string }>;
   clearCache(): Promise<{ success: true }>;
@@ -87,33 +91,52 @@ export function createOSDownloadOrchestrator(params: {
       let unresolved: PackageDependency[] = [];
       let conflicts: Array<{ package: string; versions: OSPackageInfo[] }> = [];
 
+      if (osDownloadAbortController) throw new Error('이미 OS 패키지 다운로드가 진행 중입니다.');
       log.info(`Starting OS package download: ${packages.length} packages to ${outputDir}`);
       osDownloadCancelled = false;
-      osDownloadAbortController = new AbortController();
+      const controller = new AbortController();
+      osDownloadAbortController = controller;
+      let stagingDir: string | undefined;
+      const cancel = () => {
+        osDownloadCancelled = true;
+        controller.abort();
+      };
+      try {
+        await fse.ensureDir(outputDir);
 
-      await fse.ensureDir(outputDir);
+        let packagesToDownload = packages;
+        if (resolveDependencies) {
+          const resolver = createOSResolverForDistribution({
+            distribution,
+            architecture,
+            includeOptional: includeOptionalDeps ?? false,
+            includeRecommends: includeOptionalDeps ?? false,
+            progressEmitter,
+            abortSignal: controller.signal,
+          });
 
-      let packagesToDownload = packages;
-      if (resolveDependencies) {
-        const resolver = createOSResolverForDistribution({
-          distribution,
-          architecture,
-          includeOptional: includeOptionalDeps ?? false,
-          includeRecommends: includeOptionalDeps ?? false,
-          progressEmitter,
-          abortSignal: osDownloadAbortController.signal,
-        });
+          try {
+            const resolved = await resolver.resolveDependencies(packages);
+            packagesToDownload = resolved.packages;
+            warnings.push(...resolved.warnings);
+            unresolved = resolved.unresolved;
+            conflicts = resolved.conflicts;
+          } catch (error) {
+            if ((error as { name?: string })?.name === 'AbortError' || osDownloadCancelled) {
+              warnings.push('의존성 해결 단계에서 취소되어 다운로드를 시작하지 않았습니다.');
+              return buildOSDownloadStartResult({
+                outputDir,
+                distribution,
+                outputOptions,
+                warnings,
+                cancelled: true,
+              });
+            }
+            throw error;
+          }
 
-        try {
-          const resolved = await resolver.resolveDependencies(packages);
-          packagesToDownload = resolved.packages;
-          warnings.push(...resolved.warnings);
-          unresolved = resolved.unresolved;
-          conflicts = resolved.conflicts;
-        } catch (error) {
-          if ((error as { name?: string })?.name === 'AbortError' || osDownloadCancelled) {
+          if (osDownloadCancelled) {
             warnings.push('의존성 해결 단계에서 취소되어 다운로드를 시작하지 않았습니다.');
-            osDownloadAbortController = null;
             return buildOSDownloadStartResult({
               outputDir,
               distribution,
@@ -122,24 +145,23 @@ export function createOSDownloadOrchestrator(params: {
               cancelled: true,
             });
           }
-          throw error;
+
+          if (conflicts.length > 0) {
+            progressEmitter.emitOSProgress({
+              currentPackage: `버전 충돌 ${conflicts.length}건 감지`,
+              currentIndex: 0,
+              totalPackages: packagesToDownload.length,
+              bytesDownloaded: 0,
+              totalBytes: 0,
+              speed: 0,
+              phase: 'resolving',
+            });
+          }
         }
 
-        if (osDownloadCancelled) {
-          warnings.push('의존성 해결 단계에서 취소되어 다운로드를 시작하지 않았습니다.');
-          osDownloadAbortController = null;
-          return buildOSDownloadStartResult({
-            outputDir,
-            distribution,
-            outputOptions,
-            warnings,
-            cancelled: true,
-          });
-        }
-
-        if (conflicts.length > 0) {
+        if (unresolved.length > 0) {
           progressEmitter.emitOSProgress({
-            currentPackage: `버전 충돌 ${conflicts.length}건 감지`,
+            currentPackage: `해결되지 않은 의존성 ${unresolved.length}건`,
             currentIndex: 0,
             totalPackages: packagesToDownload.length,
             bytesDownloaded: 0,
@@ -147,114 +169,83 @@ export function createOSDownloadOrchestrator(params: {
             speed: 0,
             phase: 'resolving',
           });
-        }
-      }
-
-      if (unresolved.length > 0) {
-        progressEmitter.emitOSProgress({
-          currentPackage: `해결되지 않은 의존성 ${unresolved.length}건`,
-          currentIndex: 0,
-          totalPackages: packagesToDownload.length,
-          bytesDownloaded: 0,
-          totalBytes: 0,
-          speed: 0,
-          phase: 'resolving',
-        });
-        osDownloadAbortController = null;
-        return buildOSDownloadStartResult({
-          outputDir,
-          distribution,
-          outputOptions,
-          warnings,
-          unresolved,
-          conflicts,
-        });
-      }
-
-      const stagingDir = await fse.mkdtemp(path.join(outputDir, '.depssmuggler-os-'));
-      const downloader = createOSDownloaderForDistribution({
-        distribution,
-        architecture,
-        outputDir: stagingDir,
-        concurrency,
-        progressEmitter,
-        abortSignal: osDownloadAbortController.signal,
-        onCancel: () => {
-          osDownloadCancelled = true;
-        },
-        mainWindow: params.getMainWindow(),
-      });
-      const downloadedFiles = new Map<string, string>();
-      const successfulPackages: OSPackageInfo[] = [];
-      const failedPackages: OSDownloadFailure[] = [];
-      const skippedPackages: OSPackageInfo[] = [];
-      const generatedOutputs: OSGeneratedOutput[] = [];
-
-      try {
-        for (const [index, pkg] of packagesToDownload.entries()) {
-          if (osDownloadCancelled) {
-            markRemainingPackagesAsSkipped({
-              packagesToDownload,
-              startIndex: index,
-              skippedPackages,
-              successfulPackages,
-              downloadedFiles,
-              warnings,
-            });
-            break;
-          }
-
-          progressEmitter.emitOSProgress({
-            currentPackage: pkg.name,
-            currentIndex: index + 1,
-            totalPackages: packagesToDownload.length,
-            bytesDownloaded: 0,
-            totalBytes: pkg.size,
-            speed: 0,
-            phase: 'downloading',
+          return buildOSDownloadStartResult({
+            outputDir,
+            distribution,
+            outputOptions,
+            warnings,
+            unresolved,
+            conflicts,
           });
+        }
 
-          const result = await downloader.downloadPackage(pkg);
-          if (result.cancelled || osDownloadCancelled) {
-            markRemainingPackagesAsSkipped({
-              packagesToDownload,
-              startIndex: index,
-              skippedPackages,
-              successfulPackages,
-              downloadedFiles,
-              warnings,
-            });
-            break;
-          }
+        const downloadStagingDir = await fse.mkdtemp(path.join(outputDir, '.depssmuggler-os-'));
+        stagingDir = downloadStagingDir;
+        const onError = createOSDownloadErrorHandler(
+          params.getMainWindow(),
+          cancel,
+          controller.signal
+        );
+        const downloadedFiles = new Map<string, string>();
+        const successfulPackages: OSPackageInfo[] = [];
+        const failedPackages: OSDownloadFailure[] = [];
+        const skippedPackages: OSPackageInfo[] = [];
+        const generatedOutputs: OSGeneratedOutput[] = [];
 
-          if (result.success && result.filePath) {
+        const results = await runOSDownloadPool({
+          packages: packagesToDownload,
+          concurrency,
+          controller,
+          cancel,
+          onProgress: (progress) => progressEmitter.emitOSProgress(progress),
+          createDownloader: (slot, onProgress) =>
+            createOSDownloaderForDistribution({
+              distribution,
+              architecture,
+              // Parallel duplicates cannot write/clean the same path; all slots are removed together.
+              outputDir: path.join(downloadStagingDir, `slot-${slot}`),
+              concurrency,
+              progressEmitter: { ...progressEmitter, emitOSProgress: onProgress },
+              abortSignal: controller.signal,
+              onCancel: cancel,
+              onError,
+              mainWindow: params.getMainWindow(),
+            }),
+        });
+        // Record in input order, independent of completion order.
+        for (const [index, pkg] of packagesToDownload.entries()) {
+          const result = results[index];
+          if (result?.success && result.filePath) {
             successfulPackages.push(pkg);
             downloadedFiles.set(`${pkg.name}-${pkg.version}`, result.filePath);
-            continue;
-          }
-
-          if (result.skipped) {
+          } else if (!result || result.skipped || result.cancelled) {
             skippedPackages.push(pkg);
-            continue;
+          } else {
+            failedPackages.push({ package: pkg, error: result.error?.message || '다운로드 실패' });
           }
-
-          failedPackages.push({
-            package: pkg,
-            error: result.error?.message || '다운로드 실패',
-          });
+        }
+        if (osDownloadCancelled) {
+          warnings.push(
+            successfulPackages.length > 0
+              ? `다운로드 취소로 임시 파일 ${successfulPackages.length}개를 정리했습니다. 최종 출력물은 생성되지 않았습니다.`
+              : '다운로드가 취소되어 최종 출력물을 생성하지 않았습니다.'
+          );
+          successfulPackages.length = 0;
+          downloadedFiles.clear();
         }
 
         if (!osDownloadCancelled && successfulPackages.length > 0) {
-          const emitPackaging = (packagingDetails: PackagingDetails) => progressEmitter.emitOSProgress({
-            currentPackage: '결과 패키징',
-            currentIndex: successfulPackages.length,
-            totalPackages: successfulPackages.length,
-            bytesDownloaded: 0,
-            totalBytes: 0,
-            speed: 0,
-            phase: 'packaging',
-            packagingDetails,
-          });
+          const emitPackaging = (packagingDetails: PackagingDetails) =>
+            progressEmitter.emitOSProgress({
+              currentPackage: '결과 패키징',
+              currentIndex: successfulPackages.length,
+              totalPackages: successfulPackages.length,
+              bytesDownloaded: 0,
+              totalBytes: 0,
+              speed: 0,
+              phase: 'packaging',
+              packagingDetails,
+            });
           emitPackaging({ message: '파일 생성 준비 중...' });
 
           try {
@@ -276,12 +267,14 @@ export function createOSDownloadOrchestrator(params: {
                 packageManager: distribution.packageManager,
                 repoName: 'depssmuggler-local',
                 onStage: (message) => emitPackaging({ message }),
-                onProgress: (archiveProgress) => emitPackaging({
-                  message: archiveProgress.percentage >= 99
-                    ? '압축 파일 저장 마무리 중...'
-                    : `${(outputOptions.archiveFormat || 'zip').toUpperCase()} 압축 중...`,
-                  archiveProgress,
-                }),
+                onProgress: (archiveProgress) =>
+                  emitPackaging({
+                    message:
+                      archiveProgress.percentage >= 99
+                        ? '압축 파일 저장 마무리 중...'
+                        : `${(outputOptions.archiveFormat || 'zip').toUpperCase()} 압축 중...`,
+                    archiveProgress,
+                  }),
               });
 
               if (osDownloadCancelled) {
@@ -309,8 +302,7 @@ export function createOSDownloadOrchestrator(params: {
                 outputPath: repoPath,
                 repoName: 'depssmuggler-local',
                 includeSetupScript:
-                  outputOptions.generateScripts &&
-                  outputOptions.scriptTypes.includes('local-repo'),
+                  outputOptions.generateScripts && outputOptions.scriptTypes.includes('local-repo'),
               });
 
               if (outputOptions.generateScripts) {
@@ -360,9 +352,13 @@ export function createOSDownloadOrchestrator(params: {
           cancelled: osDownloadCancelled,
         });
       } finally {
-        osDownloadCancelled = false;
-        osDownloadAbortController = null;
-        await fse.remove(stagingDir);
+        controller.abort();
+        try {
+          if (stagingDir) await fse.remove(stagingDir);
+        } finally {
+          osDownloadCancelled = false;
+          osDownloadAbortController = null;
+        }
       }
     },
 
@@ -384,34 +380,4 @@ export function createOSDownloadOrchestrator(params: {
       return { success: true };
     },
   };
-}
-
-function markRemainingPackagesAsSkipped(params: {
-  packagesToDownload: OSPackageInfo[];
-  startIndex: number;
-  skippedPackages: OSPackageInfo[];
-  successfulPackages: OSPackageInfo[];
-  downloadedFiles: Map<string, string>;
-  warnings: string[];
-}): void {
-  const {
-    packagesToDownload,
-    startIndex,
-    skippedPackages,
-    successfulPackages,
-    downloadedFiles,
-    warnings,
-  } = params;
-
-  if (successfulPackages.length > 0) {
-    warnings.push(
-      `다운로드 취소로 임시 파일 ${successfulPackages.length}개를 정리했습니다. 최종 출력물은 생성되지 않았습니다.`
-    );
-  } else {
-    warnings.push('다운로드가 취소되어 최종 출력물을 생성하지 않았습니다.');
-  }
-
-  skippedPackages.push(...packagesToDownload.slice(startIndex));
-  successfulPackages.length = 0;
-  downloadedFiles.clear();
 }

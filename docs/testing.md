@@ -679,3 +679,11 @@ bash scripts/verify-worktree.sh \
 `conda-worker-index.test.ts`는 production Worker handler의 스레드·캐시 경계를 모킹하고 Proxy의 `ownKeys`로 원본 열거 횟수를 셉니다. 처음 포맷별 1회 인덱싱 후 20 hit/20 miss가 추가 열거를 하지 않는지, 디스크 버전 교체·forceRefresh·TTL 만료가 데이터와 인덱스를 함께 교체하는지 검사합니다. 시간 임계값으로 성능을 판정하지 않습니다.
 
 `conda-index-consumers.test.ts`는 실제 Worker에서 임시 디스크 데이터를 읽고 조회합니다. 같은 참조를 resolver와 downloader에 제공해 platform miss → noarch, resolver의 Python/CUDA/버전/build 조건과 downloader의 최고 build 선택 차이를 보존하는지 확인합니다. 별도 raw 입력은 인덱스 없이 그대로 반환되고 소비자의 전체 열거 fallback이 유지되는지 계수합니다. 외부 HTTP/API는 호출하지 않습니다. 기존 cache/race 테스트는 실제 디스크 교체·삭제와 Worker 종료 후 재조회 계약을 함께 검증합니다. [상세 조회 계약](shared-conda.md#이름-인덱스의-hitmiss와-호환-경로-187)을 참고하세요.
+
+### GUI OS 동시 다운로드 (#188)
+
+[동시 실행 문서](os-download-concurrency.md#검증과-한계)의 검증 명령은 실제 orchestrator·pool·BaseOSDownloader·스트림·파일 시스템에 12개/50ms 응답을 제공해 설정 1/3/6과 최대 활성 전송 수가 같은지 검사합니다. 취소 또는 한 슬롯의 예외 후 나머지 스트림의 종료를 지연시켜 staging이 먼저 삭제되지 않는지 확인합니다. 파일명이 같은 병렬 입력도 슬롯별 임시 폴더로 격리됩니다.
+
+router 테스트는 동시 오류의 재시도/건너뛰기 응답 연결, 취소 신호, 오류 창 실패 후 대기 창 억제를 검증합니다. orchestrator 회귀는 기존 성공/실패/skip·출력 정리와 초기화/정리 실패 후 다음 세션을 확인합니다. pool·화면 검증은 완료 순서와 독립적인 결과 순서, 고정된 표시 패키지, 완료 수·활성 수, 종료 뒤 늦은 콜백 무시를 검사합니다. 실제 Electron native dialog나 외부 네트워크 속도를 측정한 결과는 아닙니다.
+
+`electron/download-handlers.test.ts`의 취소 회귀는 동시성 1/3을 각각 사용합니다. 순차 실행에서는 첫 성공 뒤 취소가 발생하지만, 병렬 실행에서는 첫 성공 결과를 기록하기 전에 취소될 수 있습니다. 두 경우 모두 성공 산출물이 없으며 각 skipped 목록과 출력물 미생성 경고를 확인합니다.

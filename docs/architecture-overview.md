@@ -142,7 +142,7 @@ depssmuggler/
 2. 장바구니가 OS 패키지로만 구성되고 모든 항목의 `metadata.osContext`에 패키지 관리자·배포판·아키텍처가 동일하게 저장되어 있으면 `DownloadPage.tsx`가 `pages/download-page/hooks/use-os-download-flow.ts`를 통해 동일 라우트(`/download`) 안에서 전용 화면으로 전환합니다. context가 누락된 OS 장바구니는 재선택 안내를 표시합니다. 일반 패키지가 섞이거나 서로 다른 context인 경우에는 전용 흐름이 성립하지 않습니다.
 3. OS 전용 흐름은 `os:getDistribution`으로 선택된 배포판 전체 설정을 읽고 `archive | repository | both` 출력 옵션을 노출합니다. `repository`/`both`에서는 로컬 저장소 설정 스크립트가 기본 포함됩니다.
 4. 실제 다운로드 시작은 `os:download:start` 하나로 통합되어, `electron/services/os-download-orchestrator.ts`가 필요 시 의존성 해결과 패키징까지 수행합니다. 미해결 의존성은 이 단계에서 즉시 중단되고, resolving 단계 취소도 오류보다 우선해 중단 결과를 반환합니다.
-5. 진행률은 `os:download:progress`로, 취소는 `os:download:cancel`로 처리됩니다. 취소 요청은 현재 OS 패키지 전송의 `fetch`에도 abort 신호를 전달합니다.
+5. 진행률은 `os:download:progress`로, 취소는 `os:download:cancel`로 처리됩니다. `os-download-pool.ts`가 설정한 동시 실행 수를 적용하고, 오류 선택은 세션 안에서 직렬화합니다. 취소/예외는 모든 활성 전송을 중단하고 전체 작업 종료 뒤 staging을 정리합니다. [병렬 진행률과 수명](os-download-concurrency.md)을 참고하세요.
 6. 결과 출력물 경로와 `generatedOutputs`, `warnings`, `conflicts`, `cancelled` 상태는 `os:download:start` 반환값으로 렌더러에 전달됩니다. 취소로 최종 산출물이 생성되지 않은 경우에는 임시 다운로드를 성공으로 승격하지 않고, routed OS 결과 화면에서 중단 상태와 실제 생성물만 안내합니다.
 
 OS 전용 흐름은 로컬 저장으로 동작하며, 일반 다운로드의 SMTP 전달·자동 분할 파이프라인을 사용하지 않습니다. Electron의 `os:cache:*`는 아직 placeholder이고, 실제 OS CLI 캐시는 `<cachePath>/os-packages`의 JSON 파일을 관리합니다. CLI의 `cacheEnabled`와 `maxCacheSize`를 검색·다운로드 backend에 전달하며, 크기 한도는 저장 데이터의 추정 크기에 적용합니다. 기본값과 별도 캐시의 범위는 [캐시 문서](shared-cache.md#os-메타데이터-캐시-설정)를 참고하세요.
