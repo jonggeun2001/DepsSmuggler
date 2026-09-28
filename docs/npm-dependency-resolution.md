@@ -4,6 +4,8 @@
 
 ## 현재 구현 요약
 
+- 현재 대기 큐는 `NpmDependencyQueue` 최소 힙으로 depth → parentPath의 localeCompare → 동순위 삽입 순서를 보존합니다. 아래 Arborist 참고 코드와 구분하며, [현재 큐 계약·hoisting 결과 회귀·성능 재현](npm-queue-performance.md)을 참고하세요.
+
 - `src/core/resolver/npm-resolver.ts`의 `NpmResolver`는 BFS로 의존성을 수집합니다. 버전/packument 조회는 `src/core/shared/npm-version-resolver.ts`, peer 충돌과 hoisting은 `src/core/resolver/npm-tree-manager.ts`가 담당합니다. npm의 Arborist 패키지를 직접 실행하는 구현은 아닙니다.
 - 공개 resolver 기본값은 `includeDev: false`, `includeOptional: false`, `installPeers: true`, `legacyPeerDeps: false`, `preferDedupe: false`, `installStrategy: 'hoisted'`입니다. UI/CLI가 노출하는 옵션과 구분합니다.
 - downloader는 packument의 `dist.tarball` URL을 사용하고 integrity 정보를 처리합니다. 아래 단순 URL 패턴은 구조 예시이며 scoped 패키지 등을 위해 직접 URL을 조립하는 계약이 아닙니다.

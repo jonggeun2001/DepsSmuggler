@@ -30,6 +30,7 @@
 | [Downloaders](downloaders.md) | 패키지별 검색·버전·다운로드 인터페이스 |
 | [Downloader factory](downloader-factory.md) | 일반·OS downloader 생성과 선택 |
 | [Resolvers](resolvers.md) | 의존성 해결, 옵션, 트리·충돌·실패 결과 |
+| [npm 큐 순서와 성능](npm-queue-performance.md) | 안정적인 depth/parentPath 순서·hoisting 결과 보존과 규모별 비교 |
 | [다운로드 유틸리티](download-utilities.md) | 진행률·파일·로그와 다운로드 공통 처리 |
 | [Packagers](packagers.md) | 압축, manifest, 설치 스크립트, 파일 분할 |
 | [OS 패키지](os-package-downloader.md) | yum/apt/apk, 배포판·저장소·캐시·출력·검증 제한 |

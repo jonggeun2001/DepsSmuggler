@@ -825,7 +825,7 @@ p:nginx=1.24.0-r6
 
 | 메서드 | 설명 |
 |--------|------|
-| `buildDeps` | 의존성 목록에서 큐 아이템 생성 |
+| `buildDeps` | 우선순위 큐를 소비하며 방문·깊이·실패 정책 적용 |
 | `processDepItem` | 단일 의존성 아이템 처리 |
 | `NpmTreeManager.findPlacement` | node_modules 배치 위치 결정 (호이스팅) |
 | `NpmTreeManager.addNodeToTree` | 트리에 노드 추가 |
@@ -843,10 +843,12 @@ p:nginx=1.24.0-r6
 | `versionResolver` | NpmVersionResolver | 저장소 조회/해결된 버전 캐시 |
 | `treeManager` | NpmTreeManager | root·배치 상태·충돌 목록 |
 | `targetOS` / `targetArchitecture` | string 또는 null | 플랫폼 필터 조건 |
-| `depsQueue` | DepsQueueItem[] | 처리 대기 큐 |
+| `depsQueue` | NpmDependencyQueue | depth/parentPath/삽입 순서로 처리하는 최소 힙 |
 | `depsSeen` | Set<string> | 처리된 의존성 추적 |
 
 ### NpmResolverOptions
+
+큐의 path는 패키지명이나 설치 경로가 아닌 enqueue 당시의 parentPath입니다. 같은 부모 아래 형제는 입력 순서를 유지합니다. 반복 전체 정렬을 대체하면서 기존 방문 키·호이스팅 정책을 보존하며, [동등성 검사와 규모별 측정](npm-queue-performance.md)으로 처리 순서·버전·설치 경로·충돌을 확인합니다.
 
 ```typescript
 interface NpmResolverOptions {
