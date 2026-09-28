@@ -224,7 +224,10 @@ describe('registerDownloadHandlers', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    tempDir = path.join(os.tmpdir(), `download-handler-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDir = path.join(
+      os.tmpdir(),
+      `download-handler-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
     await fs.remove(osOutputDir);
 
     showOpenDialog.mockResolvedValue({
@@ -242,11 +245,13 @@ describe('registerDownloadHandlers', () => {
     downloadFileMock.mockResolvedValue(undefined);
     generateInstallScriptsMock.mockResolvedValue(undefined);
     createZipArchiveMock.mockResolvedValue(undefined);
-    createArchiveFromDirectoryMock.mockImplementation(async (_sourceDir: string, outputPath: string) => {
-      await fs.ensureDir(path.dirname(outputPath));
-      await fs.writeFile(outputPath, Buffer.alloc(1024));
-      return outputPath;
-    });
+    createArchiveFromDirectoryMock.mockImplementation(
+      async (_sourceDir: string, outputPath: string) => {
+        await fs.ensureDir(path.dirname(outputPath));
+        await fs.writeFile(outputPath, Buffer.alloc(1024));
+        return outputPath;
+      }
+    );
     sendEmailMock.mockResolvedValue({
       success: true,
       messageId: 'mail-1',
@@ -360,13 +365,16 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('tar.gz 선택 시 공통 아카이브 패키저를 사용하고 실제 산출물 경로를 완료 이벤트에 담아야 함', async () => {
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -435,13 +443,16 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('zip 선택 시에도 완료 이벤트가 디렉터리가 아닌 실제 아카이브 파일 경로를 반영해야 함', async () => {
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -495,13 +506,16 @@ describe('registerDownloadHandlers', () => {
   it('아카이브 생성이 실패하면 성공 완료 이벤트 대신 실패 이벤트를 보내야 함', async () => {
     createArchiveFromDirectoryMock.mockRejectedValueOnce(new Error('archive failed'));
 
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -550,13 +564,16 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('지원하지 않는 출력 형식은 조용히 성공시키지 말고 실패로 처리해야 함', async () => {
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -605,13 +622,16 @@ describe('registerDownloadHandlers', () => {
       throw new Error('script generation failed');
     });
 
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -656,13 +676,16 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('email 전달 선택 시 패키징 뒤 메일을 발송하고 완료 이벤트에 전달 메타데이터를 담아야 함', async () => {
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -741,13 +764,16 @@ describe('registerDownloadHandlers', () => {
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('network failed'));
 
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -806,7 +832,7 @@ describe('registerDownloadHandlers', () => {
             name: 'requests',
           }),
         ],
-        expect.any(Object),
+        expect.any(Object)
       );
       expect(createArchiveFromDirectoryMock).toHaveBeenCalledWith(
         outputDir,
@@ -822,7 +848,9 @@ describe('registerDownloadHandlers', () => {
       expect(sendEmailMock).toHaveBeenCalledWith(
         expect.objectContaining({
           subject: 'DepsSmuggler 패키지 전달 (1개 패키지)',
-          body: expect.stringContaining('다운로드 실패한 1개 패키지는 이번 전달에서 제외되었습니다.'),
+          body: expect.stringContaining(
+            '다운로드 실패한 1개 패키지는 이번 전달에서 제외되었습니다.'
+          ),
           packages: [
             expect.objectContaining({
               name: 'requests',
@@ -837,13 +865,16 @@ describe('registerDownloadHandlers', () => {
   it('성공한 패키지가 하나도 없으면 패키징과 메일 전달 없이 실패해야 함', async () => {
     downloadFileMock.mockRejectedValue(new Error('network failed'));
 
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -919,13 +950,16 @@ describe('registerDownloadHandlers', () => {
         })
     );
 
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -1012,20 +1046,25 @@ describe('registerDownloadHandlers', () => {
       };
     }>();
 
-    createArchiveFromDirectoryMock.mockImplementationOnce(async (_sourceDir: string, outputPath: string) => {
-      await fs.ensureDir(path.dirname(outputPath));
-      await fs.writeFile(outputPath, Buffer.alloc(4 * 1024));
-      return outputPath;
-    });
+    createArchiveFromDirectoryMock.mockImplementationOnce(
+      async (_sourceDir: string, outputPath: string) => {
+        await fs.ensureDir(path.dirname(outputPath));
+        await fs.writeFile(outputPath, Buffer.alloc(4 * 1024));
+        return outputPath;
+      }
+    );
     splitFileMock.mockImplementationOnce(async () => splitDeferred.promise);
 
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -1119,19 +1158,24 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('첨부 제한 초과이고 파일 분할이 켜져 있으면 splitFile 결과를 첨부와 완료 이벤트에 반영해야 함', async () => {
-    createArchiveFromDirectoryMock.mockImplementationOnce(async (_sourceDir: string, outputPath: string) => {
-      await fs.ensureDir(path.dirname(outputPath));
-      await fs.writeFile(outputPath, Buffer.alloc(4 * 1024));
-      return outputPath;
-    });
+    createArchiveFromDirectoryMock.mockImplementationOnce(
+      async (_sourceDir: string, outputPath: string) => {
+        await fs.ensureDir(path.dirname(outputPath));
+        await fs.writeFile(outputPath, Buffer.alloc(4 * 1024));
+        return outputPath;
+      }
+    );
 
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -1213,13 +1257,16 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('발신자 후보가 없으면 이메일 전달을 시작하지 않고 명시적으로 실패해야 함', async () => {
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -1272,7 +1319,8 @@ describe('registerDownloadHandlers', () => {
           deliveryMethod: 'email',
           deliveryResult: expect.objectContaining({
             emailSent: false,
-            error: '이메일 전달에 필요한 발신자 설정이 없습니다. SMTP 발신자 또는 로그인 사용자를 설정하세요.',
+            error:
+              '이메일 전달에 필요한 발신자 설정이 없습니다. SMTP 발신자 또는 로그인 사용자를 설정하세요.',
           }),
         })
       );
@@ -1280,19 +1328,24 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('첨부 제한 초과인데 파일 분할이 꺼져 있으면 메일 전달 실패로 처리해야 함', async () => {
-    createArchiveFromDirectoryMock.mockImplementationOnce(async (_sourceDir: string, outputPath: string) => {
-      await fs.ensureDir(path.dirname(outputPath));
-      await fs.writeFile(outputPath, Buffer.alloc(4 * 1024));
-      return outputPath;
-    });
+    createArchiveFromDirectoryMock.mockImplementationOnce(
+      async (_sourceDir: string, outputPath: string) => {
+        await fs.ensureDir(path.dirname(outputPath));
+        await fs.writeFile(outputPath, Buffer.alloc(4 * 1024));
+        return outputPath;
+      }
+    );
 
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const downloadStartHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'download:start'
@@ -1352,13 +1405,16 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('os:download:start에서 OS 전용 출력 옵션을 적용해 패키징 결과를 반환한다', async () => {
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     const osDownloadHandler = ipcHandle.mock.calls.find(
       ([channel]) => channel === 'os:download:start'
@@ -1442,13 +1498,16 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('os:download:start에서 해결되지 않은 의존성이 있으면 다운로드를 시작하지 않고 결과에 포함한다', async () => {
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     yumResolveDependencies.mockResolvedValueOnce({
       packages: [rootPackage],
@@ -1490,13 +1549,16 @@ describe('registerDownloadHandlers', () => {
   });
 
   it('os:download:start에서 건너뛴 패키지를 failed 대신 skipped로 집계한다', async () => {
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+    registerDownloadHandlers(
+      () =>
+        ({
+          isDestroyed: () => false,
+          webContents: {
+            isDestroyed: () => false,
+            send: webContentsSend,
+          },
+        }) as never
+    );
 
     yumDownloadPackage.mockReset();
     yumDownloadPackage.mockResolvedValueOnce({
@@ -1533,61 +1595,68 @@ describe('registerDownloadHandlers', () => {
     );
   });
 
-  it('os:download:start에서 취소되면 최종 성공 산출물 없이 cancelled 결과를 반환한다', async () => {
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+  it.each([1, 3])(
+    'os:download:start 동시성 %i에서 취소되면 최종 성공 산출물 없이 cancelled 결과를 반환한다',
+    async (concurrency) => {
+      registerDownloadHandlers(
+        () =>
+          ({
+            isDestroyed: () => false,
+            webContents: {
+              isDestroyed: () => false,
+              send: webContentsSend,
+            },
+          }) as never
+      );
 
-    yumDownloadPackage.mockReset();
+      yumDownloadPackage.mockReset();
 
-    const osDownloadHandler = ipcHandle.mock.calls.find(
-      ([channel]) => channel === 'os:download:start'
-    )?.[1];
-    const osCancelHandler = ipcHandle.mock.calls.find(
-      ([channel]) => channel === 'os:download:cancel'
-    )?.[1];
+      const osDownloadHandler = ipcHandle.mock.calls.find(
+        ([channel]) => channel === 'os:download:start'
+      )?.[1];
+      const osCancelHandler = ipcHandle.mock.calls.find(
+        ([channel]) => channel === 'os:download:cancel'
+      )?.[1];
 
-    yumDownloadPackage.mockImplementationOnce(async () => {
-      return {
-        success: true,
-        filePath: '/tmp/bash-5.1.8.rpm',
-      };
-    });
-    yumDownloadPackage.mockImplementationOnce(async () => {
-      await osCancelHandler({}, {});
-      return {
-        success: false,
-        error: new Error('사용자 취소'),
-        skipped: true,
-      };
-    });
+      yumDownloadPackage.mockImplementationOnce(async () => {
+        return {
+          success: true,
+          filePath: '/tmp/bash-5.1.8.rpm',
+        };
+      });
+      yumDownloadPackage.mockImplementationOnce(async () => {
+        await osCancelHandler({}, {});
+        return {
+          success: false,
+          error: new Error('사용자 취소'),
+          skipped: true,
+        };
+      });
 
-    const result = await osDownloadHandler(
-      {},
-      {
-        packages: [rootPackage, dependencyPackage],
-        outputDir: osOutputDir,
-        distribution,
-        architecture: 'x86_64',
-        resolveDependencies: false,
-      }
-    );
+      const result = await osDownloadHandler(
+        {},
+        {
+          packages: [rootPackage, dependencyPackage],
+          outputDir: osOutputDir,
+          distribution,
+          architecture: 'x86_64',
+          resolveDependencies: false,
+          concurrency,
+        }
+      );
 
-    expect(archiveCreateArchive).not.toHaveBeenCalled();
-    expect(repoCreateLocalRepo).not.toHaveBeenCalled();
-    expect(result).toEqual(
-      expect.objectContaining({
-        success: [],
-        cancelled: true,
-        generatedOutputs: [],
-        warnings: expect.arrayContaining([
-          expect.stringContaining('최종 출력물은 생성되지 않았습니다'),
-        ]),
-      })
-    );
-  });
+      expect(archiveCreateArchive).not.toHaveBeenCalled();
+      expect(repoCreateLocalRepo).not.toHaveBeenCalled();
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: [],
+          // 병렬 요청은 첫 작업의 결과를 기록하기 전에 취소할 수 있다.
+          skipped: concurrency === 1 ? [dependencyPackage] : [rootPackage, dependencyPackage],
+          cancelled: true,
+          generatedOutputs: [],
+          warnings: expect.arrayContaining([expect.stringMatching(/최종 출력물.*않았습니다/)]),
+        })
+      );
+    }
+  );
 });
