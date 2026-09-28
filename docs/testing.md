@@ -167,7 +167,7 @@ bash scripts/verify-worktree.sh src/core/shared/atomic-json-store.test.ts src/co
 
 ### OS 파일 스트리밍 회귀
 
-`src/core/downloaders/os-shared/base-downloader-stream.integration.test.ts`는 실제 Web stream과 파일 writer로 backpressure·writer 종료 후 검증·취소·응답/디스크 오류·재시도·검증 실패 정리를 확인합니다. CLI backend 테스트는 실제 staging 디렉터리의 실패 후 삭제를, GUI orchestrator 테스트는 downloader 경계에서 취소·skip·패키징·정리 계약을 검사합니다. 파일 크기별 메모리와 이벤트 루프 비교는 [OS 스트리밍 성능](os-streaming-performance.md)의 `scripts/profile-os-streaming.mjs`를 사용하며 앱 빌드/외부 네트워크는 필요하지 않습니다.
+`src/core/downloaders/os-shared/base-downloader-stream.integration.test.ts`는 실제 Web stream과 파일 writer로 backpressure·writer 종료 후 검증·취소·응답/디스크 오류·재시도·검증 실패 정리와 삭제 실패 시 원인·취소 결과 보존을 확인합니다. CLI backend 테스트는 실제 staging 디렉터리의 실패 후 삭제를, GUI orchestrator 테스트는 downloader 경계에서 취소·skip·패키징·정리 계약을 검사합니다. 파일 크기별 메모리와 이벤트 루프 비교는 [OS 스트리밍 성능](os-streaming-performance.md)의 `scripts/profile-os-streaming.mjs`를 사용하며 앱 빌드/외부 네트워크는 필요하지 않습니다.
 
 ### HTTP 스트림 중단과 부분 파일 검증
 

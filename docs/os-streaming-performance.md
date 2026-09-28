@@ -4,7 +4,7 @@
 
 #184의 APT/YUM/APK 공용 `BaseOSDownloader.downloadFile()`을 전체 응답 버퍼링에서 파일 스트리밍으로 변경했다. `Readable.fromWeb()` → 공용 다운로드 gate → 파일 writer를 `pipeline()`으로 연결한다. 파일이 느리게 기록되면 backpressure가 다음 읽기를 제한한다. 전체 청크 배열, 청크별 복사와 마지막 `Buffer.concat`/`writeFileSync`는 사용하지 않는다.
 
-스트림이 닫힌 뒤 주입된 verifier를 호출하고 성공 결과를 반환한다. 네트워크/쓰기 오류·취소 시 pipeline 종료 후 이번 시도에서 연 부분 파일을 삭제한다. 파일 열기 자체가 실패하면 기존 대상 파일/디렉터리를 삭제하지 않는다. 검증 실패 또는 검증 중 취소에서도 완성 파일을 지우며 다음 재시도는 새 파일에서 시작한다. verifier가 없는 CLI 경로에 검증을 새로 추가하지 않는다.
+스트림이 닫힌 뒤 주입된 verifier를 호출하고 성공 결과를 반환한다. 네트워크/쓰기 오류·취소 시 pipeline 종료 후 이번 시도에서 연 부분 파일을 삭제한다. 파일 열기 자체가 실패하면 기존 대상 파일/디렉터리를 삭제하지 않는다. 검증 실패 또는 검증 중 취소에서도 완성 파일을 지우며 다음 재시도는 새 파일에서 시작한다. 삭제가 권한·잠금 오류로 실패하면 원래 원인을 `cause`, 정리 실패를 `cleanupError`로 보존하고 기존 재시도·오류 콜백·취소 결과를 유지한다. 이 경우 파일은 남을 수 있으며 상위 staging 정리도 실패를 보고할 수 있다. verifier가 없는 CLI 경로에 검증을 새로 추가하지 않는다.
 
 진행률 callback의 바이트·속도·단계 의미는 유지한다. 청크별 IPC 빈도(#189)와 GUI의 순차 다운로드(#188)는 별도 이슈다. 이번 변경은 공개 API, 저장 형식, UI 옵션을 바꾸지 않는다.
 
@@ -45,4 +45,4 @@ bash scripts/verify-worktree.sh \
   electron/services/os-download-orchestrator.test.ts
 ```
 
-스트리밍 테스트는 실제 Web stream과 파일 시스템을 사용한다. 느린 writer의 backpressure, 파일 닫힘 후 검증, pending read 중 취소, 응답 오류 후 재시도, writer 오류, 대상 디렉터리 보존, 검증 실패/검증 중 취소, HTTP 오류 응답 취소를 확인한다. CLI 테스트는 실제 staging 디렉터리를 만들고 실패 결과·예외 후 삭제와 패키징 생략을 확인한다. GUI 서비스 테스트는 downloader 경계를 대체하여 성공/실패/skip·취소·예외 후 staging 정리를 검사한다. 이 테스트들이 전체 배포 앱의 E2E 다운로드나 OS별 파일 권한 차이까지 검증하는 것은 아니다.
+스트리밍 테스트는 실제 Web stream과 파일 시스템을 사용한다. 느린 writer의 backpressure, 파일 닫힘 후 검증, pending read 중 취소, 응답 오류 후 재시도, writer 오류, 대상 디렉터리 보존, 검증 실패/검증 중 취소, HTTP 오류 응답 취소와 정리 실패 후 재시도/취소 결과 보존을 확인한다. CLI 테스트는 실제 staging 디렉터리를 만들고 실패 결과·예외 후 삭제와 패키징 생략을 확인한다. GUI 서비스 테스트는 downloader 경계를 대체하여 성공/실패/skip·취소·예외 후 staging 정리를 검사한다. 이 테스트들이 전체 배포 앱의 E2E 다운로드나 OS별 파일 권한 차이까지 검증하는 것은 아니다.

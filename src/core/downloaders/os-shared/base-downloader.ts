@@ -114,6 +114,21 @@ export abstract class BaseOSDownloader {
     );
   }
 
+  private async cleanupFailedFile(filePath: string, cause: unknown): Promise<Error> {
+    const failure = cause instanceof Error ? cause : new Error(String(cause));
+    try {
+      await fs.promises.rm(filePath, { force: true });
+      return failure;
+    } catch (cleanupError) {
+      const detail = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      return Object.assign(new Error(`${failure.message}; 다운로드 파일 정리 실패: ${detail}`), {
+        name: failure.name,
+        cause: failure,
+        cleanupError,
+      });
+    }
+  }
+
   /**
    * 단일 패키지 다운로드
    */
@@ -160,12 +175,15 @@ export abstract class BaseOSDownloader {
       } catch (error) {
         lastError = error as Error;
         // Failed transfers clean their partial file; failed verification owns a complete file.
-        if (ownsCompletedFile) await fs.promises.rm(filePath, { force: true });
+        if (ownsCompletedFile) lastError = await this.cleanupFailedFile(filePath, lastError);
 
         if (this.isAbortError(lastError)) {
           return {
             success: false,
-            error: this.createAbortError(),
+            error:
+              lastError.name === 'AbortError'
+                ? lastError
+                : Object.assign(this.createAbortError(), { cause: lastError }),
             cancelled: true,
           };
         }
@@ -272,7 +290,7 @@ export abstract class BaseOSDownloader {
     } catch (error) {
       // pipeline waits for the writer to close before partial-file cleanup.
       source.destroy();
-      if (ownsFile) await fs.promises.rm(destPath, { force: true });
+      if (ownsFile) throw await this.cleanupFailedFile(destPath, error);
       throw error;
     } finally {
       gate.destroy();

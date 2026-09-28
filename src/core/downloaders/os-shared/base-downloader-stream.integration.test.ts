@@ -119,7 +119,7 @@ describe('OS streaming transfer lifecycle', () => {
     const verifier = new GPGVerifier();
     const verify = vi.spyOn(verifier, 'verifyPackage').mockImplementation(async (_, file) => {
       expect(writer.closed).toBe(true);
-      expect(await fs.promises.readFile(file)).toEqual(Buffer.alloc(total, 42));
+      expect((await fs.promises.readFile(file)).equals(Buffer.alloc(total, 42))).toBe(true);
       return { verified: true, skipped: false };
     });
     const onProgress = vi.fn();
@@ -279,6 +279,66 @@ describe('OS streaming transfer lifecycle', () => {
       }).downloadPackage(pkg)
     ).toMatchObject({ success: false, cancelled: true });
     expect(fs.existsSync(destination)).toBe(false);
+  });
+
+  it('preserves verification and cleanup errors through the error callback and retry', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response('failed'))
+      .mockResolvedValueOnce(new Response('fresh'));
+    const verifier = new GPGVerifier();
+    vi.spyOn(verifier, 'verifyPackage')
+      .mockResolvedValueOnce({ verified: false, skipped: false, reason: 'checksum-mismatch' })
+      .mockResolvedValueOnce({ verified: true, skipped: false });
+    const cleanupError = Object.assign(new Error('file locked'), { code: 'EPERM' });
+    vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(cleanupError);
+    const onError = vi.fn(async () => 'retry' as const);
+
+    const result = await new StreamingDownloader({
+      ...options,
+      gpgVerifier: verifier,
+      onError,
+    }).downloadPackage(pkg);
+
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cause: expect.objectContaining({
+          cause: expect.objectContaining({ message: 'Verification failed: checksum-mismatch' }),
+          cleanupError,
+        }),
+      })
+    );
+    expect(result.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fs.readFileSync(destination, 'utf8')).toBe('fresh');
+  });
+
+  it('returns cancellation with cleanup details when unlink fails after verification', async () => {
+    const controller = new AbortController();
+    fetchMock.mockResolvedValue(new Response('hello'));
+    const verifier = new GPGVerifier();
+    vi.spyOn(verifier, 'verifyPackage').mockImplementation(async () => {
+      controller.abort();
+      return { verified: true, skipped: false };
+    });
+    const cleanupError = Object.assign(new Error('file locked'), { code: 'EPERM' });
+    vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(cleanupError);
+    const onError = vi.fn();
+
+    expect(
+      await new StreamingDownloader({
+        ...options,
+        abortSignal: controller.signal,
+        gpgVerifier: verifier,
+        onError,
+      }).downloadPackage(pkg)
+    ).toMatchObject({
+      success: false,
+      cancelled: true,
+      error: { name: 'AbortError', cause: { name: 'AbortError' }, cleanupError },
+    });
+    expect(onError).not.toHaveBeenCalled();
+    expect(fs.existsSync(destination)).toBe(true);
   });
 
   it('cancels an HTTP error response without opening the destination', async () => {
