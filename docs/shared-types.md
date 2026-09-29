@@ -504,6 +504,10 @@ const SCOPE_TRANSITION_MATRIX: Record<
 
 `ScopeTransitionKey`는 `compile | provided | runtime | test`입니다. `transitScope(parentScope, childOriginalScope)`는 이 중첩 행렬을 조회하며 `system` 자식이나 지원하지 않는 조합에는 `null`을 반환합니다.
 
+## OS 다운로드 진행률
+
+`src/core/downloaders/os-shared/types.ts`의 `OSDownloadProgress`는 GUI 병렬 처리에서 선택적 `completedPackages`와 `activePackages`를 전달합니다. 완료 수는 성공·실패·건너뛰기의 합이며, 기존 바이트/속도는 현재 표시 패키지 한 개의 값입니다. 추가 필드가 없는 이벤트와 기존 packaging 단계는 유지됩니다. [진행률 필드 의미](os-download-concurrency.md#진행률-계약)를 참고하세요.
+
 ## 관련 문서
 
 - [Shared Utilities 개요](./shared-utilities.md)

@@ -37,17 +37,21 @@ export function UpdateNotification() {
   useEffect(() => {
     if (!window.electronAPI?.updater) return;
 
-    const unsubscribe = window.electronAPI.updater.onStatusChange((newStatus) => {
-      const s = newStatus as UpdateStatus;
+    let disposed = false;
+    let receivedStatusEvent = false;
+    let receivedStatus = false;
+    const applyStatus = (s: UpdateStatus) => {
+      if (disposed) return;
+      const initial = !receivedStatus;
+      receivedStatus = true;
       setStatus(s);
 
-      // 새 버전 발견 시 모달 표시
-      if (s.available && !s.downloaded && !s.downloading) {
-        setVisible(true);
-      }
-
-      // 다운로드 완료 시 모달 표시
-      if (s.downloaded) {
+      // 구독 전에 발견된 업데이트와 진행 중인 다운로드도 초기 조회로 복원한다.
+      if (
+        (s.available && !s.downloaded && !s.downloading) ||
+        s.downloaded ||
+        (initial && s.downloading)
+      ) {
         setVisible(true);
       }
 
@@ -55,14 +59,29 @@ export function UpdateNotification() {
       if (s.error) {
         message.error(`업데이트 오류: ${s.error}`);
       }
+    };
+
+    const unsubscribe = window.electronAPI.updater.onStatusChange((newStatus) => {
+      receivedStatusEvent = true;
+      applyStatus(newStatus as UpdateStatus);
     });
 
-    // 초기 상태 로드
-    window.electronAPI.updater.getStatus().then((s) => {
-      setStatus(s as UpdateStatus);
-    });
+    // 늦게 도착한 초기 응답이 최신 이벤트(및 사용자의 닫기 선택)를 덮지 않게 한다.
+    void window.electronAPI.updater
+      .getStatus()
+      .then((s) => {
+        if (!receivedStatusEvent) applyStatus(s as UpdateStatus);
+      })
+      .catch(() => {
+        if (!disposed && !receivedStatusEvent) {
+          message.error('업데이트 상태를 불러오지 못했습니다. 설정에서 다시 확인해 주세요.');
+        }
+      });
 
-    return unsubscribe;
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
   }, []);
 
   // 업데이트 다운로드
@@ -146,15 +165,16 @@ export function UpdateNotification() {
             릴리즈 날짜: {new Date(status.updateInfo.releaseDate).toLocaleDateString('ko-KR')}
           </Text>
 
-          <ReleaseNotes releaseNotes={status.updateInfo.releaseNotes} />
+          <Text strong>릴리스 이력</Text>
+          <ReleaseNotes
+            releaseNotes={status.updateInfo.releaseNotes}
+            version={status.updateInfo.version}
+          />
 
           {/* 다운로드 진행률 */}
           {status.downloading && status.progress && (
             <div style={{ marginTop: 16 }}>
-              <Progress
-                percent={Math.round(status.progress.percent)}
-                status="active"
-              />
+              <Progress percent={Math.round(status.progress.percent)} status="active" />
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {formatBytes(status.progress.transferred)} / {formatBytes(status.progress.total)}
                 {' | '}
@@ -184,9 +204,7 @@ export function UpdateNotification() {
 
             {status.downloaded && (
               <>
-                <Button onClick={handleLater}>
-                  나중에 설치
-                </Button>
+                <Button onClick={handleLater}>나중에 설치</Button>
                 <Button type="primary" onClick={handleInstall} icon={<ReloadOutlined />}>
                   지금 재시작
                 </Button>

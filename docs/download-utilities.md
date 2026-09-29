@@ -6,6 +6,10 @@
 
 ---
 
+## Electron OS progress
+
+Electron OS 진행률 전송은 별도 `electron/services/download-progress.ts`가 담당합니다. `emitOSProgress`는 150ms 간격으로 최신 값을 병합하며 전환/완료 또는 `force=true`는 즉시 전달합니다. `flushOSProgress`는 대기 값을 보내고 `clearOSProgress`는 세션 timer와 값을 제거합니다. 일반 패키지별 throttle과 속도 계산은 유지됩니다. [OS 전송 계약·재현](os-progress-performance.md)을 참고하세요.
+
 ## SpeedCalculator
 
 ### 개요

@@ -305,7 +305,7 @@ depssmuggler config reset
 
 ### `config ca`
 
-추가 회사 CA는 `config ca set <file>`, `config ca get`, `config ca clear`로 관리합니다. PEM/DER를 검증해 사본을 저장하며 GUI와 공유합니다. 다음 CLI 실행부터 적용하고, 실행 중인 앱은 재시작해야 합니다. 일반 설정 초기화는 CA를 해제하지 않습니다. [CA 사용법과 런타임 호환성](root-ca.md)을 참고하세요.
+사용자 지정 CA는 `config ca set <file>`, `config ca get`, `config ca clear`로 관리합니다. PEM/DER를 검증해 사본을 저장하며 GUI와 공유합니다. 다음 CLI 실행부터 적용하고, 실행 중인 앱은 재시작해야 합니다. 일반 설정 초기화는 CA를 해제하지 않습니다. [CA 사용법과 런타임 호환성](root-ca.md)을 참고하세요.
 
 ## `cache`
 

@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { toPng, toSvg } from 'html-to-image';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DependencyTree from './DependencyTree';
+vi.mock('html-to-image', () => ({
+  toPng: vi.fn().mockResolvedValue('data:image/png;base64,test'),
+  toSvg: vi.fn().mockResolvedValue('data:image/svg+xml;base64,test'),
+}));
 import type { DependencyNode, DependencyResolutionResult, PackageInfo } from '../../types';
 
 function mavenPackage(name: string, artifactType = 'jar', classifier?: string): PackageInfo {
@@ -65,7 +70,12 @@ describe('DependencyTree의 Maven POM 미리보기', () => {
     const runtimeTree = node(rootPackage, [node(library)]);
     const originalTree = structuredClone(runtimeTree);
     const onNodeClick = vi.fn();
-    render(<DependencyTree data={result(runtimeTree, [rootPackage, library, parentPom, bom, { ...parentPom }])} onNodeClick={onNodeClick} />);
+    render(
+      <DependencyTree
+        data={result(runtimeTree, [rootPackage, library, parentPom, bom, { ...parentPom }])}
+        onNodeClick={onNodeClick}
+      />
+    );
 
     const toggle = screen.getByRole('button', { name: /함께 다운로드할 POM.*2개/ });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
@@ -81,7 +91,9 @@ describe('DependencyTree의 Maven POM 미리보기', () => {
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText('parent-1.0.pom')).toBeTruthy();
     expect(within(dialog).getByText('POM')).toBeTruthy();
-    expect(onNodeClick).toHaveBeenCalledWith(expect.objectContaining({ package: parentPom, dependencies: [] }));
+    expect(onNodeClick).toHaveBeenCalledWith(
+      expect.objectContaining({ package: parentPom, dependencies: [] })
+    );
     expect(runtimeTree).toEqual(originalTree);
     expect(document.querySelectorAll('svg text')).toHaveLength(4);
   });
@@ -91,7 +103,16 @@ describe('DependencyTree의 Maven POM 미리보기', () => {
     const jar = mavenPackage('org:lib');
     const pom = mavenPackage('org:lib', 'pom');
     const testsJar = mavenPackage('org:lib', 'jar', 'tests');
-    render(<DependencyTree data={result(node(rootPackage, [node(jar), node(pom), node(testsJar)]), [rootPackage, jar, pom, testsJar])} />);
+    render(
+      <DependencyTree
+        data={result(node(rootPackage, [node(jar), node(pom), node(testsJar)]), [
+          rootPackage,
+          jar,
+          pom,
+          testsJar,
+        ])}
+      />
+    );
 
     expect(screen.getAllByText('org:lib')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: /함께 다운로드할 POM/ })).toBeNull();
@@ -102,7 +123,17 @@ describe('DependencyTree의 Maven POM 미리보기', () => {
     const existingPom = mavenPackage('org:platform', 'pom');
     const extraPom = mavenPackage('org:root', 'pom');
     const unrelated: PackageInfo = { type: 'npm', name: 'npm-extra', version: '1.0' };
-    render(<DependencyTree data={result(node(rootPackage, [node(existingPom)]), [rootPackage, existingPom, { ...existingPom }, extraPom, unrelated])} />);
+    render(
+      <DependencyTree
+        data={result(node(rootPackage, [node(existingPom)]), [
+          rootPackage,
+          existingPom,
+          { ...existingPom },
+          extraPom,
+          unrelated,
+        ])}
+      />
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /함께 다운로드할 POM.*1개/ }));
     const list = await screen.findByRole('list', { name: '함께 다운로드할 POM 목록' });
@@ -110,5 +141,69 @@ describe('DependencyTree의 Maven POM 미리보기', () => {
     expect(within(list).getByText('org:root')).toBeTruthy();
     expect(within(list).queryByText('org:platform')).toBeNull();
     expect(within(list).queryByText('npm-extra')).toBeNull();
+  });
+  it('renders the shared DAG with references and opens the original referenced node details', async () => {
+    let children: DependencyNode[] = [];
+    const packages: PackageInfo[] = [];
+    for (let depth = 9; depth >= 0; depth--) {
+      const left = node(mavenPackage(`org:left-${depth}`), children);
+      const right = node(mavenPackage(`org:right-${depth}`), children);
+      packages.push(left.package, right.package);
+      children = [left, right];
+    }
+    const root = node(mavenPackage('org:root'), children);
+    const onNodeClick = vi.fn();
+    render(
+      <DependencyTree data={result(root, [root.package, ...packages])} onNodeClick={onNodeClick} />
+    );
+    expect(document.querySelectorAll('.rd3t-node,.rd3t-leaf-node')).toHaveLength(39);
+    const references = screen.getAllByRole('button', { name: /참조 상세 보기/ });
+    expect(references).toHaveLength(18);
+    fireEvent.keyDown(references[0], { key: 'Enter' });
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    const selected = onNodeClick.mock.calls[0][0] as DependencyNode;
+    expect(packages).toContain(selected.package);
+    expect(selected.dependencies.length).toBeGreaterThan(0);
+  });
+
+  it('starts with 200 nodes, expands on demand and resets the limit for a new result', async () => {
+    const wide = () => {
+      const root = node(
+        mavenPackage('org:root'),
+        Array.from({ length: 230 }, (_, index) => node(mavenPackage(`org:leaf-${index}`)))
+      );
+      return result(root, [root.package, ...root.dependencies.map((item) => item.package)]);
+    };
+    const first = wide();
+    const { rerender } = render(<DependencyTree data={first} />);
+    expect(document.querySelectorAll('.rd3t-node,.rd3t-leaf-node')).toHaveLength(200);
+    fireEvent.click(screen.getByRole('button', { name: '200개 더 표시' }));
+    expect(document.querySelectorAll('.rd3t-node,.rd3t-leaf-node')).toHaveLength(231);
+    expect(screen.queryByRole('button', { name: '200개 더 표시' })).toBeNull();
+    rerender(<DependencyTree data={wide()} />);
+    await waitFor(() =>
+      expect(document.querySelectorAll('.rd3t-node,.rd3t-leaf-node')).toHaveLength(200)
+    );
+    expect(first.flatList).toHaveLength(231);
+  });
+
+  it('exports the current viewport including reference marks and the displayed scope', async () => {
+    const shared = node(mavenPackage('org:shared'));
+    const root = node(mavenPackage('org:root'), [
+      node(mavenPackage('org:a'), [shared]),
+      node(mavenPackage('org:b'), [shared]),
+    ]);
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    render(<DependencyTree data={result(root, [root.package, shared.package])} />);
+    fireEvent.click(screen.getByRole('button', { name: 'PNG 저장' }));
+    fireEvent.click(screen.getByRole('button', { name: 'SVG 저장' }));
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
+    for (const exporter of [toPng, toSvg]) {
+      const captured = vi.mocked(exporter).mock.calls[0][0];
+      expect(captured.querySelectorAll('.rd3t-node,.rd3t-leaf-node')).toHaveLength(5);
+      expect(captured.textContent).toContain('↗ 참조');
+      expect(captured.textContent).toContain('현재 표시 영역');
+      expect(captured.textContent).toContain('표시 항목 5/5개');
+    }
   });
 });

@@ -62,3 +62,35 @@ describe('PackagingProgressView', () => {
     expect(screen.queryByRole('progressbar')).toBeNull();
   });
 });
+
+it('OS 병렬 진행률은 시작 인덱스와 구분해 완료 수를 집계하고 현재 표시 패키지를 설명한다', () => {
+  const progress = {
+    phase: 'downloading' as const,
+    currentPackage: 'curl',
+    currentIndex: 9,
+    totalPackages: 12,
+    completedPackages: 3,
+    activePackages: 6,
+    bytesDownloaded: 50,
+    totalBytes: 100,
+    speed: 10,
+  };
+  const { rerender } = render(
+    <OSDownloadProgress packageCount={12} outputDir="/tmp/out" progress={progress} />
+  );
+  expect(screen.getByText('25%')).toBeTruthy();
+  expect(screen.getByText('3 / 12')).toBeTruthy();
+  expect(screen.getByText('현재 표시 패키지')).toBeTruthy();
+  expect(screen.getByText(/동시에 6개 패키지/)).toBeTruthy();
+  expect(screen.getByText('50 B / 100 B')).toBeTruthy();
+  rerender(
+    <OSDownloadProgress
+      packageCount={12}
+      outputDir="/tmp/out"
+      progress={{ ...progress, completedPackages: 12, activePackages: 0 }}
+    />
+  );
+  expect(screen.getByText('100%')).toBeTruthy();
+  expect(screen.getByText('12 / 12')).toBeTruthy();
+  expect(screen.queryByText(/동시에/)).toBeNull();
+});

@@ -4,9 +4,12 @@
  */
 
 import * as fs from 'fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import * as path from 'path';
 import { GPGVerifier, type VerificationResult } from './gpg-verifier';
 import { getDownloadedFileKey } from './package-file-utils';
+import { createDownloadGate } from '../../shared/download-control';
 import type {
   OSPackageInfo,
   Repository,
@@ -16,6 +19,7 @@ import type {
   OSDownloadError,
   OSErrorAction,
 } from './types';
+import type { ReadableStream } from 'node:stream/web';
 
 /**
  * 다운로드 결과
@@ -104,7 +108,25 @@ export abstract class BaseOSDownloader {
   }
 
   protected isAbortError(error: unknown): boolean {
-    return this.options.abortSignal?.aborted === true || (error as { name?: string })?.name === 'AbortError';
+    return (
+      this.options.abortSignal?.aborted === true ||
+      (error as { name?: string })?.name === 'AbortError'
+    );
+  }
+
+  private async cleanupFailedFile(filePath: string, cause: unknown): Promise<Error> {
+    const failure = cause instanceof Error ? cause : new Error(String(cause));
+    try {
+      await fs.promises.rm(filePath, { force: true });
+      return failure;
+    } catch (cleanupError) {
+      const detail = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      return Object.assign(new Error(`${failure.message}; 다운로드 파일 정리 실패: ${detail}`), {
+        name: failure.name,
+        cause: failure,
+        cleanupError,
+      });
+    }
   }
 
   /**
@@ -126,9 +148,12 @@ export abstract class BaseOSDownloader {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      let ownsCompletedFile = false;
       try {
         // 다운로드
         await this.downloadFile(url, filePath, pkg);
+        ownsCompletedFile = true;
+        if (this.options.abortSignal?.aborted) throw this.createAbortError();
 
         // GPG 검증
         let verification: VerificationResult | undefined;
@@ -140,6 +165,8 @@ export abstract class BaseOSDownloader {
           }
         }
 
+        if (this.options.abortSignal?.aborted) throw this.createAbortError();
+
         return {
           success: true,
           filePath,
@@ -147,11 +174,16 @@ export abstract class BaseOSDownloader {
         };
       } catch (error) {
         lastError = error as Error;
+        // Failed transfers clean their partial file; failed verification owns a complete file.
+        if (ownsCompletedFile) lastError = await this.cleanupFailedFile(filePath, lastError);
 
         if (this.isAbortError(lastError)) {
           return {
             success: false,
-            error: this.createAbortError(),
+            error:
+              lastError.name === 'AbortError'
+                ? lastError
+                : Object.assign(this.createAbortError(), { cause: lastError }),
             cancelled: true,
           };
         }
@@ -196,11 +228,7 @@ export abstract class BaseOSDownloader {
   /**
    * 파일 다운로드
    */
-  protected async downloadFile(
-    url: string,
-    destPath: string,
-    pkg: OSPackageInfo
-  ): Promise<void> {
+  protected async downloadFile(url: string, destPath: string, pkg: OSPackageInfo): Promise<void> {
     if (this.options.abortSignal?.aborted) {
       throw this.createAbortError();
     }
@@ -210,33 +238,23 @@ export abstract class BaseOSDownloader {
     });
 
     if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
     const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
-    const reader = response.body?.getReader();
-
-    if (!reader) {
+    if (!response.body) {
       throw new Error('Response body is not readable');
     }
 
-    const chunks: Uint8Array[] = [];
     let downloaded = 0;
     let lastBytes = 0;
     let lastTime = Date.now();
     let currentSpeed = 0;
 
-    for (;;) {
-      if (this.options.abortSignal?.aborted) {
-        throw this.createAbortError();
-      }
-
-      const { done, value } = await reader.read();
-
-      if (done) break;
-
-      chunks.push(value);
-      downloaded += value.length;
+    const source = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
+    const gate = createDownloadGate({ signal: this.options.abortSignal }, (chunk) => {
+      downloaded += chunk.length;
 
       // 속도 계산 (0.3초마다)
       const now = Date.now();
@@ -259,19 +277,30 @@ export abstract class BaseOSDownloader {
           phase: 'downloading',
         });
       }
-    }
+    });
 
-    // 파일 저장
-    const buffer = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
-    fs.writeFileSync(destPath, buffer);
+    let ownsFile = false;
+    try {
+      const writer = fs.createWriteStream(destPath);
+      // Failed open must not remove an untouched existing file or directory.
+      writer.once('open', () => {
+        ownsFile = true;
+      });
+      await pipeline(source, gate, writer, { signal: this.options.abortSignal });
+    } catch (error) {
+      // pipeline waits for the writer to close before partial-file cleanup.
+      source.destroy();
+      if (ownsFile) throw await this.cleanupFailedFile(destPath, error);
+      throw error;
+    } finally {
+      gate.destroy();
+    }
   }
 
   /**
    * 여러 패키지 다운로드 (병렬)
    */
-  async downloadPackages(
-    packages: OSPackageInfo[]
-  ): Promise<DownloadPackagesResult> {
+  async downloadPackages(packages: OSPackageInfo[]): Promise<DownloadPackagesResult> {
     const success: OSPackageInfo[] = [];
     const failed: Array<{ package: OSPackageInfo; error: Error }> = [];
     const downloadedFiles = new Map<string, string>();

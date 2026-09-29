@@ -104,7 +104,7 @@ try {
 
 | 메서드 | 설명 |
 |--------|------|
-| `getRepoData` | repodata.json 가져오기 (zstd 압축 지원, 캐싱) |
+| `getRepoData` | Worker의 repodata 재조회용 참조 가져오기 (zstd/디스크 캐싱) |
 | `findPackageInRepoData` | repodata에서 패키지 검색 |
 | `selectBestFile` | Anaconda API fallback에서 버전/아키텍처에 맞는 파일 선택 |
 | `getPackageMetadataFallback` | Anaconda API fallback 조회 |
@@ -117,7 +117,7 @@ try {
 | `type` | PackageType | 'conda' |
 | `apiUrl` | string | Anaconda API URL |
 | `condaUrl` | string | Conda 패키지 저장소 URL |
-| `repodataCache` | Map<string, RepoData> | repodata 캐시 |
+| `repodataCache` | Map<string, RepoData | RepodataReference> | 운영 경로는 Worker 재조회용 참조만 보관 |
 | `client` | AxiosInstance | HTTP 클라이언트 |
 
 ### 다운로드 옵션
@@ -155,7 +155,7 @@ await downloader.searchPackages('numpy', 'all'); // 검색에서만 채널 필�
 ### 특징
 
 - **repodata.json.zst 지원**: zstd 압축 파일 우선 사용 (대역폭 절약)
-- **캐싱**: repodata 캐싱으로 중복 요청 방지
+- **캐싱**: repodata 캐싱으로 중복 요청 방지; Worker 이름 인덱스에서 필요한 이름의 원시 후보만 조회하고 완성된 인덱스의 miss는 빈 결과로 처리. 정확한 버전·최고 build number 선택과 noarch fallback은 유지 ([조회 계약](shared-conda.md#이름-인덱스의-hitmiss와-호환-경로-187))
 - **Python 버전 필터링**: CondaResolver에서 build 태그/의존성 조건에 맞는 파일을 선택하여 전달
 - **noarch 지원**: 아키텍처 독립 패키지 자동 탐색
 - **Anaconda API fallback**: repodata에서 찾지 못한 경우 API 파일 목록에서 후보 선택 (엄격한 대상 환경 해결은 resolver 사용)
@@ -421,7 +421,7 @@ const artifactResult = await downloader.downloadArtifact(
 
 ### 실행 클래스와 조합 경로
 
-`YumDownloader`, `AptDownloader`, `ApkDownloader`는 `BaseOSDownloader`를 상속합니다. 검색과 의존성 해결은 `*DependencyResolver`, CLI 작업 조합은 `os-shared/cli-backend.ts`가 맡습니다. `OSPackageDownloader`는 `os-shared/types.ts`의 계약 인터페이스이며 생성 가능한 통합 클래스가 아닙니다.
+`YumDownloader`, `AptDownloader`, `ApkDownloader`는 `BaseOSDownloader`를 상속합니다. 공용 파일 전송은 backpressure가 적용된 스트림을 사용하며 writer 종료 뒤 검증하고 실패·취소 파일을 정리합니다([측정·검증](os-streaming-performance.md)). 검색과 의존성 해결은 `*DependencyResolver`, CLI 작업 조합은 `os-shared/cli-backend.ts`가 맡습니다. `OSPackageDownloader`는 `os-shared/types.ts`의 계약 인터페이스이며 생성 가능한 통합 클래스가 아닙니다.
 
 | 소유 모듈 | 메서드 | 반환값 | 설명 |
 |-----------|--------|--------|------|
@@ -502,6 +502,8 @@ const downloadResult = await downloadOSPackages({
 | `downloadPackage` | pkg: OSPackageInfo | Promise<OSPackageDownloadResult> | RPM 단일 다운로드 (상속) |
 
 ### 메타데이터 파서 (YumMetadataParser)
+
+primary gzip 해제·XML 파싱·패키지 변환은 Worker에서 수행하고 정규화된 목록만 반환합니다. `repomd.xml` 조회와 파싱은 기존 경로입니다. 취소·오류·수명·성능의 상세 범위는 [메타데이터 Worker](metadata-worker-performance.md)를 참고하세요.
 
 | 메서드 | 설명 |
 |--------|------|
@@ -655,6 +657,7 @@ const versions = results[0]?.versions ?? [];
 - 위치: `src/core/downloaders/npm.ts`
 - 버전 스펙 해석과 packument 조회는 `src/core/shared/npm-version-resolver.ts`를 재사용한다.
 - tarball 저장과 진행률 이벤트 생성은 `BaseLanguageDownloader`가 담당하고, `NpmDownloader`는 packument 해석과 integrity/sha1 검증 기준을 제공한다.
+- SRI는 저장 writer 종료 뒤 파일을 `ssri.checkStream`으로 검증한다. integrity가 있을 때 SHA1을 중복 실행하지 않으며 알고리즘/복수 해시 선택, 오류 시 false와 실패 파일 삭제를 유지한다. reader 종료를 기다린 뒤 반환한다. [계약·메모리/응답성 측정](npm-integrity-performance.md)을 참고한다.
 - `downloadPackage()`는 파일 저장과 제공된 무결성 검증이 성공한 뒤 전달받은 `PackageInfo`의 `version`을 실제 선택한 버전으로 갱신하고 조회한 메타데이터를 병합한다. 기존 객체·이름·타입·아키텍처와 별도 호출자 메타데이터는 유지하며, 다운로드 URL과 체크섬은 실제 받은 패키지 기준으로 반영한다. 다운로드나 무결성 검증에 실패하면 입력 정보는 갱신하지 않는다.
 
 ### 클래스 구조

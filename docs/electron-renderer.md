@@ -29,6 +29,8 @@
 
 `DownloadPage.tsx` 자체는 현재 orchestration 레이어이며, 실제 일반 다운로드 상태/완료 처리와 OS 전용 흐름은 `src/renderer/pages/download-page/hooks/*`, `components/*`, `utils.ts`, `view-state.ts`로 분리되어 있습니다.
 
+의존성 다운로드 목록은 그룹/하위 항목 각각 10개씩 페이지화하고 로그는 전체 기록을 보존하며 50개씩 표시합니다. 전체 완료/실패 집계는 모든 항목 기준이며, 진행 갱신 시 선택한 페이지·접힘 상태를 유지합니다. 변경 없는 하위 행·로그는 memo로 렌더를 생략하고 로그 카드에 전달하는 style 참조도 고정합니다. 일반 표는 진행 화면의 10행 페이지와 완료 화면의 전체 표시를 유지합니다. [계약·재현·측정 한계](download-list-performance.md)를 참고하세요.
+
 main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 생성·파일 크기 조회를 주입받습니다. 주입 계약은 `createArchiveFromDirectory`와 `(path: string) => Promise<{ size: number }>`로 제한해 실제 구현과 부분 테스트 대역을 같은 public 계약으로 검사합니다. IPC payload와 다운로드 처리 흐름은 이 타입 분리로 바뀌지 않습니다. 서비스·화면 테스트는 `npm run typecheck:tests`에서도 검사합니다.
 
 ## 다운로드 후 파일 생성 표시
@@ -154,6 +156,7 @@ main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 
 - 설정 IPC는 저장 전에 객체 형태와 알려진 필드의 타입/범위를 검증합니다. 잘못된 저장 입력은 전체 거부하고 기존 파일을 보존하며, 레거시 출력 형식·캐시 별칭과 알 수 없는 JSON 데이터 필드는 유지합니다. 함수·순환 참조·비 JSON 객체와 `__proto__`/`constructor` 키는 저장 입력에서 거부합니다. 조회는 잘못된 개별 필드를 renderer의 기존 메모리 보정에 맡깁니다.
 - 설정·히스토리 IPC는 파일별로 조회/변경을 직렬화하고 임시 파일을 완성한 뒤 rename으로 교체합니다. 전체 저장은 전달한 상태로 대체하는 계약이며, 서로 다른 프로세스의 동시 편집 병합은 포함하지 않습니다. [저장 동작과 실패 계약](shared-file-path.md#설정히스토리-json-저장)을 참고하세요.
 - 설정 화면의 캐시 위젯은 현재 `cache:*` IPC 기준 패키지 메타데이터 캐시만 집계/삭제합니다.
+- 설정 진입은 재사용 가능한 디스크 통계를 조회하고, **새로고침**은 강제 재집계합니다. 갱신 중에는 안내를 표시하며 실패 시 이전 값과 재시도 안내를 유지합니다. 삭제 후 통계는 다시 조회하고, 이전 요청·화면 종료 후 늦게 도착한 응답은 무시합니다. 저장·초기화·미저장 변경 보호와 폼 mount 구조는 유지합니다. [성능 검증](settings-cache-performance.md)을 참고하세요.
 - `src/renderer/pages/settings/` 아래 `DeliverySettingsSection`, `CacheSettingsSection`, `UpdateSettingsSection`, `use-settings-form-actions.ts`가 `SettingsPage`의 세부 책임을 분리합니다.
 - SMTP 테스트 버튼은 `testSmtpConnection` IPC가 있으면 실제 연결 테스트를 실행하고, 브라우저 개발 환경에서는 시뮬레이션, IPC가 빠진 Electron 빌드에서는 경고와 비활성화 상태를 노출합니다.
 - 히스토리 store는 renderer data client를 통해 `window.electronAPI.history.*`와 동기화됩니다. `load/add/delete/clear`가 모두 있으면 파일이 기준이며, 이 API 세트가 없거나 일부 빠진 환경에서는 `depssmuggler-history` localStorage로 대체합니다. 추가/삭제/전체 삭제는 영속화 성공 뒤 store를 갱신하고, 실패하면 이전 메모리 목록을 유지합니다.
@@ -178,6 +181,8 @@ main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 
 
 `<dependency>` 조각은 기존 동기 파서로 처리합니다. 전체 POM의 `dependencyManagement`에 있는 import BOM 선언도 모델 POM으로 가져옵니다. 부모 관리 속성은 자식 POM의 최종 property/project.version 문맥으로 해석하고, 자식의 직접 관리 선언 및 child import를 우선합니다. 부모의 직접 관리 선언은 child import보다 우선하며, 같은 BOM GA의 다른 버전 import는 child 선언을 사용합니다. 장바구니 의존성 트리 미리보기와 실제 의존성 포함 다운로드 모두 선택한 type을 resolver에 전달하며, 원격 packaging보다 명시한 type을 우선합니다.
 
+의존성 트리는 원본 그래프를 변경하지 않고 표시용 데이터와 원본 lookup을 분리합니다. 공유 artifact의 모든 부모 관계를 유지하되 하위 트리는 한 번 펼치며, 재방문은 `↗ 참조` 말단으로 표시합니다. 처음에는 최대 200개를 표시하고 `200개 더 표시`로 확장합니다. 참조도 클릭/Enter/Space로 원본 상세를 열며 버전/type/classifier를 구분합니다. PNG/SVG는 현재 확대·이동 상태의 표시 영역과 참조·개수 안내만 저장합니다. 화면 밖·미표시 노드와 추가 POM 목록은 포함하지 않습니다. [표시 계약과 성능 검증](dependency-tree-performance.md)을 참고하세요.
+
 Maven 해결 결과의 `root`는 실행 의존성 그래프이고, `flatList`에는 그 그래프에 없는 부모 POM과 import BOM도 포함될 수 있습니다. 장바구니 미리보기의 `함께 다운로드할 POM` 목록을 펼치면 그래프 밖 모델의 좌표·버전·파일 상세를 확인할 수 있습니다. 그래프에 이미 있는 POM은 이 목록에 중복 표시하지 않으며, 같은 GAV의 JAR와 POM, 서로 다른 classifier를 구분합니다.
 
 다운로드 화면은 수동 의존성 확인(`handleResolveDependencies`)과 다운로드 시작 후 해결 이벤트(`onDepsResolved`)에서 `download-page/resolved-items.ts`의 공통 변환을 사용합니다. 각 루트의 `flatList`를 기준으로 원본 다운로드 항목의 실제 ID에 그룹을 연결하므로, `root.dependencies`에 없는 부모/BOM POM도 의존성 그룹에 표시됩니다. 원본 항목 판정과 그룹 연결은 Maven artifact type과 classifier를 구분하며, 그룹에 연결하지 못한 행도 표에서 유지합니다.
@@ -188,12 +193,16 @@ Electron 다운로드 라우터는 같은 출력 디렉터리·GAV의 Maven 작�
 
 ### OS 패키지 흐름
 
+OS 바이트 진행률은 main에서 최신 payload를 150ms 간격으로 병합합니다. renderer는 수신 값을 그대로 반영하며 패키지/단계 전환과 완료 이벤트는 즉시 받습니다. 취소 뒤 예약된 과거 전송이 화면을 되돌리지 않도록 main이 timer와 이전 payload를 정리합니다. [전송 빈도와 검증](os-progress-performance.md)을 참고하세요.
+
 1. `WizardPage`에서 `yum`, `apt`, `apk` 중 하나 선택
 2. 배포판과 아키텍처는 settings store와 `wizard-page/os-context.ts` helper를 통해 선택/적용됩니다.
 3. 검색은 `wizard-page/search-service.ts`가 `os:search` IPC를 통해 수행합니다.
 4. OS 의존성은 전용 다운로드 시작 요청의 `resolveDependencies` 옵션에 따라 main에서 계산합니다. 별도 `os:resolveDependencies`와 진행 이벤트 API도 노출되어 있지만 현재 routed UI는 이 메서드를 직접 호출하지 않습니다.
 5. 장바구니가 OS 패키지로만 구성되고 모든 항목에 동일한 패키지 관리자·배포판·아키텍처의 `metadata.osContext`가 있으면 `/download`에서 전용 OS 다운로드 화면으로 전환됩니다. `src/renderer/components/os/*`의 출력 옵션/진행률/결과 컴포넌트를 사용합니다. OS 항목의 context가 누락되면 재선택 안내를 표시하며, 일반 패키지가 섞이거나 서로 다른 context이면 전용 흐름 조건을 만족하지 않습니다.
 6. 실제 다운로드는 `os:download:start` IPC로 실행되고, 일반 패키지 경로 `download:start`와 분리되어 유지됩니다.
+
+OS 다운로드는 설정의 동시 실행 수를 적용합니다. 화면의 전체 퍼센트는 성공/실패/건너뛰기를 포함한 처리 완료 수로 계산하고, 현재 표시 패키지는 입력 순서상 가장 앞선 활성 항목을 유지합니다. 바이트·속도는 그 패키지 값이며 활성 슬롯 수는 별도 안내합니다. 오류 선택 창은 이름·버전·아키텍처와 함께 하나씩 표시하며, 취소/예외 시 모든 전송 종료와 임시 파일 정리 뒤 결과를 반환합니다. [동시 실행·진행률 계약](os-download-concurrency.md)을 참고하세요.
 
 ## 출력과 패키징
 
@@ -218,9 +227,10 @@ OS 전용 흐름의 전달 방식은 로컬 저장이며, 일반 다운로드의
 
 ## 자동 업데이트
 
-- `UpdateNotification.tsx`가 `updater:status` 이벤트를 구독합니다.
+- `UpdateNotification.tsx`가 `updater:status` 이벤트를 구독하고 초기 상태를 조회합니다. 구독 전에 새 버전 발견·다운로드 시작·설치 준비가 완료되어도 최초 상태로 모달을 복원합니다. 초기 조회보다 진행 이벤트가 먼저 와도 복원하며, 늦게 도착한 초기 응답은 최신 이벤트나 사용자의 모달 닫기를 덮어쓰지 않습니다.
 - 새 버전 발견, 다운로드 진행률, 설치 준비 완료를 모달로 노출합니다.
 - 패치 노트는 GitHub updater가 전달하는 HTML의 제목·목록·강조·코드·표를 서식에 맞게 표시합니다. 일반 텍스트는 줄바꿈을 유지하며, 버전별 노트 배열은 버전과 함께 표시하고 빈 노트는 생략합니다. Markdown을 직접 파싱하는 화면은 아닙니다.
+- `릴리스 이력` 영역에 표시할 노트가 전혀 없으면 변경 사항 미제공 안내와 해당 버전의 `GitHub 릴리스 보기` 링크를 표시합니다. GitHub Release 본문이 비어 있으면 Atom의 `No content.`가 updater에서 빈 문자열로 변환됩니다. 배포 시 본문 생성과 검증 절차는 [테스트·릴리스 CI](testing.md#releaseyml)를 참고하세요.
 - 외부 HTML은 DOMPurify의 태그·속성 허용 목록으로 정제합니다. 스크립트, 이벤트 속성, 스타일, 이미지와 iframe은 표시하지 않습니다. HTTP(S) 링크는 updater IPC에서 주소를 다시 검증한 뒤 시스템 브라우저로 열며 앱 화면은 이동하지 않습니다.
 - 패키징된 앱은 시작 후 약 3초 뒤 업데이트를 확인합니다. 자동 다운로드 기본값은 `false`이며, 사용자가 다운로드와 설치/재시작을 선택할 수 있고 내려받은 업데이트는 앱 종료 시 설치하도록 설정되어 있습니다.
 - Electron 44 앱 번들의 `mac.minimumSystemVersion`은 macOS `13.0.0`입니다. 업데이트 피드의 `minimumSystemVersion`은 updater가 `os.release()`와 비교하므로 Darwin 커널 `22.0.0`을 사용합니다. `postpackage:mac`이 생성된 피드에 이 조건을 기록하고 검증합니다. 정책 값은 `scripts/macos-update-policy.json`에 있습니다. 마케팅 OS 버전 `13.0.0`을 피드에 넣으면 macOS 12 차단이 되지 않습니다. 생성된 모든 `*-mac.yml`은 이 조건도 검사합니다.
@@ -228,11 +238,12 @@ OS 전용 흐름의 전달 방식은 로컬 저장이며, 일반 다운로드의
 - 설정 화면의 `autoUpdate`/`autoDownloadUpdate` 값은 저장·복원되지만 현재 updater 동작과 연결되어 있지 않습니다. 시작 검사에서는 `autoUpdate`를 읽지 않으며, 설정 저장은 `updater.setAutoDownload`를 호출하지 않습니다. `지금 확인` 버튼은 실제 `updater.check`를 호출합니다.
 - 개발 모드에서는 업데이트 확인·다운로드·설치가 no-op 응답을 반환합니다. 패치 노트 링크 열기는 배포 앱과 같은 주소 검증을 사용합니다.
 
-검증: `bash scripts/verify-worktree.sh src/renderer/components/ReleaseNotes.test.tsx src/renderer/components/UpdateNotification.test.tsx electron/updater.test.ts`와 `npm run test:e2e -- tests/e2e/updater-release-notes.spec.ts`로 서식·유해 HTML 제거·노트 형식·링크 및 모달 상태 전환을 확인합니다. 브라우저 E2E는 실제 GitHub Atom 노트 형식과 모의 Electron bridge를 사용하며 업데이트 파일을 설치하지 않습니다.
+검증: `bash scripts/verify-worktree.sh src/renderer/components/ReleaseNotes.test.tsx src/renderer/components/UpdateNotification.test.tsx electron/updater.test.ts`와 `npm run test:e2e -- tests/e2e/updater-release-notes.spec.ts`로 서식·유해 HTML 제거·빈 노트의 안내/링크·초기 상태 복원·응답 순서 및 모달 상태 전환을 확인합니다. 단위 테스트는 실제 GitHubProvider의 빈 Atom 본문 변환을 사용합니다. 브라우저 E2E는 모의 Electron bridge를 사용하며 업데이트 파일을 설치하지 않습니다.
 
 ## 버전 선택의 현재 방식
 
 - Python/CUDA 목록은 IPC 기반 프리로드를 사용합니다.
+- 시작 조회와 설정 화면의 조기 IPC가 겹치면 공통 fetcher가 진행 중 요청을 공유합니다. 화면/IPC 계약은 유지하며, 실패 대체 목록의 IPC 세션 캐시를 자동 갱신하는 변경은 아닙니다. [조회 공유와 기존 fallback 정책](version-request-sharing.md)을 참고하세요.
 - Java/Node 런타임 버전 선택 단계는 없습니다. 위자드는 카테고리 → 패키지 타입 → 검색 → 패키지 버전 순서로 진행하며, 사용되지 않던 과거 언어 버전 옵션 목록과 단계 생략 함수를 제거했습니다. Python 설정과 패키지 버전 조회 흐름은 유지됩니다.
 
 ## 관련 문서
@@ -240,3 +251,7 @@ OS 전용 흐름의 전달 방식은 로컬 저장이며, 일반 다운로드의
 - [IPC 핸들러](./ipc-handlers.md)
 - [다운로드 히스토리](./download-history.md)
 - [아키텍처 개요](./architecture-overview.md)
+
+## 장바구니 일괄 추가
+
+파일/텍스트 가져오기와 이력 복원은 `cart-store.addItems`로 신규 항목을 한 번에 갱신·저장합니다. 기존 항목과 입력 내 최초 항목의 순서·옵션을 유지하며 Maven JAR/POM 구분 외 동일성 조건을 넓히지 않습니다. 빈/전부 중복 입력은 저장하지 않고, 안내에는 실제 추가 수를 사용합니다. latest 실패 대체값과 파일별 성공/실패, 이력의 설정·수신자 복원은 유지합니다. [동작·검증·브라우저 측정](cart-bulk-add.md)을 참고하세요.

@@ -38,23 +38,20 @@ const getMavenArtifactType = (metadata?: Record<string, unknown>): string => {
     : 'jar';
 };
 
-const isSameCartItem = (item: CartItem, candidate: CartItemIdentity): boolean => {
-  if (
-    item.type !== candidate.type ||
-    item.name !== candidate.name ||
-    item.version !== candidate.version
-  ) {
-    return false;
-  }
-
-  return item.type !== 'maven' ||
-    getMavenArtifactType(item.metadata) === getMavenArtifactType(candidate.metadata);
-};
+// 장바구니 동일성은 다운로드 아티팩트 키와 다르다. 옵션을 추가로 비교하지 않는다.
+const getCartIdentityKey = (item: CartItemIdentity): string =>
+  JSON.stringify([
+    item.type,
+    item.name,
+    item.version,
+    item.type === 'maven' ? getMavenArtifactType(item.metadata) : null,
+  ]);
 
 // 장바구니 상태
 interface CartState {
   items: CartItem[];
   addItem: (item: Omit<CartItem, 'id' | 'addedAt'>) => void;
+  addItems: (items: ReadonlyArray<Omit<CartItem, 'id' | 'addedAt'>>) => number;
   removeItem: (id: string) => void;
   clearCart: () => void;
   hasItem: (
@@ -76,22 +73,22 @@ export const useCartStore = create<CartState>()(
       items: [],
 
       addItem: (item) => {
-        const state = get();
-        // 중복 체크
-        if (state.hasItem(item.type, item.name, item.version, item.metadata)) {
-          return;
-        }
+        get().addItems([item]);
+      },
 
-        set((state) => ({
-          items: [
-            ...state.items,
-            {
-              ...item,
-              id: generateId(),
-              addedAt: Date.now(),
-            },
-          ],
-        }));
+      addItems: (items) => {
+        if (items.length === 0) return 0;
+        const existing = get().items;
+        const seen = new Set(existing.map(getCartIdentityKey));
+        const added: CartItem[] = [];
+        for (const item of items) {
+          const key = getCartIdentityKey(item);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          added.push({ ...item, id: generateId(), addedAt: Date.now() });
+        }
+        if (added.length > 0) set({ items: [...existing, ...added] });
+        return added.length;
       },
 
       removeItem: (id) => {
@@ -105,9 +102,8 @@ export const useCartStore = create<CartState>()(
       },
 
       hasItem: (type, name, version, metadata) => {
-        return get().items.some((item) =>
-          isSameCartItem(item, { type, name, version, metadata })
-        );
+        const key = getCartIdentityKey({ type, name, version, metadata });
+        return get().items.some((item) => getCartIdentityKey(item) === key);
       },
     }),
     {

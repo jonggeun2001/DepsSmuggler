@@ -58,6 +58,7 @@ depssmuggler/
 - React Router 기준 경로는 `/`, `/wizard`, `/cart`, `/download`, `/history`, `/settings`입니다.
 - 라우트 source of truth는 `src/renderer/router.tsx`이며, `src/renderer/index.tsx`는 `createAppRouter()`만 소비합니다.
 - `MainLayout.tsx`가 좌측 네비게이션과 공통 레이아웃을 담당합니다.
+- 의존성 트리의 표시 모델은 원본 resolver 그래프와 분리합니다. artifact 관계 인덱스에서 최대 200개의 초기 트리와 참조 노드를 만들고, 별도 lookup으로 원본 상세를 엽니다. [표시/내보내기 계약](dependency-tree-performance.md)을 참고하세요.
 - `HomePage.tsx`와 `WizardPage.tsx`는 패키지 타입 선택과 검색 진입을 담당합니다.
 - `CartPage.tsx`는 장바구니와 텍스트 입력 기반 패키지 추가를 담당하며, BOM을 포함한 Maven POM 입력의 artifact type metadata를 미리보기·의존성 해결·다운로드 경계까지 유지하고 같은 GAV라도 type이 다른 artifact를 구분합니다.
 - 장바구니의 Maven artifact type 정보는 Electron 다운로드 라우터까지 전달됩니다. 같은 출력 디렉터리·GAV의 다운로드와 복사는 main service에서 직렬화해 JAR의 부속 POM과 별도 POM 작업 간 파일 쓰기 충돌을 방지합니다.
@@ -91,6 +92,7 @@ depssmuggler/
 - `downloaders/lang-shared/`: 언어 패키지 downloader가 공유하는 스트림 저장, 진행률 계산, 파일명 정규화, 검증 실패 정리 계층
 - `downloaders/os-shared/`: YUM/APT/APK 공용 저장소, 캐시, 스크립트, 아카이브, 로컬 저장소 패키징
 - `ports/`: downloader와 resolver 사이에 두는 패키지 메타데이터/파일 fetch 경계. orchestration 계층이 구현체를 조합합니다.
+- `shared/metadata/`: Conda repodata/YUM primary의 큰 파싱·인덱싱을 Worker에서 수행합니다. 네트워크는 호출 프로세스에 유지하고 Conda 이름별 레코드/YUM 정규화 목록만 돌려줍니다. [Worker 경계·수명](metadata-worker-performance.md)을 참고하세요.
 - `resolver/`: 타입별 의존성 계산
 - `packager/`: 일반 패키지용 아카이브/스크립트/분할 처리
 - `mailer/`: SMTP 발송
@@ -140,7 +142,7 @@ depssmuggler/
 2. 장바구니가 OS 패키지로만 구성되고 모든 항목의 `metadata.osContext`에 패키지 관리자·배포판·아키텍처가 동일하게 저장되어 있으면 `DownloadPage.tsx`가 `pages/download-page/hooks/use-os-download-flow.ts`를 통해 동일 라우트(`/download`) 안에서 전용 화면으로 전환합니다. context가 누락된 OS 장바구니는 재선택 안내를 표시합니다. 일반 패키지가 섞이거나 서로 다른 context인 경우에는 전용 흐름이 성립하지 않습니다.
 3. OS 전용 흐름은 `os:getDistribution`으로 선택된 배포판 전체 설정을 읽고 `archive | repository | both` 출력 옵션을 노출합니다. `repository`/`both`에서는 로컬 저장소 설정 스크립트가 기본 포함됩니다.
 4. 실제 다운로드 시작은 `os:download:start` 하나로 통합되어, `electron/services/os-download-orchestrator.ts`가 필요 시 의존성 해결과 패키징까지 수행합니다. 미해결 의존성은 이 단계에서 즉시 중단되고, resolving 단계 취소도 오류보다 우선해 중단 결과를 반환합니다.
-5. 진행률은 `os:download:progress`로, 취소는 `os:download:cancel`로 처리됩니다. 취소 요청은 현재 OS 패키지 전송의 `fetch`에도 abort 신호를 전달합니다.
+5. 진행률은 `os:download:progress`로, 취소는 `os:download:cancel`로 처리됩니다. `os-download-pool.ts`가 설정한 동시 실행 수를 적용하고, 오류 선택은 세션 안에서 직렬화합니다. 취소/예외는 모든 활성 전송을 중단하고 전체 작업 종료 뒤 staging을 정리합니다. [병렬 진행률과 수명](os-download-concurrency.md)을 참고하세요.
 6. 결과 출력물 경로와 `generatedOutputs`, `warnings`, `conflicts`, `cancelled` 상태는 `os:download:start` 반환값으로 렌더러에 전달됩니다. 취소로 최종 산출물이 생성되지 않은 경우에는 임시 다운로드를 성공으로 승격하지 않고, routed OS 결과 화면에서 중단 상태와 실제 생성물만 안내합니다.
 
 OS 전용 흐름은 로컬 저장으로 동작하며, 일반 다운로드의 SMTP 전달·자동 분할 파이프라인을 사용하지 않습니다. Electron의 `os:cache:*`는 아직 placeholder이고, 실제 OS CLI 캐시는 `<cachePath>/os-packages`의 JSON 파일을 관리합니다. CLI의 `cacheEnabled`와 `maxCacheSize`를 검색·다운로드 backend에 전달하며, 크기 한도는 저장 데이터의 추정 크기에 적용합니다. 기본값과 별도 캐시의 범위는 [캐시 문서](shared-cache.md#os-메타데이터-캐시-설정)를 참고하세요.

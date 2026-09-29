@@ -184,7 +184,7 @@ const electronAPI = {
   // 패키지 메타데이터 캐시 관련
   cache: {
     getSize: (): Promise<number> => ipcRenderer.invoke('cache:get-size'),
-    getStats: (): Promise<{
+    getStats: (options?: { forceRefresh?: boolean }): Promise<{
       scope: string;
       excludes: string[];
       totalSize: number;
@@ -195,7 +195,7 @@ const electronAPI = {
         maven: unknown;
         conda: unknown;
       };
-    }> => ipcRenderer.invoke('cache:stats'),
+    }> => ipcRenderer.invoke('cache:stats', options),
     clear: (): Promise<{ success: boolean }> => ipcRenderer.invoke('cache:clear'),
   },
 

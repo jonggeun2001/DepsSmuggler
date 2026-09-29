@@ -65,6 +65,8 @@ describe('bindSessionProgressEmitter', () => {
       clearAllPackageProgress: vi.fn(),
       emitAllComplete: vi.fn(),
       emitOSProgress: vi.fn(),
+      flushOSProgress: vi.fn(),
+      clearOSProgress: vi.fn(),
       emitOSResolveDependenciesProgress: vi.fn(),
     };
 
@@ -85,6 +87,10 @@ describe('bindSessionProgressEmitter', () => {
     });
     sessionEmitter.clearPackageProgress('pkg-1');
     sessionEmitter.clearAllPackageProgress();
+    sessionEmitter.flushOSProgress();
+    sessionEmitter.clearOSProgress();
+    expect(emitter.flushOSProgress).toHaveBeenCalledTimes(1);
+    expect(emitter.clearOSProgress).toHaveBeenCalledTimes(1);
     sessionEmitter.emitOSResolveDependenciesProgress({
       message: 'resolving',
       current: 1,

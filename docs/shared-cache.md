@@ -11,6 +11,7 @@
 ```
 src/core/shared/
 ├── cache-utils.ts     # 캐시 공통 유틸리티
+├── cache-stats.ts     # 비동기 디스크 집계와 통계 재사용
 ├── cache-manager.ts   # compatibility shim
 ├── cache/
 │   ├── cache-store.ts     # 범용 CacheStore
@@ -263,9 +264,9 @@ interface CacheStoreOptions<T> {
 | pip | O | O | 메모리 5분, 디스크 1시간 | [shared-pip.md](./shared-pip.md) |
 | npm | O | X | 5분 | [shared-npm.md](./shared-npm.md) |
 | Maven | O | O | 메모리 5분, 디스크 24시간 | [shared-maven.md](./shared-maven.md) |
-| Conda (`conda-cache.ts`) | 동시 요청만 | O | 서버 max-age와 24시간 중 큰 값 | [shared-conda.md](./shared-conda.md) |
+| Conda (`conda-cache.ts`) | 동시 요청 공유 + 제한된 Worker 인덱스 | O | 서버 max-age와 24시간 중 큰 값 | [shared-conda.md](./shared-conda.md) |
 
-`conda-cache.ts`는 완료 후 repodata payload를 메모리에 보존하지 않고 동시 요청만 합칩니다. 별도 URL 헬퍼 `conda-utils.ts`는 TTL 없는 메모리 Map을 사용하므로 두 경로를 구분해야 합니다.
+`conda-cache.ts`와 URL 헬퍼 `conda-utils.ts`는 디스크 캐시와 Worker 인덱스를 공유합니다. 메인에는 원본 대신 재조회용 참조만 저장합니다. Worker 인덱스의 원본 크기 예산·항목 수·유휴 종료와 갱신 정책은 [메타데이터 Worker](metadata-worker-performance.md)를 참고하세요.
 
 Maven 메모리 캐시와 중복 요청 관리는 `CacheStore<PomCacheEntry>` 어댑터로 통합되고, 디스크 캐시만 Maven 전용 파일 구조를 유지합니다.
 
@@ -300,6 +301,18 @@ Maven 메모리 캐시와 중복 요청 관리는 `CacheStore<PomCacheEntry>` �
 
 캐시 경로를 별도로 설정한 경우 위 기본 경로와 달라집니다. pip/Maven/Conda 메타데이터 함수의 `cacheDir` 옵션과 Simple API 클라이언트의 `configManager.getCacheDir()` 적용 범위는 각 상세 문서를 참고하세요.
 
+## 설정 화면의 통계 조회
+
+`cache:*` IPC는 pip·Maven·Conda의 비동기 통계 API를 사용합니다. `cache-stats.ts`는 디렉터리별 결과와 진행 중 요청을 메모리에 보관합니다. 변경 없는 재진입과 동시 요청은 같은 디스크 집계를 재사용하며, npm 및 pip·Maven의 메모리 항목 수는 조회할 때 갱신합니다.
+
+최초 pip·Maven 집계는 `fs.promises.opendir/stat`으로 순회하여 파일마다 이벤트 루프에 제어를 돌려줍니다. Conda는 비동기로 작은 메타데이터와 repodata 크기만 확인하며 repodata 본문을 읽지 않습니다. pip·Maven 순회와 Conda 채널·하위 디렉터리 탐색은 심볼릭 링크 항목을 건너뜁니다. 없는 경로와 집계 중 삭제된 파일은 건너뛰며 권한 오류 등은 호출자에게 전달합니다. 실패한 집계는 재사용하지 않습니다.
+
+각 패키지 캐시의 파일 저장·삭제·만료 정리는 통계 결과를 무효화합니다. 비동기 Maven 변경은 시작과 종료 시 모두 무효화합니다. 집계 중 변경이 발생하면 진행 중 요청을 유지한 채 다시 집계하여 이전 결과를 저장하지 않습니다. 기존 동기 통계 API와 CLI 계약은 유지합니다.
+
+설정 화면의 **새로고침**은 `cache.getStats({ forceRefresh: true })`로 재집계합니다. 외부 CLI나 다른 프로세스에서 바꾼 파일은 자동 감시하지 않으므로 새로고침 또는 앱 재시작으로 반영합니다. 조회 실패 시 화면의 이전 통계와 재시도 안내를 유지하고, 삭제 후에는 재조회한 통계를 표시합니다. 이 변경은 통계 조회에 한정되며 기존 동기 파일 저장·삭제 작업 전체를 비동기로 바꾸지는 않습니다.
+
+재현 명령과 동일 환경의 전후 측정은 [설정 캐시 통계 성능](settings-cache-performance.md)을 참고하세요.
+
 ## 관련 문서
 
 - [Shared Utilities 개요](./shared-utilities.md)
@@ -307,3 +320,7 @@ Maven 메모리 캐시와 중복 요청 관리는 `CacheStore<PomCacheEntry>` �
 - [Conda 유틸리티](./shared-conda.md)
 - [Maven 유틸리티](./shared-maven.md)
 - [npm 유틸리티](./shared-npm.md)
+
+## Python/CUDA 버전 조회의 진행 중 작업
+
+`version-fetcher.ts`의 Python/CUDA는 종류별 pending Promise를 공유하고 정상 응답·fallback resolve·예외 reject 모두 완료 시 해제합니다. 이는 완료된 결과의 TTL 캐시와 별개이며 Python 24시간/CUDA 7일, 저장 캐시·만료 캐시 fallback 규칙은 유지합니다. 일반 패키지 캐시 관리 IPC의 대상에 버전 캐시를 새로 포함하지 않습니다. handler의 fallback 세션 캐시와 직접 fetcher 재시도의 차이는 [버전 조회 공유](version-request-sharing.md)를 참고하세요.

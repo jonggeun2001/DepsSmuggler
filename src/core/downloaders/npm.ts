@@ -6,6 +6,7 @@
  */
 
 import * as crypto from 'crypto';
+import { finished } from 'stream/promises';
 import axios, { AxiosInstance } from 'axios';
 import * as fs from 'fs-extra';
 import * as ssri from 'ssri';
@@ -213,12 +214,24 @@ export class NpmDownloader extends BaseLanguageDownloader implements IDownloader
   }
 
   /**
-   * integrity 검증 (sha512)
+   * 저장된 파일의 SRI 검증 (라이브러리의 알고리즘/다중 해시 선택 유지)
    */
   async verifyIntegrity(filePath: string, expectedIntegrity: string): Promise<boolean> {
     try {
-      const fileBuffer = await fs.readFile(filePath);
-      return ssri.checkData(fileBuffer, expectedIntegrity) !== false;
+      const reader = fs.createReadStream(filePath);
+      // Invalid SRI can reject before ssri installs stream listeners. Observe errors immediately
+      // and wait for file closure before returning, including when the caller will delete the file.
+      const closed = finished(reader, { cleanup: true }).then(
+        () => true,
+        () => false
+      );
+      try {
+        const verified = await ssri.checkStream(reader, expectedIntegrity);
+        return Boolean(verified) && (await closed);
+      } finally {
+        reader.destroy();
+        await closed;
+      }
     } catch {
       return false;
     }

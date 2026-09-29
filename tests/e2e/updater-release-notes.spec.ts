@@ -25,9 +25,9 @@ type CapturedUpdater = {
   opened: string[];
 };
 
-async function installUpdaterHarness(page: Page) {
+async function installUpdaterHarness(page: Page, initialStatus?: UpdaterStatus) {
   await setupMockElectronApp(page);
-  await page.addInitScript(() => {
+  await page.addInitScript((snapshot) => {
     const api = window.electronAPI;
     const updater = api.updater;
     if (!updater) throw new Error('Updater API unavailable');
@@ -37,15 +37,16 @@ async function installUpdaterHarness(page: Page) {
       captured.emit = callback;
       return originalSubscribe(callback);
     };
-    updater.getStatus = async () => ({
-      checking: false,
-      available: false,
-      downloaded: false,
-      downloading: false,
-      error: null,
-      progress: null,
-      updateInfo: null,
-    });
+    updater.getStatus = async () =>
+      snapshot ?? {
+        checking: false,
+        available: false,
+        downloaded: false,
+        downloading: false,
+        error: null,
+        progress: null,
+        updateInfo: null,
+      };
     (
       updater as typeof updater & {
         openReleaseNotesLink: (url: string) => Promise<{ success: boolean }>;
@@ -55,7 +56,7 @@ async function installUpdaterHarness(page: Page) {
       return { success: true };
     };
     Object.defineProperty(window, '__updaterE2E__', { value: captured, configurable: true });
-  });
+  }, initialStatus);
 }
 
 async function showUpdate(
@@ -188,10 +189,41 @@ test('일반 텍스트의 줄바꿈과 비교 기호를 유지한다', async ({ 
   await expect(notes).toHaveCSS('white-space', 'pre-wrap');
 });
 
-test('빈 버전별 노트는 생략하고 다운로드 버튼을 유지한다', async ({ page }) => {
+test('빈 노트는 안내와 릴리스 링크를 표시하고 다운로드 버튼을 유지한다', async ({ page }, testInfo) => {
   await installUpdaterHarness(page);
   await showUpdate(page, [{ version: '0.2.26', note: null }]);
   const dialog = page.getByRole('dialog');
-  await expect(dialog.locator('.release-notes')).toHaveCount(0);
+  await expect(dialog).toContainText('이 버전의 변경 사항이 제공되지 않았습니다.');
+  await dialog.screenshot({ path: testInfo.outputPath('empty-release-notes.png') });
+  const appUrl = page.url();
+  await dialog.getByRole('link', { name: 'GitHub 릴리스 보기' }).click();
+  expect(
+    await page.evaluate(
+      () => (window as typeof window & { __updaterE2E__: CapturedUpdater }).__updaterE2E__.opened
+    )
+  ).toEqual(['https://github.com/jonggeun2001/DepsSmuggler/releases/tag/v0.2.26']);
+  await expect(page).toHaveURL(appUrl);
   await expect(dialog.getByRole('button', { name: /다운로드$/ })).toBeVisible();
+});
+
+test('구독 전 완료된 업데이트를 초기 상태만으로 열어 릴리스 이력을 표시한다', async ({ page }) => {
+  await installUpdaterHarness(page, {
+    checking: false,
+    available: true,
+    downloaded: true,
+    downloading: false,
+    error: null,
+    progress: null,
+    updateInfo: {
+      version: '0.2.30',
+      releaseDate: '2026-09-22T00:00:00Z',
+      releaseNotes: '<p>검색 오류 안내 개선</p>',
+    },
+  });
+  await page.goto('/#/');
+  const dialog = page.getByRole('dialog', { name: '업데이트 준비 완료' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('릴리스 이력');
+  await expect(dialog).toContainText('검색 오류 안내 개선');
+  await expect(dialog.getByRole('button', { name: '지금 재시작' })).toBeVisible();
 });

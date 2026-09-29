@@ -1,17 +1,46 @@
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AnacondaFileInfo, RepoData, RepoDataPackage } from './conda-types';
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
-  decompress: vi.fn(),
-  logger: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-vi.mock('axios', () => ({ default: { get: mocks.get } }));
-vi.mock('fzstd', () => ({ decompress: mocks.decompress }));
+vi.mock('axios', () => ({
+  default: {
+    get: async (url: string, options: unknown) => {
+      const result = await mocks.get(url, options);
+      if (url.endsWith('/files')) return result;
+      return {
+        status: 200,
+        headers: {},
+        ...result,
+        data:
+          result.data instanceof ArrayBuffer
+            ? result.data
+            : Buffer.from(JSON.stringify(result.data)),
+      };
+    },
+  },
+}));
 vi.mock('../../utils/logger', () => ({ default: mocks.logger }));
 
 let getCondaDownloadUrl: typeof import('./conda-utils').getCondaDownloadUrl;
 let getCondaSubdir: typeof import('./conda-utils').getCondaSubdir;
+let cacheModule: typeof import('./conda-cache');
+let cacheDirectory: string;
+
+function rawZstd(text: string): ArrayBuffer {
+  const data = Buffer.from(text);
+  const header = Buffer.alloc(12);
+  header.writeUInt32LE(0xfd2fb528);
+  header[4] = 0xa0;
+  header.writeUInt32LE(data.length, 5);
+  header.writeUIntLE((data.length << 3) | 1, 9, 3);
+  return Uint8Array.from(Buffer.concat([header, data])).buffer;
+}
 const baseUrl = 'https://conda.anaconda.org';
 
 function pkg(overrides: Partial<RepoDataPackage> = {}): RepoDataPackage {
@@ -55,9 +84,19 @@ beforeEach(async () => {
   vi.resetAllMocks();
   mocks.get.mockRejectedValue(new Error('mock network unavailable'));
   vi.spyOn(console, 'warn').mockImplementation(() => {});
+  cacheDirectory = await mkdtemp(join(tmpdir(), 'conda-utils-worker-'));
+  cacheModule = await import('./conda-cache');
+  const fetch = cacheModule.fetchRepodata;
+  vi.spyOn(cacheModule, 'fetchRepodata').mockImplementation((channel, subdir, options) =>
+    fetch(channel, subdir, { ...options, cacheDir: cacheDirectory })
+  );
   ({ getCondaDownloadUrl, getCondaSubdir } = await import('./conda-utils'));
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(async () => {
+  await cacheModule.closeRepodataWorker();
+  await rm(cacheDirectory, { recursive: true, force: true });
+  vi.restoreAllMocks();
+});
 
 describe('getCondaSubdir', () => {
   it.each([
@@ -81,13 +120,11 @@ describe('getCondaSubdir', () => {
 
 describe('Conda repodata retrieval and caching', () => {
   it('decodes a zstd index and returns the exact package URL, filename and size', async () => {
-    const compressed = Uint8Array.from([1, 2, 3, 4]);
     const repodata: RepoData = {
       packages: {},
       'packages.conda': { 'numpy-2.0.0-py312_0.conda': pkg() },
     };
-    mocks.get.mockResolvedValueOnce({ data: compressed.buffer });
-    mocks.decompress.mockReturnValueOnce(new TextEncoder().encode(JSON.stringify(repodata)));
+    mocks.get.mockResolvedValueOnce({ data: rawZstd(JSON.stringify(repodata)) });
     await expect(
       getCondaDownloadUrl('numpy', '2.0.0', 'x86_64', 'linux', 'conda-forge', '3.12')
     ).resolves.toEqual({
@@ -97,13 +134,12 @@ describe('Conda repodata retrieval and caching', () => {
     });
     expect(mocks.get).toHaveBeenCalledExactlyOnceWith(
       `${baseUrl}/conda-forge/linux-64/repodata.json.zst`,
-      {
+      expect.objectContaining({
         responseType: 'arraybuffer',
         headers: { 'User-Agent': 'DepsSmuggler/1.0' },
         timeout: 120000,
-      }
+      })
     );
-    expect(mocks.decompress).toHaveBeenCalledExactlyOnceWith(compressed);
   });
 
   it.each(['download', 'decompression', 'invalid-json'] as const)(
@@ -111,12 +147,9 @@ describe('Conda repodata retrieval and caching', () => {
     async (failure) => {
       if (failure === 'download') mocks.get.mockRejectedValueOnce(new Error('404'));
       else {
-        mocks.get.mockResolvedValueOnce({ data: new Uint8Array([0]).buffer });
-        if (failure === 'decompression')
-          mocks.decompress.mockImplementationOnce(() => {
-            throw new Error('invalid zstd frame');
-          });
-        else mocks.decompress.mockReturnValueOnce(new TextEncoder().encode('not json'));
+        mocks.get.mockResolvedValueOnce({
+          data: failure === 'decompression' ? new Uint8Array([0]).buffer : rawZstd('not json'),
+        });
       }
       mocks.get.mockResolvedValueOnce({ data: { packages: { 'numpy.tar.bz2': pkg() } } });
       await expect(getCondaDownloadUrl('numpy', '2.0.0')).resolves.toEqual({
@@ -324,7 +357,10 @@ describe('Conda Anaconda API fallback and errors', () => {
         timeout: 30000,
       }
     );
-    expect(mocks.logger.warn).not.toHaveBeenCalled();
+    expect(mocks.logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('[conda-utils]'),
+      expect.anything()
+    );
   });
 
   it('selects the highest API build when no Python version is requested', async () => {
@@ -384,7 +420,10 @@ describe('Conda Anaconda API fallback and errors', () => {
       serveIndexes({}, files);
       await expect(getCondaDownloadUrl('numpy', '2.0.0')).resolves.toBeNull();
       expect(mocks.get).toHaveBeenCalledTimes(5);
-      expect(mocks.logger.error).not.toHaveBeenCalled();
+      expect(mocks.logger.error).not.toHaveBeenCalledWith(
+        expect.stringContaining('[conda-utils]'),
+        expect.anything()
+      );
       expect(mocks.logger.warn).toHaveBeenCalledWith(
         '[conda-utils] API에서도 패키지를 찾을 수 없음',
         {

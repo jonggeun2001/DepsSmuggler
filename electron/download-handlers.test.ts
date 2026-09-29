@@ -1533,61 +1533,68 @@ describe('registerDownloadHandlers', () => {
     );
   });
 
-  it('os:download:start에서 취소되면 최종 성공 산출물 없이 cancelled 결과를 반환한다', async () => {
-    registerDownloadHandlers(() => ({
-      isDestroyed: () => false,
-      webContents: {
-        isDestroyed: () => false,
-        send: webContentsSend,
-      },
-    }) as never);
+  it.each([1, 3])(
+    'os:download:start 동시성 %i에서 취소되면 최종 성공 산출물 없이 cancelled 결과를 반환한다',
+    async (concurrency) => {
+      registerDownloadHandlers(
+        () =>
+          ({
+            isDestroyed: () => false,
+            webContents: {
+              isDestroyed: () => false,
+              send: webContentsSend,
+            },
+          }) as never
+      );
 
-    yumDownloadPackage.mockReset();
+      yumDownloadPackage.mockReset();
 
-    const osDownloadHandler = ipcHandle.mock.calls.find(
-      ([channel]) => channel === 'os:download:start'
-    )?.[1];
-    const osCancelHandler = ipcHandle.mock.calls.find(
-      ([channel]) => channel === 'os:download:cancel'
-    )?.[1];
+      const osDownloadHandler = ipcHandle.mock.calls.find(
+        ([channel]) => channel === 'os:download:start'
+      )?.[1];
+      const osCancelHandler = ipcHandle.mock.calls.find(
+        ([channel]) => channel === 'os:download:cancel'
+      )?.[1];
 
-    yumDownloadPackage.mockImplementationOnce(async () => {
-      return {
-        success: true,
-        filePath: '/tmp/bash-5.1.8.rpm',
-      };
-    });
-    yumDownloadPackage.mockImplementationOnce(async () => {
-      await osCancelHandler({}, {});
-      return {
-        success: false,
-        error: new Error('사용자 취소'),
-        skipped: true,
-      };
-    });
+      yumDownloadPackage.mockImplementationOnce(async () => {
+        return {
+          success: true,
+          filePath: '/tmp/bash-5.1.8.rpm',
+        };
+      });
+      yumDownloadPackage.mockImplementationOnce(async () => {
+        await osCancelHandler({}, {});
+        return {
+          success: false,
+          error: new Error('사용자 취소'),
+          skipped: true,
+        };
+      });
 
-    const result = await osDownloadHandler(
-      {},
-      {
-        packages: [rootPackage, dependencyPackage],
-        outputDir: osOutputDir,
-        distribution,
-        architecture: 'x86_64',
-        resolveDependencies: false,
-      }
-    );
+      const result = await osDownloadHandler(
+        {},
+        {
+          packages: [rootPackage, dependencyPackage],
+          outputDir: osOutputDir,
+          distribution,
+          architecture: 'x86_64',
+          resolveDependencies: false,
+          concurrency,
+        }
+      );
 
-    expect(archiveCreateArchive).not.toHaveBeenCalled();
-    expect(repoCreateLocalRepo).not.toHaveBeenCalled();
-    expect(result).toEqual(
-      expect.objectContaining({
-        success: [],
-        cancelled: true,
-        generatedOutputs: [],
-        warnings: expect.arrayContaining([
-          expect.stringContaining('최종 출력물은 생성되지 않았습니다'),
-        ]),
-      })
-    );
-  });
+      expect(archiveCreateArchive).not.toHaveBeenCalled();
+      expect(repoCreateLocalRepo).not.toHaveBeenCalled();
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: [],
+          // 병렬 요청은 첫 작업의 결과를 기록하기 전에 취소할 수 있다.
+          skipped: concurrency === 1 ? [dependencyPackage] : [rootPackage, dependencyPackage],
+          cancelled: true,
+          generatedOutputs: [],
+          warnings: expect.arrayContaining([expect.stringMatching(/최종 출력물.*않았습니다/)]),
+        })
+      );
+    }
+  );
 });

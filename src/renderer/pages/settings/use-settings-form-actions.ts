@@ -1,6 +1,7 @@
 import { message, type FormInstance } from 'antd';
 import React from 'react';
 import { useBlocker } from 'react-router-dom';
+import { buildCacheDetailItems, type CacheDetailItem } from './cache-stats-utils';
 import {
   SMTP_TEST_MODE_MESSAGES,
   applySynchronizedSettingsFormState,
@@ -11,10 +12,6 @@ import {
   type SettingsStoreSnapshot,
   type SmtpTestMode,
 } from './settings-form-utils';
-import {
-  buildCacheDetailItems,
-  type CacheDetailItem,
-} from './cache-stats-utils';
 
 type SmtpTestResult = 'success' | 'failed' | null;
 
@@ -28,6 +25,7 @@ interface UseSettingsFormActionsOptions {
 interface UseSettingsFormActionsResult {
   cacheCount: number;
   cacheDetails: CacheDetailItem[];
+  cacheError: string;
   cacheSize: number;
   clearingCache: boolean;
   handleCheckForUpdates: () => Promise<void>;
@@ -44,7 +42,7 @@ interface UseSettingsFormActionsResult {
   handleSelectDownloadFolder: () => Promise<void>;
   handleTestSmtp: () => Promise<void>;
   isDirty: boolean;
-  loadCacheInfo: () => Promise<void>;
+  loadCacheInfo: (forceRefresh?: boolean) => Promise<void>;
   loadingCache: boolean;
   showNavigationModal: boolean;
   smtpTestMode: SmtpTestMode;
@@ -70,6 +68,9 @@ export function useSettingsFormActions({
     buildCacheDetailItems()
   );
   const [loadingCache, setLoadingCache] = React.useState(false);
+  const [cacheError, setCacheError] = React.useState('');
+  const cacheRequestRef = React.useRef(0);
+  const cacheMountedRef = React.useRef(false);
   const [clearingCache, setClearingCache] = React.useState(false);
   const [testingSmtp, setTestingSmtp] = React.useState(false);
   const [smtpTestResult, setSmtpTestResult] = React.useState<SmtpTestResult>(null);
@@ -94,10 +95,7 @@ export function useSettingsFormActions({
 
   React.useEffect(() => {
     const resetBeforeApply = forceSynchronizeOnNextSnapshotRef.current;
-    if (
-      !resetBeforeApply &&
-      lastSynchronizedValuesRef.current === synchronizedFormValuesKey
-    ) {
+    if (!resetBeforeApply && lastSynchronizedValuesRef.current === synchronizedFormValuesKey) {
       return;
     }
 
@@ -152,50 +150,60 @@ export function useSettingsFormActions({
     lastSynchronizedValuesRef.current = JSON.stringify(currentValues);
   }, [form]);
 
-  const loadCacheInfo = React.useCallback(async () => {
+  const loadCacheInfo = React.useCallback(async (forceRefresh = true) => {
+    const request = ++cacheRequestRef.current;
     setLoadingCache(true);
+    setCacheError('');
     try {
       if (!window.electronAPI?.cache?.getStats) {
         throw new Error('패키지 캐시 정보 API를 사용할 수 없습니다');
       }
 
-      const stats = await window.electronAPI.cache.getStats();
+      const stats = await window.electronAPI.cache.getStats({ forceRefresh });
+      if (!cacheMountedRef.current || request !== cacheRequestRef.current) return;
       setCacheSize(stats.totalSize);
       setCacheCount(stats.entryCount);
       setCacheDetails(buildCacheDetailItems(stats.details));
     } catch (error) {
+      if (!cacheMountedRef.current || request !== cacheRequestRef.current) return;
       console.error('패키지 캐시 정보 로드 실패:', error);
-      setCacheSize(0);
-      setCacheCount(0);
-      setCacheDetails(buildCacheDetailItems());
+      setCacheError('캐시 정보를 갱신하지 못했습니다. 새로고침으로 다시 시도하세요.');
     } finally {
-      setLoadingCache(false);
+      if (cacheMountedRef.current && request === cacheRequestRef.current) setLoadingCache(false);
     }
   }, []);
 
   React.useEffect(() => {
-    void loadCacheInfo();
+    const requestRef = cacheRequestRef;
+    cacheMountedRef.current = true;
+    void loadCacheInfo(false);
+    return () => {
+      cacheMountedRef.current = false;
+      requestRef.current++;
+    };
   }, [loadCacheInfo]);
 
   const handleClearCache = React.useCallback(async () => {
+    const request = ++cacheRequestRef.current;
+    setLoadingCache(false);
     setClearingCache(true);
     try {
       if (!window.electronAPI?.cache?.clear) {
         throw new Error('패키지 캐시 삭제 API를 사용할 수 없습니다');
       }
 
-      await window.electronAPI.cache.clear();
-      setCacheSize(0);
-      setCacheCount(0);
-      setCacheDetails(buildCacheDetailItems());
+      const result = await window.electronAPI.cache.clear();
+      if (!result.success) throw new Error('패키지 캐시 삭제 실패');
+      if (!cacheMountedRef.current || request !== cacheRequestRef.current) return;
+      await loadCacheInfo();
       message.success('패키지 캐시가 삭제되었습니다');
     } catch (error) {
       console.error('패키지 캐시 삭제 실패:', error);
       message.error('패키지 캐시 삭제에 실패했습니다');
     } finally {
-      setClearingCache(false);
+      if (cacheMountedRef.current) setClearingCache(false);
     }
-  }, []);
+  }, [loadCacheInfo]);
 
   const handleSave = React.useCallback(
     (values: SettingsFormSubmission) => {
@@ -317,7 +325,11 @@ export function useSettingsFormActions({
       if (success) {
         message.success('SMTP 연결 테스트 성공');
       } else {
-        message.error(typeof result === 'boolean' ? 'SMTP 연결 테스트 실패' : result.error || 'SMTP 연결 테스트 실패');
+        message.error(
+          typeof result === 'boolean'
+            ? 'SMTP 연결 테스트 실패'
+            : result.error || 'SMTP 연결 테스트 실패'
+        );
       }
     } catch (error) {
       setSmtpTestResult('failed');
@@ -348,6 +360,7 @@ export function useSettingsFormActions({
   return {
     cacheCount,
     cacheDetails,
+    cacheError,
     cacheSize,
     clearingCache,
     handleCheckForUpdates,

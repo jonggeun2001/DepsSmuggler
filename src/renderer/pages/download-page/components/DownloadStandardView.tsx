@@ -31,6 +31,8 @@ import type { DownloadStoreItem, LogEntry, PackagingStatus } from '../../../stor
 
 const { Title, Text } = Typography;
 
+const LOGS_STYLE = { marginTop: 16 };
+
 interface DownloadStandardViewProps {
   outputDir: string;
   onOutputDirChange: (value: string) => void;
@@ -318,7 +320,7 @@ export function DownloadStandardView({
         </Space>
       </Card>
 
-      <DownloadLogsCard logs={logs} style={{ marginTop: 16 }} />
+      <DownloadLogsCard logs={logs} style={LOGS_STYLE} />
     </div>
   );
 }

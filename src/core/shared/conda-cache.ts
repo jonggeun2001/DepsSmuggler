@@ -1,23 +1,33 @@
 /**
  * Conda Repodata 캐시 관리
  * HTTP 조건부 요청 (RFC 7232) 및 파일 시스템 캐시 지원
- * 디스크 캐시만 사용 (repodata.json이 350MB+ 크기이므로 메모리 캐시 제외)
+ * 디스크 캐시 + Worker 내부의 크기/수명이 제한된 이름 인덱스
  */
 
 import * as fs from 'fs';
+import { randomUUID } from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
 import axios, { AxiosResponse } from 'axios';
+import { isMainThread } from 'worker_threads';
+import { requestRepodata } from './metadata/worker-http';
+import { MetadataWorkerClient } from './metadata/worker-client';
 import * as fzstd from 'fzstd';
 import { createMemoryCache } from './cache/cache-store';
+import { createCacheStatsReader, isMissingCachePath } from './cache-stats';
 import { CONDA_STANDARD_ORIGIN, getCondaRepositoryBase } from './conda-channel';
 import { RepoData } from './conda-types';
-import logger from '../../utils/logger';
+import { metadataLogger as logger } from './metadata/worker-logger';
+
+const diskStatsReader = createCacheStatsReader(scanCacheStats);
 
 /** DepsSmuggler용 기본 TTL: 24시간 (폐쇄망 전달 목적이므로 길게 설정) */
 const DEFAULT_MAX_AGE = 86400; // 24시간
 const REQUEST_DEDUPE_TTL_MS = 1000;
-const repodataRequestCache = createMemoryCache<CacheResult>('Conda repodata request', REQUEST_DEDUPE_TTL_MS);
+const repodataRequestCache = createMemoryCache<WorkerCacheResult>(
+  'Conda repodata request',
+  REQUEST_DEDUPE_TTL_MS
+);
 
 /**
  * 캐시 메타데이터
@@ -44,7 +54,9 @@ export interface RepodataCacheMeta {
 /**
  * 캐시 가져오기 결과
  */
-export interface CacheResult {
+export interface WorkerCacheResult {
+  cacheVersion: string | null;
+  dataSize: number;
   /** 데이터 */
   data: RepoData;
   /** 캐시에서 가져왔는지 */
@@ -63,7 +75,11 @@ function getDefaultCacheDir(): string {
 /**
  * 채널/subdir에서 캐시 파일 경로 생성
  */
-function getCachePaths(cacheDir: string, channel: string, subdir: string): {
+function getCachePaths(
+  cacheDir: string,
+  channel: string,
+  subdir: string
+): {
   dataPath: string;
   metaPath: string;
 } {
@@ -103,26 +119,52 @@ function readCacheMeta(metaPath: string): RepodataCacheMeta | null {
 /**
  * 캐시 메타데이터 저장
  */
-function writeCacheMeta(metaPath: string, meta: RepodataCacheMeta): void {
+function fileVersion(filePath: string): string | null {
   try {
-    const dir = path.dirname(metaPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    const stat = fs.statSync(filePath);
+    return `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return null;
+  }
+}
+
+function snapshotVersion(dataVersion: string | null, metaVersion: string | null): string | null {
+  return dataVersion && metaVersion ? JSON.stringify([dataVersion, metaVersion]) : null;
+}
+
+/** Fingerprint the bytes we wrote before publishing, never a subsequent replacement. */
+function writeCacheSnapshot(filePath: string, content: string): string | null {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporary = `${filePath}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, content, { flag: 'wx' });
+    const version = fileVersion(temporary);
+    fs.renameSync(temporary, filePath);
+    return version;
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+}
+
+function writeCacheMeta(metaPath: string, meta: RepodataCacheMeta): string | null {
+  try {
+    return writeCacheSnapshot(metaPath, JSON.stringify(meta, null, 2));
   } catch (error) {
     logger.warn('캐시 메타데이터 저장 실패', { metaPath, error });
+    return null;
+  } finally {
+    diskStatsReader.invalidate();
   }
 }
 
 /**
  * 캐시 데이터 읽기
  */
-function readCacheData(dataPath: string): RepoData | null {
+function readCacheData(dataPath: string): { data: RepoData; dataSize: number } | null {
   try {
     if (fs.existsSync(dataPath)) {
       const content = fs.readFileSync(dataPath, 'utf-8');
-      return JSON.parse(content) as RepoData;
+      return { data: JSON.parse(content) as RepoData, dataSize: Buffer.byteLength(content) };
     }
   } catch (error) {
     logger.warn('캐시 데이터 읽기 실패', { dataPath, error });
@@ -133,15 +175,14 @@ function readCacheData(dataPath: string): RepoData | null {
 /**
  * 캐시 데이터 저장
  */
-function writeCacheData(dataPath: string, data: RepoData): void {
+function writeCacheData(dataPath: string, data: RepoData): string | null {
   try {
-    const dir = path.dirname(dataPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(dataPath, JSON.stringify(data));
+    return writeCacheSnapshot(dataPath, JSON.stringify(data));
   } catch (error) {
     logger.warn('캐시 데이터 저장 실패', { dataPath, error });
+    return null;
+  } finally {
+    diskStatsReader.invalidate();
   }
 }
 
@@ -197,14 +238,97 @@ export interface FetchRepodataOptions {
   timeout?: number;
 }
 
-/**
- * Repodata 가져오기 (캐시 + HTTP 조건부 요청 지원)
- */
-export async function fetchRepodata(
+/** A small reloadable reference. Raw payloads and indexes never enter the main process. */
+export interface RepodataReference {
+  kind: 'conda-repodata';
+  channel: string;
+  subdir: string;
+  options: FetchRepodataOptions;
+  info?: RepoData['info'];
+}
+export interface CacheResult {
+  data: RepodataReference;
+  fromCache: boolean;
+  meta: RepodataCacheMeta;
+}
+const metadataWorker = new MetadataWorkerClient('conda-worker');
+const pendingLoads = new Map<string, Promise<CacheResult | null>>();
+
+export function fetchRepodata(
   channel: string,
   subdir: string,
   options: FetchRepodataOptions = {}
 ): Promise<CacheResult | null> {
+  const reference: RepodataReference = {
+    kind: 'conda-repodata',
+    channel,
+    subdir,
+    options: { ...options, cacheDir: options.cacheDir ?? getDefaultCacheDir() },
+  };
+  const key = JSON.stringify(reference);
+  const pending = pendingLoads.get(key);
+  if (pending) return pending;
+  const load = metadataWorker.run<CacheResult | null>({ kind: 'load', reference }).finally(() => {
+    pendingLoads.delete(key);
+    diskStatsReader.invalidate();
+  });
+  pendingLoads.set(key, load);
+  return load;
+}
+
+/** Raw fixtures remain usable by callers; production requests return only one name's artifacts. */
+export async function queryRepodata(
+  data: RepoData | RepodataReference,
+  name: string
+): Promise<RepoData> {
+  if (!('kind' in data)) return Promise.resolve(data);
+  const result = await metadataWorker.run<{
+    data: RepoData;
+    reference: RepodataReference;
+    cacheMayHaveChanged: boolean;
+  }>({
+    kind: 'query',
+    reference: data,
+    name,
+  });
+  if (result.cacheMayHaveChanged) diskStatsReader.invalidate();
+  data.options = result.reference.options;
+  return result.data;
+}
+
+export function closeRepodataWorker(): Promise<void> {
+  return metadataWorker.close();
+}
+
+/** Cheap fingerprint also notices external replacement/pruning of the disk cache. Worker-only. */
+export function repodataCacheVersion(
+  channel: string,
+  subdir: string,
+  options: FetchRepodataOptions
+): string {
+  if (options.useCache === false) return 'nocache';
+  try {
+    const { dataPath, metaPath } = getCachePaths(
+      options.cacheDir ?? getDefaultCacheDir(),
+      channel,
+      subdir
+    );
+    return snapshotVersion(fileVersion(dataPath), fileVersion(metaPath)) ?? 'missing';
+  } catch {
+    return 'missing';
+  }
+}
+
+/** Cache protocol runs inside the metadata worker; HTTP bytes are fetched by the caller. */
+/**
+ * Repodata 가져오기 (캐시 + HTTP 조건부 요청 지원)
+ */
+export async function fetchRepodataInWorker(
+  channel: string,
+  subdir: string,
+  options: FetchRepodataOptions = {}
+): Promise<WorkerCacheResult | null> {
+  if (isMainThread) throw new Error('Repodata parsing requires a metadata worker');
   const {
     baseUrl = CONDA_STANDARD_ORIGIN,
     cacheDir = getDefaultCacheDir(),
@@ -217,6 +341,7 @@ export async function fetchRepodata(
 
   // 1. 파일 시스템 캐시 확인 (forceRefresh가 아닐 때)
   if (useCache && !forceRefresh) {
+    const beforeRead = repodataCacheVersion(channel, subdir, options);
     const cachedMeta = readCacheMeta(metaPath);
 
     if (cachedMeta && isCacheValid(cachedMeta)) {
@@ -230,7 +355,13 @@ export async function fetchRepodata(
           maxAge: cachedMeta.maxAge,
         });
         return {
-          data: cachedData,
+          cacheVersion:
+            beforeRead !== 'missing' &&
+            beforeRead === repodataCacheVersion(channel, subdir, options)
+              ? beforeRead
+              : null,
+          data: cachedData.data,
+          dataSize: cachedData.dataSize,
           fromCache: true,
           meta: cachedMeta,
         };
@@ -249,6 +380,7 @@ export async function fetchRepodata(
     ];
 
     // 기존 캐시 메타데이터 (조건부 요청용)
+    const existingVersion = repodataCacheVersion(channel, subdir, options);
     const existingMeta = useCache ? readCacheMeta(metaPath) : null;
 
     for (const { url, compressed } of urls) {
@@ -274,27 +406,7 @@ export async function fetchRepodata(
           conditional: !!(headers['If-None-Match'] || headers['If-Modified-Since']),
         });
 
-        let lastLoggedPercent = 0;
-        const response = await axios.get(url, {
-          responseType: compressed ? 'arraybuffer' : 'json',
-          headers,
-          timeout,
-          validateStatus: (status) => status === 200 || status === 304,
-          onDownloadProgress: (progressEvent) => {
-            const { loaded, total } = progressEvent;
-            if (total) {
-              const percent = Math.floor((loaded / total) * 100);
-              // 20% 단위로 로그 출력 (너무 많은 로그 방지)
-              if (percent >= lastLoggedPercent + 20) {
-                lastLoggedPercent = percent;
-                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-                const loadedMB = (loaded / 1024 / 1024).toFixed(1);
-                const totalMB = (total / 1024 / 1024).toFixed(1);
-                logger.info(`repodata 다운로드 중: ${channel}/${subdir} (${loadedMB}MB / ${totalMB}MB, ${percent}%, ${elapsed}초)`);
-              }
-            }
-          },
-        });
+        const response = await requestRepodata(url, { headers, timeout });
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         logger.info(`repodata 다운로드 완료: ${channel}/${subdir} (${elapsed}초)`);
@@ -302,7 +414,12 @@ export async function fetchRepodata(
         // 304 Not Modified - 캐시 유효 (디스크에서 읽기)
         if (response.status === 304) {
           const cachedData = readCacheData(dataPath);
-          if (cachedData && existingMeta) {
+          if (
+            cachedData &&
+            existingMeta &&
+            existingVersion !== 'missing' &&
+            existingVersion === repodataCacheVersion(channel, subdir, options)
+          ) {
             // 캐시 시간 갱신
             const { maxAge } = extractCacheHeaders(response);
             const updatedMeta: RepodataCacheMeta = {
@@ -310,7 +427,8 @@ export async function fetchRepodata(
               maxAge,
               cachedAt: Date.now(),
             };
-            writeCacheMeta(metaPath, updatedMeta);
+            const metaVersion = writeCacheMeta(metaPath, updatedMeta);
+            const [dataVersion] = JSON.parse(existingVersion) as [string, string];
 
             logger.info('캐시 유효 (304 Not Modified)', {
               url,
@@ -318,7 +436,9 @@ export async function fetchRepodata(
             });
 
             return {
-              data: cachedData,
+              cacheVersion: snapshotVersion(dataVersion, metaVersion),
+              data: cachedData.data,
+              dataSize: cachedData.dataSize,
               fromCache: true,
               meta: updatedMeta,
             };
@@ -328,6 +448,7 @@ export async function fetchRepodata(
         // 200 OK - 새 데이터
         let repodata: RepoData;
         let fileSize: number;
+        let dataSize: number;
 
         if (compressed) {
           const compressedData = new Uint8Array(response.data);
@@ -335,9 +456,12 @@ export async function fetchRepodata(
           const jsonString = new TextDecoder().decode(decompressedData);
           repodata = JSON.parse(jsonString) as RepoData;
           fileSize = compressedData.length;
+          dataSize = decompressedData.length;
         } else {
-          repodata = response.data as RepoData;
-          fileSize = JSON.stringify(repodata).length;
+          const bytes = new Uint8Array(response.data);
+          repodata = JSON.parse(new TextDecoder().decode(bytes)) as RepoData;
+          fileSize = bytes.byteLength;
+          dataSize = bytes.byteLength;
         }
 
         // 패키지 수 계산
@@ -361,9 +485,11 @@ export async function fetchRepodata(
         };
 
         // 캐시 저장 (디스크만)
+        let cacheVersion: string | null = 'nocache';
         if (useCache) {
-          writeCacheData(dataPath, repodata);
-          writeCacheMeta(metaPath, meta);
+          const dataVersion = writeCacheData(dataPath, repodata);
+          const metaVersion = dataVersion ? writeCacheMeta(metaPath, meta) : null;
+          cacheVersion = snapshotVersion(dataVersion, metaVersion);
         }
 
         logger.info('repodata 가져오기 성공', {
@@ -375,7 +501,9 @@ export async function fetchRepodata(
         });
 
         return {
+          cacheVersion,
           data: repodata,
+          dataSize,
           fromCache: false,
           meta,
         };
@@ -411,6 +539,52 @@ export interface CacheStats {
     meta: RepodataCacheMeta;
     dataSize: number;
   }>;
+}
+
+async function scanCacheStats(cacheDir: string): Promise<CacheStats> {
+  const stats: CacheStats = { totalSize: 0, channelCount: 0, entries: [] };
+  try {
+    const channels = await fs.promises.readdir(cacheDir, { withFileTypes: true });
+    stats.channelCount = channels.length;
+    for (const channel of channels) {
+      if (!channel.isDirectory()) continue;
+      let subdirs: fs.Dirent[];
+      try {
+        subdirs = await fs.promises.readdir(path.join(cacheDir, channel.name), {
+          withFileTypes: true,
+        });
+      } catch (error) {
+        if (isMissingCachePath(error)) continue;
+        throw error;
+      }
+      for (const subdir of subdirs) {
+        if (!subdir.isDirectory()) continue;
+        const { dataPath, metaPath } = getCachePaths(cacheDir, channel.name, subdir.name);
+        try {
+          const meta = JSON.parse(
+            await fs.promises.readFile(metaPath, 'utf-8')
+          ) as RepodataCacheMeta;
+          if (!meta) continue;
+          const dataSize = (await fs.promises.stat(dataPath)).size;
+          stats.totalSize += dataSize;
+          stats.entries.push({ channel: channel.name, subdir: subdir.name, meta, dataSize });
+        } catch (error) {
+          if (!isMissingCachePath(error) && !(error instanceof SyntaxError)) throw error;
+        }
+      }
+    }
+  } catch (error) {
+    if (!isMissingCachePath(error)) throw error;
+  }
+  return stats;
+}
+
+/** Read small metadata files and stat repodata without reading its payload. */
+export function getCacheStatsAsync(
+  cacheDir: string = getDefaultCacheDir(),
+  forceRefresh = false
+): Promise<CacheStats> {
+  return diskStatsReader.get(cacheDir, forceRefresh);
 }
 
 export function getCacheStats(cacheDir: string = getDefaultCacheDir()): CacheStats {
@@ -487,6 +661,8 @@ export function clearCache(
     }
   } catch (error) {
     logger.error('캐시 삭제 실패', { cacheDir, channel, subdir, error });
+  } finally {
+    diskStatsReader.invalidate();
   }
 }
 
@@ -517,5 +693,4 @@ export function pruneExpiredCache(
   return pruned;
 }
 
-// 메모리 캐시 관련 함수 제거됨 (디스크 캐시만 사용)
-// 350MB+ repodata.json을 메모리에 저장하면 메모리 부족 발생 가능
+// 메인에는 큰 repodata 원본을 보관하지 않는다. Worker 인덱스는 예산/유휴 종료로 제한한다.

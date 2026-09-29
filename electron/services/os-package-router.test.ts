@@ -1,6 +1,5 @@
 import * as path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OSDistribution, OSPackageInfo } from '../../src/core/downloaders/os-shared/types';
 import {
   buildOSDownloadStartResult,
   cleanupGeneratedOutputs,
@@ -10,6 +9,7 @@ import {
   DEFAULT_OS_OUTPUT_OPTIONS,
   writeRepositoryScripts,
 } from './os-package-router';
+import type { OSDistribution, OSPackageInfo } from '../../src/core/downloaders/os-shared/types';
 
 const mocks = vi.hoisted(() => ({
   yumDownloader: vi.fn(),
@@ -57,6 +57,8 @@ function progressEmitter() {
     clearAllPackageProgress: vi.fn(),
     emitAllComplete: vi.fn(),
     emitOSProgress: vi.fn(),
+    flushOSProgress: vi.fn(),
+    clearOSProgress: vi.fn(),
     emitOSResolveDependenciesProgress: vi.fn(),
   };
 }
@@ -85,7 +87,9 @@ describe('OS package router boundaries', () => {
       expect(mocks.dialog).toHaveBeenCalledWith(
         null,
         expect.objectContaining({
-          message: expect.stringContaining('curl: checksum mismatch'),
+          message: expect.stringContaining(
+            `curl@${pkg.version} (${pkg.architecture}): checksum mismatch`
+          ),
           buttons: ['재시도', '건너뛰기', '취소'],
           defaultId: 0,
           cancelId: 2,
@@ -118,7 +122,8 @@ describe('OS package router boundaries', () => {
       const factory = mocks[`${manager}Resolver`];
       factory.mockReturnValue(resolver);
       const emitter = progressEmitter();
-      const abortSignal = new AbortController().signal;
+      const controller = new AbortController();
+      const abortSignal = controller.signal;
       const selectedDistribution = { ...distribution, packageManager: manager };
       expect(
         createOSResolverForDistribution({
@@ -154,6 +159,10 @@ describe('OS package router boundaries', () => {
         current: 2,
         total: 5,
       });
+      controller.abort();
+      factory.mock.calls[0][0].onProgress('late', 3, 5);
+      expect(emitter.emitOSProgress).toHaveBeenCalledTimes(1);
+      expect(emitter.emitOSResolveDependenciesProgress).toHaveBeenCalledTimes(1);
       for (const other of ['yum', 'apt', 'apk'] as const) {
         if (other !== manager) expect(mocks[`${other}Resolver`]).not.toHaveBeenCalled();
       }
@@ -298,5 +307,73 @@ describe('OS package router boundaries', () => {
   it('accepts cleanup with no generated output', async () => {
     await expect(cleanupGeneratedOutputs([])).resolves.toBeUndefined();
     expect(mocks.remove).not.toHaveBeenCalled();
+  });
+});
+
+describe('OS 오류 선택 직렬화', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('동시 오류의 재시도/건너뛰기 응답을 각 요청에 연결한다', async () => {
+    let choose!: (value: { response: number }) => void;
+    mocks.dialog
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            choose = resolve;
+          })
+      )
+      .mockResolvedValueOnce({ response: 1 });
+    const handler = createOSDownloadErrorHandler(null, vi.fn());
+    const first = handler({ package: pkg, message: 'first' });
+    const second = handler({ package: { ...pkg, version: '2' }, message: 'second' });
+    await vi.waitFor(() => expect(mocks.dialog).toHaveBeenCalledTimes(1));
+    choose({ response: 0 });
+    await expect(first).resolves.toBe('retry');
+    await expect(second).resolves.toBe('skip');
+    expect(mocks.dialog.mock.calls.map((call) => call[1].message)).toEqual([
+      expect.stringContaining(`curl@${pkg.version}`),
+      expect.stringContaining('curl@2'),
+    ]);
+  });
+
+  it('취소 선택 후 대기 중인 오류 창을 더 열지 않는다', async () => {
+    mocks.dialog.mockResolvedValue({ response: 2 });
+    const onCancel = vi.fn();
+    const handler = createOSDownloadErrorHandler(null, onCancel);
+    await expect(
+      Promise.all([handler({ message: 'one' }), handler({ message: 'two' })])
+    ).resolves.toEqual(['skip', 'skip']);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(mocks.dialog).toHaveBeenCalledTimes(1);
+  });
+
+  it('세션 취소 신호를 현재 창에 전달하고 대기 중인 창을 생략한다', async () => {
+    const controller = new AbortController();
+    mocks.dialog.mockImplementation(
+      (_window, options) =>
+        new Promise((resolve) => {
+          options.signal.addEventListener('abort', () => resolve({ response: 2 }));
+        })
+    );
+    const onCancel = vi.fn();
+    const handler = createOSDownloadErrorHandler(null, onCancel, controller.signal);
+    const first = handler({ message: 'one' });
+    const second = handler({ message: 'two' });
+    await vi.waitFor(() => expect(mocks.dialog).toHaveBeenCalledTimes(1));
+    controller.abort();
+    await expect(Promise.all([first, second])).resolves.toEqual(['skip', 'skip']);
+    expect(mocks.dialog).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('창 오류를 보존하고 세션 종료 전에 다음 창을 열지 않는다', async () => {
+    const failure = new Error('dialog rejected');
+    mocks.dialog.mockRejectedValue(failure);
+    const handler = createOSDownloadErrorHandler(null, vi.fn());
+    const first = handler({ message: 'one' });
+    const second = handler({ message: 'two' });
+    await expect(first).rejects.toBe(failure);
+    await expect(second).resolves.toBe('skip');
+    expect(mocks.dialog).toHaveBeenCalledTimes(1);
   });
 });

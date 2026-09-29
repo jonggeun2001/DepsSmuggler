@@ -24,6 +24,7 @@ interface PythonRelease {
 let cachedVersions: string[] | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24시간
+let pendingPythonVersions: Promise<string[]> | null = null;
 
 // 로컬 스토리지 캐시 키
 const STORAGE_KEY = 'python_versions_cache';
@@ -34,7 +35,13 @@ const STORAGE_TIMESTAMP_KEY = 'python_versions_cache_timestamp';
  * 데이터 소스: https://www.python.org/api/v2/downloads/release/
  * 또는 PyPI JSON API: https://pypi.org/pypi/python/json (fallback)
  */
-export async function fetchPythonVersions(): Promise<string[]> {
+export function fetchPythonVersions(): Promise<string[]> {
+  return (pendingPythonVersions ??= loadPythonVersions().finally(() => {
+    pendingPythonVersions = null;
+  }));
+}
+
+async function loadPythonVersions(): Promise<string[]> {
   // 메모리 캐시 확인
   if (cachedVersions && Date.now() - cacheTimestamp < CACHE_TTL) {
     logger.debug('Python 버전 메모리 캐시 사용');
@@ -490,6 +497,7 @@ async function saveCachedNodeVersions(versions: NodeRelease[]): Promise<void> {
 let cachedCudaVersions: string[] | null = null;
 let cudaCacheTimestamp: number = 0;
 const CUDA_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7일 (CUDA 릴리스 빈도 낮음)
+let pendingCudaVersions: Promise<string[]> | null = null;
 
 /**
  * NVIDIA conda 채널에서 CUDA 버전 추출
@@ -540,7 +548,14 @@ async function fetchCudaVersionsFromConda(): Promise<string[]> {
 /**
  * CUDA 버전 목록 가져오기
  */
-export async function fetchCudaVersions(): Promise<string[]> {
+export function fetchCudaVersions(): Promise<string[]> {
+  // 파일 캐시 읽기가 끝나기 전의 동시 호출도 같은 작업을 기다린다.
+  return (pendingCudaVersions ??= loadCudaVersions().finally(() => {
+    pendingCudaVersions = null;
+  }));
+}
+
+async function loadCudaVersions(): Promise<string[]> {
   // 메모리 캐시 확인
   if (cachedCudaVersions && Date.now() - cudaCacheTimestamp < CUDA_CACHE_TTL) {
     logger.debug('CUDA 버전 메모리 캐시 사용');

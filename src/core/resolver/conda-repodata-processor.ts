@@ -13,7 +13,7 @@ import {
   matchesVersionSpec,
   parseMatchSpec,
 } from '../shared';
-import { fetchRepodata } from '../shared/conda-cache';
+import { fetchRepodata, queryRepodata, type RepodataReference } from '../shared/conda-cache';
 
 /**
  * 패키지 후보 정보
@@ -53,13 +53,7 @@ export interface RepoDataProcessorConfig {
  */
 export class CondaRepoDataProcessor {
   /** repodata 캐시 (channel/subdir -> RepoData) */
-  private repodataCache: Map<string, RepoData> = new Map();
-
-  /** 패키지 이름별 인덱스 캐시 */
-  private packageIndex: Map<
-    string,
-    Map<string, Array<{ filename: string; pkg: RepoDataPackage }>>
-  > = new Map();
+  private repodataCache: Map<string, RepoData | RepodataReference> = new Map();
 
   constructor(private config: RepoDataProcessorConfig) {}
 
@@ -67,6 +61,7 @@ export class CondaRepoDataProcessor {
    * 설정 업데이트
    */
   updateConfig(config: Partial<RepoDataProcessorConfig>): void {
+    if (config.condaUrl && config.condaUrl !== this.config.condaUrl) this.clearCache();
     this.config = { ...this.config, ...config };
   }
 
@@ -80,7 +75,7 @@ export class CondaRepoDataProcessor {
   /**
    * RepoData 가져오기 (캐시 포함)
    */
-  async getRepoData(channel: string, subdir: string): Promise<RepoData | null> {
+  async getRepoData(channel: string, subdir: string): Promise<RepoData | RepodataReference | null> {
     const cacheKey = `${channel}/${subdir}`;
 
     // 메모리 캐시 확인 (세션 내 재사용)
@@ -101,10 +96,6 @@ export class CondaRepoDataProcessor {
       // 메모리 캐시에도 저장 (세션 내 빠른 접근)
       this.repodataCache.set(cacheKey, result.data);
 
-      // 패키지 이름별 인덱스 생성 (검색 최적화)
-      const index = this.buildPackageIndex(cacheKey, result.data);
-      this.packageIndex.set(cacheKey, index);
-
       logger.info(`repodata 로드 완료: ${channel}/${subdir}`, {
         fromCache: result.fromCache ? '디스크 캐시' : '네트워크',
         packages: result.meta.packageCount,
@@ -118,73 +109,31 @@ export class CondaRepoDataProcessor {
   }
 
   /**
-   * 패키지 인덱스 생성
-   */
-  private buildPackageIndex(
-    cacheKey: string,
-    repodata: RepoData
-  ): Map<string, Array<{ filename: string; pkg: RepoDataPackage }>> {
-    const startTime = Date.now();
-    const index = new Map<string, Array<{ filename: string; pkg: RepoDataPackage }>>();
-
-    // packages와 packages.conda 모두 인덱싱
-    const allPackages = {
-      ...repodata.packages,
-      ...(repodata['packages.conda'] || {}),
-    };
-
-    for (const [filename, pkg] of Object.entries(allPackages)) {
-      const normalizedName = pkg.name.toLowerCase();
-      if (!index.has(normalizedName)) {
-        index.set(normalizedName, []);
-      }
-      index.get(normalizedName)!.push({ filename, pkg });
-    }
-
-    const elapsed = Date.now() - startTime;
-    logger.info(
-      `패키지 인덱스 생성 완료: ${cacheKey} (${index.size}개 패키지명, ${elapsed}ms)`
-    );
-
-    return index;
-  }
-
-  /**
    * 패키지 후보 검색
    */
   findPackageCandidates(
     repodata: RepoData,
     packageName: string,
     versionSpec?: string,
-    cacheKey?: string,
-    buildSpec?: string,
+    _cacheKey?: string,
+    buildSpec?: string
   ): PackageCandidate[] {
     const candidates: Array<PackageCandidate & { timestamp: number }> = [];
     const normalizedName = packageName.toLowerCase();
 
-    // 인덱스가 있으면 O(1) 조회 사용
-    let packageEntries: Array<{ filename: string; pkg: RepoDataPackage }> | undefined;
-    if (cacheKey && this.packageIndex.has(cacheKey)) {
-      packageEntries = this.packageIndex.get(cacheKey)?.get(normalizedName);
-    }
-
-    // 인덱스가 없으면 폴백: 전체 순회 (첫 로드 시)
-    if (!packageEntries) {
-      const allPackages = {
-        ...repodata.packages,
-        ...(repodata['packages.conda'] || {}),
-      };
-      packageEntries = [];
-      for (const [filename, pkg] of Object.entries(allPackages)) {
-        if (pkg.name.toLowerCase() === normalizedName) {
-          packageEntries.push({ filename, pkg });
-        }
-      }
+    // Production receives only this name's records from the worker index.
+    // Raw RepoData remains supported for small fixtures and direct callers.
+    const allPackages = { ...repodata.packages, ...(repodata['packages.conda'] || {}) };
+    const packageEntries: Array<{ filename: string; pkg: RepoDataPackage }> = [];
+    for (const [filename, pkg] of Object.entries(allPackages)) {
+      if (pkg.name.toLowerCase() === normalizedName) packageEntries.push({ filename, pkg });
     }
 
     // 디버그: Python 버전 설정 확인
     const pythonTag = this.getPythonBuildTag();
-    logger.info(`[DEBUG] findPackageCandidates: ${packageName}, pythonTag=${pythonTag}, entries=${packageEntries.length}`);
+    logger.info(
+      `[DEBUG] findPackageCandidates: ${packageName}, pythonTag=${pythonTag}, entries=${packageEntries.length}`
+    );
 
     for (const { filename, pkg } of packageEntries) {
       // 버전 스펙 체크 (새로운 MatchSpec 파서 사용)
@@ -201,21 +150,11 @@ export class CondaRepoDataProcessor {
       }
 
       // CUDA 호환성 체크 (가상/메타 의존성과 build 변형 반영)
-      if (
-        !this.isBuildCompatibleWithCuda(
-          pkg.name,
-          pkg.version,
-          pkg.build,
-          pkg.depends || [],
-        )
-      ) {
+      if (!this.isBuildCompatibleWithCuda(pkg.name, pkg.version, pkg.build, pkg.depends || [])) {
         continue;
       }
 
-      const isPythonMatch = this.isBuildCompatibleWithPython(
-        pkg.build,
-        pkg.depends || [],
-      );
+      const isPythonMatch = this.isBuildCompatibleWithPython(pkg.build, pkg.depends || []);
 
       candidates.push({
         filename,
@@ -256,7 +195,10 @@ export class CondaRepoDataProcessor {
 
     // 디버그: 상위 5개 후보 출력
     if (candidates.length > 0) {
-      const top5 = candidates.slice(0, 5).map(c => `${c.build}(match=${c.isPythonMatch})`).join(', ');
+      const top5 = candidates
+        .slice(0, 5)
+        .map((c) => `${c.build}(match=${c.isPythonMatch})`)
+        .join(', ');
       logger.info(`[DEBUG] ${packageName} top5: ${top5}`);
     }
 
@@ -278,10 +220,7 @@ export class CondaRepoDataProcessor {
   /**
    * 빌드 문자열이 Python 버전과 호환되는지 확인
    */
-  isBuildCompatibleWithPython(
-    build: string,
-    depends: string[] = [],
-  ): boolean {
+  isBuildCompatibleWithPython(build: string, depends: string[] = []): boolean {
     const pythonTag = this.getPythonBuildTag();
 
     // pythonTag가 없으면 필터링 안함
@@ -290,11 +229,7 @@ export class CondaRepoDataProcessor {
     // 빌드 문자열에 버전 태그가 있으면 대상 Python과 정확히 일치해야 한다.
     const pyMatch = build.match(/(py|cp)\d+/);
     const pythonNumber = pythonTag.slice(2); // 'py313' -> '313'
-    if (
-      pyMatch &&
-      !build.includes(`py${pythonNumber}`) &&
-      !build.includes(`cp${pythonNumber}`)
-    ) {
+    if (pyMatch && !build.includes(`py${pythonNumber}`) && !build.includes(`cp${pythonNumber}`)) {
       return false;
     }
 
@@ -314,10 +249,7 @@ export class CondaRepoDataProcessor {
         return true;
       }
 
-      if (
-        matchSpec.version &&
-        !matchesVersionSpec(targetVersion, matchSpec.version)
-      ) {
+      if (matchSpec.version && !matchesVersionSpec(targetVersion, matchSpec.version)) {
         return false;
       }
 
@@ -342,15 +274,10 @@ export class CondaRepoDataProcessor {
     const isLinux = targetSubdir.startsWith('linux-');
     const isWindows = targetSubdir.startsWith('win-');
     const isMacOS = targetSubdir.startsWith('osx-');
-    const targetArchitectures = this.getTargetArchitectureBuilds(
-      this.config.targetArchitecture,
-    );
+    const targetArchitectures = this.getTargetArchitectureBuilds(this.config.targetArchitecture);
     const archSpecs = depends
       .map((dependency) => parseMatchSpec(dependency))
-      .filter(
-        (matchSpec) =>
-          matchSpec.name.toLowerCase() === '__archspec',
-      );
+      .filter((matchSpec) => matchSpec.name.toLowerCase() === '__archspec');
 
     if (archSpecs.length > 0) {
       if (targetArchitectures.length === 0) {
@@ -358,17 +285,14 @@ export class CondaRepoDataProcessor {
       }
 
       for (const archSpec of archSpecs) {
-        if (
-          archSpec.version &&
-          !matchesVersionSpec('1', archSpec.version)
-        ) {
+        if (archSpec.version && !matchesVersionSpec('1', archSpec.version)) {
           return false;
         }
         const archspecBuild = archSpec.build;
         if (
           archspecBuild &&
           !targetArchitectures.some((targetArchitecture) =>
-            matchesBuildSpec(targetArchitecture, archspecBuild),
+            matchesBuildSpec(targetArchitecture, archspecBuild)
           )
         ) {
           return false;
@@ -377,11 +301,13 @@ export class CondaRepoDataProcessor {
     }
 
     // 플랫폼 마커 확인 (버전 스펙 포함 가능: "__glibc >=2.17,<3.0.a0")
-    const hasWin = depends.some(d => d === '__win' || d.startsWith('__win '));
-    const hasUnix = depends.some(d => d === '__unix' || d.startsWith('__unix '));
-    const hasLinux = depends.some(d => d === '__linux' || d.startsWith('__linux '));
-    const hasOSX = depends.some(d => d === '__osx' || d.startsWith('__osx ') || d === '__macos' || d.startsWith('__macos '));
-    const hasGlibc = depends.some(d => d === '__glibc' || d.startsWith('__glibc '));
+    const hasWin = depends.some((d) => d === '__win' || d.startsWith('__win '));
+    const hasUnix = depends.some((d) => d === '__unix' || d.startsWith('__unix '));
+    const hasLinux = depends.some((d) => d === '__linux' || d.startsWith('__linux '));
+    const hasOSX = depends.some(
+      (d) => d === '__osx' || d.startsWith('__osx ') || d === '__macos' || d.startsWith('__macos ')
+    );
+    const hasGlibc = depends.some((d) => d === '__glibc' || d.startsWith('__glibc '));
 
     // 플랫폼 마커가 없으면 모든 플랫폼과 호환 (__glibc는 Linux 전용이므로 Linux에서 호환)
     if (!hasWin && !hasUnix && !hasLinux && !hasOSX && !hasGlibc) {
@@ -420,9 +346,7 @@ export class CondaRepoDataProcessor {
     return false;
   }
 
-  private getTargetArchitectureBuilds(
-    architecture: string | null,
-  ): string[] {
+  private getTargetArchitectureBuilds(architecture: string | null): string[] {
     switch (architecture?.trim().toLowerCase()) {
       case 'x86_64':
       case 'amd64':
@@ -442,7 +366,6 @@ export class CondaRepoDataProcessor {
     }
   }
 
-
   /**
    * 빌드가 타겟 CUDA 버전과 호환되는지 확인
    * __cuda 및 CUDA 메타 패키지 의존성과 build 태그를 평가
@@ -459,41 +382,25 @@ export class CondaRepoDataProcessor {
     packageName: string,
     packageVersion: string,
     build: string,
-    depends: string[],
+    depends: string[]
   ): boolean {
-    const cudaDependencyNames = new Set([
-      '__cuda',
-      'pytorch-cuda',
-      'cuda-version',
-      'cudatoolkit',
-    ]);
-    const isCudaMetaPackage = cudaDependencyNames.has(
-      packageName.toLowerCase(),
-    );
+    const cudaDependencyNames = new Set(['__cuda', 'pytorch-cuda', 'cuda-version', 'cudatoolkit']);
+    const isCudaMetaPackage = cudaDependencyNames.has(packageName.toLowerCase());
     const cudaSpecs = depends
       .map((dependency) => parseMatchSpec(dependency))
-      .filter((matchSpec) =>
-        cudaDependencyNames.has(matchSpec.name.toLowerCase()),
-      );
+      .filter((matchSpec) => cudaDependencyNames.has(matchSpec.name.toLowerCase()));
     const normalizedBuild = build.toLowerCase();
-    const isExplicitCpuBuild =
-      /(?:^|[_-])cpu(?:[_-]|$)/.test(normalizedBuild);
+    const isExplicitCpuBuild = /(?:^|[_-])cpu(?:[_-]|$)/.test(normalizedBuild);
     const cudaBuildMarker =
       /(?:^|[_-])(?:cuda|cu)[_-]?(\d{2,3}(?=[a-z_-]|$)|\d{1,2}[._]\d{1,2}(?=[a-z_-]|$)|\d{1,2}(?=[a-z_-]|$))/.exec(
-        normalizedBuild,
+        normalizedBuild
       );
     const hasUnparsedCudaBuild =
-      !cudaBuildMarker &&
-      /(?:^|[_-])(?:cuda|cu)(?=[0-9._-]|$)/.test(
-        normalizedBuild,
-      );
+      !cudaBuildMarker && /(?:^|[_-])(?:cuda|cu)(?=[0-9._-]|$)/.test(normalizedBuild);
 
     if (!this.config.cudaVersion) {
       return (
-        !isCudaMetaPackage &&
-        cudaSpecs.length === 0 &&
-        !cudaBuildMarker &&
-        !hasUnparsedCudaBuild
+        !isCudaMetaPackage && cudaSpecs.length === 0 && !cudaBuildMarker && !hasUnparsedCudaBuild
       );
     }
 
@@ -502,17 +409,9 @@ export class CondaRepoDataProcessor {
     }
 
     if (isCudaMetaPackage) {
-      const targetCudaVersion = this.extractMajorMinorCudaVersion(
-        this.config.cudaVersion,
-      );
-      const packageCudaVersion = this.extractMajorMinorCudaVersion(
-        packageVersion,
-      );
-      if (
-        !targetCudaVersion ||
-        !packageCudaVersion ||
-        targetCudaVersion !== packageCudaVersion
-      ) {
+      const targetCudaVersion = this.extractMajorMinorCudaVersion(this.config.cudaVersion);
+      const packageCudaVersion = this.extractMajorMinorCudaVersion(packageVersion);
+      if (!targetCudaVersion || !packageCudaVersion || targetCudaVersion !== packageCudaVersion) {
         return false;
       }
     }
@@ -521,10 +420,7 @@ export class CondaRepoDataProcessor {
       if (
         cudaSpec.version &&
         cudaSpec.version !== '*' &&
-        !matchesVersionSpec(
-          this.config.cudaVersion,
-          cudaSpec.version,
-        )
+        !matchesVersionSpec(this.config.cudaVersion, cudaSpec.version)
       ) {
         return false;
       }
@@ -532,28 +428,21 @@ export class CondaRepoDataProcessor {
 
     if (cudaBuildMarker) {
       const rawVersion = cudaBuildMarker[1].replace('_', '.');
-      const targetMajorMinor = this.config.cudaVersion
-        .split('.')
-        .slice(0, 2)
-        .join('.');
+      const targetMajorMinor = this.config.cudaVersion.split('.').slice(0, 2).join('.');
       const twoDigitVersion =
-        rawVersion.length === 2
-          ? `${rawVersion[0]}.${rawVersion[1]}`
-          : rawVersion;
-      const buildVersion =
-        rawVersion.includes('.')
-          ? rawVersion
-          : rawVersion.length === 3
-            ? `${rawVersion.slice(0, -1)}.${rawVersion.slice(-1)}`
-            : twoDigitVersion === targetMajorMinor
-              ? twoDigitVersion
-              : rawVersion;
+        rawVersion.length === 2 ? `${rawVersion[0]}.${rawVersion[1]}` : rawVersion;
+      const buildVersion = rawVersion.includes('.')
+        ? rawVersion
+        : rawVersion.length === 3
+          ? `${rawVersion.slice(0, -1)}.${rawVersion.slice(-1)}`
+          : twoDigitVersion === targetMajorMinor
+            ? twoDigitVersion
+            : rawVersion;
       const targetParts = this.config.cudaVersion.split('.');
       const buildParts = buildVersion.split('.');
       if (
         targetParts[0] !== buildParts[0] ||
-        (buildParts[1] !== undefined &&
-          targetParts[1] !== buildParts[1])
+        (buildParts[1] !== undefined && targetParts[1] !== buildParts[1])
       ) {
         return false;
       }
@@ -576,7 +465,7 @@ export class CondaRepoDataProcessor {
     channel: string,
     versionSpec?: string,
     _fallbackFn?: (name: string, channel: string, versionSpec?: string) => Promise<string | null>,
-    buildSpec?: string,
+    buildSpec?: string
   ): Promise<string | null> {
     // 타겟 플랫폼 repodata 확인
     const targetCacheKey = `${channel}/${this.config.targetSubdir}`;
@@ -585,11 +474,11 @@ export class CondaRepoDataProcessor {
 
     if (repodata) {
       const candidates = this.findPackageCandidates(
-        repodata,
+        await queryRepodata(repodata, name),
         name,
         versionSpec,
         targetCacheKey,
-        buildSpec,
+        buildSpec
       );
       if (candidates.length > 0) {
         // 첫 번째 후보가 Python 버전과 호환되는지 확인
@@ -610,11 +499,11 @@ export class CondaRepoDataProcessor {
       const noarchRepodata = await this.getRepoData(channel, 'noarch');
       if (noarchRepodata) {
         const candidates = this.findPackageCandidates(
-          noarchRepodata,
+          await queryRepodata(noarchRepodata, name),
           name,
           versionSpec,
           noarchCacheKey,
-          buildSpec,
+          buildSpec
         );
         if (candidates.length > 0 && candidates[0].isPythonMatch) {
           return candidates[0].version;
@@ -642,7 +531,6 @@ export class CondaRepoDataProcessor {
    */
   clearCache(): void {
     this.repodataCache.clear();
-    this.packageIndex.clear();
     logger.info('Conda repodata 캐시 초기화됨');
   }
 }

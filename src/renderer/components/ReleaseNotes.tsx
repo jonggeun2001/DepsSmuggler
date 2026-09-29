@@ -40,6 +40,7 @@ const HTTP_URL = /^https?:\/\//i;
 
 interface ReleaseNotesProps {
   releaseNotes?: UpdateReleaseNotes;
+  version?: string;
 }
 
 function sanitize(note: string): string {
@@ -79,7 +80,7 @@ function isSafeHttpUrl(value: string): boolean {
   }
 }
 
-export function ReleaseNotes({ releaseNotes }: ReleaseNotesProps) {
+export function ReleaseNotes({ releaseNotes, version }: ReleaseNotesProps) {
   const entries = releaseNoteEntries(releaseNotes);
 
   const openLink = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
@@ -115,7 +116,7 @@ export function ReleaseNotes({ releaseNotes }: ReleaseNotesProps) {
     [openLink]
   );
 
-  if (entries.length === 0) return null;
+  if (entries.length === 0 && !version) return null;
 
   return (
     <div
@@ -125,6 +126,16 @@ export function ReleaseNotes({ releaseNotes }: ReleaseNotesProps) {
       onAuxClick={openLink}
       onKeyDown={handleKeyDown}
     >
+      {entries.length === 0 && version && (
+        <>
+          <p>이 버전의 변경 사항이 제공되지 않았습니다.</p>
+          <a
+            href={`https://github.com/jonggeun2001/DepsSmuggler/releases/tag/${encodeURIComponent(`v${version}`)}`}
+          >
+            GitHub 릴리스 보기
+          </a>
+        </>
+      )}
       {entries.map((entry, index) => (
         <section className="release-notes__entry" key={`${entry.version ?? 'note'}-${index}`}>
           {entry.version && <h4 className="release-notes__version">v{entry.version}</h4>}

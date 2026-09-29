@@ -210,7 +210,7 @@ history: {
 
 1. 재다운로드 버튼 클릭
 2. 확인 모달 표시
-3. 기존 장바구니를 유지하면서 패키지와 `metadata`를 추가 (`cartStore.addItem`의 중복 규칙 적용)
+3. 기존 장바구니를 유지하면서 패키지와 `metadata`를 `cartStore.addItems`로 일괄 추가 (기존 중복 규칙 유지, 신규 항목이 있을 때만 한 번 저장, 실제 추가 수 안내)
 4. `buildHistoryRestoreSettings`로 출력 형식·설치 스크립트·의존성 포함·분할 여부·분할 기준 크기를 전역 설정에 복원
 5. 전달 방식, 이메일 수신자(`smtpTo`), `osOutputOptions`는 `/download`의 라우트 상태로 전달. 전역 SMTP 수신자는 바꾸지 않음
 
@@ -309,16 +309,17 @@ import { buildHistoryRestoreSettings } from './download-delivery-utils';
 
 const handleRedownload = (history: DownloadHistory) => {
   // 장바구니에 패키지 추가
-  history.packages.forEach((pkg) => {
-    addItem({
+  const addedCount = addItems(
+    history.packages.map((pkg) => ({
       type: pkg.type,
       name: pkg.name,
       version: pkg.version,
       arch: pkg.arch,
       languageVersion: pkg.languageVersion,
       metadata: pkg.metadata,
-    });
-  });
+    }))
+  );
+  message.success(`${addedCount}개 패키지가 장바구니에 추가되었습니다.`);
 
   // 설정 복원
   updateSettings(buildHistoryRestoreSettings(history.settings));

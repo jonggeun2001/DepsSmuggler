@@ -14,22 +14,20 @@ import { getDockerDownloader } from '../src/core';
 
 const log = createScopedLogger('Cache');
 
-async function collectPackageCacheStats() {
+async function collectPackageCacheStats(forceRefresh = false) {
   const [pipStats, npmStats, mavenStats, condaStats] = await Promise.all([
-    Promise.resolve(pipCache.getCacheStats()),
+    pipCache.getCacheStatsAsync(undefined, forceRefresh),
     Promise.resolve(npmCache.getNpmCacheStats()),
-    Promise.resolve(mavenCache.getMavenCacheStats()),
-    condaCache.getCacheStats(),
+    mavenCache.getMavenCacheStatsAsync(undefined, forceRefresh),
+    condaCache.getCacheStatsAsync(undefined, forceRefresh),
   ]);
 
-  const totalSize = (pipStats.diskSize || 0) + (mavenStats.diskSize || 0) + (condaStats.totalSize || 0);
+  const totalSize =
+    (pipStats.diskSize || 0) + (mavenStats.diskSize || 0) + (condaStats.totalSize || 0);
   const pipEntryCount = Math.max(pipStats.memoryEntries || 0, pipStats.diskEntries || 0);
   const mavenEntryCount = Math.max(mavenStats.memoryEntries || 0, mavenStats.diskEntries || 0);
   const entryCount =
-    pipEntryCount +
-    (npmStats.entries || 0) +
-    mavenEntryCount +
-    (condaStats.entries?.length || 0);
+    pipEntryCount + (npmStats.entries || 0) + mavenEntryCount + (condaStats.entries?.length || 0);
 
   return {
     scope: 'package-metadata',
@@ -57,10 +55,10 @@ export function registerCacheHandlers(): void {
   });
 
   // 캐시 통계 조회
-  ipcMain.handle('cache:stats', async () => {
+  ipcMain.handle('cache:stats', async (_event, options?: { forceRefresh?: boolean }) => {
     log.debug('Getting package cache stats...');
     try {
-      return await collectPackageCacheStats();
+      return await collectPackageCacheStats(options?.forceRefresh === true);
     } catch (error) {
       log.error('Failed to get cache stats:', error);
       throw error;

@@ -58,9 +58,8 @@ export function RootCaSettingsSection() {
     >
       <Space orientation="vertical" style={{ width: '100%' }}>
         <Typography.Paragraph style={{ marginBottom: 0 }}>
-          회사에서 제공한 CA 인증서를 등록하면 패키지 검색과 다운로드에 사용합니다. PEM 또는 DER
-          형식의 .pem, .crt, .cer 파일을 선택하세요. 여러 CA는 하나의 PEM 파일에 넣어 등록할 수
-          있습니다.
+          사용자 지정 CA 인증서를 등록하면 패키지 검색과 다운로드에 사용합니다. PEM 또는 DER 형식의
+          .pem, .crt, .cer 파일을 선택하세요. 여러 CA는 하나의 PEM 파일에 넣어 등록할 수 있습니다.
         </Typography.Paragraph>
         <Typography.Text type="secondary">
           등록·해제는 바로 저장되며 앱 재시작 후 적용됩니다. 새 파일을 등록하면 기존 등록을

@@ -2,7 +2,7 @@ import type { QueryErrorCode, QueryFailure } from '../types/query-error';
 
 const messages: Record<QueryErrorCode, string> = {
   TLS_CERTIFICATE:
-    '서버 인증서를 신뢰할 수 없습니다. 회사망에서는 IT에서 제공한 CA를 설정의 추가 루트 CA 인증서에 등록한 뒤 앱을 재시작하세요.',
+    '서버 인증서를 신뢰할 수 없습니다. 추가 CA가 필요한 환경에서는 신뢰할 수 있는 CA를 설정의 추가 루트 CA 인증서에 등록한 뒤 앱을 재시작하세요.',
   TIMEOUT: '서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도하세요.',
   HTTP: '패키지 서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요.',
   NETWORK: '패키지 서버에 연결하지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도하세요.',

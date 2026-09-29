@@ -165,6 +165,10 @@ Phase 1 characterization 범위에서 특히 회귀 게이트로 삼는 테스�
 bash scripts/verify-worktree.sh src/core/shared/atomic-json-store.test.ts src/core/shared/settings-validation.test.ts src/core/config.test.ts src/core/config-persistence.test.ts electron/history-handlers.test.ts electron/history-realfile.test.ts electron/config-handlers.test.ts electron/config-handlers.integration.test.ts
 ```
 
+### OS 파일 스트리밍 회귀
+
+`src/core/downloaders/os-shared/base-downloader-stream.integration.test.ts`는 실제 Web stream과 파일 writer로 backpressure·writer 종료 후 검증·취소·응답/디스크 오류·재시도·검증 실패 정리와 삭제 실패 시 원인·취소 결과 보존을 확인합니다. CLI backend 테스트는 실제 staging 디렉터리의 실패 후 삭제를, GUI orchestrator 테스트는 downloader 경계에서 취소·skip·패키징·정리 계약을 검사합니다. 파일 크기별 메모리와 이벤트 루프 비교는 [OS 스트리밍 성능](os-streaming-performance.md)의 `scripts/profile-os-streaming.mjs`를 사용하며 앱 빌드/외부 네트워크는 필요하지 않습니다.
+
 ### HTTP 스트림 중단과 부분 파일 검증
 
 `src/core/shared/file-utils-interrupted.integration.test.ts`는 loopback HTTP 서버가 Content-Length를 선언한 200 응답의 첫 번째 chunk만 보낸 뒤 연결을 끊는 상황을 실제 `downloadFile`에 두 번 전달합니다. 응답의 `error`·`aborted`·정상 완료 전 `close`와 Content-Length 불일치는 성공으로 끝나지 않아야 하며, 이미 전달된 진행률은 남겨도 완료 진행률은 보고하지 않고 destination 부분 파일을 닫아 삭제해야 합니다. Content-Length가 없는 chunked 응답이 정상적으로 끝나는 경우와 헤더 오류, pause/resume, 명시적인 AbortSignal 취소도 같은 파일 경계에서 구분합니다.
@@ -445,8 +449,11 @@ Python noarch 사례는 호환 runtime archive를 별도 임시 prefix에 준비
 |--------|-----------|
 | `src/renderer/pages/download-page/resolved-items.test.ts` | flatList의 부모/BOM POM 연결, 실제 원본 ID와 다운로드 메타데이터 보존, GAV·type·classifier별 그룹, 공유 POM 중복 표시 방지, 이전 응답의 순환 트리 처리, 미연결 행 표시 |
 | `src/renderer/pages/download-page/hooks/use-download-page-controller.test.tsx` | 수동 의존성 확인과 `onDepsResolved` 이벤트 양쪽에서 71개 fixture 항목과 모델 POM의 그룹·ID·파일 정보 보존 |
-| `src/renderer/components/DependencyTree.test.tsx` | 그래프 밖 POM 목록 펼치기와 파일 상세, 중복·기존 그래프 POM 제외, 같은 GAV의 JAR/POM/classifier 구분, 원본 실행 그래프 유지 |
+| `src/renderer/components/DependencyTree.test.tsx` | 그래프 밖 POM 목록 펼치기와 파일 상세, 중복·기존 그래프 POM 제외, 같은 GAV의 JAR/POM/classifier 구분, 원본 실행 그래프 유지, 공유 DAG 39개 표시·참조 상세/키보드·200개씩 추가/초기화·PNG/SVG 범위 |
+| `src/renderer/components/dependency-tree-model.test.ts` | 모든 부모 관계와 문맥별 자식 합치기, 버전/type/classifier, 원본 불변, 순환·깊이 10,000 입력, 초기/추가 표시 한도 |
 | `tests/e2e/maven-pom-preview.spec.ts` | Chromium의 실제 의존성 확인 화면에서 전체 71개·하위 70개·POM 35개 표시, `flink-metrics-1.20.5.pom` 가시성 확인 |
+
+공유 DAG의 실제 브라우저 전후 비교와 PNG/SVG 저장 검증은 [의존성 트리 표시와 성능](dependency-tree-performance.md)의 `scripts/profile-dependency-tree.mjs`로 재현합니다. 원본 resolver의 방문·다운로드 정책을 바꾸지 않는 UI 변환 검증입니다.
 
 71개 fixture의 개수는 화면 회귀를 위한 고정 데이터이며 Maven Central의 실시간 의존성 개수가 아닙니다. 훅과 컴포넌트 테스트는 jsdom에서 Electron bridge 또는 트리 렌더링 경계를 모킹합니다. 그룹 상태 집계와 목록 스캔은 기존 `download-page/utils.test.ts`도 함께 확인합니다.
 
@@ -496,7 +503,7 @@ npx playwright test tests/e2e/maven-pom-preview.spec.ts --project=chromium
 
 - `tests/e2e/search-errors.spec.ts`: 실제 위자드 자동 입력의 IPC 인증서 오류·재시도, 버전 실패·복구, HTTP 오류·파싱 실패·정상 0건 구분, 빠른 재시도 후 후보 유지, 네이티브 classifier 장바구니 보존
 - `tests/e2e/settings-regression.spec.ts`: 설정 저장, SMTP 연결 테스트 호출, 새로고침 후 값 유지
-- `tests/e2e/settings-cache-breakdown.spec.ts`: 패키지 타입별 캐시 통계와 비우기 후 갱신
+- `tests/e2e/settings-cache-breakdown.spec.ts`: 패키지 타입별 캐시 통계, 강제 새로고침 인자, 실패 시 이전 값 유지·재시도와 비우기 후 재조회
 - `tests/e2e/download-smoke.spec.ts`: 장바구니에서 일반 다운로드 완료 화면까지의 smoke flow
 - `tests/e2e/history-email-restore.spec.ts`: 이메일 전달 히스토리 재다운로드 시 수신자 복원과 전역 설정 보존
 - `tests/e2e/os-package-download.spec.ts`: OS 패키지 전용 검색/다운로드 흐름
@@ -563,6 +570,14 @@ LCOV는 `core-coverage-lcov` artifact로 14일간 보존합니다. 측정 성공
 
 그 후 Windows/macOS/Linux 패키징과 draft release 생성이 이어집니다.
 
+세 플랫폼 모두 패키징 단계에서는 게시하지 않습니다. Windows/Linux는 `--publish never`를 명시하고 macOS는 래퍼에서 강제합니다. 설치 파일과 함께 Windows/Linux의 `*.yml`, macOS의 `*-mac.yml`, 각 플랫폼의 `*.blockmap`을 artifact로 넘깁니다. Windows/Linux 자동 게시를 끄면서 피드를 누락하면 앱의 업데이트 확인·다운로드가 깨지므로 메타데이터를 함께 전달해야 합니다.
+
+Windows 설치 파일은 `build.win.artifactName`으로 `DepsSmuggler-Setup-${version}.${ext}`를 지정합니다. 공백이 들어간 기본 로컬 이름을 사용하면 electron-builder가 피드에 기록하는 GitHub용 이름과 최종 게시기가 올리는 파일명이 달라집니다. `node scripts/verify-update-artifacts.mjs build windows`와 `node scripts/verify-update-artifacts.mjs build linux`는 업로드 전에 피드가 참조하는 정확한 파일명(대소문자 포함), GitHub 허용 문자, 크기·SHA512, Windows blockmap과 legacy `path`/`sha512`의 일치를 검사합니다. 빌더 진단 로그인 `builder-debug.yml`은 피드 검사와 업로드에서 제외합니다.
+
+최종 `Create Release` 단계만 `softprops/action-gh-release@v2`로 본문과 자동 생성 변경 이력, 모든 플랫폼 파일을 등록합니다. 새 릴리스는 기존 정책대로 draft이며 확인 후 게시합니다. 기존 릴리스를 재실행해도 본문이 갱신되고, 마지막 단계는 release ID로 저장된 본문이 비어 있지 않은지 검증합니다. v1은 `draft: true`일 때 같은 태그의 릴리스가 이미 있으면 본문 갱신 전에 반환합니다. 이 때문에 빌더가 빈 릴리스를 먼저 공개했던 v0.2.28~v0.2.30은 성공한 CI에서도 본문이 비어 있었습니다. [v1 구현](https://github.com/softprops/action-gh-release/blob/v1/src/github.ts), [v2 구현](https://github.com/softprops/action-gh-release/blob/v2/src/github.ts)
+
+`bash scripts/verify-worktree.sh tests/unit/release-workflow.test.ts tests/unit/update-artifacts.test.ts tests/unit/macos-package-command.test.ts`는 조기 게시 차단·업데이트 피드 전달·본문 갱신과 검증 계약을 확인합니다. 실제 임시 파일로 Windows/Linux 피드를 검사하며 이름·대소문자 불일치, blockmap 누락, 같은 크기의 파일 변조와 잘못된 legacy 경로를 거부합니다. NSIS 파일명은 실제 electron-builder의 게시용 이름 처리에도 전달해 변경되지 않는지 확인합니다. 기존 공개 릴리스의 본문은 이 소스 변경으로 소급 복구되지 않습니다. 복구가 필요하면 해당 태그 사이의 실제 변경을 기준으로 본문을 작성하고, 태그·설치 파일을 재생성하지 않고 릴리스 본문만 수정한 뒤 공개 `releases.atom`의 해당 항목에 변경 이력이 나오는지 확인합니다.
+
 각 OS 테스트 잡은 `ELECTRON_RUN_AS_NODE=1`로 Electron 바이너리를 실행하고 `process.versions.electron`을 설치 패키지 버전과 대조합니다. 이 모드는 버전 확인 단계에만 적용하며 Linux runner의 SUID sandbox 설정 없이도 내장 Node 버전까지 확인합니다. Electron 설치 패키지가 존재하는 것과 플랫폼 바이너리 준비가 완료된 것은 다르며, 이 단계의 다운로드 실패도 CI 실패로 처리합니다. 이 버전 확인은 GUI 실행 검증을 대신하지 않습니다. 런타임 major 갱신 시 패키징된 앱의 IPC와 updater 다운로드까지 확인하는 절차는 [런타임 지원 정책](runtime-support.md)을 따릅니다.
 
 macOS는 DMG와 ZIP을 생성한 뒤 `node scripts/verify-macos-update.mjs build`로 안정 채널의 `latest-mac.yml`과 시험 채널의 `beta-mac.yml` 등 `*-mac.yml`을 검사합니다. ZIP 참조, DMG/ZIP 파일의 존재, 메타데이터의 크기·SHA512와 실제 파일의 일치가 필수입니다. 업데이트 피드는 `scripts/macos-update-policy.json`에 지정된 Darwin 커널 `22.0.0` 조건도 포함해야 합니다. 앱 번들의 macOS `13.0.0` 값과 혼동하지 않습니다. 파일 경로가 출력 폴더를 벗어나거나 메타데이터가 누락·손상되면 실패합니다. macOS 패키징 단계는 `--publish never`를 사용하며, 검증이 끝난 산출물과 `*-mac.yml`, blockmap을 artifact로 넘겨 최종 릴리스 단계에서 게시합니다.
@@ -610,4 +625,101 @@ DEPS_SMUGGLER_NATIVE_MAVEN_PROJECT=1 bash scripts/verify-worktree.sh \
 
 ### 검색 실패 회귀 (#173)
 
-[검색 오류와 재시도](search-errors.md)의 명령으로 오류 분류·HTTP 상태/파싱/15초 중단·IPC 핸들러와 facade 전달·입력 경쟁 상태·버전 대체 안내를 검증합니다. `useWizardSearchFlow.async.test.tsx`는 실제 service/facade를 사용하는 훅에서 새 입력 전후의 늦은 성공/실패, 환경 변경, 초기화, Enter 중복 방지와 버전 재시도를 검사합니다. E2E는 mock Electron API 및 HTTP 응답을 사용하며 회사망 연결 자체를 검증하지 않습니다.
+[검색 오류와 재시도](search-errors.md)의 명령으로 오류 분류·HTTP 상태/파싱/15초 중단·IPC 핸들러와 facade 전달·입력 경쟁 상태·버전 대체 안내를 검증합니다. `useWizardSearchFlow.async.test.tsx`는 실제 service/facade를 사용하는 훅에서 새 입력 전후의 늦은 성공/실패, 환경 변경, 초기화, Enter 중복 방지와 버전 재시도를 검사합니다. E2E는 mock Electron API 및 HTTP 응답을 사용하며 실제 사용자 네트워크 연결 자체를 검증하지 않습니다.
+
+### 설정 캐시 통계 (#182)
+
+`cache-stats.test.ts`는 동시 요청 공유, 변경 없는 통계 재사용, 집계 도중 무효화·재집계, 실패 후 재시도, 비동기 파일 순회와 삭제·권한 오류를 검증합니다. `package-cache-stats.integration.test.ts`는 임시 디렉터리와 실제 pip/Maven/Conda 저장·삭제·만료 경로를 사용하고 HTTP만 대체합니다. 메모리 항목 수는 계속 갱신하며 Conda 통계에서 큰 repodata 본문을 읽지 않는 것도 확인합니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/shared/cache-stats.test.ts \
+  src/core/shared/package-cache-stats.integration.test.ts \
+  src/core/shared/pip-cache.test.ts src/core/shared/maven-cache.test.ts \
+  src/core/shared/conda-cache.test.ts electron/cache-handlers.test.ts \
+  src/renderer/pages/settings/use-settings-form-actions.test.ts \
+  src/renderer/pages/settings/settings-form-utils.test.ts \
+  src/renderer/stores/settings-store.test.ts
+npm run test:e2e -- tests/e2e/settings-cache-breakdown.spec.ts tests/e2e/settings-regression.spec.ts
+```
+
+설정 훅 테스트에는 늦은 응답이 삭제·새 조회 결과를 덮어쓰지 않는 경우와 기존 저장·초기화·미저장 입력 보호가 포함됩니다. E2E는 수정된 렌더러와 mock IPC로 검증합니다. 실제 Electron 메인 프로세스와 13,000개 이상의 합성 파일을 사용하는 성능 검증은 [별도 측정 절차](settings-cache-performance.md)를 따릅니다.
+
+
+### Conda/YUM 메타데이터 Worker (#185)
+
+실제 Worker에서 캐시 TTL·304·강제 갱신·손상 복구·디스크 교체·재시작·이름별 반환과 Conda 빌드/플랫폼 선택을 검증합니다. YUM은 기존 버전 문자열·엔티티 제한·provides·파일 전달물 검사를 그대로 실행합니다. Worker client 검사는 직렬 큐·취소·비정상 종료·유휴 해제·메인 HTTP 전달을 확인합니다.
+
+```bash
+bash scripts/verify-worktree.sh src/core/shared/metadata/worker-client.test.ts \
+  src/core/shared/metadata/conda-worker-race.test.ts \
+  src/core/shared/conda-cache.test.ts src/core/shared/conda-utils.test.ts \
+  src/core/shared/package-cache-stats.integration.test.ts \
+  src/core/resolver/conda-resolver-target.test.ts src/core/downloaders/conda.test.ts \
+  src/core/downloaders/os-metadata-parsers.test.ts \
+  src/core/downloaders/yum-delivered-payload.integration.test.ts \
+  src/core/downloaders/yum-provides-repository.integration.test.ts \
+  src/core/downloaders/yum-file-provides.integration.test.ts
+```
+
+heartbeat와 Worker를 포함한 프로세스 RSS·CPU의 전후 측정은 [재현 스크립트와 한계](metadata-worker-performance.md#재현과-측정)를 참고하세요. 단위 테스트의 통과를 패키징된 Electron 앱의 성능 측정으로 대신하지 않습니다.
+
+### Conda 이름 인덱스 miss 회귀 (#187)
+
+```bash
+bash scripts/verify-worktree.sh \
+  src/core/shared/metadata/conda-worker-index.test.ts \
+  src/core/shared/conda-index-consumers.test.ts \
+  src/core/shared/conda-cache.test.ts \
+  src/core/shared/metadata/conda-worker-race.test.ts \
+  src/core/resolver/conda-resolver-target.test.ts \
+  src/core/downloaders/conda.test.ts \
+  src/core/shared/conda-utils.test.ts
+```
+
+`conda-worker-index.test.ts`는 production Worker handler의 스레드·캐시 경계를 모킹하고 Proxy의 `ownKeys`로 원본 열거 횟수를 셉니다. 처음 포맷별 1회 인덱싱 후 20 hit/20 miss가 추가 열거를 하지 않는지, 디스크 버전 교체·forceRefresh·TTL 만료가 데이터와 인덱스를 함께 교체하는지 검사합니다. 시간 임계값으로 성능을 판정하지 않습니다.
+
+`conda-index-consumers.test.ts`는 실제 Worker에서 임시 디스크 데이터를 읽고 조회합니다. 같은 참조를 resolver와 downloader에 제공해 platform miss → noarch, resolver의 Python/CUDA/버전/build 조건과 downloader의 최고 build 선택 차이를 보존하는지 확인합니다. 별도 raw 입력은 인덱스 없이 그대로 반환되고 소비자의 전체 열거 fallback이 유지되는지 계수합니다. 외부 HTTP/API는 호출하지 않습니다. 기존 cache/race 테스트는 실제 디스크 교체·삭제와 Worker 종료 후 재조회 계약을 함께 검증합니다. [상세 조회 계약](shared-conda.md#이름-인덱스의-hitmiss와-호환-경로-187)을 참고하세요.
+
+### GUI OS 동시 다운로드 (#188)
+
+#189의 `electron/services/download-progress-os.test.ts`는 가상 시계로 150ms 최신 값 병합, 전환/완료/flush, 취소·새 세션 정리를 검증합니다. 아래 통합 테스트는 오류 창 전 최신 값 전달, 실제 emitter의 완료/취소 후 예약 전송과 늦은 패키징 콜백 차단도 검사합니다. 전송 호출 수 비교는 [별도 재현 스크립트](os-progress-performance.md#재현과-측정)를 사용하며 Electron IPC/React 비용과 구분합니다.
+
+[동시 실행 문서](os-download-concurrency.md#검증과-한계)의 검증 명령은 실제 orchestrator·pool·BaseOSDownloader·스트림·파일 시스템에 12개/50ms 응답을 제공해 설정 1/3/6과 최대 활성 전송 수가 같은지 검사합니다. 취소 또는 한 슬롯의 예외 후 나머지 스트림의 종료를 지연시켜 staging이 먼저 삭제되지 않는지 확인합니다. 파일명이 같은 병렬 입력도 슬롯별 임시 폴더로 격리됩니다.
+
+router 테스트는 동시 오류의 재시도/건너뛰기 응답 연결, 취소 신호, 오류 창 실패 후 대기 창 억제를 검증합니다. orchestrator 회귀는 기존 성공/실패/skip·출력 정리와 초기화/정리 실패 후 다음 세션을 확인합니다. pool·화면 검증은 완료 순서와 독립적인 결과 순서, 고정된 표시 패키지, 완료 수·활성 수, 종료 뒤 늦은 콜백 무시를 검사합니다. 실제 Electron native dialog나 외부 네트워크 속도를 측정한 결과는 아닙니다.
+
+`electron/download-handlers.test.ts`의 취소 회귀는 동시성 1/3을 각각 사용합니다. 순차 실행에서는 첫 성공 뒤 취소가 발생하지만, 병렬 실행에서는 첫 성공 결과를 기록하기 전에 취소될 수 있습니다. 두 경우 모두 성공 산출물이 없으며 각 skipped 목록과 출력물 미생성 경고를 확인합니다.
+
+### 다운로드 목록·로그 렌더 제한 (#190)
+
+`src/renderer/pages/download-page/components/download-lists.test.tsx`는 실제 Ant Design으로 그룹·의존성·로그의 행 제한, 마지막 항목 접근, 오류 상세와 최신 대상 재시도, 전체 집계, 페이지/접힘 유지와 로그 초기화를 검증합니다. 동일 객체 내용의 getter 관찰로 변경 없는 행·로그 재처리를 검사하며 일반 진행 10행/결과 전체 표 계약도 구분합니다. 기존 utils/resolved-items/download-store/controller 회귀를 함께 실행합니다.
+
+`node scripts/profile-download-lists.mjs c72a765 /tmp/download-list-profile`은 앱 빌드 없이 production 브라우저 fixture를 실행합니다. 3회 갱신 시간·초기 렌더·layout·DOM 수와 캡처를 기록하고 마지막 페이지 재시도/로그 접근을 확인합니다. [결과 및 범위](download-list-performance.md)를 참고하세요.
+
+`tests/e2e/maven-pom-preview.spec.ts`는 의존성 70개를 10개씩 7페이지로 순회하며 전체 파일명 순서와 부모 POM 35개, 71개 기준 집계가 보존되는지 확인합니다. 전체 항목을 한 번에 DOM에 만드는 과거 기대값을 사용하지 않습니다.
+
+### npm 저장 파일 스트림 검증 (#191)
+
+```bash
+bash scripts/verify-worktree.sh src/core/downloaders/npm-integrity-streaming.test.ts src/core/downloaders/npm.test.ts src/core/downloaders/npm-download.test.ts src/core/downloaders/lang-shared/base-language-downloader.test.ts
+```
+
+실제 파일의 여러 알고리즘·복수 SRI 후보와 불일치, malformed/빈 SRI, 미지원 알고리즘, 파일 누락·읽기 오류의 false 반환과 reader 종료를 검사합니다. loopback HTTP로 저장 완료 후 검증, SRI와 SHA1의 배타적 선택, 검증 실패 파일 삭제를 확인합니다. 크기별 메모리·timer 비교는 `node scripts/profile-npm-integrity.mjs cf10291`로 별도 실행하며 [측정 범위와 CPU/메모리 tradeoff](npm-integrity-performance.md)를 함께 읽어야 합니다.
+
+## 장바구니 bulk 저장 회귀
+
+`cart-store.test.ts`와 `cart-bulk-add.test.ts`는 실제 store에서 2,000개 추가의 구독 알림·persist 1회, 빈/전부 중복 입력의 0회와 실제 추가 수를 검증합니다. Maven 기본 type/원문 문자열·JAR/POM, 이름 대소문자, 옵션을 동일성에 추가하지 않는 규칙, 기존 항목·입력 내 최초 항목 우선과 순서·ID·옵션 보존을 포함합니다.
+
+`cart-bulk-add.spec.ts`는 Chromium에서 파일 재입력, 일부 파일 파싱 실패, 이력 복원의 저장 횟수와 실제 신규 수 안내를 검사합니다. 기존 `cart-input-regression.spec.ts`, `history-email-restore.spec.ts`로 latest 실패 대체값·파싱 오류·JAR/POM·전달 설정 복원을 함께 확인합니다. 실제 production store/localStorage의 전후 측정과 mock 경계는 [장바구니 일괄 추가](cart-bulk-add.md)를 참고하세요.
+
+## npm 대기 큐 순서 회귀
+
+`npm-dependency-queue.test.ts`는 depth/parentPath/삽입 순서, 삽입·소비 교차, Unicode 경로, 초기화와 10,000개 비교 횟수를 검사합니다. `npm-queue-equivalence.test.ts`는 실제 공개 resolver에 기존 stable sort+shift 큐를 비교 기준으로 주입해 처리 순서·전체 결과·최종 버전·hoistedPath·충돌을 대조합니다. dev/optional/peer, preferDedupe, nested, 최대 깊이, 의도된 방문 키 중복 제거와 재사용을 포함합니다. `npm-resolver.test.ts`도 함께 실행합니다.
+
+네트워크/버전 service만 대체한 실제 resolver의 규모별 비교는 [npm 큐 순서와 성능](npm-queue-performance.md)의 스크립트로 재현합니다. 일반 프로젝트의 직접 의존성이 1만 개라고 가정하거나 시간 임계값으로 회귀를 판정하지 않습니다.
+
+## 시작 버전 조회 공유 회귀
+
+`electron/version-startup-sharing.integration.test.ts`는 실제 handler 등록·preloader·fetcher를 연결하고 지연 transport로 두 시작 경로와 조기 Python/CUDA IPC를 겹칩니다. 종류별 호출 1회, 동일 Promise와 완료 캐시 재사용, TTL 만료, 실제 파일 캐시 읽기 공유를 확인합니다. 하드코딩/만료 캐시 fallback resolve 뒤 fetcher 재조회, 기존 IPC fallback 세션 유지, 예외 reject 뒤 pending 해제도 포함합니다. 기존 `version-fetcher.test.ts`, `version-preloader.test.ts`, `version-handlers.test.ts`를 함께 실행합니다.
+
+실제 외부 네트워크를 호출하지 않는 전후 요청 수 재현은 [Python/CUDA 버전 조회 공유](version-request-sharing.md)의 `scripts/profile-version-preload.mjs`를 사용합니다. preloader의 success를 원격 조회 성공으로 해석하거나 IPC fallback 자동 회복을 구현했다고 주장하지 않습니다.

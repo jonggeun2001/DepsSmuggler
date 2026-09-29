@@ -189,6 +189,8 @@ const MACOS_VERSIONS: Record<string, MacOSVersionInfo>;
 
 Python, Node.js, Java, CUDA 등의 버전 정보를 원격에서 조회하고 캐싱합니다.
 
+Python/CUDA fetcher는 종류별 진행 중 Promise를 공유하며, 정상·fallback·예외 완료 시 해제합니다. 시작 시 handler/preloader와 조기 IPC가 겹쳐도 같은 작업을 기다립니다. 기존 TTL과 fallback 규칙, 상위 handler/preloader 역할은 유지합니다. [조회 공유 계약과 재현](version-request-sharing.md)을 참고하세요.
+
 ### 주요 함수
 
 | 함수 | 반환값 | 설명 |

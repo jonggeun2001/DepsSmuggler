@@ -210,6 +210,8 @@ describe('createDeliveryPipeline', () => {
         clearAllPackageProgress: vi.fn(),
         emitAllComplete: vi.fn(),
         emitOSProgress: vi.fn(),
+        flushOSProgress: vi.fn(),
+        clearOSProgress: vi.fn(),
         emitOSResolveDependenciesProgress: vi.fn(),
       },
       isCancelled: () => false,

@@ -102,7 +102,7 @@ const HistoryPage: React.FC = () => {
     loading,
     initialized,
   } = useHistoryStore();
-  const { addItem } = useCartStore();
+  const { addItems } = useCartStore();
   const { updateSettings } = useSettingsStore();
 
   // 로컬 상태
@@ -134,21 +134,21 @@ const HistoryPage: React.FC = () => {
       cancelText: '취소',
       onOk: () => {
         // 장바구니에 패키지 추가
-        history.packages.forEach((pkg) => {
-          addItem({
+        const addedCount = addItems(
+          history.packages.map((pkg) => ({
             type: pkg.type,
             name: pkg.name,
             version: pkg.version,
             arch: pkg.arch,
             languageVersion: pkg.languageVersion,
             metadata: pkg.metadata,
-          });
-        });
+          }))
+        );
 
         // 설정 복원
         updateSettings(buildHistoryRestoreSettings(history.settings));
 
-        message.success(`${history.packages.length}개 패키지가 장바구니에 추가되었습니다.`);
+        message.success(`${addedCount}개 패키지가 장바구니에 추가되었습니다.`);
         navigate('/download', {
           state: {
             deliveryMethod: getDeliveryMethod(history),
@@ -158,7 +158,7 @@ const HistoryPage: React.FC = () => {
         });
       },
     });
-  }, [addItem, updateSettings, navigate]);
+  }, [addItems, updateSettings, navigate]);
 
   // 히스토리 삭제
   const handleDelete = useCallback(async (id: string) => {

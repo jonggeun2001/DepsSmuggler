@@ -67,6 +67,8 @@ electron/
 
 참고: `cache:*`는 현재 버전 목록 캐시(`versions:*`, 예: CUDA 버전 파일/메모리 캐시)나 renderer localStorage 캐시를 포함하지 않습니다.
 
+`cache:stats`는 선택 인자 `{ forceRefresh?: boolean }`을 받습니다. 기본 조회와 `cache:get-size`는 변경 없는 디스크 통계를 재사용하고, `forceRefresh: true`는 재집계합니다. 같은 경로의 진행 중 집계는 공유하며 파일 저장·삭제 후 무효화합니다. 응답 필드는 기존과 동일하고 오류는 reject합니다. [통계 재사용과 외부 변경 반영](shared-cache.md#설정-화면의-통계-조회)을 참고하세요.
+
 ### `history-handlers.ts`
 
 히스토리 파일 위치는 `~/.depssmuggler/history.json`입니다. 조회부터 변경 저장까지 파일별 큐에서 처리하고 JSON은 원자적으로 교체합니다. 추가는 최신순 100개를 유지하며 전체 저장은 명시적인 교체입니다. 손상 파일 조회는 로그와 빈 배열을 반환하지만 추가/삭제는 원본을 덮어쓰지 않고 실패합니다. 명시적인 전체 저장/전체 삭제로 복구할 수 있습니다. [히스토리 계약](download-history.md)을 참고하세요.
@@ -172,16 +174,20 @@ electron/
 |------|------|
 | `os:resolveDependencies` | OS 패키지 의존성 해결 |
 | `os:download:start` | OS 패키지 전용 end-to-end 다운로드 시작. 필요 시 의존성 해결, 원본 패키지 다운로드, `archive/repository/both` 패키징까지 수행하고 `warnings`, `unresolved`, `conflicts`, `generatedOutputs`, `cancelled`를 함께 반환 |
-| `os:download:cancel` | OS 패키지 전용 다운로드 취소 요청. 현재 전송 중인 fetch에도 abort 신호를 전달하고, 취소 시 최종 출력물이 없으면 성공 산출물로 보고하지 않음 |
+| `os:download:cancel` | OS 패키지 전용 다운로드 취소 요청. 모든 활성 fetch에 abort 신호를 전달하고 종료/정리 뒤 결과 반환. 최종 출력물이 없으면 성공 산출물로 보고하지 않음 |
 | `os:cache:stats` | OS 캐시 통계 조회 placeholder (`{ size: 0, count: 0, path: '' }`) |
 | `os:cache:clear` | OS 캐시 초기화 placeholder (`{ success: true }`만 반환) |
 
 OS 이벤트:
 
+`os:download:progress`의 같은 패키지/단계 바이트 값은 main에서 150ms 간격으로 최신 하나를 전달합니다. 패키지·단계·집계 수 변경, 완료는 즉시 보내고 오류 창 전에 대기 값을 flush합니다. 취소/종료/새 세션 시 timer와 이전 payload를 정리하며 최종 `os:download:start` 응답은 제한하지 않습니다. [전송 계약과 측정 범위](os-progress-performance.md)를 참고하세요.
+
 | 이벤트 | 설명 |
 |--------|------|
 | `os:resolveDependencies:progress` | OS 의존성 해결 진행률 |
 | `os:download:progress` | OS 다운로드/패키징 진행률 (`resolving`, `downloading`, `packaging` 단계 포함). 충돌/미해결 의존성도 resolving 단계 메시지로 먼저 표면화 |
+
+GUI OS `os:download:start`는 `concurrency`만큼 제한된 실행 슬롯을 사용하며 같은 서비스에서 처리/정리 중인 요청이 있으면 중복 시작을 거부합니다. `os:download:progress`는 선택적 `completedPackages`(성공/실패/skip 처리 완료 수), `activePackages`(활성 슬롯 수)를 추가합니다. `currentPackage`는 가장 앞선 활성 입력이며 바이트/속도도 해당 패키지 값입니다. 기존 필드와 결과의 success/failed/skipped/cancelled 구분은 유지합니다. [동시 실행 계약](os-download-concurrency.md)을 참고하세요.
 
 참고: `os:cache:*` 채널은 현재 실제 캐시 백엔드에 연결되지 않은 no-op 성격의 placeholder 구현입니다.
 
@@ -198,6 +204,8 @@ OS 이벤트:
 | `versions:cache-status` | 버전 캐시 상태 조회 |
 
 Java/Node 런타임 버전 목록 IPC와 해당 런타임 선택 단계는 현재 없습니다. Python/CUDA는 설정 화면에서 위 채널을 사용하고, 패키지 자체의 버전 목록은 `search:versions`로 조회합니다.
+
+시작 조회와 조기 버전 IPC는 공통 fetcher의 진행 중 Promise를 공유합니다. handler의 세션 캐시는 기존대로 fallback 목록도 보관하므로, fetcher 직접 재조회가 회복되어도 IPC 목록을 자동 교체하지 않습니다. preloader 상태 집계와 cache-status 의미도 유지합니다. [동시 요청·완료/실패 계약](version-request-sharing.md)을 참고하세요.
 
 ### `updater.ts`
 
@@ -217,6 +225,8 @@ Java/Node 런타임 버전 목록 IPC와 해당 런타임 선택 단계는 현�
 | `updater:status` | 상태 변경 브로드캐스트 |
 
 `updater:status.updateInfo.releaseNotes`는 `electron-updater`와 동일하게 HTML/일반 텍스트 문자열, `{ version, note }[]`, `null` 또는 미설정을 허용합니다. 렌더러는 외부 HTML을 정제한 뒤 표시합니다. `updater.openReleaseNotesLink(url)`는 메인 프로세스에서 HTTP(S) URL인지 검증하고 `shell.openExternal`을 호출하며 `{ success, error? }`로 결과를 반환합니다.
+
+렌더러는 이벤트 구독과 초기 `getStatus()` 조회를 함께 사용해 구독 전 업데이트도 표시합니다. 진행 이벤트가 먼저 도착해도 최초 상태로 모달을 복원하고, 이전 초기 응답은 무시합니다. 노트가 비어 있어도 `updateInfo.version`으로 만든 GitHub 릴리스 링크를 같은 링크 열기 IPC에 전달합니다. IPC 자료형이나 채널은 변경하지 않습니다.
 
 패키징된 앱은 전체 updater를 초기화하며, 개발 모드에는 업데이트 작업의 no-op 핸들러를 등록합니다. 패치 노트 링크 열기 핸들러는 양쪽에서 같은 검증을 사용합니다. `updater:set-auto-download` 채널은 구현되어 있지만 설정 화면의 `autoDownloadUpdate` 저장에서 호출하지 않습니다. 시작 시 업데이트 확인도 저장된 `autoUpdate` 값을 참조하지 않습니다.
 

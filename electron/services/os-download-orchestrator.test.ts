@@ -1,13 +1,13 @@
 import * as path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createOSDownloadOrchestrator } from './os-download-orchestrator';
+import type { OSDownloadStartOptions } from './os-package-router';
 import type {
   DependencyResolutionResult,
   OSDistribution,
   OSPackageInfo,
   Repository,
 } from '../../src/core/downloaders/os-shared/types';
-import { createOSDownloadOrchestrator } from './os-download-orchestrator';
-import type { OSDownloadStartOptions } from './os-package-router';
 
 const mocks = vi.hoisted(() => ({
   ensureDir: vi.fn(),
@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   repository: vi.fn(),
   generateScripts: vi.fn(),
   osProgress: vi.fn(),
+  flushOSProgress: vi.fn(),
+  clearOSProgress: vi.fn(),
   resolveProgress: vi.fn(),
 }));
 vi.mock('fs-extra', () => ({
@@ -58,6 +60,8 @@ vi.mock('../../src/core/downloaders/os-shared/script-generator', () => ({
 vi.mock('./download-progress', () => ({
   createDownloadProgressEmitter: () => ({
     emitOSProgress: mocks.osProgress,
+    flushOSProgress: mocks.flushOSProgress,
+    clearOSProgress: mocks.clearOSProgress,
     emitOSResolveDependenciesProgress: mocks.resolveProgress,
   }),
 }));
@@ -299,7 +303,7 @@ describe('OS download orchestration', () => {
     );
     expect(mocks.download.mock.calls).toEqual([[second], [first]]);
     expect(mocks.downloaderFactory).toHaveBeenCalledWith(
-      expect.objectContaining({ outputDir: stagingDir, concurrency: 7 })
+      expect.objectContaining({ outputDir: path.join(stagingDir, 'slot-0'), concurrency: 7 })
     );
     const downloadedFiles = new Map([
       ['libcurl-1.0', path.join(stagingDir, 'libcurl.deb')],
@@ -343,20 +347,34 @@ describe('OS download orchestration', () => {
   });
 
   it('forwards archive progress and script stages without using download bytes as packaging percent', async () => {
-    const archiveProgress = { processedFiles: 1, totalFiles: 2, processedBytes: 50, totalBytes: 100, percentage: 50, outputBytes: 20 };
+    const archiveProgress = {
+      processedFiles: 1,
+      totalFiles: 2,
+      processedBytes: 50,
+      totalBytes: 100,
+      percentage: 50,
+      outputBytes: 20,
+    };
     mocks.archive.mockImplementationOnce(async (_packages, _files, archiveOptions) => {
       archiveOptions.onStage('설치 스크립트 생성 중...');
       archiveOptions.onProgress(archiveProgress);
       return archivePath;
     });
     await createOSDownloadOrchestrator({ getMainWindow: () => null }).startDownload(options());
-    expect(mocks.osProgress).toHaveBeenCalledWith(expect.objectContaining({
-      phase: 'packaging', packagingDetails: { message: '설치 스크립트 생성 중...' },
-    }));
-    expect(mocks.osProgress).toHaveBeenLastCalledWith(expect.objectContaining({
-      phase: 'packaging', bytesDownloaded: 0, totalBytes: 0,
-      packagingDetails: { message: 'ZIP 압축 중...', archiveProgress },
-    }));
+    expect(mocks.osProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: 'packaging',
+        packagingDetails: { message: '설치 스크립트 생성 중...' },
+      })
+    );
+    expect(mocks.osProgress).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        phase: 'packaging',
+        bytesDownloaded: 0,
+        totalBytes: 0,
+        packagingDetails: { message: 'ZIP 압축 중...', archiveProgress },
+      })
+    );
   });
 
   it('packages only successful downloads and retains failure and skipped details', async () => {
@@ -415,7 +433,9 @@ describe('OS download orchestration', () => {
     const error = new Error('disk read failed');
     mocks.download.mockRejectedValue(error);
     const service = createOSDownloadOrchestrator({ getMainWindow: () => null });
-    await expect(service.startDownload(options({ packages: [first, second] }))).rejects.toBe(error);
+    await expect(
+      service.startDownload(options({ packages: [first, second], concurrency: 1 }))
+    ).rejects.toBe(error);
     expect(mocks.download).toHaveBeenCalledOnce();
     expect(mocks.archive).not.toHaveBeenCalled();
     expect(mocks.remove).toHaveBeenCalledExactlyOnceWith(stagingDir);
@@ -431,7 +451,9 @@ describe('OS download orchestration', () => {
         return secondResult.promise;
       });
     const service = createOSDownloadOrchestrator({ getMainWindow: () => null });
-    const pending = service.startDownload(options({ packages: [first, second, third] }));
+    const pending = service.startDownload(
+      options({ packages: [first, second, third], concurrency: 1 })
+    );
     await startedSecond.promise;
     await service.cancelDownload();
     expect(mocks.downloaderFactory.mock.calls[0][0].abortSignal.aborted).toBe(true);
@@ -535,5 +557,40 @@ describe('OS download orchestration', () => {
     expect(mocks.archive).not.toHaveBeenCalled();
     expect(mocks.generateScripts).not.toHaveBeenCalled();
     expect(mocks.writeFile).not.toHaveBeenCalled();
+  });
+
+  it.each(['ensureDir', 'mkdtemp', 'downloaderFactory'] as const)(
+    'releases the session after %s fails so the user can retry',
+    async (stage) => {
+      const error = new Error(`failed ${stage}`);
+      if (stage === 'downloaderFactory')
+        mocks.downloaderFactory.mockImplementationOnce(() => {
+          throw error;
+        });
+      else mocks[stage].mockRejectedValueOnce(error);
+      const service = createOSDownloadOrchestrator({ getMainWindow: () => null });
+      await expect(service.startDownload(options())).rejects.toBe(error);
+      await expect(service.startDownload(options())).resolves.toMatchObject({
+        success: [first],
+        cancelled: false,
+      });
+    }
+  );
+
+  it('keeps the session reserved until staging cleanup finishes and releases it even if cleanup fails', async () => {
+    const cleanup = deferred<void>();
+    const error = new Error('cleanup failed');
+    mocks.remove.mockImplementationOnce(() => cleanup.promise);
+    const service = createOSDownloadOrchestrator({ getMainWindow: () => null });
+    const firstRun = service.startDownload(options());
+    const rejected = expect(firstRun).rejects.toBe(error);
+    await vi.waitFor(() => expect(mocks.remove).toHaveBeenCalledTimes(1));
+    await expect(service.startDownload(options())).rejects.toThrow('이미 OS 패키지 다운로드');
+    cleanup.reject(error);
+    await rejected;
+    await expect(service.startDownload(options())).resolves.toMatchObject({
+      success: [first],
+      cancelled: false,
+    });
   });
 });
