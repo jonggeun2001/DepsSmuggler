@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import axios from 'axios';
+import { QueryRequestError } from '../src/utils/query-error';
 import { createRendererDataClient } from '../src/renderer/lib/renderer-data-client';
 import { registerSearchHandlers } from './search-handlers';
 import { resolveAllDependencies } from '../src/core/shared';
 
-const { ipcHandle, senderSend, mavenSearchPackagesMock, parseProjectMock } = vi.hoisted(() => ({
+const { ipcHandle, senderSend, mavenSearchPackagesMock, mavenGetVersionsMock, parseProjectMock } = vi.hoisted(() => ({
   ipcHandle: vi.fn(),
   senderSend: vi.fn(),
   mavenSearchPackagesMock: vi.fn(),
+  mavenGetVersionsMock: vi.fn(),
   parseProjectMock: vi.fn(),
 }));
 
@@ -44,7 +46,7 @@ vi.mock('../src/core', () => ({
   getPipDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
   getMavenDownloader: vi.fn(() => ({
     searchPackages: mavenSearchPackagesMock,
-    getVersions: vi.fn(),
+    getVersions: mavenGetVersionsMock,
   })),
   getCondaDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
   getDockerDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
@@ -94,6 +96,18 @@ describe('registerSearchHandlers', () => {
     });
   });
 
+  it('선택한 Maven 저장소만 검색과 버전 조회에 전달한다', async () => {
+    registerSearchHandlers();
+    const options = { repositoryUrl: 'https://repo.example.com/releases' };
+    mavenGetVersionsMock.mockResolvedValue(['1.0']);
+    const search = ipcHandle.mock.calls.find(([channel]) => channel === 'search:packages')![1];
+    const versions = ipcHandle.mock.calls.find(([channel]) => channel === 'search:versions')![1];
+    await search({}, 'maven', 'example:app', options);
+    await versions({}, 'maven', 'example:app', options);
+    expect(mavenSearchPackagesMock).toHaveBeenCalledWith('example:app', options.repositoryUrl);
+    expect(mavenGetVersionsMock).toHaveBeenCalledWith('example:app', options.repositoryUrl);
+  });
+
   it('Maven 인증서 실패가 실제 IPC 어댑터와 renderer facade를 통과해 보존된다', async () => {
     mavenSearchPackagesMock.mockRejectedValue(Object.assign(new Error('self signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' }));
     registerSearchHandlers();
@@ -131,7 +145,7 @@ describe('registerSearchHandlers', () => {
 
   it('Maven 버전 metadata와 fallback 응답이 모두 잘못되면 실패를 전달한다', async () => {
     registerSearchHandlers();
-    vi.mocked(axios.get).mockResolvedValue({ data: '<html>company gateway</html>' });
+    mavenGetVersionsMock.mockRejectedValue(new QueryRequestError('INVALID_RESPONSE'));
     const handler = ipcHandle.mock.calls.find(([channel]) => channel === 'search:versions')![1];
     expect(await handler({}, 'maven', 'g:a')).toMatchObject({ versions: [], error: { code: 'INVALID_RESPONSE' } });
   });

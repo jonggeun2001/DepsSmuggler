@@ -144,12 +144,16 @@ MavenResolver와 MavenDownloader가 공유하여 중복 API 호출을 방지합�
 
 병렬 함수의 `options`는 `MavenCacheOptions & { batchSize?: number }`이며 기본 배치 크기는 5입니다. `prefetchPomsParallel()`은 완료를 기다릴 수 없는 `void` 반환 함수이고, 완료가 필요하면 `await fetchPomsParallel()`을 사용합니다. 조회 실패한 POM은 병렬 조회 결과에서 빠집니다.
 
+`repositoryUrl`을 지정한 POM 조회는 선택한 저장소 다음 Central을 조회합니다. 선택이 없으면 Central만 사용합니다. 명시한 `repoUrl`은 기존처럼 단일 저장소 override로 사용합니다. 메모리 캐시는 URL과 좌표로 구분하며, 추가 저장소의 디스크 캐시는 `_repositories/<URL의 SHA-256>/` 아래에 저장합니다. 부모 POM·BOM·프로젝트 모델 수집에도 선택한 저장소를 전달합니다. 저장된 주소록은 코어 조회 범위를 넓히지 않습니다. Maven resolver는 각 root별로 생성하면서 같은 작업의 세션 캐시는 공유합니다. 세션 POM 결과에는 실제 저장소 URL도 보존해 Central 폴백 의존성의 출처를 확정합니다. 실제 출처가 다른 동일 아티팩트는 공통 목록에 병합하지 않고 해당 root의 해결 오류로 처리합니다.
+
 ### MavenCacheOptions
 
 ```typescript
 interface MavenCacheOptions {
-  /** 레포지토리 URL, 기본: https://repo1.maven.org/maven2 */
+  /** 지정 시 해당 저장소만 사용하는 명시적 override */
   repoUrl?: string;
+  /** 선택한 패키지 저장소. Central을 폴백으로 사용 */
+  repositoryUrl?: string;
   /** 메모리 TTL (ms), 기본: 300000 (5분) */
   memoryTtl?: number;
   /** 디스크 TTL (ms), 기본: 86400000 (24시간) */
@@ -224,7 +228,7 @@ console.log(`메모리: ${stats.memoryEntries}개`);
 
 ---
 
-메모리 캐시 키는 저장소 URL과 좌표를 포함하지만 디스크 경로는 G:A:V만 사용합니다. `invalidatePom()`은 메모리 항목만 삭제합니다. `getPomFromCache()`는 별도 `memoryTtl` 검사를 하지 않으며, 유효성 검사에는 `isPomCached()`를 사용합니다. `getMavenCacheStats()`는 기본 디스크 경로를 집계하고 POM과 메타데이터를 각각 파일 1개로 셉니다.
+메모리 캐시 키는 저장소 URL과 좌표를 포함합니다. Central의 디스크 경로는 G:A:V를 사용하고 추가 저장소는 `_repositories/<URL 해시>/` 아래에 같은 좌표 경로를 사용합니다. `invalidatePom()`은 메모리 항목만 삭제합니다. `getPomFromCache()`는 별도 `memoryTtl` 검사를 하지 않으며, 유효성 검사에는 `isPomCached()`를 사용합니다. `getMavenCacheStats()`는 기본 디스크 경로를 집계하고 POM과 메타데이터를 각각 파일 1개로 셉니다.
 
 ## Maven 스킵/캐시 관리 (`maven-dedupe-index.ts`)
 
@@ -365,6 +369,7 @@ const version = managedVersions.get('org.springframework:spring-core');
 - 프로젝트 속성, 부모의 일반 의존성, dependencyManagement/import BOM을 해석하고 test/provided 직접 의존성도 유지합니다. 자식의 직접 관리 선언은 부모 선언보다 우선합니다. 실제 라이브러리 전이 경로에서 쓰이는 프로젝트 관리 버전과 그 하위 경로도 추가 수집하며 원래 버전을 유지합니다. 미사용 관리 목록 전체를 펼치거나 로컬 프로젝트 자체의 JAR를 원격 패키지로 추가하지 않습니다.
 - 프로젝트와 부모의 `build/plugins`를 상속하고 `inherited=false`를 반영합니다. 명시 버전, 사용되는 pluginManagement 버전, 기본 lifecycle 버전 순으로 선택합니다. 사용하지 않는 pluginManagement 항목은 수집하지 않습니다.
 - Maven 버전 기본값은 `3.9.11`입니다. 숫자 형식 `3.x.y`의 공식 Maven Git 태그에서 `default-bindings.xml`을 조회해 packaging별 `validate`부터 `package`까지의 플러그인을 읽습니다. 조회 실패나 지원되지 않는 packaging은 오류이며 다른 버전이나 최신 플러그인으로 대체하지 않습니다. plugin metadata에 대상 버전·packaging·phase·원본 URL·SHA-256을 기록합니다.
+- CI의 네이티브 Maven 소비자 검증은 공식 배포본의 SHA-512를 확인한 `3.9.11`로 고정합니다. 러너 기본 Maven 업데이트에 따라 검증 대상이 바뀌지 않게 하기 위함입니다. `3.10.0`은 이 XML 경로가 없어 현재 프로젝트 POM 수집 대상으로 지원하지 않습니다.
 - Surefire/Failsafe의 실행용 provider는 일반 플러그인 의존성에 모두 선언되어 있지 않습니다. 선택된 플러그인 버전의 공개 `surefire-providers` POM에서 JUnit 3/4/4.7/Platform/TestNG provider 중 실제 배포된 모듈을 확인해 추가합니다. 다른 버전의 provider를 추정해 요청하지 않습니다. Platform provider가 있는 경우 프로젝트 라이브러리와 명시 plugin dependency의 전이 트리도 조회해 발견한 Jupiter API 버전에 맞는 engine, Platform engine과 Platform Commons에서 발견한 각 버전에 맞는 launcher를 추가합니다. JUnit 4와 Jupiter API가 함께 있으면 대응하는 Vintage engine도 준비합니다. 모든 발견 버전을 유지하므로 Surefire 자체가 선언한 launcher와 프로젝트 실행 시 요구되는 launcher가 달라도 함께 반출합니다.
 - 플러그인의 명시 dependencies와 부모/BOM POM도 장바구니 root가 됩니다. 이후 기존 의존성 포함 다운로드로 각 root의 JAR/POM 및 모든 발견 버전의 전이 의존성을 수집합니다. 다운로드한 일반 라이브러리 POM의 build plugin까지 재귀적으로 확장하지 않습니다.
 

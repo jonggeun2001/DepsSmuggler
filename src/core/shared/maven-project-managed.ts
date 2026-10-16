@@ -28,6 +28,7 @@ async function createResolver(): Promise<ResolveDescendants> {
     const coordinate = identity(root);
     const result = await resolver.resolveDependencies(root.name, root.version, {
       artifactType: coordinate.type, classifier: coordinate.classifier,
+      repositoryUrl: typeof root.metadata?.mavenRepository === 'string' ? root.metadata.mavenRepository : undefined,
     });
     // flatList also contains parent/import model POMs; those declarations do not
     // make an otherwise unused project management entry an actual dependency.
@@ -80,7 +81,8 @@ export async function collectMavenManagedPackages(
           ...dependency, version,
           // Old artifact URLs/checksums belong to the original version. Only
           // coordinate fields can be carried to a newly requested version.
-          metadata: { ...identity(dependency), origin: 'project-managed-dependency' },
+          metadata: { ...identity(dependency), origin: 'project-managed-dependency',
+            ...(dependency.metadata?.mavenRepository ? { mavenRepository: dependency.metadata.mavenRepository } : {}) },
         };
         const key = artifactKey(managed);
         if (queued.has(key)) continue;

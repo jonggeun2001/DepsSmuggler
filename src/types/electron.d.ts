@@ -151,6 +151,7 @@ export interface SearchOptions {
   channel?: string;
   registry?: string;
   indexUrl?: string;
+  repositoryUrl?: string;
 }
 
 export interface SearchAPI {
@@ -253,7 +254,7 @@ export interface HistoryAPI {
 }
 
 export interface MavenAPI {
-  parseProject?: (content: string, options?: { mavenVersion?: string }) => Promise<{
+  parseProject?: (content: string, options?: { mavenVersion?: string; repositoryUrl?: string }) => Promise<{
     success: boolean;
     packages: PackageInfo[];
     error?: string;

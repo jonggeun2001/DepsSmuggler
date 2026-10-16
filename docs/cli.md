@@ -269,6 +269,23 @@ depssmuggler os cache clear
 - `stats`는 OS 메타데이터 캐시 디렉터리, 항목 수, 총 크기를 출력합니다.
 - `clear`는 OS 메타데이터 캐시 JSON 파일만 삭제합니다. `--force`가 없으면 확인 프롬프트를 표시합니다.
 
+### 추가 Maven 저장소
+
+GUI에서는 **패키지 추가 → Maven 저장소**에서 URL을 추가·선택합니다. 장바구니의 파일·텍스트 가져오기에서도 저장소를 지정합니다. 주소는 각 장바구니 패키지의 `metadata.mavenRepository`에 보존되며, CLI는 명령마다 `--maven-repository`로 지정합니다.
+
+```bash
+depssmuggler search com.ibm.db2.jcc:db2jcc4 -t maven --maven-repository https://artifacts.alfresco.com/nexus/content/repositories/public/
+depssmuggler download -t maven -p com.ibm.db2.jcc:db2jcc4 -V 10.1 --maven-repository https://artifacts.alfresco.com/nexus/content/repositories/public/
+```
+
+미지정 시 Central만 사용합니다. 외부 저장소를 선택하면 검색·버전 목록은 **선택한 저장소만**, POM·부모 POM·BOM·플러그인·아티팩트 조회는 **선택한 저장소 → Maven Central** 순으로 최대 두 저장소를 사용합니다. `latest` 다운로드도 이 순서상 처음 성공한 저장소의 `latest`/`release`를 사용합니다. 외부 저장소는 `groupId:artifactId`로 검색하고, 일반 키워드 검색은 Central 선택 시에만 사용할 수 있습니다. 버전 목록 메타데이터를 제공하지 않는 저장소는 명시 버전으로 다운로드하거나 좌표 목록으로 가져오세요.
+
+여러 패키지가 같은 Maven 아티팩트를 요구할 때 실제 POM 출처가 같으면 하나로 합칩니다. 타입·classifier가 달라도 같은 좌표·버전의 공통 POM이 서로 다른 저장소에서 해결되면 해당 루트를 저장소 충돌로 표시하므로, 저장소 선택을 통일한 뒤 다시 시도하세요. 한 `.m2` 경로에 서로 다른 출처의 파일을 덮어쓰지 않기 위한 처리입니다.
+
+`settings.json.mavenRepositories`와 설정 화면의 **저장한 Maven 저장소**는 선택 목록용 주소록입니다. 목록을 길게 저장해도 자동 폴백 조회 대상이 늘어나지 않습니다. 기존에 저장한 주소도 다시 패키지 추가 화면에서 선택해야 적용됩니다. CLI의 `config set mavenRepositories '["https://repo.example.com/releases"]'`는 주소록만 변경하며 현재 다운로드 저장소는 `--maven-repository`로 지정합니다.
+
+인증이 필요 없는 HTTP(S) Maven 2 형식 저장소만 지원하며 URL 내 인증 정보·쿼리·프래그먼트는 거부합니다. POM의 `<repositories>` 자동 등록, 저장소 인증, timestamped SNAPSHOT 해석은 지원하지 않습니다. 외부 저장소의 classifier 자동 목록은 Central 검색 인덱스에 따라 제한될 수 있으며 필요한 경우 classifier를 직접 지정합니다.
+
 ## `config`
 
 설정 파일은 `~/.depssmuggler/settings.json`을 사용합니다.

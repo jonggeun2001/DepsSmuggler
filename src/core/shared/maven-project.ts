@@ -1,6 +1,7 @@
 /** Collect the inputs needed to build one submitted project through `package`.
  * Library POM build sections are deliberately not traversed by the resolver.
  */
+import { normalizeMavenRepositoryUrl } from '../../utils/maven-repositories';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import type { PackageInfo } from '../../types';
 import { MavenBomProcessor } from './maven-bom-processor';
@@ -12,7 +13,7 @@ import { collectMavenTestRuntimePackages } from './maven-test-runtime';
 import { collectMavenManagedPackages } from './maven-project-managed';
 import type { MavenCoordinate, PomDependency, PomPlugin, PomProject } from './maven-types';
 
-export interface MavenProjectOptions { mavenVersion?: string }
+export interface MavenProjectOptions { mavenVersion?: string; repositoryUrl?: string }
 const array = <T>(value: T | T[] | undefined): T[] => value === undefined ? [] : Array.isArray(value) ? value : [value];
 const key = (value: MavenCoordinate): string => `${value.groupId}:${value.artifactId}:${value.version}`;
 
@@ -49,6 +50,7 @@ export async function collectMavenProjectPackages(
   const pom: PomProject = parsed.project;
   if (!pom || typeof pom !== 'object' || Array.isArray(pom)) throw new Error('전체 <project> POM이 필요합니다.');
   checkModelScope(pom);
+  const repositoryUrl = options.repositoryUrl === undefined ? undefined : normalizeMavenRepositoryUrl(options.repositoryUrl);
   const initialProperties = { ...pom.properties };
   // This coordinate is model context only; the locally built project is never
   // added as a remote download root.
@@ -62,7 +64,7 @@ export async function collectMavenProjectPackages(
     const id = key(value);
     let promise = models.get(id);
     if (!promise) {
-      promise = fetchPom(value).then(model => { checkModelScope(model); return model; });
+      promise = (repositoryUrl ? fetchPom(value, { repositoryUrl }) : fetchPom(value)).then(model => { checkModelScope(model); return model; });
       models.set(id, promise);
     }
     return promise;
@@ -80,6 +82,7 @@ export async function collectMavenProjectPackages(
     packages.set(id, {
       type: 'maven', name: `${value.groupId}:${value.artifactId}`, version: value.version,
       metadata: { groupId: value.groupId, artifactId: value.artifactId, type, ...metadata,
+        ...(repositoryUrl ? { mavenRepository: repositoryUrl } : {}),
         ...(value.classifier ? { classifier: value.classifier } : {}) },
     });
   };
@@ -167,7 +170,7 @@ export async function collectMavenProjectPackages(
     for (const dependency of array(effectivePlugin.dependencies?.dependency)) addDependency(dependency, 'project-plugin-dependency');
     if (pluginCoordinate.groupId === 'org.apache.maven.plugins' &&
         ['maven-surefire-plugin', 'maven-failsafe-plugin'].includes(pluginCoordinate.artifactId)) {
-      for (const provider of await loadMavenSurefireProviders(pluginCoordinate.version)) {
+      for (const provider of await loadMavenSurefireProviders(pluginCoordinate.version, repositoryUrl)) {
         if (provider.artifactId === 'surefire-junit-platform') usesJUnitPlatformProvider = true;
         add(provider, { origin: 'project-test-provider', pluginVersion: pluginCoordinate.version });
       }

@@ -1,3 +1,4 @@
+import { normalizeMavenRepositories } from '../../../utils/maven-repositories';
 import type {
   CondaChannel,
   CudaVersion,
@@ -33,6 +34,7 @@ export interface SettingsStoreSnapshot {
   defaultTargetOS: TargetOS;
   defaultArchitecture: DefaultArchitecture;
   pipTargetPlatform: PipTargetPlatform;
+  mavenRepositories?: string[];
   condaChannel: CondaChannel;
   cudaVersion: CudaVersion;
   yumDistribution: OSDistributionSetting;
@@ -66,6 +68,7 @@ export interface SettingsFormValues {
   defaultTargetOS: TargetOS;
   defaultArchitecture: DefaultArchitecture;
   pipTargetPlatform: PipTargetPlatform;
+  mavenRepositories?: string[];
   condaChannel: CondaChannel;
   cudaVersion: CudaVersion;
   yumDistributionId: string;
@@ -167,6 +170,7 @@ export function buildSettingsFormValues(settings: SettingsStoreSnapshot): Settin
     defaultTargetOS: settings.defaultTargetOS,
     defaultArchitecture: settings.defaultArchitecture,
     pipTargetPlatform: settings.pipTargetPlatform,
+    mavenRepositories: settings.mavenRepositories ?? [],
     condaChannel: settings.condaChannel,
     cudaVersion: settings.cudaVersion,
     yumDistributionId: settings.yumDistribution.id,
@@ -188,6 +192,9 @@ export function normalizeSettingsFormValues(
   values: SettingsFormSubmission
 ): Record<string, unknown> {
   const normalizedValues = { ...values };
+  if (values.mavenRepositories !== undefined) {
+    normalizedValues.mavenRepositories = normalizeMavenRepositories(values.mavenRepositories);
+  }
 
   if (values.yumDistributionId && values.yumArchitecture) {
     normalizedValues.yumDistribution = {

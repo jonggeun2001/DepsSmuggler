@@ -35,7 +35,7 @@ test('설정 저장값이 SMTP 테스트와 새로고침 뒤에도 유지된다'
     password: 'app-password',
   });
 
-  await page.getByRole('button', { name: '저장' }).click();
+  await page.getByRole('button', { name: /저장$/ }).click();
   await expect(page.getByText('설정이 저장되었습니다')).toBeVisible();
 
   await page.reload();

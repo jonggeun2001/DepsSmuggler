@@ -1,3 +1,5 @@
+import { MavenRepositorySelector } from '../components/MavenRepositorySelector';
+import { MAVEN_CENTRAL_URL } from '../../utils/maven-repositories';
 import React, { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -92,6 +94,7 @@ const CartPage: React.FC = () => {
   const [pendingPackageParses, setPendingPackageParses] = useState(0);
   const parsingPackageFile = pendingPackageParses > 0;
   const [mavenVersion, setMavenVersion] = useState(DEFAULT_MAVEN_BUILD_VERSION);
+  const [mavenRepository, setMavenRepository] = useState(MAVEN_CENTRAL_URL);
 
 
   // 의존성 트리 모달
@@ -320,7 +323,7 @@ const CartPage: React.FC = () => {
     if (!mavenAPI?.parseProject) {
       throw new Error('전체 Maven POM을 처리할 API를 사용할 수 없습니다');
     }
-    const result = await mavenAPI.parseProject(content, { mavenVersion: targetVersion });
+    const result = await mavenAPI.parseProject(content, { mavenVersion: targetVersion, ...(mavenRepository !== MAVEN_CENTRAL_URL && { repositoryUrl: mavenRepository }) });
     if (!result.success) {
       throw new Error(result.error || 'Maven POM 처리에 실패했습니다');
     }
@@ -384,7 +387,8 @@ const CartPage: React.FC = () => {
   // 패키지 최신 버전 조회
   const fetchLatestVersion = async (type: PackageType, packageName: string): Promise<string | null> => {
     try {
-      return await getRendererDataClient().getLatestVersion(type, packageName);
+      return await getRendererDataClient().getLatestVersion(type, packageName,
+        type === 'maven' && mavenRepository !== MAVEN_CENTRAL_URL ? { repositoryUrl: mavenRepository } : undefined);
     } catch (error) {
       console.warn(`최신 버전 조회 실패: ${packageName}`, error);
     }
@@ -414,7 +418,8 @@ const CartPage: React.FC = () => {
         type,
         name: pkg.name,
         version: pkg.version,
-        metadata: pkg.metadata,
+        metadata: type === 'maven' && mavenRepository !== MAVEN_CENTRAL_URL
+          ? { ...pkg.metadata, mavenRepository } : pkg.metadata,
       }))
     );
 
@@ -499,6 +504,14 @@ const CartPage: React.FC = () => {
       key: 'version',
       width: 120,
       render: (version: string) => <Tag>{version}</Tag>,
+    },
+    {
+      title: '저장소',
+      key: 'mavenRepository',
+      width: 220,
+      ellipsis: true,
+      render: (_: unknown, record: CartItem) => record.type === 'maven'
+        ? String(record.metadata?.mavenRepository || 'Maven Central') : '-',
     },
     {
       title: '아키텍처',
@@ -680,6 +693,10 @@ flask~=2.0.0`}
           )}
         </Space>
       </div>
+
+      <Card size="small" title="Maven 파일·텍스트 가져오기" style={{ marginBottom: 16 }}>
+        <MavenRepositorySelector value={mavenRepository} onChange={setMavenRepository} disabled={parsingPackageFile} />
+      </Card>
 
       {items.length > 0 ? (
         <>

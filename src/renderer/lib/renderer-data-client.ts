@@ -3,6 +3,7 @@ import type { OSPackageInfo } from '../../core/downloaders/os-shared/types';
 import type { SearchResult } from '../pages/wizard-page/types';
 import type { PackageType } from '../stores/cart-store';
 import type { QueryFailure } from '../../types/query-error';
+import { MAVEN_CENTRAL_URL } from '../../utils/maven-repositories';
 import { QueryRequestError } from '../../utils/query-error';
 import { requestQueryJson } from './query-http';
 
@@ -10,6 +11,7 @@ export interface RendererSearchOptions {
   channel?: string;
   registry?: string;
   indexUrl?: string;
+  repositoryUrl?: string;
 }
 
 export interface RendererOSSearchDistribution {
@@ -163,6 +165,9 @@ async function searchViaHttp(
       ];
     }
     case 'maven': {
+      if (options?.repositoryUrl && options.repositoryUrl !== MAVEN_CENTRAL_URL) {
+        throw new Error('외부 Maven 저장소 조회는 Electron 앱에서 사용할 수 있습니다.');
+      }
       const data = await requestQueryJson(fetchImpl, `/api/maven/search?q=${encodeURIComponent(query)}`);
       return readSearchResults(data.results);
     }
@@ -200,6 +205,9 @@ async function getVersionsViaHttp(
       return Object.keys(data.releases).sort(compareVersionsDescending);
     }
     case 'maven': {
+      if (options?.repositoryUrl && options.repositoryUrl !== MAVEN_CENTRAL_URL) {
+        throw new Error('외부 Maven 저장소 조회는 Electron 앱에서 사용할 수 있습니다.');
+      }
       const data = await requestQueryJson(fetchImpl,
         `/api/maven/versions?package=${encodeURIComponent(packageName)}`
       );

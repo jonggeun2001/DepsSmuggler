@@ -5,6 +5,8 @@
  * 문서 참고: docs/maven-dependency-resolution.md
  */
 
+import { normalizeMavenRepositoryUrl } from '../../utils/maven-repositories';
+import { getMavenRepositories, tryMavenRepositories } from '../shared/maven-repositories';
 import axios, { AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
 import pLimit from 'p-limit';
@@ -51,6 +53,7 @@ import {
 
 /** Maven Resolver 옵션 */
 export interface MavenResolverOptions extends ResolverOptions {
+  repositoryUrl?: string;
   /** 알고리즘 선택 ('bf' | 'df', 기본값: 'bf') */
   algorithm?: 'bf' | 'df';
   /** 병렬 POM 다운로드 스레드 수 (기본값: 5) */
@@ -77,7 +80,8 @@ export interface MavenResolverOptions extends ResolverOptions {
  */
 export class MavenResolver implements IResolver {
   readonly type = 'maven' as const;
-  private readonly repoUrl = 'https://repo1.maven.org/maven2';
+  private repositoryUrl?: string;
+  private pomRepositories = new Map<string, string>();
   private parser: XMLParser;
   private axiosInstance: AxiosInstance;
 
@@ -162,6 +166,7 @@ export class MavenResolver implements IResolver {
     options?: MavenResolverOptions
   ): Promise<DependencyResolutionResult> {
     const opts = { ...this.defaultOptions, ...options };
+    this.repositoryUrl = opts.repositoryUrl === undefined ? undefined : normalizeMavenRepositoryUrl(opts.repositoryUrl);
     const [groupId, artifactId] = packageName.split(':');
 
     if (!groupId || !artifactId) {
@@ -170,6 +175,7 @@ export class MavenResolver implements IResolver {
 
     // 상태 초기화
     this.conflicts = [];
+    this.pomRepositories.clear();
     this.bomProcessor.clearDependencyManagement();
     this.skipper.clear();
 
@@ -207,6 +213,12 @@ export class MavenResolver implements IResolver {
       const resolution = await this.resolveBF(rootCoordinate, opts);
       const root = resolution.root;
       const flatList = this.includeRequiredPoms(this.flattenDependencies(root));
+      if (this.repositoryUrl) {
+        for (const pkg of flatList) {
+          const repository = this.pomRepositories.get(`${pkg.name}:${pkg.version}`);
+          if (repository) pkg.metadata = { ...pkg.metadata, mavenRepository: repository };
+        }
+      }
 
       // 패키지 크기 조회 (병렬 HEAD 요청)
       const flatListWithSizes = await this.fetchPackageSizes(flatList);
@@ -340,6 +352,7 @@ export class MavenResolver implements IResolver {
         name: `${coordinate.groupId}:${coordinate.artifactId}`,
         version: coordinate.version,
         metadata: {
+          ...(this.repositoryUrl ? { mavenRepository: this.repositoryUrl } : {}),
           groupId: coordinate.groupId,
           artifactId: coordinate.artifactId,
           classifier: coordinate.classifier,
@@ -394,17 +407,22 @@ export class MavenResolver implements IResolver {
    * POM 캐시와 함께 조회 (공유 캐시 모듈 사용)
    */
   private async fetchPomWithCache(coordinate: MavenCoordinate): Promise<PomProject> {
-    const effectiveRepoUrl = this.getEffectiveRepoUrl();
-    return this.sessionGet(
+    const repositories = await this.getRepositories();
+    const fetched = await this.sessionGet(
       'pom',
       {
-        repoUrl: effectiveRepoUrl,
+        repoUrl: JSON.stringify(repositories),
         groupId: coordinate.groupId,
         artifactId: coordinate.artifactId,
         version: coordinate.version,
       },
-      () => fetchPomFromCache(coordinate, this.getPomCacheOptions())
+      () => tryMavenRepositories(repositories, async repoUrl => ({
+        pom: await fetchPomFromCache(coordinate, { ...this.getPomCacheOptions(), repoUrl }),
+        repoUrl,
+      }))
     );
+    this.pomRepositories.set(`${coordinate.groupId}:${coordinate.artifactId}:${coordinate.version}`, fetched.repoUrl);
+    return fetched.pom;
   }
 
   /**
@@ -427,11 +445,13 @@ export class MavenResolver implements IResolver {
    * 최신 버전 조회
    */
   async getLatestVersion(groupId: string, artifactId: string): Promise<string> {
-    const effectiveRepoUrl = this.getEffectiveRepoUrl();
+    const repositories = await this.getRepositories();
     return this.sessionGet(
       'latest-version',
-      { repoUrl: effectiveRepoUrl, groupId, artifactId },
-      () => this.getLatestVersionUncached(groupId, artifactId, effectiveRepoUrl),
+      { repoUrl: JSON.stringify(repositories), groupId, artifactId },
+      () => tryMavenRepositories(repositories, repoUrl =>
+        this.getLatestVersionUncached(groupId, artifactId, repoUrl)
+      ),
       Boolean
     );
   }
@@ -460,15 +480,14 @@ export class MavenResolver implements IResolver {
     }
   }
 
-  private getEffectiveRepoUrl(): string {
-    return this.cacheOptions.repoUrl ?? this.repoUrl;
+  private async getRepositories(): Promise<string[]> {
+    return this.cacheOptions.repoUrl ? [this.cacheOptions.repoUrl] : getMavenRepositories(this.repositoryUrl);
   }
 
   private getPomCacheOptions(): MavenCacheOptions {
     return {
       ...this.cacheOptions,
       memoryTtl: this.cacheOptions.memoryTtl ?? this.defaultOptions.pomCacheTtl,
-      repoUrl: this.getEffectiveRepoUrl(),
     };
   }
 
@@ -534,6 +553,7 @@ export class MavenResolver implements IResolver {
    * 패키지 크기 조회 (병렬 HEAD 요청)
    */
   private async fetchPackageSizes(packages: PackageInfo[]): Promise<PackageInfo[]> {
+    const repositories = await this.getRepositories();
     const limit = pLimit(15); // 동시 15개 요청
     const startTime = Date.now();
 
@@ -551,11 +571,13 @@ export class MavenResolver implements IResolver {
             const extension = type === 'pom' ? 'pom' : 'jar';
             const groupPath = groupId.replace(/\./g, '/');
             const fileName = `${artifactId}-${version}.${extension}`;
-            const url = `${this.repoUrl}/${groupPath}/${artifactId}/${version}/${fileName}`;
-
-            const response = await this.axiosInstance.head(url, {
-              timeout: MAVEN_CONSTANTS.HEAD_REQUEST_TIMEOUT_MS,
-            });
+            const packageRepositories = typeof pkg.metadata?.mavenRepository === 'string'
+              ? await getMavenRepositories(pkg.metadata.mavenRepository) : repositories;
+            const response = await tryMavenRepositories(packageRepositories, repoUrl =>
+              this.axiosInstance.head(`${repoUrl}/${groupPath}/${artifactId}/${version}/${fileName}`, {
+                timeout: MAVEN_CONSTANTS.HEAD_REQUEST_TIMEOUT_MS,
+              })
+            );
             const size = parseInt(String(response.headers['content-length'] || '0'), 10);
 
             return {

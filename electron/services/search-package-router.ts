@@ -1,6 +1,4 @@
 import axios from 'axios';
-import { XMLValidator } from 'fast-xml-parser';
-import { QueryRequestError } from '../../src/utils/query-error';
 import { createScopedLogger } from '../utils/logger';
 import { sortByRelevance } from '../../src/core/shared';
 import {
@@ -28,17 +26,17 @@ export interface SearchPackageRouter {
   searchPackages(
     type: string,
     query: string,
-    options?: { channel?: string; registry?: string; indexUrl?: string }
+    options?: { channel?: string; registry?: string; indexUrl?: string; repositoryUrl?: string }
   ): Promise<SearchPackageResult[]>;
   getVersions(
     type: string,
     packageName: string,
-    options?: { channel?: string; registry?: string; indexUrl?: string }
+    options?: { channel?: string; registry?: string; indexUrl?: string; repositoryUrl?: string }
   ): Promise<string[]>;
   suggest(
     type: string,
     query: string,
-    options?: { channel?: string }
+    options?: { channel?: string; repositoryUrl?: string }
   ): Promise<string[]>;
 }
 
@@ -96,7 +94,7 @@ export function createSearchPackageRouter(): SearchPackageRouter {
           );
         }
         case 'maven':
-          return sortByRelevance(await searchMaven(query), query, 'maven');
+          return sortByRelevance(await searchMaven(query, options?.repositoryUrl), query, 'maven');
         case 'npm': {
           const npmResults = await getNpmDownloader().searchPackages(query);
           return sortByRelevance(
@@ -134,7 +132,7 @@ export function createSearchPackageRouter(): SearchPackageRouter {
             normalizeCondaChannel(options?.channel)
           );
         case 'maven':
-          return getMavenVersions(packageName);
+          return getMavenDownloader().getVersions(packageName, options?.repositoryUrl);
         case 'npm':
           return getNpmDownloader().getVersions(packageName);
         case 'docker':
@@ -153,7 +151,8 @@ export function createSearchPackageRouter(): SearchPackageRouter {
       }
 
       const channelKey = type === 'conda' ? `:${options?.channel || 'conda-forge'}` : '';
-      const cacheKey = `${type}${channelKey}:${query.toLowerCase()}`;
+      const repositoriesKey = type === 'maven' ? options?.repositoryUrl || '' : '';
+      const cacheKey = `${type}${channelKey}${repositoriesKey}:${query.toLowerCase()}`;
       const cached = suggestionCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
         return cached.results;
@@ -172,7 +171,7 @@ export function createSearchPackageRouter(): SearchPackageRouter {
             );
             break;
           case 'maven':
-            searchPromise = getMavenDownloader().searchPackages(query);
+            searchPromise = getMavenDownloader().searchPackages(query, options?.repositoryUrl);
             break;
           case 'docker':
             searchPromise = getDockerDownloader().searchPackages(query);
@@ -307,8 +306,8 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-async function searchMaven(query: string): Promise<SearchPackageResult[]> {
-  const results = await getMavenDownloader().searchPackages(query);
+async function searchMaven(query: string, repositoryUrl?: string): Promise<SearchPackageResult[]> {
+  const results = await getMavenDownloader().searchPackages(query, repositoryUrl);
   return results.map((pkg) => {
     const [groupId = '', artifactId = pkg.name] = pkg.name.split(':');
     return {
@@ -320,58 +319,6 @@ async function searchMaven(query: string): Promise<SearchPackageResult[]> {
       artifactId,
     };
   });
-}
-
-async function getMavenVersions(packageName: string): Promise<string[]> {
-  const [groupId, artifactId] = packageName.split(':');
-
-  try {
-    return await getMavenVersionsFromMetadata(groupId, artifactId);
-  } catch (metadataError) {
-    log.warn('maven-metadata.xml 조회 실패, 폴백 API 사용:', metadataError);
-    return getMavenVersionsFromSearchApi(groupId, artifactId);
-  }
-}
-
-async function getMavenVersionsFromMetadata(
-  groupId: string,
-  artifactId: string
-): Promise<string[]> {
-  const groupPath = groupId.replace(/\./g, '/');
-  const response = await axios.get(
-    `https://repo1.maven.org/maven2/${groupPath}/${artifactId}/maven-metadata.xml`,
-    {
-      responseType: 'text',
-      timeout: 10000,
-    }
-  );
-  if (typeof response.data !== 'string' || !/<metadata(?:\s|>)/.test(response.data) || XMLValidator.validate(response.data) !== true) {
-    throw new QueryRequestError('INVALID_RESPONSE');
-  }
-  const versions: string[] = [];
-  const versionRegex = /<version>([^<]+)<\/version>/g;
-  let match: RegExpExecArray | null;
-  while ((match = versionRegex.exec(response.data)) !== null) {
-    versions.push(match[1]);
-  }
-  return versions.sort((a: string, b: string) => compareVersions(b, a));
-}
-
-async function getMavenVersionsFromSearchApi(
-  groupId: string,
-  artifactId: string
-): Promise<string[]> {
-  const response = await axios.get('https://search.maven.org/solrsearch/select', {
-    params: {
-      q: `g:"${groupId}" AND a:"${artifactId}"`,
-      core: 'gav',
-      rows: 100,
-      wt: 'json',
-    },
-    timeout: 10000,
-  });
-  const versions = response.data.response.docs.map((doc: { v: string }) => doc.v);
-  return versions.sort((a: string, b: string) => compareVersions(b, a));
 }
 
 function normalizeCondaChannel(

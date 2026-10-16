@@ -1,3 +1,4 @@
+import { normalizeMavenRepositories } from '../../utils/maven-repositories';
 import { create, type StateCreator } from 'zustand';
 import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 import type { PipTargetPlatform } from '../../types/platform/pip-target-platform';
@@ -75,6 +76,7 @@ interface SettingsState {
 
   // Conda 채널 설정
   condaChannel: CondaChannel;
+  mavenRepositories: string[];
   customCondaChannels: string[];  // 사용자가 추가한 커스텀 채널 목록
 
   // pip 커스텀 인덱스 URL 설정
@@ -152,6 +154,7 @@ const defaultSettings = {
   },
 
   condaChannel: 'conda-forge' as const,
+  mavenRepositories: [],
   customCondaChannels: [],
 
   // pip 커스텀 인덱스 URL 기본값 (PyTorch 예시)
@@ -231,6 +234,9 @@ function normalizeFileSettings(fileConfig: Record<string, unknown>): Record<stri
       if (key === 'smtpPort') valid &&= (value as number) <= 65535;
     } else if (key === 'cudaVersion') {
       valid = value === null || typeof value === 'string';
+    } else if (key === 'mavenRepositories') {
+      try { normalized[key] = normalizeMavenRepositories(value); }
+      catch { valid = false; }
     } else if (key === 'customCondaChannels') {
       valid = Array.isArray(value) && value.every(item => typeof item === 'string');
     } else if (key === 'customPipIndexUrls') {

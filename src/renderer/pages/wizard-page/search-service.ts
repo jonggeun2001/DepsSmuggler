@@ -17,6 +17,7 @@ export interface WizardSearchContext {
   condaChannel: CondaChannel;
   dockerRegistry: DockerRegistry;
   customRegistryUrl: string;
+  mavenRepository?: string;
   useCustomIndex: boolean;
   customIndexUrl: string;
   yumDistribution: OSDistributionSetting;
@@ -30,13 +31,15 @@ interface SearchServiceDependencies extends RendererDataClientDependencies {
 
 function buildSearchOptions(
   context: WizardSearchContext
-): { channel?: string; registry?: string; indexUrl?: string } | undefined {
+): { channel?: string; registry?: string; indexUrl?: string; repositoryUrl?: string } | undefined {
   switch (context.packageType) {
     case 'pip':
       if (context.useCustomIndex && context.customIndexUrl) {
         return { indexUrl: context.customIndexUrl };
       }
       return undefined;
+    case 'maven':
+      return context.mavenRepository ? { repositoryUrl: context.mavenRepository } : undefined;
     case 'conda':
       return { channel: context.condaChannel };
     case 'docker':

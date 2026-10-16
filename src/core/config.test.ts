@@ -344,7 +344,7 @@ describe('ConfigManager', () => {
       });
       expect(manager.getConfig()).toEqual({
         concurrentDownloads: 5, cacheEnabled: true, cachePath: manager.getCacheDir(),
-        maxCacheSize: 10 * 1024 * 1024 * 1024, logLevel: 'info',
+        maxCacheSize: 10 * 1024 * 1024 * 1024, logLevel: 'info', mavenRepositories: [],
       });
     });
 
