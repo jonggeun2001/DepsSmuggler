@@ -75,7 +75,7 @@ depssmuggler --help
 |------|-----|-----|-----------|
 | Python `pip` | 지원 | 지원 | PyPI 검색·버전 조회, 대상 Python·OS·아키텍처에 맞는 파일 선택 |
 | Python `conda` | 지원 | 지원 | 채널 선택, Python·CUDA·플랫폼을 고려한 빌드 선택 |
-| Java `maven` | 지원 | 지원 | Maven Central, POM·BOM·플러그인, 네이티브 classifier 선택 |
+| Java `maven` | 지원 | 지원 | Maven Central + 추가 공개 저장소, POM·BOM·플러그인, 네이티브 classifier 선택 |
 | Node.js `npm` | 지원 | 지원 | npm Registry 검색·버전 조회·tarball 다운로드 |
 | OS `yum` | 지원 | 지원 | RPM 계열 배포판, provides capability를 포함한 의존성 해결과 로컬 저장소 출력 |
 | OS `apt` | 지원 | 지원 | Ubuntu/Debian, 의존성 포함 DEB 다운로드 |
@@ -83,6 +83,8 @@ depssmuggler --help
 | Container `docker` | 지원 | 지원 | Docker Hub 이미지·태그·플랫폼 선택과 이미지 아카이브 |
 
 YUM 저장소는 필요한 RPM 파일이 없거나 파일명이 충돌하면 생성을 중단합니다. 저장소 메타데이터의 파일명·크기·SHA-256은 실제 복사된 파일을 기준으로 만듭니다.
+
+설정의 **Maven 저장소 → 저장소 추가**에서 공개 HTTP(S) 저장소 URL을 입력한 뒤 **설정 저장**을 누르세요. 외부 저장소 패키지는 `groupId:artifactId`로 검색하며, GUI와 CLI가 같은 저장소 목록을 사용합니다. [조회 순서와 CLI 설정](docs/cli.md#추가-maven-저장소)을 참고하세요.
 
 Maven 반출은 한 BFS에서 실제로 발견된 모든 버전의 원래 아티팩트와 POM·하위 의존성를 보존합니다. Parent POM의 일반 dependencies는 상속하고, 자식 문맥의 속성으로 상속된 관리 버전을 해석하며, 자식의 직접 `dependencyManagement` 선언은 부모보다 우선합니다. 같은 BOM GA를 다른 버전으로 자식이 다시 import하면 자식 import를 사용하고, 부모의 직접 관리 선언은 자식 import보다 우선합니다. BOM의 `dependencyManagement` 전체 라이브러리는 펼치지 않습니다. scope·optional·exclusion·탐색 깊이 제한은 유지됩니다.
 

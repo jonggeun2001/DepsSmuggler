@@ -32,7 +32,9 @@ export async function configSet(key: string, value: string): Promise<void> {
     // 값 파싱 (숫자, 불리언, 문자열)
     let parsedValue: unknown = value;
 
-    if (value === 'true') {
+    if (key === 'mavenRepositories') {
+      parsedValue = JSON.parse(value);
+    } else if (value === 'true') {
       parsedValue = true;
     } else if (value === 'false') {
       parsedValue = false;
@@ -66,6 +68,7 @@ export async function configList(): Promise<void> {
     cachePath: '캐시 저장 경로',
     maxCacheSize: '최대 캐시 크기 (bytes)',
     logLevel: '로그 레벨',
+    mavenRepositories: '추가 Maven 저장소 URL 목록',
   };
 
   for (const [key, value] of Object.entries(config)) {

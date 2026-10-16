@@ -269,6 +269,23 @@ depssmuggler os cache clear
 - `stats`는 OS 메타데이터 캐시 디렉터리, 항목 수, 총 크기를 출력합니다.
 - `clear`는 OS 메타데이터 캐시 JSON 파일만 삭제합니다. `--force`가 없으면 확인 프롬프트를 표시합니다.
 
+### 추가 Maven 저장소
+
+GUI의 **설정 → Maven 저장소** 또는 CLI로 추가 URL을 저장합니다. 목록은 `~/.depssmuggler/settings.json`의 `mavenRepositories` 문자열 배열이며, 저장 후 다음 조회부터 적용됩니다.
+
+```bash
+depssmuggler config set mavenRepositories '["https://repo.example.com/repository/releases"]'
+depssmuggler config get mavenRepositories
+depssmuggler search com.example:library -t maven
+depssmuggler download -t maven -p com.example:library -V 1.0.0
+# 추가 저장소 모두 제거
+depssmuggler config set mavenRepositories '[]'
+```
+
+Maven Central은 기본으로 유지되고 POM·부모 POM·BOM·플러그인·아티팩트는 Central 다음 등록 순서로 조회합니다. 버전 선택 목록은 각 저장소의 `maven-metadata.xml`을 합쳐 중복을 제거합니다. `latest` 다운로드는 조회 순서상 처음 성공한 저장소의 `latest`/`release`를 사용합니다. 일반 키워드 검색은 Central 검색 API를 사용하므로 외부 전용 패키지는 `groupId:artifactId`를 입력하세요. 버전 목록 메타데이터를 제공하지 않는 저장소는 명시 버전으로 다운로드하거나 좌표 목록으로 가져오세요.
+
+인증이 필요 없는 HTTP(S) Maven 2 형식 저장소만 지원하며 URL 내 인증 정보·쿼리·프래그먼트는 거부합니다. POM의 `<repositories>` 자동 등록, 저장소 인증, timestamped SNAPSHOT 해석은 지원하지 않습니다. 외부 저장소의 classifier 자동 목록은 Central 검색 인덱스에 따라 제한될 수 있으며 필요한 경우 classifier를 직접 지정합니다.
+
 ## `config`
 
 설정 파일은 `~/.depssmuggler/settings.json`을 사용합니다.

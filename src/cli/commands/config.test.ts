@@ -47,6 +47,7 @@ describe('CLI 설정 명령', () => {
     ['maxCacheSize', '1048576', 1048576],
     ['cachePath', '/tmp/package-cache', '/tmp/package-cache'],
     ['logLevel', 'debug', 'debug'],
+    ['mavenRepositories', '["https://repo.example.com/releases"]', ['https://repo.example.com/releases']],
   ])('%s=%s를 기존 CLI 변환 규칙으로 저장한다', async (key, input, expected) => {
     await configSet(key, input as string);
     expect(manager.set).toHaveBeenCalledExactlyOnceWith(key, expected);

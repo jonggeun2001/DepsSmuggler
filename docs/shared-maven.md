@@ -144,11 +144,13 @@ MavenResolver와 MavenDownloader가 공유하여 중복 API 호출을 방지합�
 
 병렬 함수의 `options`는 `MavenCacheOptions & { batchSize?: number }`이며 기본 배치 크기는 5입니다. `prefetchPomsParallel()`은 완료를 기다릴 수 없는 `void` 반환 함수이고, 완료가 필요하면 `await fetchPomsParallel()`을 사용합니다. 조회 실패한 POM은 병렬 조회 결과에서 빠집니다.
 
+`repoUrl`을 생략한 POM 조회는 Central 다음 `settings.json.mavenRepositories`에 등록된 저장소를 조회합니다. 명시한 `repoUrl`은 기존처럼 단일 저장소로 사용합니다. 메모리 캐시는 URL과 좌표로 구분하며, 추가 저장소의 디스크 캐시는 `_repositories/<URL의 SHA-256>/` 아래에 저장해 같은 좌표의 다른 POM이 섞이지 않도록 합니다. Central의 기존 캐시 경로는 유지합니다. 부모 POM·BOM·프로젝트 모델 수집도 이 경로를 사용합니다.
+
 ### MavenCacheOptions
 
 ```typescript
 interface MavenCacheOptions {
-  /** 레포지토리 URL, 기본: https://repo1.maven.org/maven2 */
+  /** 지정 시 해당 저장소만 사용. 생략 시 Central + 설정의 추가 저장소 */
   repoUrl?: string;
   /** 메모리 TTL (ms), 기본: 300000 (5분) */
   memoryTtl?: number;
@@ -224,7 +226,7 @@ console.log(`메모리: ${stats.memoryEntries}개`);
 
 ---
 
-메모리 캐시 키는 저장소 URL과 좌표를 포함하지만 디스크 경로는 G:A:V만 사용합니다. `invalidatePom()`은 메모리 항목만 삭제합니다. `getPomFromCache()`는 별도 `memoryTtl` 검사를 하지 않으며, 유효성 검사에는 `isPomCached()`를 사용합니다. `getMavenCacheStats()`는 기본 디스크 경로를 집계하고 POM과 메타데이터를 각각 파일 1개로 셉니다.
+메모리 캐시 키는 저장소 URL과 좌표를 포함합니다. Central의 디스크 경로는 G:A:V를 사용하고 추가 저장소는 `_repositories/<URL 해시>/` 아래에 같은 좌표 경로를 사용합니다. `invalidatePom()`은 메모리 항목만 삭제합니다. `getPomFromCache()`는 별도 `memoryTtl` 검사를 하지 않으며, 유효성 검사에는 `isPomCached()`를 사용합니다. `getMavenCacheStats()`는 기본 디스크 경로를 집계하고 POM과 메타데이터를 각각 파일 1개로 셉니다.
 
 ## Maven 스킵/캐시 관리 (`maven-dedupe-index.ts`)
 

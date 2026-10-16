@@ -1,3 +1,5 @@
+import { normalizeMavenRepositories } from '../../utils/maven-repositories';
+
 type JsonRecord = Record<string, unknown>;
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -98,6 +100,10 @@ export function validateSettingsForWrite(value: unknown):
     }
     if (key === 'cudaVersion' && fieldValue !== null && typeof fieldValue !== 'string') {
       return { error: 'cudaVersion은 null 또는 문자열이어야 합니다' };
+    }
+    if (key === 'mavenRepositories') {
+      try { normalizeMavenRepositories(fieldValue); }
+      catch (error) { return { error: (error as Error).message }; }
     }
     if (key === 'customCondaChannels' &&
         (!Array.isArray(fieldValue) || !fieldValue.every(item => typeof item === 'string'))) {

@@ -175,6 +175,16 @@ describe('settings-store', () => {
     ).toBe(false);
   });
 
+  it('Maven 저장소를 파일에서 복원하고 삭제 및 초기화를 저장한다', async () => {
+    const { useSettingsStore, electronAPI } = await loadSettingsStore({ mavenRepositories: [' https://repo.example.com/releases/ '] });
+    await useSettingsStore.getState().initializeFromFile();
+    expect(useSettingsStore.getState().mavenRepositories).toEqual(['https://repo.example.com/releases']);
+    useSettingsStore.getState().updateSettings({ mavenRepositories: [] });
+    await vi.waitFor(() => expect(electronAPI.config.set).toHaveBeenCalledWith(expect.objectContaining({ mavenRepositories: [] })));
+    useSettingsStore.getState().resetSettings();
+    expect(useSettingsStore.getState().mavenRepositories).toEqual([]);
+  });
+
   it('resetSettings는 기본값으로 되돌리고 Electron 설정도 초기화한다', async () => {
     const { electronAPI, useSettingsStore } = await loadSettingsStore();
 

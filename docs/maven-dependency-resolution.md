@@ -451,6 +451,8 @@ Maven Central REST API로 POM 메타데이터 조회:
 GET https://repo1.maven.org/maven2/{groupId}/{artifactId}/{version}/{artifactId}-{version}.pom
 ```
 
+Central에서 조회하지 못한 POM은 설정의 `mavenRepositories` 등록 순서로 조회합니다. 부모 POM·BOM·플러그인에도 동일하게 적용되며 POM에 선언된 저장소를 자동 추가하지는 않습니다. 저장소별 POM 캐시는 분리합니다. [설정 방법](cli.md#추가-maven-저장소)을 참고하세요.
+
 ### 9.2 구현 권장사항
 
 1. **BF 탐색 우선**: 너비 우선 탐색으로 불필요한 노드 계산 방지

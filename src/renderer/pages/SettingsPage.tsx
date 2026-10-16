@@ -30,6 +30,7 @@ import {
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSettingsStore } from '../stores/settings-store';
+import { MavenRepositorySettingsSection } from './settings/MavenRepositorySettingsSection';
 import { CacheSettingsSection } from './settings/CacheSettingsSection';
 import { RootCaSettingsSection } from './settings/RootCaSettingsSection';
 import { DeliverySettingsSection } from './settings/DeliverySettingsSection';
@@ -75,6 +76,7 @@ const SettingsPage: React.FC = () => {
     defaultArchitecture,
     pipTargetPlatform,
     condaChannel,
+    mavenRepositories,
     customCondaChannels,
     customPipIndexUrls,
     cudaVersion,
@@ -104,7 +106,7 @@ const SettingsPage: React.FC = () => {
   const highlightSections: Record<string, string[]> = {
     pip: ['python-settings', 'library-env', 'pip-platform', 'pip-custom-index'],
     conda: ['python-settings', 'library-env'],
-    maven: [],
+    maven: ['maven-repositories'],
     npm: [],
     yum: ['os-distribution'],
     apt: ['os-distribution'],
@@ -155,6 +157,7 @@ const SettingsPage: React.FC = () => {
     defaultArchitecture,
     pipTargetPlatform,
     condaChannel,
+    mavenRepositories,
     cudaVersion,
     yumDistribution,
     aptDistribution,
@@ -573,6 +576,10 @@ const SettingsPage: React.FC = () => {
         />
 
         <RootCaSettingsSection />
+
+        <div id="maven-repositories" ref={highlightType === 'maven' ? highlightedRef : undefined}>
+          <MavenRepositorySettingsSection style={getCardStyle('maven-repositories')} />
+        </div>
 
         {/* Python 버전 설정 */}
         <div

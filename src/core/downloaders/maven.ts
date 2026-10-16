@@ -1,3 +1,6 @@
+import { XMLParser, XMLValidator } from 'fast-xml-parser';
+import { QueryRequestError } from '../../utils/query-error';
+import { getMavenRepositories, tryMavenRepositories } from '../shared/maven-repositories';
 import * as path from 'path';
 import axios, { AxiosInstance } from 'axios';
 import * as fs from 'fs-extra';
@@ -143,6 +146,13 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     if (parsed.type === 'coordinates' && parsed.groupId && parsed.artifactId) {
       const groupId = parsed.groupId;
       const artifactId = parsed.artifactId;
+      if ((await getMavenRepositories(this.repoUrl)).length > 1) {
+        const versions = await this.getVersions(`${groupId}:${artifactId}`);
+        return versions.length ? [{
+          type: 'maven', name: `${groupId}:${artifactId}`, version: versions[0],
+          metadata: { groupId, artifactId },
+        }] : [];
+      }
       try {
         return await retryWithExponentialBackoff(
           () => this.searchViaSonatypeApi(groupId, artifactId),
@@ -304,30 +314,25 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
    */
   async getVersions(packageName: string): Promise<string[]> {
     const [groupId, artifactId] = packageName.split(':');
-
-    try {
-      // 1차: maven-metadata.xml에서 정확한 버전 목록 조회
-      return await this.getVersionsFromMetadata(groupId, artifactId);
-    } catch (metadataError) {
-      logger.warn('maven-metadata.xml 조회 실패, 폴백 API 사용', { packageName, error: metadataError });
-
-      try {
-        // 2차: 기존 Search API 폴백
-        return await this.getVersionsFromSearchApi(groupId, artifactId);
-      } catch (error) {
-        logger.error('Maven 버전 목록 조회 실패', { packageName, error });
-        throw error;
-      }
+    const repositories = await getMavenRepositories(this.repoUrl);
+    const results = await Promise.allSettled(repositories.map(repoUrl =>
+      this.getVersionsFromMetadata(groupId, artifactId, repoUrl)
+    ));
+    const versions = results.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+    // External-only artifacts do not need Central's search index to be available.
+    if (!versions.length && results[0].status === 'rejected') {
+      return this.getVersionsFromSearchApi(groupId, artifactId);
     }
+    return [...new Set(versions)].sort((a, b) => this.compareVersions(b, a));
   }
 
 
   /**
    * maven-metadata.xml에서 버전 목록 조회
    */
-  private async getVersionsFromMetadata(groupId: string, artifactId: string): Promise<string[]> {
+  private async getVersionsFromMetadata(groupId: string, artifactId: string, repoUrl = this.repoUrl): Promise<string[]> {
     const groupPath = groupId.replace(/\./g, '/');
-    const metadataUrl = `${this.repoUrl}/${groupPath}/${artifactId}/maven-metadata.xml`;
+    const metadataUrl = `${repoUrl}/${groupPath}/${artifactId}/maven-metadata.xml`;
 
     const response = await this.client.get<string>(metadataUrl, {
       responseType: 'text' as const,
@@ -344,6 +349,9 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
    * maven-metadata.xml 파싱
    */
   private parseMetadataXml(xml: string): string[] {
+    if (typeof xml !== 'string' || !/<metadata(?:\s|>)/.test(xml) || XMLValidator.validate(xml) !== true) {
+      throw new QueryRequestError('INVALID_RESPONSE');
+    }
     const versionRegex = /<version>([^<]+)<\/version>/g;
     const versions: string[] = [];
     let match;
@@ -368,6 +376,9 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
       },
     });
 
+    if (!Array.isArray(response.data?.response?.docs) || response.data.response.docs.some(doc => typeof doc.v !== 'string')) {
+      throw new QueryRequestError('INVALID_RESPONSE');
+    }
     const versions = response.data.response.docs.map((doc) => doc.v);
 
     // 버전 정렬 (최신순)
@@ -380,6 +391,19 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
   async getPackageMetadata(name: string, version: string): Promise<PackageInfo> {
     try {
       const [groupId, artifactId] = name.split(':');
+      const repositories = await getMavenRepositories(this.repoUrl);
+      if (repositories.length > 1) {
+        return tryMavenRepositories(repositories, async repoUrl => {
+          const response = await this.client.get<string>(this.buildDownloadUrl(groupId, artifactId, version, 'pom', undefined, repoUrl));
+          const pom = new XMLParser({ parseTagValue: false }).parse(response.data).project;
+          if (!pom || typeof pom !== 'object') throw new QueryRequestError('INVALID_RESPONSE');
+          const packaging = pom.packaging || 'jar';
+          return { type: 'maven', name, version, metadata: {
+            groupId, artifactId, packaging,
+            downloadUrl: this.buildDownloadUrl(groupId, artifactId, version, this.validateArtifactType(packaging), undefined, repoUrl),
+          } };
+        });
+      }
 
       const response = await this.client.get<MavenSearchResponse>(this.searchUrl, {
         params: {
@@ -469,9 +493,10 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     // (Search API는 BOM 같은 POM-only 패키지의 packaging 정보를 제대로 반환하지 않음)
     if (!packaging) {
       try {
-        const pomUrl = this.buildDownloadUrl(groupId, artifactId, info.version, 'pom');
         await waitForDownloadResume(options);
-        const pomResponse = await this.client.get<string>(pomUrl, { signal: options?.signal });
+        const pomResponse = await tryMavenRepositories(await getMavenRepositories(this.repoUrl), repoUrl =>
+          this.client.get<string>(this.buildDownloadUrl(groupId, artifactId, info.version, 'pom', undefined, repoUrl), { signal: options?.signal })
+        );
         await waitForDownloadResume(options);
         const pomXml = pomResponse.data;
 
@@ -574,55 +599,60 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
   ): Promise<string> {
     try {
       await waitForDownloadResume(options);
-      const downloadUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType, classifier);
-      const fileName = this.buildFileName(artifactId, version, artifactType, classifier);
-
-      // .m2 형식의 디렉토리 구조 생성
-      const m2SubPath = this.buildM2Path(groupId, artifactId, version);
-
-      const artifactIdForProgress = `${groupId}:${artifactId}@${version}`;
-
-      // SHA-1 체크섬 조회
-      let expectedSha1: string | undefined;
-      try {
-        const sha1Response = await this.client.get<string>(downloadUrl + '.sha1', { signal: options?.signal });
+      return await tryMavenRepositories(await getMavenRepositories(this.repoUrl), async repoUrl => {
         await waitForDownloadResume(options);
-        expectedSha1 = sha1Response.data.trim().split(' ')[0];
-      } catch (error) {
-        if (options?.signal?.aborted) throw error;
-        // 체크섬 없을 수 있음
-      }
+        const downloadUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType, classifier, repoUrl);
+        const fileName = this.buildFileName(artifactId, version, artifactType, classifier);
 
-      const verifyFile = expectedSha1 === undefined
-        ? undefined
-        : async (artifactPath: string) => this.verifyChecksum(artifactPath, expectedSha1);
+        // .m2 형식의 디렉토리 구조 생성
+        const m2SubPath = this.buildM2Path(groupId, artifactId, version);
 
-      const filePath = await this.downloadArtifactFile(
-        destPath,
-        {
-          downloadUrl,
-          itemId: artifactIdForProgress,
-          timeoutMs: 300000,
-          relativeFilePath: path.posix.join(m2SubPath, fileName),
-          verifyFile,
-          verificationFailureMessage: '체크섬 검증 실패',
-          signal: options?.signal,
-          shouldPause: options?.shouldPause,
-        },
-        onProgress
+        const artifactIdForProgress = `${groupId}:${artifactId}@${version}`;
+
+        // SHA-1 체크섬 조회
+        let expectedSha1: string | undefined;
+        try {
+          const sha1Response = await this.client.get<string>(downloadUrl + '.sha1', { signal: options?.signal });
+          await waitForDownloadResume(options);
+          expectedSha1 = sha1Response.data.trim().split(' ')[0];
+        } catch (error) {
+          if (options?.signal?.aborted) throw error;
+          // 체크섬 없을 수 있음
+        }
+
+        const verifyFile = expectedSha1 === undefined
+          ? undefined
+          : async (artifactPath: string) => this.verifyChecksum(artifactPath, expectedSha1);
+
+        const filePath = await this.downloadArtifactFile(
+          destPath,
+          {
+            downloadUrl,
+            itemId: artifactIdForProgress,
+            timeoutMs: 300000,
+            relativeFilePath: path.posix.join(m2SubPath, fileName),
+            verifyFile,
+            verificationFailureMessage: '체크섬 검증 실패',
+            signal: options?.signal,
+            shouldPause: options?.shouldPause,
+          },
+          onProgress
+        );
+        await waitForDownloadResume(options);
+
+        logger.info('Maven 아티팩트 다운로드 완료', {
+          groupId,
+          artifactId,
+          version,
+          artifactType,
+          classifier,
+          filePath,
+        });
+
+        return filePath;
+      }, error => !options?.signal?.aborted && axios.isAxiosError(error) &&
+        (!error.response || [404, 410].includes(error.response.status) || error.response.status >= 500)
       );
-      await waitForDownloadResume(options);
-
-      logger.info('Maven 아티팩트 다운로드 완료', {
-        groupId,
-        artifactId,
-        version,
-        artifactType,
-        classifier,
-        filePath,
-      });
-
-      return filePath;
     } catch (error) {
       logger.error('Maven 아티팩트 다운로드 실패', {
         groupId,
@@ -687,11 +717,12 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     artifactId: string,
     version: string,
     artifactType: ArtifactType,
-    classifier?: string
+    classifier?: string,
+    repoUrl = this.repoUrl
   ): string {
     const groupPath = groupId.replace(/\./g, '/');
     const fileName = this.buildFileName(artifactId, version, artifactType, classifier);
-    return `${this.repoUrl}/${groupPath}/${artifactId}/${version}/${fileName}`;
+    return `${repoUrl}/${groupPath}/${artifactId}/${version}/${fileName}`;
   }
 
 
@@ -767,7 +798,6 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     classifier?: string,
     options?: MavenDownloadOptions
   ): Promise<string | undefined> {
-    const baseUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType, classifier);
     const baseFileName = this.buildFileName(artifactId, version, artifactType, classifier);
 
     // .m2 형식의 디렉토리 구조
@@ -776,7 +806,7 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
 
     try {
       await waitForDownloadResume(options);
-      const checksumUrl = `${baseUrl}.sha1`;
+      const repositories = await getMavenRepositories(this.repoUrl);
       const checksumFileName = `${baseFileName}.sha1`;
       const checksumFilePath = path.join(artifactDir, checksumFileName);
 
@@ -784,15 +814,19 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
       await fs.ensureDir(artifactDir);
       await waitForDownloadResume(options);
 
-      const response = await this.client.get<string>(checksumUrl, {
-        responseType: 'text',
-        timeout: 10000,
-        signal: options?.signal,
+      const sha1Content = await tryMavenRepositories(repositories, async repoUrl => {
+        await waitForDownloadResume(options);
+        const checksumUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType, classifier, repoUrl) + '.sha1';
+        const response = await this.client.get<string>(checksumUrl, {
+          responseType: 'text', timeout: 10000, signal: options?.signal,
+        });
+        await waitForDownloadResume(options);
+        const checksum = response.data.trim().split(/\s+/)[0];
+        if (repositories.length > 1 && !(await this.verifyChecksum(path.join(artifactDir, baseFileName), checksum))) {
+          throw new Error('다운로드한 파일과 체크섬이 일치하지 않습니다.');
+        }
+        return checksum;
       });
-      await waitForDownloadResume(options);
-
-      // sha1 파일 내용 정리 (공백이나 파일명이 포함된 경우 처리)
-      const sha1Content = response.data.trim().split(' ')[0].split('\n')[0];
       await fs.writeFile(checksumFilePath, sha1Content);
       await waitForDownloadResume(options);
 

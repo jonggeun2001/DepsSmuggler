@@ -1,3 +1,4 @@
+import { normalizeMavenRepositories } from '../utils/maven-repositories';
 import * as crypto from 'crypto';
 import { TextDecoder } from 'node:util';
 import * as os from 'os';
@@ -80,6 +81,7 @@ export interface CLIConfig {
   cachePath: string;
   maxCacheSize: number;
   logLevel: string;
+  mavenRepositories: string[];
 }
 
 // 암호화 설정
@@ -305,6 +307,9 @@ export class ConfigManager {
             (!validLogLevel && rawConfig.logLevel !== undefined)) {
           console.warn('[config:get] 잘못된 CLI 설정에 기본값 사용');
         }
+        let mavenRepositories: string[] = [];
+        try { mavenRepositories = normalizeMavenRepositories(rawConfig.mavenRepositories ?? []); }
+        catch { console.warn('[config:get] 잘못된 Maven 저장소 설정에 기본값 사용'); }
         return {
           concurrentDownloads: validConcurrency ? rawConfig.concurrentDownloads as number : DEFAULT_CONFIG.concurrentDownloads,
           // settings.json은 enableCache 사용, 기존 cachingEnabled도 호환
@@ -314,6 +319,7 @@ export class ConfigManager {
             ? rawConfig.maxCacheSize as number
             : DEFAULT_CLI_MAX_CACHE_SIZE,
           logLevel: validLogLevel ? rawConfig.logLevel as string : 'info',
+          mavenRepositories,
         };
       }
     } catch (error) {
@@ -325,6 +331,7 @@ export class ConfigManager {
       cachePath: this.cacheDir,
       maxCacheSize: DEFAULT_CLI_MAX_CACHE_SIZE,
       logLevel: 'info',
+      mavenRepositories: [],
     };
   }
 
@@ -347,7 +354,7 @@ export class ConfigManager {
       throw new TypeError('maxCacheSize는 양의 안전한 정수여야 합니다');
     }
 
-    config[key] = value;
+    config[key] = key === 'mavenRepositories' ? normalizeMavenRepositories(value) : value;
     const canonicalConfig = canonicalizeCacheAliases(config, isCacheAlias ? value as boolean : undefined);
     writeJsonAtomicallySync(this.configPath, canonicalConfig);
   }

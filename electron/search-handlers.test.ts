@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import axios from 'axios';
+import { QueryRequestError } from '../src/utils/query-error';
 import { createRendererDataClient } from '../src/renderer/lib/renderer-data-client';
 import { registerSearchHandlers } from './search-handlers';
 import { resolveAllDependencies } from '../src/core/shared';
 
-const { ipcHandle, senderSend, mavenSearchPackagesMock, parseProjectMock } = vi.hoisted(() => ({
+const { ipcHandle, senderSend, mavenSearchPackagesMock, mavenGetVersionsMock, parseProjectMock } = vi.hoisted(() => ({
   ipcHandle: vi.fn(),
   senderSend: vi.fn(),
   mavenSearchPackagesMock: vi.fn(),
+  mavenGetVersionsMock: vi.fn(),
   parseProjectMock: vi.fn(),
 }));
 
@@ -44,7 +46,7 @@ vi.mock('../src/core', () => ({
   getPipDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
   getMavenDownloader: vi.fn(() => ({
     searchPackages: mavenSearchPackagesMock,
-    getVersions: vi.fn(),
+    getVersions: mavenGetVersionsMock,
   })),
   getCondaDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
   getDockerDownloader: vi.fn(() => ({ searchPackages: vi.fn(), getVersions: vi.fn() })),
@@ -131,7 +133,7 @@ describe('registerSearchHandlers', () => {
 
   it('Maven 버전 metadata와 fallback 응답이 모두 잘못되면 실패를 전달한다', async () => {
     registerSearchHandlers();
-    vi.mocked(axios.get).mockResolvedValue({ data: '<html>company gateway</html>' });
+    mavenGetVersionsMock.mockRejectedValue(new QueryRequestError('INVALID_RESPONSE'));
     const handler = ipcHandle.mock.calls.find(([channel]) => channel === 'search:versions')![1];
     expect(await handler({}, 'maven', 'g:a')).toMatchObject({ versions: [], error: { code: 'INVALID_RESPONSE' } });
   });

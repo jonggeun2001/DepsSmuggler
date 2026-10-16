@@ -5,6 +5,7 @@
  * 문서 참고: docs/maven-dependency-resolution.md
  */
 
+import { getMavenRepositories, tryMavenRepositories } from '../shared/maven-repositories';
 import axios, { AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
 import pLimit from 'p-limit';
@@ -77,7 +78,6 @@ export interface MavenResolverOptions extends ResolverOptions {
  */
 export class MavenResolver implements IResolver {
   readonly type = 'maven' as const;
-  private readonly repoUrl = 'https://repo1.maven.org/maven2';
   private parser: XMLParser;
   private axiosInstance: AxiosInstance;
 
@@ -394,16 +394,18 @@ export class MavenResolver implements IResolver {
    * POM 캐시와 함께 조회 (공유 캐시 모듈 사용)
    */
   private async fetchPomWithCache(coordinate: MavenCoordinate): Promise<PomProject> {
-    const effectiveRepoUrl = this.getEffectiveRepoUrl();
+    const repositories = await this.getRepositories();
     return this.sessionGet(
       'pom',
       {
-        repoUrl: effectiveRepoUrl,
+        repoUrl: JSON.stringify(repositories),
         groupId: coordinate.groupId,
         artifactId: coordinate.artifactId,
         version: coordinate.version,
       },
-      () => fetchPomFromCache(coordinate, this.getPomCacheOptions())
+      () => tryMavenRepositories(repositories, repoUrl =>
+        fetchPomFromCache(coordinate, { ...this.getPomCacheOptions(), repoUrl })
+      )
     );
   }
 
@@ -427,11 +429,13 @@ export class MavenResolver implements IResolver {
    * 최신 버전 조회
    */
   async getLatestVersion(groupId: string, artifactId: string): Promise<string> {
-    const effectiveRepoUrl = this.getEffectiveRepoUrl();
+    const repositories = await this.getRepositories();
     return this.sessionGet(
       'latest-version',
-      { repoUrl: effectiveRepoUrl, groupId, artifactId },
-      () => this.getLatestVersionUncached(groupId, artifactId, effectiveRepoUrl),
+      { repoUrl: JSON.stringify(repositories), groupId, artifactId },
+      () => tryMavenRepositories(repositories, repoUrl =>
+        this.getLatestVersionUncached(groupId, artifactId, repoUrl)
+      ),
       Boolean
     );
   }
@@ -460,15 +464,14 @@ export class MavenResolver implements IResolver {
     }
   }
 
-  private getEffectiveRepoUrl(): string {
-    return this.cacheOptions.repoUrl ?? this.repoUrl;
+  private async getRepositories(): Promise<string[]> {
+    return this.cacheOptions.repoUrl ? [this.cacheOptions.repoUrl] : getMavenRepositories();
   }
 
   private getPomCacheOptions(): MavenCacheOptions {
     return {
       ...this.cacheOptions,
       memoryTtl: this.cacheOptions.memoryTtl ?? this.defaultOptions.pomCacheTtl,
-      repoUrl: this.getEffectiveRepoUrl(),
     };
   }
 
@@ -534,6 +537,7 @@ export class MavenResolver implements IResolver {
    * 패키지 크기 조회 (병렬 HEAD 요청)
    */
   private async fetchPackageSizes(packages: PackageInfo[]): Promise<PackageInfo[]> {
+    const repositories = await this.getRepositories();
     const limit = pLimit(15); // 동시 15개 요청
     const startTime = Date.now();
 
@@ -551,11 +555,11 @@ export class MavenResolver implements IResolver {
             const extension = type === 'pom' ? 'pom' : 'jar';
             const groupPath = groupId.replace(/\./g, '/');
             const fileName = `${artifactId}-${version}.${extension}`;
-            const url = `${this.repoUrl}/${groupPath}/${artifactId}/${version}/${fileName}`;
-
-            const response = await this.axiosInstance.head(url, {
-              timeout: MAVEN_CONSTANTS.HEAD_REQUEST_TIMEOUT_MS,
-            });
+            const response = await tryMavenRepositories(repositories, repoUrl =>
+              this.axiosInstance.head(`${repoUrl}/${groupPath}/${artifactId}/${version}/${fileName}`, {
+                timeout: MAVEN_CONSTANTS.HEAD_REQUEST_TIMEOUT_MS,
+              })
+            );
             const size = parseInt(String(response.headers['content-length'] || '0'), 10);
 
             return {
