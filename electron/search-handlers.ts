@@ -8,6 +8,7 @@ import { createMavenProjectService } from './services/maven-project-service';
 import { createOSSearchService } from './services/os-search-service';
 import { createSearchOrchestrator } from './services/search-orchestrator';
 import { createScopedLogger } from './utils/logger';
+import { testMavenRepositoryConnection } from '../src/core/shared/maven-repositories';
 
 const log = createScopedLogger('Search');
 
@@ -16,6 +17,9 @@ export function registerSearchHandlers(): void {
   const dependencyResolveService = createDependencyResolveService();
   const osSearchService = createOSSearchService();
   const mavenProjectService = createMavenProjectService();
+
+  ipcMain.handle('maven:testRepository', async (_event, url: unknown) =>
+    testMavenRepositoryConnection(url));
 
   void searchOrchestrator.prime();
 

@@ -3,8 +3,10 @@ import { Button, Card, Form, Input, Space, Typography } from 'antd';
 import { SETTINGS_CARD_BODY_PADDING } from './settings-form-utils';
 import { MAVEN_CENTRAL_URL, normalizeMavenRepositories } from '../../../utils/maven-repositories';
 import type { CSSProperties } from 'react';
+import { MavenRepositoryTestButton } from '../../components/MavenRepositoryTestButton';
 
 export function MavenRepositorySettingsSection({ style }: { style?: CSSProperties }) {
+  const repositories = Form.useWatch<string[]>('mavenRepositories') ?? [];
   return (
     <Card
       title="저장한 Maven 저장소"
@@ -15,14 +17,14 @@ export function MavenRepositorySettingsSection({ style }: { style?: CSSPropertie
       <Typography.Paragraph type="secondary">
         Maven Central: {MAVEN_CENTRAL_URL}
         <br />
-        패키지 추가 화면에서 선택할 공개 저장소 주소를 관리합니다. 목록에 저장한 모든 주소를 자동 조회하지 않습니다.
-        아래 설정 저장 버튼을 누르면 목록에 적용됩니다.
+        패키지 추가 화면에서 선택할 공개 저장소 주소를 관리합니다. 목록에 저장한 모든 주소를 자동
+        조회하지 않습니다. 아래 설정 저장 버튼을 누르면 목록에 적용됩니다.
       </Typography.Paragraph>
       <Form.List name="mavenRepositories">
         {(fields, { add, remove }) => (
           <>
             {fields.map(({ key, name, ...rest }) => (
-              <Space key={key} align="baseline" style={{ display: 'flex' }}>
+              <Space key={key} align="start" wrap style={{ display: 'flex', marginBottom: 8 }}>
                 <Form.Item
                   {...rest}
                   name={name}
@@ -40,6 +42,10 @@ export function MavenRepositorySettingsSection({ style }: { style?: CSSPropertie
                     placeholder="https://repo.example.com/repository/releases"
                   />
                 </Form.Item>
+                <MavenRepositoryTestButton
+                  url={repositories[name]}
+                  label={`Maven 저장소 ${name + 1} 연결 테스트`}
+                />
                 <Button
                   aria-label={`Maven 저장소 ${name + 1} 삭제`}
                   icon={<DeleteOutlined />}
