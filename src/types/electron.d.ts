@@ -1,3 +1,4 @@
+import type { MavenRepositoryTestResult } from './maven-repository';
 import type { QueryFailure } from './query-error';
 // Electron API 타입 정의 (렌더러 프로세스용)
 
@@ -254,6 +255,7 @@ export interface HistoryAPI {
 }
 
 export interface MavenAPI {
+  testRepository?: (url: string) => Promise<MavenRepositoryTestResult>;
   parseProject?: (content: string, options?: { mavenVersion?: string; repositoryUrl?: string }) => Promise<{
     success: boolean;
     packages: PackageInfo[];

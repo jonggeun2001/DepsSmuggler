@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { UpdateReleaseNotes } from '../src/types/updater';
 import type { PackageInfo } from '../src/types/package-manager/metadata';
 import type { RootCaResult } from '../src/types/root-ca';
+import type { MavenRepositoryTestResult } from '../src/types/maven-repository';
 
 // 렌더러 프로세스에 노출할 API 정의
 const electronAPI = {
@@ -322,6 +323,8 @@ const electronAPI = {
 
   // Maven 관련
   maven: {
+    testRepository: (url: string): Promise<MavenRepositoryTestResult> =>
+      ipcRenderer.invoke('maven:testRepository', url),
     parseProject: (content: string, options?: { mavenVersion?: string; repositoryUrl?: string }): Promise<{
       success: boolean;
       packages: PackageInfo[];

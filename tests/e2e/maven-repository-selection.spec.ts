@@ -82,3 +82,42 @@ test('장바구니 POM 가져오기에 선택한 저장소를 전달하고 추�
     repository
   );
 });
+
+test('설정의 미저장 URL을 테스트하고 URL 수정 시 이전 결과를 지운다', async ({ page }) => {
+  await setupMockElectronApp(page, { config: { mavenRepositories: [] } });
+  await page.goto('/#/settings');
+  await page.evaluate(() => {
+    if (!window.electronAPI.maven) throw new Error('Maven API missing');
+    window.electronAPI.maven.testRepository = async (url) => {
+      sessionStorage.setItem('tested-repository', url);
+      return { success: true, status: 200, repositoryUrl: url, message: '연결 성공 (HTTP 200)' };
+    };
+  });
+  await page.getByRole('button', { name: '저장소 추가' }).click();
+  await page.getByLabel('Maven 저장소 URL 1').fill(repository + '/');
+  await page.getByRole('button', { name: 'Maven 저장소 1 연결 테스트' }).click();
+  await expect(page.getByRole('status').filter({ hasText: '연결 성공' })).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem('tested-repository'))).toBe(repository);
+  expect((await readMockElectronAppState(page)).config.mavenRepositories).toEqual([]);
+  await page.getByLabel('Maven 저장소 URL 1').fill('https://wrong.example.com');
+  await expect(page.getByText('연결 성공 (HTTP 200)')).toHaveCount(0);
+});
+
+test('패키지 추가 화면은 입력 중인 URL을 추가·저장하기 전에 테스트한다', async ({ page }) => {
+  await setupMockElectronApp(page, { config: { mavenRepositories: [] } });
+  await page.goto('/#/wizard?type=maven');
+  await page.evaluate(() => {
+    if (!window.electronAPI.maven) throw new Error('Maven API missing');
+    window.electronAPI.maven.testRepository = async (url) => {
+      sessionStorage.setItem('tested-repository', url);
+      return { success: false, status: 404, message: '주소를 찾을 수 없습니다. (HTTP 404)' };
+    };
+  });
+  await page.getByLabel('추가할 Maven 저장소 URL').fill('https://wrong.example.com/releases/');
+  await page.getByRole('button', { name: 'Maven 저장소 연결 테스트' }).click();
+  await expect(page.getByText('주소를 찾을 수 없습니다. (HTTP 404)')).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem('tested-repository'))).toBe(
+    'https://wrong.example.com/releases'
+  );
+  expect((await readMockElectronAppState(page)).config.mavenRepositories).toEqual([]);
+});

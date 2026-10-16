@@ -108,6 +108,19 @@ describe('registerSearchHandlers', () => {
     expect(mavenGetVersionsMock).toHaveBeenCalledWith('example:app', options.repositoryUrl);
   });
 
+  it('저장소 연결 테스트 IPC는 URL을 검증하고 입력 주소의 응답을 반환한다', async () => {
+    registerSearchHandlers();
+    const test = ipcHandle.mock.calls.find(([channel]) => channel === 'maven:testRepository')![1];
+    expect(await test({}, 'file:///tmp/repo')).toMatchObject({ success: false });
+    const destroy = vi.fn();
+    vi.mocked(axios.get).mockResolvedValue({ status: 204, data: { destroy } });
+    expect(await test({}, ' https://repo.example.com/releases/ ')).toMatchObject({
+      success: true, status: 204, repositoryUrl: 'https://repo.example.com/releases',
+    });
+    expect(axios.get).toHaveBeenLastCalledWith('https://repo.example.com/releases/', expect.objectContaining({ responseType: 'stream' }));
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
   it('Maven 인증서 실패가 실제 IPC 어댑터와 renderer facade를 통과해 보존된다', async () => {
     mavenSearchPackagesMock.mockRejectedValue(Object.assign(new Error('self signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' }));
     registerSearchHandlers();
