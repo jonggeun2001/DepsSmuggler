@@ -369,6 +369,7 @@ const version = managedVersions.get('org.springframework:spring-core');
 - 프로젝트 속성, 부모의 일반 의존성, dependencyManagement/import BOM을 해석하고 test/provided 직접 의존성도 유지합니다. 자식의 직접 관리 선언은 부모 선언보다 우선합니다. 실제 라이브러리 전이 경로에서 쓰이는 프로젝트 관리 버전과 그 하위 경로도 추가 수집하며 원래 버전을 유지합니다. 미사용 관리 목록 전체를 펼치거나 로컬 프로젝트 자체의 JAR를 원격 패키지로 추가하지 않습니다.
 - 프로젝트와 부모의 `build/plugins`를 상속하고 `inherited=false`를 반영합니다. 명시 버전, 사용되는 pluginManagement 버전, 기본 lifecycle 버전 순으로 선택합니다. 사용하지 않는 pluginManagement 항목은 수집하지 않습니다.
 - Maven 버전 기본값은 `3.9.11`입니다. 숫자 형식 `3.x.y`의 공식 Maven Git 태그에서 `default-bindings.xml`을 조회해 packaging별 `validate`부터 `package`까지의 플러그인을 읽습니다. 조회 실패나 지원되지 않는 packaging은 오류이며 다른 버전이나 최신 플러그인으로 대체하지 않습니다. plugin metadata에 대상 버전·packaging·phase·원본 URL·SHA-256을 기록합니다.
+- CI의 네이티브 Maven 소비자 검증은 공식 배포본의 SHA-512를 확인한 `3.9.11`로 고정합니다. 러너 기본 Maven 업데이트에 따라 검증 대상이 바뀌지 않게 하기 위함입니다. `3.10.0`은 이 XML 경로가 없어 현재 프로젝트 POM 수집 대상으로 지원하지 않습니다.
 - Surefire/Failsafe의 실행용 provider는 일반 플러그인 의존성에 모두 선언되어 있지 않습니다. 선택된 플러그인 버전의 공개 `surefire-providers` POM에서 JUnit 3/4/4.7/Platform/TestNG provider 중 실제 배포된 모듈을 확인해 추가합니다. 다른 버전의 provider를 추정해 요청하지 않습니다. Platform provider가 있는 경우 프로젝트 라이브러리와 명시 plugin dependency의 전이 트리도 조회해 발견한 Jupiter API 버전에 맞는 engine, Platform engine과 Platform Commons에서 발견한 각 버전에 맞는 launcher를 추가합니다. JUnit 4와 Jupiter API가 함께 있으면 대응하는 Vintage engine도 준비합니다. 모든 발견 버전을 유지하므로 Surefire 자체가 선언한 launcher와 프로젝트 실행 시 요구되는 launcher가 달라도 함께 반출합니다.
 - 플러그인의 명시 dependencies와 부모/BOM POM도 장바구니 root가 됩니다. 이후 기존 의존성 포함 다운로드로 각 root의 JAR/POM 및 모든 발견 버전의 전이 의존성을 수집합니다. 다운로드한 일반 라이브러리 POM의 build plugin까지 재귀적으로 확장하지 않습니다.
 

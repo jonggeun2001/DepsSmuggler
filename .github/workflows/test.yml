@@ -68,6 +68,21 @@ jobs:
           DEPS_SMUGGLER_NATIVE_APK: '1'
         run: bash scripts/verify-worktree.sh src/core/downloaders/apk-native-consumer.integration.test.ts
 
+      - name: Set up Maven 3.9.11 for native consumer tests
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          maven_version=3.9.11
+          maven_archive="$RUNNER_TEMP/apache-maven-${maven_version}-bin.tar.gz"
+          curl --fail --location --retry 3 \
+            "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/${maven_version}/apache-maven-${maven_version}-bin.tar.gz" \
+            --output "$maven_archive"
+          printf '%s  %s\n' \
+            'bcfe4fe305c962ace56ac7b5fc7a08b87d5abd8b7e89027ab251069faebee516b0ded8961445d6d91ec1985dfe30f8153268843c89aa392733d1a3ec956c9978' \
+            "$maven_archive" | sha512sum --check -
+          tar -xzf "$maven_archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apache-maven-${maven_version}/bin" >> "$GITHUB_PATH"
+
       - name: Test generated Maven bundle with native Maven
         if: runner.os == 'Linux'
         env:
