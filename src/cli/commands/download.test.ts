@@ -272,6 +272,17 @@ describe('downloadCommand', () => {
     }
   });
 
+  it('Maven 저장소 URL을 검증·정규화하고 의존성을 끈 다운로드에도 보존한다', async () => {
+    await downloadCommand(commandOptions({
+      type: 'maven', package: 'com.ibm.db2.jcc:db2jcc4', pkgVersion: '10.1', deps: false,
+      mavenRepository: ' https://repo.example.com/releases/ ',
+    }));
+    expect(addToQueue).toHaveBeenCalledWith([
+      expect.objectContaining({ metadata: { mavenRepository: 'https://repo.example.com/releases' } }),
+    ]);
+    expect(resolveAllDependencies).not.toHaveBeenCalled();
+  });
+
   it('deps가 true면 의존성을 해결한 패키지 목록을 큐에 추가한다', async () => {
     await downloadCommand(commandOptions());
 

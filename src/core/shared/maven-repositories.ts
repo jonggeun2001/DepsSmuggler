@@ -1,25 +1,9 @@
-import * as os from 'os';
-import * as path from 'path';
 import axios from 'axios';
-import * as fs from 'fs-extra';
-import logger from '../../utils/logger';
-import { MAVEN_CENTRAL_URL, normalizeMavenRepositories } from '../../utils/maven-repositories';
+import { MAVEN_CENTRAL_URL, normalizeMavenRepositoryUrl } from '../../utils/maven-repositories';
 
-/** Read on each operation so saved settings apply without restarting the app. */
-export async function getMavenRepositories(
-  primaryRepository = MAVEN_CENTRAL_URL
-): Promise<string[]> {
-  // Preserve explicit single-repository clients (e.g. a local repository fixture).
-  if (primaryRepository !== MAVEN_CENTRAL_URL) return [primaryRepository];
-  try {
-    const settings = await fs.readJson(path.join(os.homedir(), '.depssmuggler', 'settings.json'));
-    return [MAVEN_CENTRAL_URL, ...normalizeMavenRepositories(settings.mavenRepositories ?? [])];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logger.warn('Maven 저장소 설정을 읽지 못해 Central을 사용합니다.');
-    }
-    return [MAVEN_CENTRAL_URL];
-  }
+/** Only the selected repository and Central participate in resolution/downloads. */
+export async function getMavenRepositories(repositoryUrl = MAVEN_CENTRAL_URL): Promise<string[]> {
+  return [...new Set([normalizeMavenRepositoryUrl(repositoryUrl), MAVEN_CENTRAL_URL])];
 }
 
 export async function tryMavenRepositories<T>(

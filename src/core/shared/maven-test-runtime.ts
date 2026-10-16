@@ -19,13 +19,14 @@ function key(pkg: PackageInfo): string {
   return `${coordinate(pkg)}:${pkg.version}:${pkg.metadata?.type || 'jar'}:${pkg.metadata?.classifier || ''}`;
 }
 
-function runtimePackage(name: string, version: string): PackageInfo {
+function runtimePackage(name: string, version: string, repositoryUrl?: string): PackageInfo {
   const [groupId, artifactId] = name.split(':');
   return {
     type: 'maven',
     name,
     version,
-    metadata: { groupId, artifactId, type: 'jar', origin: 'maven-test-runtime' },
+    metadata: { groupId, artifactId, type: 'jar', origin: 'maven-test-runtime',
+      ...(repositoryUrl ? { mavenRepository: repositoryUrl } : {}) },
   };
 }
 
@@ -59,6 +60,7 @@ async function createDefaultResolver(): Promise<ResolvePackage> {
   return async (pkg: PackageInfo): Promise<PackageInfo[]> => {
     const resolver = createRequestMavenResolver(session);
     const result = await resolver.resolveDependencies(coordinate(pkg), pkg.version, {
+      repositoryUrl: typeof pkg.metadata?.mavenRepository === 'string' ? pkg.metadata.mavenRepository : undefined,
       classifier: typeof pkg.metadata?.classifier === 'string' ? pkg.metadata.classifier : undefined,
       artifactType: typeof pkg.metadata?.type === 'string' && pkg.metadata.type !== 'pom'
         ? pkg.metadata.type
@@ -74,6 +76,7 @@ export async function collectMavenTestRuntimePackages(
   resolve?: ResolvePackage,
 ): Promise<PackageInfo[]> {
   const roots = projectPackages.filter(isProjectRoot);
+  const repositoryUrl = roots.find(pkg => typeof pkg.metadata?.mavenRepository === 'string')?.metadata?.mavenRepository as string | undefined;
   const resolvePackage = resolve ?? (await createDefaultResolver());
   const rootTrees = await mapLimited(roots, MAX_CONCURRENCY, resolvePackage);
   const discovered = rootTrees.flat();
@@ -88,7 +91,7 @@ export async function collectMavenTestRuntimePackages(
     if (!added.has(artifactKey)) added.set(artifactKey, pkg);
   };
   const queueEngine = (name: string, version: string): void => {
-    const engine = runtimePackage(name, version);
+    const engine = runtimePackage(name, version, repositoryUrl);
     add(engine);
     if (!resolvedRuntime.has(key(engine))) {
       resolvedRuntime.add(key(engine));
@@ -115,7 +118,7 @@ export async function collectMavenTestRuntimePackages(
     const engineTrees = await mapLimited(batch, MAX_CONCURRENCY, resolvePackage);
     for (const pkg of engineTrees.flat()) {
       if (pkg.type === 'maven' && pkg.metadata?.type !== 'pom' && coordinate(pkg) === PLATFORM_ENGINE) {
-        add(runtimePackage(PLATFORM_LAUNCHER, pkg.version));
+        add(runtimePackage(PLATFORM_LAUNCHER, pkg.version, repositoryUrl));
       }
       if (pkg.type === 'maven' && pkg.metadata?.type !== 'pom' && coordinate(pkg) === PLATFORM_COMMONS) {
         platformCommonsVersions.add(pkg.version);
@@ -123,8 +126,8 @@ export async function collectMavenTestRuntimePackages(
     }
   }
 
-  for (const version of directPlatformVersions) add(runtimePackage(PLATFORM_LAUNCHER, version));
-  for (const version of platformCommonsVersions) add(runtimePackage(PLATFORM_LAUNCHER, version));
+  for (const version of directPlatformVersions) add(runtimePackage(PLATFORM_LAUNCHER, version, repositoryUrl));
+  for (const version of platformCommonsVersions) add(runtimePackage(PLATFORM_LAUNCHER, version, repositoryUrl));
 
   return [...added.values()];
 }

@@ -11,6 +11,7 @@ import { getDockerDownloader } from '../../core/downloaders/docker';
 interface SearchOptions {
   type: PackageType;
   limit: string;
+  mavenRepository?: string;
 }
 
 /**
@@ -20,6 +21,9 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
   console.log(chalk.cyan(`'${query}' 검색 중...`));
 
   try {
+    if (options.mavenRepository !== undefined && options.type !== 'maven') {
+      throw new Error('--maven-repository는 Maven 패키지에만 사용할 수 있습니다.');
+    }
     let results: Array<{ name: string; version: string; description?: string }> = [];
     const parsedLimit = Number.parseInt(options.limit, 10);
     const limit = Number.isNaN(parsedLimit) || parsedLimit <= 0 ? 20 : parsedLimit;
@@ -50,7 +54,7 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
 
       case 'maven': {
         const mavenDownloader = getMavenDownloader();
-        const mavenResults = await mavenDownloader.searchPackages(query);
+        const mavenResults = await mavenDownloader.searchPackages(query, options.mavenRepository);
         results = mavenResults.map((pkg) => ({
           name: pkg.name,
           version: pkg.version,

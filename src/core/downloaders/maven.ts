@@ -1,4 +1,5 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
+import { MAVEN_CENTRAL_URL, normalizeMavenRepositoryUrl } from '../../utils/maven-repositories';
 import { QueryRequestError } from '../../utils/query-error';
 import { getMavenRepositories, tryMavenRepositories } from '../shared/maven-repositories';
 import * as path from 'path';
@@ -22,6 +23,7 @@ import { BaseLanguageDownloader } from './lang-shared/base-language-downloader';
 import { waitForDownloadResume, type DownloadControlOptions } from '../shared/download-control';
 
 export interface MavenDownloadOptions extends DownloadControlOptions {
+  repositoryUrl?: string;
   targetOS?: string;
   targetArchitecture?: string;
 }
@@ -139,15 +141,19 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
   /**
    * 아티팩트 검색 (입력 형식에 따라 최적 API 선택)
    */
-  async searchPackages(query: string): Promise<PackageInfo[]> {
+  async searchPackages(query: string, repositoryUrl?: string): Promise<PackageInfo[]> {
+    const selectedRepository = normalizeMavenRepositoryUrl(repositoryUrl ?? this.repoUrl);
     const parsed = this.parseMavenQuery(query);
+    if (selectedRepository !== MAVEN_CENTRAL_URL && parsed.type !== 'coordinates') {
+      throw new Error('외부 Maven 저장소는 groupId:artifactId 형식으로 검색하세요.');
+    }
 
     // coordinates 형식이면 Sonatype API 우선 사용
     if (parsed.type === 'coordinates' && parsed.groupId && parsed.artifactId) {
       const groupId = parsed.groupId;
       const artifactId = parsed.artifactId;
-      if ((await getMavenRepositories(this.repoUrl)).length > 1) {
-        const versions = await this.getVersions(`${groupId}:${artifactId}`);
+      if (selectedRepository !== MAVEN_CENTRAL_URL) {
+        const versions = await this.getVersions(`${groupId}:${artifactId}`, selectedRepository);
         return versions.length ? [{
           type: 'maven', name: `${groupId}:${artifactId}`, version: versions[0],
           metadata: { groupId, artifactId },
@@ -312,18 +318,15 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
   /**
    * 아티팩트 버전 목록 조회
    */
-  async getVersions(packageName: string): Promise<string[]> {
+  async getVersions(packageName: string, repositoryUrl?: string): Promise<string[]> {
+    const selectedRepository = normalizeMavenRepositoryUrl(repositoryUrl ?? this.repoUrl);
     const [groupId, artifactId] = packageName.split(':');
-    const repositories = await getMavenRepositories(this.repoUrl);
-    const results = await Promise.allSettled(repositories.map(repoUrl =>
-      this.getVersionsFromMetadata(groupId, artifactId, repoUrl)
-    ));
-    const versions = results.flatMap(result => result.status === 'fulfilled' ? result.value : []);
-    // External-only artifacts do not need Central's search index to be available.
-    if (!versions.length && results[0].status === 'rejected') {
+    try {
+      return await this.getVersionsFromMetadata(groupId, artifactId, selectedRepository);
+    } catch (error) {
+      if (selectedRepository !== MAVEN_CENTRAL_URL) throw error;
       return this.getVersionsFromSearchApi(groupId, artifactId);
     }
-    return [...new Set(versions)].sort((a, b) => this.compareVersions(b, a));
   }
 
 
@@ -388,10 +391,10 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
   /**
    * 아티팩트 메타데이터 조회
    */
-  async getPackageMetadata(name: string, version: string): Promise<PackageInfo> {
+  async getPackageMetadata(name: string, version: string, repositoryUrl?: string): Promise<PackageInfo> {
     try {
       const [groupId, artifactId] = name.split(':');
-      const repositories = await getMavenRepositories(this.repoUrl);
+      const repositories = await this.getRepositories(repositoryUrl);
       if (repositories.length > 1) {
         return tryMavenRepositories(repositories, async repoUrl => {
           const response = await this.client.get<string>(this.buildDownloadUrl(groupId, artifactId, version, 'pom', undefined, repoUrl));
@@ -399,7 +402,7 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
           if (!pom || typeof pom !== 'object') throw new QueryRequestError('INVALID_RESPONSE');
           const packaging = pom.packaging || 'jar';
           return { type: 'maven', name, version, metadata: {
-            groupId, artifactId, packaging,
+            groupId, artifactId, packaging, mavenRepository: repositoryUrl,
             downloadUrl: this.buildDownloadUrl(groupId, artifactId, version, this.validateArtifactType(packaging), undefined, repoUrl),
           } };
         });
@@ -469,6 +472,9 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     onProgress?: (progress: DownloadProgressEvent) => void,
     options?: MavenDownloadOptions
   ): Promise<string[]> {
+    if (info.metadata?.mavenRepository !== undefined) {
+      options = { ...options, repositoryUrl: normalizeMavenRepositoryUrl(info.metadata.mavenRepository) };
+    }
     const groupId = (info.metadata?.groupId as string) || info.name.split(':')[0];
     const artifactId = (info.metadata?.artifactId as string) || info.name.split(':')[1];
     const classifier = info.metadata?.classifier as string | undefined;
@@ -494,7 +500,7 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
     if (!packaging) {
       try {
         await waitForDownloadResume(options);
-        const pomResponse = await tryMavenRepositories(await getMavenRepositories(this.repoUrl), repoUrl =>
+        const pomResponse = await tryMavenRepositories(await this.getRepositories(options?.repositoryUrl), repoUrl =>
           this.client.get<string>(this.buildDownloadUrl(groupId, artifactId, info.version, 'pom', undefined, repoUrl), { signal: options?.signal })
         );
         await waitForDownloadResume(options);
@@ -599,7 +605,7 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
   ): Promise<string> {
     try {
       await waitForDownloadResume(options);
-      return await tryMavenRepositories(await getMavenRepositories(this.repoUrl), async repoUrl => {
+      return await tryMavenRepositories(await this.getRepositories(options?.repositoryUrl), async repoUrl => {
         await waitForDownloadResume(options);
         const downloadUrl = this.buildDownloadUrl(groupId, artifactId, version, artifactType, classifier, repoUrl);
         const fileName = this.buildFileName(artifactId, version, artifactType, classifier);
@@ -712,6 +718,10 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
   /**
    * 다운로드 URL 생성
    */
+  private async getRepositories(repositoryUrl?: string): Promise<string[]> {
+    return repositoryUrl === undefined ? [this.repoUrl] : getMavenRepositories(repositoryUrl);
+  }
+
   private buildDownloadUrl(
     groupId: string,
     artifactId: string,
@@ -806,7 +816,7 @@ export class MavenDownloader extends BaseLanguageDownloader implements IDownload
 
     try {
       await waitForDownloadResume(options);
-      const repositories = await getMavenRepositories(this.repoUrl);
+      const repositories = await this.getRepositories(options?.repositoryUrl);
       const checksumFileName = `${baseFileName}.sha1`;
       const checksumFilePath = path.join(artifactDir, checksumFileName);
 

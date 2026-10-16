@@ -258,6 +258,6 @@ OS 전용 흐름의 전달 방식은 로컬 저장이며, 일반 다운로드의
 
 ### Maven 저장소 설정
 
-`SettingsPage`의 `MavenRepositorySettingsSection`은 추가 저장소 URL 목록을 추가·삭제하고 기존 **설정 저장** 흐름으로 저장합니다. 미저장 변경 경고, 초기값 복원, 설정 초기화가 적용되며 `?highlight=maven`으로 해당 카드에 이동합니다. HTTP(S)만 허용하고 인증 정보·쿼리·프래그먼트는 금지합니다. URL 정규화와 중복 제거는 공용 유틸리티를 사용하고 IPC에서도 검증합니다.
+`MavenRepositorySelector`는 패키지 추가 위자드와 장바구니 파일·텍스트 가져오기에서 URL을 추가하고 사용할 저장소 하나를 선택합니다. 주소록은 `settings.json.mavenRepositories`에 저장하고, 실제 선택은 장바구니 항목의 `metadata.mavenRepository`에 보존해 다운로드·이력 복원·부모/BOM/플러그인 해결로 전달합니다. 조회 중 선택을 바꾸면 이전 검색/버전 결과를 무효화하고, POM 가져오기 중에는 선택을 잠급니다. 장바구니 저장소 열에서 패키지별 선택을 확인할 수 있습니다.
 
-Electron의 검색·버전·다운로드·의존성 해결은 저장된 목록을 다음 요청부터 사용합니다. 외부 저장소 전용 패키지는 `groupId:artifactId`로 검색하고, 일반 키워드 검색은 Central 검색 API를 사용합니다. [CLI와 공용 저장소 설정](cli.md#추가-maven-저장소)을 참고하세요.
+설정 화면의 `MavenRepositorySettingsSection`은 저장한 주소를 관리하는 용도로 유지합니다. 주소록에 여러 URL이 있어도 자동으로 순회하지 않습니다. 기본은 Central이며 외부 선택 시 검색·버전 조회는 선택한 저장소만, 다운로드·의존성 해결은 선택한 저장소 다음 Central만 조회합니다. 외부 저장소는 `groupId:artifactId`로 검색합니다. URL 검증은 공용 유틸리티를 사용하며 IPC와 코어 경계에서도 확인합니다. [CLI 저장소 옵션](cli.md#추가-maven-저장소)을 참고하세요.

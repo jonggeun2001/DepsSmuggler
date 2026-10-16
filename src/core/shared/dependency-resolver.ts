@@ -1,4 +1,5 @@
 // 공통 의존성 해결 모듈
+import { MAVEN_CENTRAL_URL } from '../../utils/maven-repositories';
 import { createRequestPipResolver } from '../resolver/pip-resolver';
 import { createRequestMavenResolver } from '../resolver/maven-resolver';
 import { createRequestCondaResolver } from '../resolver/conda-resolver';
@@ -203,7 +204,7 @@ export interface DependencyResolverOptions {
 type RequestLibraryResolvers = {
   pip: ReturnType<typeof createRequestPipResolver>;
   conda: ReturnType<typeof createRequestCondaResolver>;
-  maven: ReturnType<typeof createRequestMavenResolver>;
+  maven: () => ReturnType<typeof createRequestMavenResolver>;
   npm: ReturnType<typeof createRequestNpmResolver>;
 };
 
@@ -217,7 +218,7 @@ function getResolverByType(
     case 'conda':
       return requestResolvers.conda;
     case 'maven':
-      return requestResolvers.maven;
+      return requestResolvers.maven();
     case 'npm':
       return requestResolvers.npm;
     // OS 패키지 (yum, apt, apk)는 distribution 정보가 필요하므로
@@ -245,6 +246,7 @@ export async function resolveAllDependencies(
   options?: DependencyResolverOptions
 ): Promise<ResolvedPackageList> {
   const resolvedSet = new Map<string, DownloadPackage>();
+  const mavenSources = new Map<string, string>();
   const successfulPackageSet = new Map<string, DownloadPackage>();
   const dependencyTrees: DependencyResolutionResult[] = [];
   const failedPackages: { name: string; version: string; error: string }[] = [];
@@ -277,7 +279,7 @@ export async function resolveAllDependencies(
   const requestResolvers: RequestLibraryResolvers = {
     pip: createRequestPipResolver(resolutionSession),
     conda: createRequestCondaResolver(resolutionSession),
-    maven: createRequestMavenResolver(resolutionSession),
+    maven: () => createRequestMavenResolver(resolutionSession),
     npm: createRequestNpmResolver(resolutionSession),
   };
 
@@ -583,6 +585,7 @@ export async function resolveAllDependencies(
         // Maven의 명시적 artifact 선택을 resolver 결과와 파일명에도 유지한다.
         resolverOptions = {
           ...resolverOptions,
+          repositoryUrl: pkg.metadata?.mavenRepository,
           classifier: pkg.classifier,
           artifactType: typeof pkg.metadata?.type === 'string'
             ? pkg.metadata.type
@@ -714,6 +717,23 @@ export async function resolveAllDependencies(
           pkg.version,
           resolverOptions
         ) as DependencyResolutionResult;
+
+        if (pkg.type === 'maven') {
+          const sources = result.flatList.map(artifact => ({
+            key: JSON.stringify([artifact.name, artifact.version]),
+            repository: String(artifact.metadata?.mavenRepository || MAVEN_CENTRAL_URL),
+            name: `${artifact.name}:${artifact.version}`,
+          }));
+          // All types/classifiers of a GAV share the same companion POM in .m2.
+          // Validate the whole root before merging any of its dependencies.
+          for (const source of sources) {
+            const existing = mavenSources.get(source.key);
+            if (existing && existing !== source.repository) {
+              throw new Error(`Maven 저장소 충돌: ${source.name} (${existing}, ${source.repository}). 해당 패키지들의 저장소 선택을 통일하세요.`);
+            }
+          }
+          for (const source of sources) mavenSources.set(source.key, source.repository);
+        }
 
         if (pkg.type === 'conda' && hasTargetedCondaEnvironment) {
           assertTargetedCondaArtifacts(result.flatList);

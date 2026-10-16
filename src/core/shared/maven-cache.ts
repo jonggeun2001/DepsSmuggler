@@ -74,6 +74,8 @@ function getCacheKey(coordinate: MavenCoordinate, repoUrl: string): string {
 export interface MavenCacheOptions {
   /** 레포지토리 URL */
   repoUrl?: string;
+  /** Selected package repository, with Central fallback. repoUrl remains an explicit single-repository override. */
+  repositoryUrl?: string;
   /** 메모리 TTL (ms) */
   memoryTtl?: number;
   /** 디스크 TTL (ms) */
@@ -215,7 +217,7 @@ export async function fetchPomWithCacheInfo(
   options: MavenCacheOptions = {}
 ): Promise<MavenCacheResult> {
   if (!options.repoUrl) {
-    return tryMavenRepositories(await getMavenRepositories(), repoUrl =>
+    return tryMavenRepositories(await getMavenRepositories(options.repositoryUrl), repoUrl =>
       fetchPomWithCacheInfo(coordinate, { ...options, repoUrl })
     );
   }

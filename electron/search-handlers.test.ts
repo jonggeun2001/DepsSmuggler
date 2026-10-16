@@ -96,6 +96,18 @@ describe('registerSearchHandlers', () => {
     });
   });
 
+  it('선택한 Maven 저장소만 검색과 버전 조회에 전달한다', async () => {
+    registerSearchHandlers();
+    const options = { repositoryUrl: 'https://repo.example.com/releases' };
+    mavenGetVersionsMock.mockResolvedValue(['1.0']);
+    const search = ipcHandle.mock.calls.find(([channel]) => channel === 'search:packages')![1];
+    const versions = ipcHandle.mock.calls.find(([channel]) => channel === 'search:versions')![1];
+    await search({}, 'maven', 'example:app', options);
+    await versions({}, 'maven', 'example:app', options);
+    expect(mavenSearchPackagesMock).toHaveBeenCalledWith('example:app', options.repositoryUrl);
+    expect(mavenGetVersionsMock).toHaveBeenCalledWith('example:app', options.repositoryUrl);
+  });
+
   it('Maven 인증서 실패가 실제 IPC 어댑터와 renderer facade를 통과해 보존된다', async () => {
     mavenSearchPackagesMock.mockRejectedValue(Object.assign(new Error('self signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' }));
     registerSearchHandlers();

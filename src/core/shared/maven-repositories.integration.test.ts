@@ -5,11 +5,12 @@ import { Readable } from 'stream';
 import axios, { AxiosError, type AxiosAdapter } from 'axios';
 import * as fs from 'fs-extra';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { clearMemoryCache, fetchPomWithCacheInfo } from './maven-cache';
+import { clearMemoryCache, fetchPomWithCacheInfo, type MavenCacheOptions } from './maven-cache';
+import { resolveAllDependencies } from './dependency-resolver';
 import { getMavenRepositories } from './maven-repositories';
 import { MAVEN_CENTRAL_URL } from '../../utils/maven-repositories';
 import { MavenDownloader } from '../downloaders/maven';
-import { MavenResolver } from '../resolver/maven-resolver';
+import { MavenResolver, getMavenResolver } from '../resolver/maven-resolver';
 
 const testHome = vi.hoisted(() => ({ path: '' }));
 vi.mock('os', async (original) => ({
@@ -23,6 +24,7 @@ const coordinates = (artifact: string) =>
 const artifactPath = (artifact: string, extension: string) =>
   `example/${artifact}/1.0/${artifact}-1.0.${extension}`;
 let previousAdapter: typeof axios.defaults.adapter;
+let previousCacheOptions: MavenCacheOptions;
 let responses: Map<string, string>;
 let requests: string[];
 
@@ -38,8 +40,10 @@ function addProject(repository: string, artifact: string, body = '', packaging =
 beforeEach(async () => {
   testHome.path = await fs.mkdtemp(path.join(os.tmpdir(), 'maven-external-'));
   await fs.outputJson(path.join(testHome.path, '.depssmuggler/settings.json'), {
-    mavenRepositories: [external],
+    mavenRepositories: [external, 'https://unused.example.test/repo'],
   });
+  previousCacheOptions = getMavenResolver().getCacheOptions();
+  getMavenResolver().setCacheOptions({ cacheDir: path.join(testHome.path, 'resolver-cache') });
   responses = new Map();
   requests = [];
   previousAdapter = axios.defaults.adapter;
@@ -56,9 +60,10 @@ beforeEach(async () => {
         data: '',
       });
     }
-    const content = url.endsWith('.sha1')
-      ? createHash('sha1').update(payload).digest('hex')
-      : payload;
+    const content =
+      url.endsWith('.sha1') && !responses.has(url)
+        ? createHash('sha1').update(payload).digest('hex')
+        : payload;
     return {
       config,
       status: 200,
@@ -74,18 +79,20 @@ beforeEach(async () => {
 afterEach(async () => {
   clearMemoryCache();
   axios.defaults.adapter = previousAdapter;
+  getMavenResolver().setCacheOptions(previousCacheOptions);
   await fs.remove(testHome.path);
 });
 
-it('merges versions, searches external coordinates and applies repository removal without restart', async () => {
+it('queries only the selected repository and ignores saved addresses', async () => {
   const metadata = (versions: string[]) =>
     `<metadata><versioning><versions>${versions.map((v) => `<version>${v}</version>`).join('')}</versions></versioning></metadata>`;
   responses.set(`${MAVEN_CENTRAL_URL}/example/app/maven-metadata.xml`, metadata(['1.0', '2.0']));
   responses.set(`${external}/example/app/maven-metadata.xml`, metadata(['2.0', '3.0']));
   const downloader = new MavenDownloader();
-  expect(await downloader.getVersions('example:app')).toEqual(['3.0', '2.0', '1.0']);
+  expect(await downloader.getVersions('example:app')).toEqual(['2.0', '1.0']);
+  expect(await downloader.getVersions('example:app', external)).toEqual(['3.0', '2.0']);
   responses.delete(`${MAVEN_CENTRAL_URL}/example/app/maven-metadata.xml`);
-  expect(await downloader.searchPackages('example:app')).toMatchObject([
+  expect(await downloader.searchPackages('example:app', external)).toMatchObject([
     { name: 'example:app', version: '3.0' },
   ]);
   expect(requests.some((url) => url.includes('search.maven.org'))).toBe(false);
@@ -118,12 +125,14 @@ it('resolves external parent/BOM/transitive POMs and downloads artifacts with ma
   responses.set(`${MAVEN_CENTRAL_URL}/${artifactPath('app', 'jar.sha1')}`, '0'.repeat(40));
   const resolver = new MavenResolver();
   resolver.setCacheOptions({ cacheDir: path.join(testHome.path, 'cache') });
-  const resolved = await resolver.resolveDependencies('example:app', '1.0');
+  const resolved = await resolver.resolveDependencies('example:app', '1.0', {
+    repositoryUrl: external,
+  });
   expect(resolved.flatList.map((pkg) => pkg.name)).toEqual(
     expect.arrayContaining(['example:app', 'example:parent', 'example:bom', 'example:library'])
   );
   const downloader = new MavenDownloader();
-  const metadata = await downloader.getPackageMetadata('example:bom', '1.0');
+  const metadata = await downloader.getPackageMetadata('example:bom', '1.0', external);
   expect(metadata.metadata?.packaging).toBe('pom');
   const output = path.join(testHome.path, 'output');
   for (const pkg of resolved.flatList) await downloader.downloadPackageFiles(pkg, output);
@@ -135,9 +144,8 @@ it('resolves external parent/BOM/transitive POMs and downloads artifacts with ma
   );
   expect(await fs.pathExists(path.join(output, artifactPath('parent', 'pom')))).toBe(true);
   expect(await fs.pathExists(path.join(output, artifactPath('bom', 'jar')))).toBe(false);
-  expect(requests.indexOf(`${MAVEN_CENTRAL_URL}/${artifactPath('app', 'pom')}`)).toBeLessThan(
-    requests.indexOf(`${external}/${artifactPath('app', 'pom')}`)
-  );
+  expect(requests).not.toContain(`${MAVEN_CENTRAL_URL}/${artifactPath('app', 'pom')}`);
+  expect(requests.some((url) => url.includes('unused.example.test'))).toBe(false);
 });
 
 it('isolates disk POM caches for identical coordinates from different repositories', async () => {
@@ -157,7 +165,7 @@ it('isolates disk POM caches for identical coordinates from different repositori
 it('rejects malformed metadata and does not try another repository after cancellation', async () => {
   responses.set(`${external}/example/app/maven-metadata.xml`, '<html>login page</html>');
   const downloader = new MavenDownloader();
-  await expect(downloader.getVersions('example:app')).rejects.toThrow();
+  await expect(downloader.getVersions('example:app', external)).rejects.toThrow();
   const controller = new AbortController();
   controller.abort();
   requests.length = 0;
@@ -186,4 +194,115 @@ it('stops on checksum failure instead of hiding corruption by trying another rep
   ).rejects.toThrow('체크섬 검증 실패');
   expect(requests).not.toContain(`${external}/${artifactPath('app', 'jar')}`);
   expect(await fs.pathExists(path.join(output, artifactPath('app', 'jar')))).toBe(false);
+});
+
+it('keeps separate repository selections across cart roots and defaults unselected roots to Central', async () => {
+  const another = 'https://another.example.test/releases';
+  addProject(external, 'first');
+  addProject(another, 'second');
+  addProject(MAVEN_CENTRAL_URL, 'central');
+  const result = await resolveAllDependencies([
+    {
+      id: 'first',
+      type: 'maven',
+      name: 'example:first',
+      version: '1.0',
+      metadata: { mavenRepository: external },
+    },
+    {
+      id: 'second',
+      type: 'maven',
+      name: 'example:second',
+      version: '1.0',
+      metadata: { mavenRepository: another },
+    },
+    { id: 'central', type: 'maven', name: 'example:central', version: '1.0' },
+  ]);
+  expect(result.failedPackages).toEqual([]);
+  expect(
+    result.allPackages.find((pkg) => pkg.name === 'example:first')?.metadata?.mavenRepository
+  ).toBe(external);
+  expect(
+    result.allPackages.find((pkg) => pkg.name === 'example:second')?.metadata?.mavenRepository
+  ).toBe(another);
+  expect(
+    result.allPackages.find((pkg) => pkg.name === 'example:central')?.metadata?.mavenRepository
+  ).toBeUndefined();
+  expect(
+    requests.filter((url) => url.includes('/first/')).every((url) => url.startsWith(external))
+  ).toBe(true);
+  expect(
+    requests.filter((url) => url.includes('/second/')).every((url) => url.startsWith(another))
+  ).toBe(true);
+  expect(
+    requests
+      .filter((url) => url.includes('/central/'))
+      .every((url) => url.startsWith(MAVEN_CENTRAL_URL))
+  ).toBe(true);
+});
+
+it.each([false, true])(
+  'rejects conflicting shared artifact sources without overwriting either root selection (reverse=%s)',
+  async (reverse) => {
+    const dependency = `<dependencies><dependency>${coordinates('shared')}</dependency></dependencies>`;
+    addProject(external, 'external-root', dependency);
+    addProject(MAVEN_CENTRAL_URL, 'central-root', dependency);
+    addProject(external, 'shared');
+    addProject(MAVEN_CENTRAL_URL, 'shared');
+    const roots = [
+      {
+        id: 'external',
+        type: 'maven',
+        name: 'example:external-root',
+        version: '1.0',
+        metadata: { mavenRepository: external },
+      },
+      { id: 'central', type: 'maven', name: 'example:central-root', version: '1.0' },
+    ];
+    if (reverse) roots.reverse();
+    const result = await resolveAllDependencies(roots);
+    expect(result.failedPackages).toHaveLength(1);
+    expect(result.failedPackages[0].name).toBe(roots[1].name);
+    expect(result.failedPackages[0].error).toContain('Maven 저장소 충돌');
+    const shared = result.successfulPackages?.find((pkg) => pkg.name === 'example:shared');
+    expect(shared?.metadata?.mavenRepository || MAVEN_CENTRAL_URL).toBe(
+      reverse ? MAVEN_CENTRAL_URL : external
+    );
+  }
+);
+
+it('deduplicates a shared Central dependency after selected repository fallback', async () => {
+  const dependency = `<dependencies><dependency>${coordinates('shared')}</dependency></dependencies>`;
+  addProject(external, 'external-root', dependency);
+  addProject(MAVEN_CENTRAL_URL, 'central-root', dependency);
+  addProject(MAVEN_CENTRAL_URL, 'shared');
+  const result = await resolveAllDependencies([
+    {
+      id: 'external',
+      type: 'maven',
+      name: 'example:external-root',
+      version: '1.0',
+      metadata: { mavenRepository: external },
+    },
+    { id: 'central', type: 'maven', name: 'example:central-root', version: '1.0' },
+  ]);
+  expect(result.failedPackages).toEqual([]);
+  const shared = result.allPackages.filter((pkg) => pkg.name === 'example:shared');
+  expect(shared).toHaveLength(1);
+  expect(shared[0].metadata?.mavenRepository).toBe(MAVEN_CENTRAL_URL);
+});
+
+
+it('rejects different sources for the shared POM even when the JAR classifiers differ', async () => {
+  addProject(external, 'external-root', `<dependencies><dependency>${coordinates('shared')}<classifier>custom</classifier></dependency></dependencies>`);
+  addProject(MAVEN_CENTRAL_URL, 'central-root', `<dependencies><dependency>${coordinates('shared')}</dependency></dependencies>`);
+  addProject(external, 'shared');
+  addProject(MAVEN_CENTRAL_URL, 'shared');
+  const result = await resolveAllDependencies([
+    { id: 'external', type: 'maven', name: 'example:external-root', version: '1.0', metadata: { mavenRepository: external } },
+    { id: 'central', type: 'maven', name: 'example:central-root', version: '1.0' },
+  ]);
+  expect(result.failedPackages).toEqual([
+    expect.objectContaining({ name: 'example:central-root', error: expect.stringContaining('Maven 저장소 충돌') }),
+  ]);
 });

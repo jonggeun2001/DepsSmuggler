@@ -253,7 +253,7 @@ const electronAPI = {
     packages: (
       type: string,
       query: string,
-      options?: { channel?: string; registry?: string; indexUrl?: string }
+      options?: { channel?: string; registry?: string; indexUrl?: string; repositoryUrl?: string }
     ): Promise<{
       results: Array<{
         name: string;
@@ -263,12 +263,12 @@ const electronAPI = {
       }>;
       error?: QueryFailure;
     }> => ipcRenderer.invoke('search:packages', type, query, options),
-    suggest: (type: string, query: string, options?: { channel?: string }): Promise<string[]> =>
+    suggest: (type: string, query: string, options?: { channel?: string; repositoryUrl?: string }): Promise<string[]> =>
       ipcRenderer.invoke('search:suggest', type, query, options),
     versions: (
       type: string,
       packageName: string,
-      options?: { channel?: string; registry?: string; indexUrl?: string }
+      options?: { channel?: string; registry?: string; indexUrl?: string; repositoryUrl?: string }
     ): Promise<{ versions: string[]; error?: QueryFailure }> =>
       ipcRenderer.invoke('search:versions', type, packageName, options),
   },
@@ -322,7 +322,7 @@ const electronAPI = {
 
   // Maven 관련
   maven: {
-    parseProject: (content: string, options?: { mavenVersion?: string }): Promise<{
+    parseProject: (content: string, options?: { mavenVersion?: string; repositoryUrl?: string }): Promise<{
       success: boolean;
       packages: PackageInfo[];
       error?: string;

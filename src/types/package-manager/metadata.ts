@@ -15,6 +15,8 @@ export interface PackageMetadata {
     sha512?: string;
   };
   downloadUrl?: string;
+  /** Selected Maven repository for this package and its dependency closure. */
+  mavenRepository?: string;
   groupId?: string;
   artifactId?: string;
   registry?: string;

@@ -15,7 +15,7 @@ vi.mock('os', async (original) => ({
 
 // Explicit opt-in: exercise the user's real public repository without changing their settings.
 it.skipIf(process.env.DEPS_SMUGGLER_ALFRESCO_TEST !== '1')(
-  'downloads com.ibm.db2.jcc:db2jcc4:10.1 from the configured Alfresco repository',
+  'downloads com.ibm.db2.jcc:db2jcc4:10.1 from the selected Alfresco repository',
   async () => {
     testHome.path = await fs.mkdtemp(path.join(os.tmpdir(), 'depssmuggler-alfresco-'));
     const repository = 'https://artifacts.alfresco.com/nexus/content/repositories/public';
@@ -25,15 +25,15 @@ it.skipIf(process.env.DEPS_SMUGGLER_ALFRESCO_TEST !== '1')(
         mavenRepositories: [repository + '/'],
       });
       const downloader = new MavenDownloader();
-      expect(await downloader.searchPackages(name)).toMatchObject([{ name, version: '10.1' }]);
-      expect(await downloader.getVersions(name)).toContain('10.1');
-      const metadata = await downloader.getPackageMetadata(name, '10.1');
+      expect(await downloader.searchPackages(name, repository)).toMatchObject([{ name, version: '10.1' }]);
+      expect(await downloader.getVersions(name, repository)).toContain('10.1');
+      const metadata = await downloader.getPackageMetadata(name, '10.1', repository);
       expect(metadata.metadata?.downloadUrl).toBe(
         `${repository}/com/ibm/db2/jcc/db2jcc4/10.1/db2jcc4-10.1.jar`
       );
       const resolver = new MavenResolver();
       resolver.setCacheOptions({ cacheDir: path.join(testHome.path, 'cache') });
-      const resolved = await resolver.resolveDependencies(name, 'latest');
+      const resolved = await resolver.resolveDependencies(name, 'latest', { repositoryUrl: repository });
       expect(resolved.flatList).toMatchObject([{ name, version: '10.1' }]);
       const output = path.join(testHome.path, 'output');
       const files = await downloader.downloadPackageFiles(resolved.flatList[0], output);

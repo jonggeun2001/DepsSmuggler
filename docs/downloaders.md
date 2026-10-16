@@ -311,11 +311,13 @@ POM 파일은 모든 아티팩트에서 필수입니다. 일반 JAR를 받은 �
 
 ### 추가 Maven 저장소
 
-`settings.json`의 `mavenRepositories` URL 배열은 `core/shared/maven-repositories.ts`에서 읽습니다. Central을 먼저 조회하고 추가 저장소를 등록 순서로 시도합니다. 버전 목록은 저장소별 메타데이터를 병렬 조회하여 합치며, Electron과 CLI가 같은 `MavenDownloader.getVersions()`를 사용합니다. 추가 저장소가 있을 때 좌표 검색과 packaging 조회는 저장소 메타데이터/POM을 사용하므로 Central 검색 색인에 없어도 처리됩니다. 일반 키워드 검색은 Central 검색 API를 유지합니다.
+`searchPackages(query, repositoryUrl?)`, `getVersions(name, repositoryUrl?)`는 선택한 저장소를 조회합니다. 미지정 시 Central의 기존 검색 흐름을 유지하고, 외부 저장소에서는 `groupId:artifactId` 좌표와 `maven-metadata.xml`을 사용합니다. Electron/CLI에서 이 메서드를 공유합니다.
+
+다운로드는 `PackageInfo.metadata.mavenRepository`(또는 직접 아티팩트 API의 `MavenDownloadOptions.repositoryUrl`)를 사용합니다. 미지정 시 Central만, 외부 저장소 지정 시 해당 저장소 다음 Central만 조회합니다. `settings.json.mavenRepositories`는 UI에서 선택할 주소록이며 코어 조회는 이 목록을 읽지 않습니다. 패키지별 저장소를 유지해 다른 패키지의 URL을 조회하지 않으며, 의존성 해결 세션의 캐시 키도 조회 저장소를 구분합니다.
 
 다운로드는 같은 저장소의 SHA-1로 검증하며, 전달할 체크섬도 실제 저장된 파일과 일치하는 값만 포함합니다. 아티팩트 요청의 404/410, 서버·연결 오류는 다음 저장소로 진행하지만 취소·파일 쓰기·무결성 검증 오류는 즉시 실패합니다. 사용법과 제한은 [CLI 저장소 설정](cli.md#추가-maven-저장소)을 참고하세요.
 
-실제 공개 저장소 검증은 아래 명령으로 실행합니다. 사용자 설정을 바꾸지 않고 임시 설정으로 Alfresco 저장소의 `com.ibm.db2.jcc:db2jcc4:10.1`을 검색·버전 조회·의존성 해결·다운로드하며 JAR/POM과 SHA-1을 확인합니다. 일반 테스트 실행에서는 외부 네트워크 테스트를 건너뜁니다.
+실제 공개 저장소 검증은 아래 명령으로 실행합니다. 사용자 설정을 바꾸지 않고 패키지별 저장소 선택으로 Alfresco 저장소의 `com.ibm.db2.jcc:db2jcc4:10.1`을 검색·버전 조회·의존성 해결·다운로드하며 JAR/POM과 SHA-1을 확인합니다. 일반 테스트 실행에서는 외부 네트워크 테스트를 건너뜁니다.
 
 ```bash
 DEPS_SMUGGLER_ALFRESCO_TEST=1 bash scripts/verify-worktree.sh src/core/downloaders/maven-alfresco.integration.test.ts
@@ -369,7 +371,7 @@ packages/flink-metrics-1.20.5.pom
 
 ### 검색 결과 필드
 
-`searchPackages`는 추가 저장소가 없고 `groupId:artifactId` 좌표 입력이면 Sonatype의 `/api/internal/browse/component/versions`를 조회합니다. 좌표 조회 실패 시와 일반 키워드 입력 시에는 같은 호스트의 `/api/internal/browse/components`에 POST하여 인기도 순으로 검색합니다. `searchViaSearchApi`라는 내부 이름과 달리 이 키워드 경로는 search.maven.org가 아닙니다:
+`searchPackages`는 Central을 선택하고 `groupId:artifactId` 좌표 입력이면 Sonatype의 `/api/internal/browse/component/versions`를 조회합니다. 좌표 조회 실패 시와 일반 키워드 입력 시에는 같은 호스트의 `/api/internal/browse/components`에 POST하여 인기도 순으로 검색합니다. `searchViaSearchApi`라는 내부 이름과 달리 이 키워드 경로는 search.maven.org가 아닙니다:
 
 ```typescript
 interface PackageInfo {

@@ -1,3 +1,4 @@
+import { normalizeMavenRepositoryUrl } from '../../utils/maven-repositories';
 import * as path from 'path';
 import chalk from 'chalk';
 import cliProgress from 'cli-progress';
@@ -30,6 +31,7 @@ interface DownloadCommandOptions extends CliDownloadEnvironmentOptions {
   strict?: boolean;
   maxDepth?: string;
   concurrency: string;
+  mavenRepository?: string;
 }
 
 interface PreparedPackagesResult {
@@ -293,6 +295,10 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
 
   try {
     assertArchiveFormat(options.format);
+    if (options.mavenRepository !== undefined && options.type !== 'maven') {
+      throw new Error('--maven-repository는 Maven 패키지에만 사용할 수 있습니다.');
+    }
+    const mavenRepository = options.mavenRepository === undefined ? undefined : normalizeMavenRepositoryUrl(options.mavenRepository);
     const concurrency = parseConcurrency(options.concurrency);
     validateDownloadEnvironmentOptions(options);
     const maxDepth = parseMaxDepth(options.maxDepth ?? '5');
@@ -324,6 +330,7 @@ export async function downloadCommand(options: DownloadCommandOptions): Promise<
 
     packages = packages.map((pkg) => ({
       ...pkg,
+      ...(mavenRepository ? { metadata: { ...pkg.metadata, mavenRepository } } : {}),
       arch: options.arch,
     }));
 

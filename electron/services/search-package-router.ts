@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { getMavenRepositories } from '../../src/core/shared/maven-repositories';
 import { createScopedLogger } from '../utils/logger';
 import { sortByRelevance } from '../../src/core/shared';
 import {
@@ -27,17 +26,17 @@ export interface SearchPackageRouter {
   searchPackages(
     type: string,
     query: string,
-    options?: { channel?: string; registry?: string; indexUrl?: string }
+    options?: { channel?: string; registry?: string; indexUrl?: string; repositoryUrl?: string }
   ): Promise<SearchPackageResult[]>;
   getVersions(
     type: string,
     packageName: string,
-    options?: { channel?: string; registry?: string; indexUrl?: string }
+    options?: { channel?: string; registry?: string; indexUrl?: string; repositoryUrl?: string }
   ): Promise<string[]>;
   suggest(
     type: string,
     query: string,
-    options?: { channel?: string }
+    options?: { channel?: string; repositoryUrl?: string }
   ): Promise<string[]>;
 }
 
@@ -95,7 +94,7 @@ export function createSearchPackageRouter(): SearchPackageRouter {
           );
         }
         case 'maven':
-          return sortByRelevance(await searchMaven(query), query, 'maven');
+          return sortByRelevance(await searchMaven(query, options?.repositoryUrl), query, 'maven');
         case 'npm': {
           const npmResults = await getNpmDownloader().searchPackages(query);
           return sortByRelevance(
@@ -133,7 +132,7 @@ export function createSearchPackageRouter(): SearchPackageRouter {
             normalizeCondaChannel(options?.channel)
           );
         case 'maven':
-          return getMavenDownloader().getVersions(packageName);
+          return getMavenDownloader().getVersions(packageName, options?.repositoryUrl);
         case 'npm':
           return getNpmDownloader().getVersions(packageName);
         case 'docker':
@@ -152,7 +151,7 @@ export function createSearchPackageRouter(): SearchPackageRouter {
       }
 
       const channelKey = type === 'conda' ? `:${options?.channel || 'conda-forge'}` : '';
-      const repositoriesKey = type === 'maven' ? JSON.stringify(await getMavenRepositories()) : '';
+      const repositoriesKey = type === 'maven' ? options?.repositoryUrl || '' : '';
       const cacheKey = `${type}${channelKey}${repositoriesKey}:${query.toLowerCase()}`;
       const cached = suggestionCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -172,7 +171,7 @@ export function createSearchPackageRouter(): SearchPackageRouter {
             );
             break;
           case 'maven':
-            searchPromise = getMavenDownloader().searchPackages(query);
+            searchPromise = getMavenDownloader().searchPackages(query, options?.repositoryUrl);
             break;
           case 'docker':
             searchPromise = getDockerDownloader().searchPackages(query);
@@ -307,8 +306,8 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-async function searchMaven(query: string): Promise<SearchPackageResult[]> {
-  const results = await getMavenDownloader().searchPackages(query);
+async function searchMaven(query: string, repositoryUrl?: string): Promise<SearchPackageResult[]> {
+  const results = await getMavenDownloader().searchPackages(query, repositoryUrl);
   return results.map((pkg) => {
     const [groupId = '', artifactId = pkg.name] = pkg.name.split(':');
     return {

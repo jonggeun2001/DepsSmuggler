@@ -7,7 +7,7 @@ import type { CSSProperties } from 'react';
 export function MavenRepositorySettingsSection({ style }: { style?: CSSProperties }) {
   return (
     <Card
-      title="Maven 저장소"
+      title="저장한 Maven 저장소"
       size="small"
       style={style}
       styles={{ body: { padding: SETTINGS_CARD_BODY_PADDING } }}
@@ -15,8 +15,8 @@ export function MavenRepositorySettingsSection({ style }: { style?: CSSPropertie
       <Typography.Paragraph type="secondary">
         Maven Central: {MAVEN_CENTRAL_URL}
         <br />
-        Central 다음에 조회할 공개 저장소를 추가하세요. 외부 패키지는 groupId:artifactId로
-        검색합니다. 아래 설정 저장 버튼을 누르면 적용됩니다.
+        패키지 추가 화면에서 선택할 공개 저장소 주소를 관리합니다. 목록에 저장한 모든 주소를 자동 조회하지 않습니다.
+        아래 설정 저장 버튼을 누르면 목록에 적용됩니다.
       </Typography.Paragraph>
       <Form.List name="mavenRepositories">
         {(fields, { add, remove }) => (

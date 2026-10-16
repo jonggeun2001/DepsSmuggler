@@ -421,10 +421,10 @@ describe('dependency-resolver', () => {
       expect(firstResult.failedPackages).toEqual([]);
       expect(secondResult.failedPackages).toEqual([]);
 
-      expect(sessions).toHaveLength(8);
+      expect(sessions).toHaveLength(7);
       expect(sessions[0]).toBeInstanceOf(ResolutionSession);
       expect(new Set(sessions.slice(0, 4))).toEqual(new Set([sessions[0]]));
-      expect(new Set(sessions.slice(4, 8))).toEqual(new Set([sessions[4]]));
+      expect(new Set(sessions.slice(4, 7))).toEqual(new Set([sessions[4]]));
       expect(sessions[4]).not.toBe(sessions[0]);
     });
 

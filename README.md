@@ -84,7 +84,7 @@ depssmuggler --help
 
 YUM 저장소는 필요한 RPM 파일이 없거나 파일명이 충돌하면 생성을 중단합니다. 저장소 메타데이터의 파일명·크기·SHA-256은 실제 복사된 파일을 기준으로 만듭니다.
 
-설정의 **Maven 저장소 → 저장소 추가**에서 공개 HTTP(S) 저장소 URL을 입력한 뒤 **설정 저장**을 누르세요. 외부 저장소 패키지는 `groupId:artifactId`로 검색하며, GUI와 CLI가 같은 저장소 목록을 사용합니다. [조회 순서와 CLI 설정](docs/cli.md#추가-maven-저장소)을 참고하세요.
+**패키지 추가 → Maven 저장소**에서 공개 HTTP(S) 주소를 추가하고 선택하세요. 장바구니의 파일·텍스트 가져오기도 저장소를 지정할 수 있습니다. 선택한 주소는 패키지에 저장되며, 외부 저장소를 선택한 패키지는 해당 저장소와 Maven Central만 조회합니다. [검색 방식과 CLI 옵션](docs/cli.md#추가-maven-저장소)을 참고하세요.
 
 Maven 반출은 한 BFS에서 실제로 발견된 모든 버전의 원래 아티팩트와 POM·하위 의존성를 보존합니다. Parent POM의 일반 dependencies는 상속하고, 자식 문맥의 속성으로 상속된 관리 버전을 해석하며, 자식의 직접 `dependencyManagement` 선언은 부모보다 우선합니다. 같은 BOM GA를 다른 버전으로 자식이 다시 import하면 자식 import를 사용하고, 부모의 직접 관리 선언은 자식 import보다 우선합니다. BOM의 `dependencyManagement` 전체 라이브러리는 펼치지 않습니다. scope·optional·exclusion·탐색 깊이 제한은 유지됩니다.
 

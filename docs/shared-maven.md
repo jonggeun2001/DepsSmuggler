@@ -144,14 +144,16 @@ MavenResolver와 MavenDownloader가 공유하여 중복 API 호출을 방지합�
 
 병렬 함수의 `options`는 `MavenCacheOptions & { batchSize?: number }`이며 기본 배치 크기는 5입니다. `prefetchPomsParallel()`은 완료를 기다릴 수 없는 `void` 반환 함수이고, 완료가 필요하면 `await fetchPomsParallel()`을 사용합니다. 조회 실패한 POM은 병렬 조회 결과에서 빠집니다.
 
-`repoUrl`을 생략한 POM 조회는 Central 다음 `settings.json.mavenRepositories`에 등록된 저장소를 조회합니다. 명시한 `repoUrl`은 기존처럼 단일 저장소로 사용합니다. 메모리 캐시는 URL과 좌표로 구분하며, 추가 저장소의 디스크 캐시는 `_repositories/<URL의 SHA-256>/` 아래에 저장해 같은 좌표의 다른 POM이 섞이지 않도록 합니다. Central의 기존 캐시 경로는 유지합니다. 부모 POM·BOM·프로젝트 모델 수집도 이 경로를 사용합니다.
+`repositoryUrl`을 지정한 POM 조회는 선택한 저장소 다음 Central을 조회합니다. 선택이 없으면 Central만 사용합니다. 명시한 `repoUrl`은 기존처럼 단일 저장소 override로 사용합니다. 메모리 캐시는 URL과 좌표로 구분하며, 추가 저장소의 디스크 캐시는 `_repositories/<URL의 SHA-256>/` 아래에 저장합니다. 부모 POM·BOM·프로젝트 모델 수집에도 선택한 저장소를 전달합니다. 저장된 주소록은 코어 조회 범위를 넓히지 않습니다. Maven resolver는 각 root별로 생성하면서 같은 작업의 세션 캐시는 공유합니다. 세션 POM 결과에는 실제 저장소 URL도 보존해 Central 폴백 의존성의 출처를 확정합니다. 실제 출처가 다른 동일 아티팩트는 공통 목록에 병합하지 않고 해당 root의 해결 오류로 처리합니다.
 
 ### MavenCacheOptions
 
 ```typescript
 interface MavenCacheOptions {
-  /** 지정 시 해당 저장소만 사용. 생략 시 Central + 설정의 추가 저장소 */
+  /** 지정 시 해당 저장소만 사용하는 명시적 override */
   repoUrl?: string;
+  /** 선택한 패키지 저장소. Central을 폴백으로 사용 */
+  repositoryUrl?: string;
   /** 메모리 TTL (ms), 기본: 300000 (5분) */
   memoryTtl?: number;
   /** 디스크 TTL (ms), 기본: 86400000 (24시간) */

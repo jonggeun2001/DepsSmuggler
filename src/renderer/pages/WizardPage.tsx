@@ -1,3 +1,5 @@
+import { MavenRepositorySelector } from '../components/MavenRepositorySelector';
+import { MAVEN_CENTRAL_URL } from '../../utils/maven-repositories';
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
@@ -177,6 +179,8 @@ const WizardPage: React.FC = () => {
   const [dockerRegistry, setDockerRegistry] = useState<DockerRegistry>(defaultDockerRegistry);
   const [customRegistryUrl, setCustomRegistryUrl] = useState(dockerCustomRegistry);
 
+  const [mavenRepository, setMavenRepository] = useState(MAVEN_CENTRAL_URL);
+
   // pip 커스텀 인덱스 URL 상태
   const [useCustomIndex, setUseCustomIndex] = useState(false);
   const [customIndexUrl, setCustomIndexUrl] = useState('');
@@ -277,6 +281,7 @@ const WizardPage: React.FC = () => {
       condaChannel,
       dockerRegistry,
       customRegistryUrl,
+      mavenRepository,
       useCustomIndex,
       customIndexUrl,
       yumDistribution,
@@ -343,6 +348,7 @@ const WizardPage: React.FC = () => {
         ...(LIBRARY_PACKAGE_TYPES.includes(packageType) && { targetOS: defaultTargetOS }),
         // Docker 이미지 메타데이터
         ...dockerMetadata,
+        ...(packageType === 'maven' && mavenRepository !== MAVEN_CENTRAL_URL && { mavenRepository }),
         // OS 패키지 전체 정보 (의존성 해결에 사용)
         ...(OS_PACKAGE_TYPES.includes(packageType) && selectedPackage.osPackageInfo && {
           osPackageInfo: selectedPackage.osPackageInfo,
@@ -680,6 +686,13 @@ const WizardPage: React.FC = () => {
             {/* 패키지 타입별 환경 설정 정보 바 */}
             {renderEnvironmentInfoBar()}
 
+            {packageType === 'maven' && (
+              <MavenRepositorySelector value={mavenRepository} onChange={repository => {
+                setMavenRepository(repository);
+                resetSearch();
+              }} />
+            )}
+
             {/* Docker 타입일 때 레지스트리 선택 UI */}
             {packageType === 'docker' && (
               <div style={{ marginBottom: 16 }}>
@@ -869,6 +882,9 @@ const WizardPage: React.FC = () => {
                     </Tag>
                   )}
                 </Text>
+                {packageType === 'maven' && (
+                  <div><Text type="secondary">저장소: {mavenRepository === MAVEN_CENTRAL_URL ? 'Maven Central' : mavenRepository}</Text></div>
+                )}
                 <Divider />
                 {versionError && <QueryFailureAlert version failure={versionError} loading={loadingVersions} onRetry={() => { void handleSelectPackage(selectedPackage); }} />}
                 <div style={{ marginBottom: 16 }}>

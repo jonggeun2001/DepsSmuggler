@@ -32,13 +32,13 @@ function effectiveValue(
  * aggregator. The aggregator itself is returned first so its parent and
  * dependency metadata remain available to the normal Maven closure resolver.
  */
-export async function loadMavenSurefireProviders(version: string): Promise<MavenCoordinate[]> {
+export async function loadMavenSurefireProviders(version: string, repositoryUrl?: string): Promise<MavenCoordinate[]> {
   if (!/^\d+(?:\.\d+)+(?:[-.][A-Za-z0-9][A-Za-z0-9.-]*)?$/.test(version)) {
     throw new Error(`Invalid Maven Surefire version: ${version}`);
   }
 
   const aggregate = coordinate('surefire-providers', version, 'pom');
-  const pom = await fetchPom(aggregate);
+  const pom = await (repositoryUrl ? fetchPom(aggregate, { repositoryUrl }) : fetchPom(aggregate));
   if (
     pom.artifactId !== undefined && pom.artifactId !== aggregate.artifactId
     || effectiveValue(pom, 'groupId', SUREFIRE_GROUP) !== SUREFIRE_GROUP
@@ -56,7 +56,9 @@ export async function loadMavenSurefireProviders(version: string): Promise<Maven
   for (const artifactId of modules) {
     if (!PROVIDER_ARTIFACTS.has(artifactId)) continue;
     const expected = coordinate(artifactId, version);
-    const providerPom = await fetchPom({ ...expected, type: 'pom' });
+    const providerPom = await (repositoryUrl
+      ? fetchPom({ ...expected, type: 'pom' }, { repositoryUrl })
+      : fetchPom({ ...expected, type: 'pom' }));
     const actualGroupId = effectiveValue(providerPom, 'groupId', SUREFIRE_GROUP);
     const actualVersion = effectiveValue(providerPom, 'version', version);
     if (actualGroupId !== SUREFIRE_GROUP || actualVersion !== version || providerPom.artifactId !== artifactId) {

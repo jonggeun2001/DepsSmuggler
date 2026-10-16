@@ -44,6 +44,7 @@ program
   .option('--cuda-version <version>', 'CUDA 버전 (예: 12.4)')
   .option('--conda-channel <channel>', 'Conda 채널', 'conda-forge')
   .option('--classifier <classifier>', 'Maven classifier')
+  .option('--maven-repository <url>', '이번 다운로드에 사용할 Maven 저장소 URL')
   .option('-o, --output <path>', '출력 경로', './output')
   .option('-f, --format <format>', '출력 형식 (zip, tar.gz)', 'zip')
   .option('--file <file>', '줄 단위 패키지 목록 파일 (requirements.txt, Maven 좌표 목록 등)')
@@ -137,6 +138,7 @@ program
   .argument('<query>', '검색어')
   .option('-t, --type <type>', '패키지 타입', 'pip')
   .option('-l, --limit <num>', '결과 수 제한', '20')
+  .option('--maven-repository <url>', '검색할 Maven 저장소 URL')
   .action(async (query, options) => {
     const { searchCommand } = await import('./commands/search');
     await searchCommand(query, options);

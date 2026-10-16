@@ -34,6 +34,17 @@ describe('project POM package collection', () => {
     vi.mocked(collectMavenManagedPackages).mockResolvedValue([]);
   });
 
+  it('keeps the selected repository for parent models, dependencies and generated plugins', async () => {
+    const repositoryUrl = 'https://repo.example.com/releases';
+    vi.mocked(fetchPom).mockResolvedValue({ groupId: 'org', artifactId: 'parent', version: '1' });
+    const result = await collectMavenProjectPackages(project(`
+      <parent><groupId>org</groupId><artifactId>parent</artifactId><version>1</version></parent>
+      <dependencies><dependency><groupId>lib</groupId><artifactId>api</artifactId><version>1</version></dependency></dependencies>`), { repositoryUrl });
+    expect(fetchPom).toHaveBeenCalledWith(expect.objectContaining({ groupId: 'org', artifactId: 'parent' }), { repositoryUrl });
+    expect(result.length).toBeGreaterThan(2);
+    for (const pkg of result) expect(pkg.metadata?.mavenRepository).toBe(repositoryUrl);
+  });
+
   it('resolves properties and retains provided/test roots alongside package lifecycle plugins, without downloading the local project', async () => {
     const result = await collectMavenProjectPackages(project(`<properties><v>1.2</v></properties>
       <dependencies>
@@ -140,7 +151,7 @@ describe('project POM package collection', () => {
     ]);
     const pom = project(`<build><plugins>${plugin('maven-surefire-plugin', '<version>3.2.5</version>')}</plugins></build>`);
     const result = await collectMavenProjectPackages(pom);
-    expect(loadMavenSurefireProviders).toHaveBeenCalledWith('3.2.5');
+    expect(loadMavenSurefireProviders).toHaveBeenCalledWith('3.2.5', undefined);
     expect(result).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'org.apache.maven.surefire:surefire-junit-platform', version: '3.2.5' }),
       expect.objectContaining({ name: 'org.apache.maven.surefire:surefire-providers', metadata: expect.objectContaining({ type: 'pom' }) }),
