@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { registerOSCommands } from './commands/os';
-import { getPackageVersion } from './version';
+import { assertSupportedNodeVersion, getPackageVersion } from './version';
 import { logger } from '../utils/logger';
 import { maskString } from '../utils/mask';
 import { createCaCommand } from './commands/ca';
@@ -163,6 +163,7 @@ program.exitOverride((err) => {
 registerOSCommands(program);
 
 program.hook('preAction', async (_command, actionCommand) => {
+  assertSupportedNodeVersion();
   let topLevel = actionCommand;
   while (topLevel.parent && topLevel.parent !== program) topLevel = topLevel.parent;
   // Keep local configuration and recovery commands usable even if the CA store is damaged.

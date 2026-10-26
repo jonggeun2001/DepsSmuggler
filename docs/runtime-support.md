@@ -2,25 +2,29 @@
 
 ## 현재 계약
 
-2026-09-13 기준 소스·CLI·개발 도구의 지원 범위입니다. 다운로드할 패키지의 대상 OS·아키텍처와 이 앱을 실행하는 환경은 별개입니다.
+2026-10-26 기준 소스·CLI·개발 도구의 지원 범위입니다. 다운로드할 패키지의 대상 OS·아키텍처와 이 앱을 실행하는 환경은 별개입니다.
 
 | 대상 | 계약 | 검증 |
 |------|------|------|
-| 독립 CLI·소스 개발 | Node `^22.13.0 || ^24.0.0` | 최소 22.13.0의 실제 CLI, Node 24의 3개 OS 테스트·빌드 |
+| 독립 CLI·소스 개발 | Node `^22.23.4 || ^24.22.1` | 최소 22.23.4/24.22.1의 실제 CLI, Node 24.22.1의 3개 OS 테스트·빌드 |
 | 패키지 관리자 | npm `11.8.0` | `packageManager` 선언과 CI 명시 설치 |
 | Node 타입 | `@types/node` 22 계열 | renderer 포함 운영 설정, Electron/CJS 설정 및 테스트 전용 설정 검사 |
 | 배포 GUI | Electron 44 계열의 내장 Chromium·Node | 바이너리 확인, 패키징된 앱 실행·IPC·업데이트 다운로드 |
 | macOS GUI | macOS 13 이상 | 번들 `13.0.0`, 업데이트 피드 Darwin `22.0.0` |
 
-Node 22와 24는 점검일 기준 지원 중인 LTS이며, Node 20·23·25는 EOL입니다. 새 환경에는 Node 24의 최신 보안 패치를 사용합니다. 22.13.0은 호환성 하한 검사 버전이며 운영 환경에 오래된 패치를 권장하는 의미는 아닙니다. 새 major를 검증하기 전에는 engines 범위를 확장하지 않습니다. [Node 공식 릴리스 상태](https://nodejs.org/en/about/previous-releases)
+Node 22와 24는 점검일 기준 지원 중인 LTS이며, Node 20·23·25는 EOL입니다. 새 환경에는 Node 24의 최신 보안 패치를 사용합니다. Node2Shell(CVE-2026-111497) 수정이 포함된 22.23.4/24.22.1을 보안 하한으로 사용합니다. 새 major를 검증하기 전에는 engines 범위를 확장하지 않습니다. [Node 공식 릴리스 상태](https://nodejs.org/en/about/previous-releases)
 
-Node 22.13.0은 jsdom의 22 계열 최소 조건과 Electron 설치기·Vite·패키징 도구의 22.12 이상 조건을 함께 충족합니다. 빌드 CLI는 CommonJS이고 chalk·ora 같은 ESM 의존성을 불러옵니다. Node 22.12부터 별도 플래그 없이 동기 ESM을 `require()`할 수 있으며 22.13부터 기본 실험 경고가 제거됐습니다. 이 경계를 실제 하위 프로세스로 검사합니다. [Node 22.13의 CommonJS/ESM 문서](https://nodejs.org/download/release/v22.13.0/docs/api/modules.html#loading-ecmascript-modules-using-require)
+이전 호환성 하한 22.13.0은 jsdom과 Electron 설치기·Vite·패키징 조건을 충족했지만, 현재는 Brotli 보안 패치 때문에 더 높은 버전을 요구합니다. 빌드 CLI는 CommonJS이고 chalk·ora 같은 ESM 의존성을 불러옵니다. Node 22.12부터 별도 플래그 없이 동기 ESM을 `require()`할 수 있으며 22.13부터 기본 실험 경고가 제거됐습니다. 이 경계를 실제 하위 프로세스로 검사합니다. [Node 22.13의 CommonJS/ESM 문서](https://nodejs.org/download/release/v22.13.0/docs/api/modules.html#loading-ecmascript-modules-using-require)
 
 루트 `package.json`은 `type: module`이며 Vite renderer와 `.mjs` 운영 스크립트가 이 경계를 사용합니다. `tsconfig.electron.json`은 main·preload·core·CLI를 CommonJS로 출력하고 빌드가 `dist/package.json`에 `type: commonjs`를 기록합니다. 패키징 앱에도 `extraMetadata.type: commonjs`를 적용합니다. Electron의 내장 Node는 시스템 Node와 별개이므로 GUI 사용자는 Node를 따로 설치할 필요가 없습니다.
 
+개발 기본 버전은 `.nvmrc`의 `24.22.1`입니다. `.npmrc`의 `engine-strict=true`로 잘못된 Node에서 설치를 거부합니다. `npm run dev`, `dev:electron`, `build`, `build:electron`의 사전 검사는 Node 범위와 설치된 Electron 패키지 버전이 lockfile과 같은지 확인합니다. 오래된 `node_modules`가 남아 있으면 지원되는 Node에서 `npm ci`로 동기화합니다. `npm test`의 사전 검사는 호스트 Node를 확인합니다.
+
+독립 CLI는 source/built/packed 공통 엔트리포인트의 `preAction`에서 같은 `engines.node`를 검사하므로 `--engine-strict=false`로 설치했어도 취약한 Node에서 명령을 실행할 수 없습니다. 도움말·버전 출력은 진단을 위해 허용합니다. GUI의 내장 Node에는 이 호스트 Node 하한을 그대로 적용하지 않습니다. Electron은 Chromium의 Brotli를 링크하므로 실제 수정 코드와 배포 바이너리를 함께 확인합니다.
+
 ## 최소 환경 검증
 
-선택한 Node 22.13.0 환경에서 다음을 실행합니다. CI의 `runtime-contract` 잡도 같은 테스트를 사용합니다.
+선택한 Node 22.23.4 또는 24.22.1 환경에서 다음을 실행합니다. CI의 `runtime-contract` 잡도 같은 테스트를 사용합니다.
 
 ```bash
 node --version
@@ -36,7 +40,7 @@ CLI 테스트는 소스 실행, 빌드, 배포와 같은 디렉터리 구조에�
 
 ## 추가 CA 런타임 호환성
 
-Electron의 추가 CA는 내장 Node의 기본 CA 설정 API를 사용합니다. CLI는 기존 지원 하한을 유지하고 모든 지원 버전에서 CA를 합친 임시 PEM과 `NODE_EXTRA_CA_CERTS`로 같은 명령을 다시 실행합니다. OpenSSL CA 옵션과 환경을 그대로 전달해 기존 신뢰도 보존합니다. `root-ca.integration.test.ts`를 runtime-contract 잡에서도 실행해 실제 Node 22.13의 신뢰 확장·OpenSSL 신뢰 보존·종료 코드 전달을 확인합니다. [추가 루트 CA](root-ca.md)
+Electron의 추가 CA는 내장 Node의 기본 CA 설정 API를 사용합니다. CLI는 기존 지원 하한을 유지하고 모든 지원 버전에서 CA를 합친 임시 PEM과 `NODE_EXTRA_CA_CERTS`로 같은 명령을 다시 실행합니다. OpenSSL CA 옵션과 환경을 그대로 전달해 기존 신뢰도 보존합니다. `root-ca.integration.test.ts`를 runtime-contract 잡에서도 실행해 실제 Node 22.23.4/24.22.1의 신뢰 확장·OpenSSL 신뢰 보존·종료 코드 전달을 확인합니다. [추가 루트 CA](root-ca.md)
 
 ## Electron major 갱신 검증
 

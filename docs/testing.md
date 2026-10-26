@@ -6,9 +6,9 @@
 
 ## 로컬 검증 명령
 
-추가 CA 검증은 `root-ca-store.test.ts`, `root-ca.integration.test.ts`, `root-ca-handlers.test.ts`, `RootCaSettingsSection.test.tsx`로 구성합니다. CLI 통합 테스트는 실제 로컬 TLS 서버와 새 프로세스를 사용해 등록 전/후 및 해제 후의 신뢰, 기존 환경·OpenSSL CA 보존, Axios/HTTPS/fetch와 CLI 재실행을 확인합니다. `main-lifecycle.test.ts`는 CA 적용과 사전 조회의 순서도 검증합니다. Node 22.13/24 runtime-contract에도 포함합니다. [상세 실행 방법](root-ca.md#검증)
+추가 CA 검증은 `root-ca-store.test.ts`, `root-ca.integration.test.ts`, `root-ca-handlers.test.ts`, `RootCaSettingsSection.test.tsx`로 구성합니다. CLI 통합 테스트는 실제 로컬 TLS 서버와 새 프로세스를 사용해 등록 전/후 및 해제 후의 신뢰, 기존 환경·OpenSSL CA 보존, Axios/HTTPS/fetch와 CLI 재실행을 확인합니다. `main-lifecycle.test.ts`는 CA 적용과 사전 조회의 순서도 검증합니다. Node 22.23.4/24.22.1 runtime-contract에도 포함합니다. [상세 실행 방법](root-ca.md#검증)
 
-`package.json`의 `engines.node`는 `^22.13.0 || ^24.0.0`, `packageManager`는 `npm@11.8.0`입니다. 테스트·릴리스 CI는 Node 24와 npm 11.8.0을 사용하며, 별도 runtime-contract 잡은 Node 22.13.0과 24에서 의존성 설치와 실제 CLI/CJS·ESM 경계를 검사합니다. Node 22 타입을 기준으로 컴파일합니다. 전체 도구의 최소 조건과 Electron 내장 Node의 차이는 [런타임 지원 정책](runtime-support.md)에 정리했습니다.
+`package.json`의 `engines.node`는 `^22.23.4 || ^24.22.1`, `packageManager`는 `npm@11.8.0`입니다. 테스트·릴리스 CI는 Node 24.22.1과 npm 11.8.0을 사용하며, 별도 runtime-contract 잡은 Node 22.23.4와 24.22.1에서 의존성 설치와 실제 CLI/CJS·ESM 경계를 검사합니다. Node 22 타입을 기준으로 컴파일합니다. 전체 도구의 최소 조건과 Electron 내장 Node의 차이는 [런타임 지원 정책](runtime-support.md)에 정리했습니다.
 
 ```bash
 # 표준 worktree 검증 진입점
@@ -550,8 +550,8 @@ UI 수동 검증과 E2E 전환 계획은 별도 문서로 관리합니다.
 
 주요 잡:
 
-- `test`: Ubuntu/Windows/macOS + Node 24에서 `npm ci`, `npm test`, `npm run build`, CLI `--version`, `--help`
-- `runtime-contract`: Ubuntu + Node 22.13.0/24에서 엄격한 engines 설치 검사와 소스·빌드·배포 형태 CLI, macOS ESM 패키징 스크립트 회귀 실행
+- `test`: Ubuntu/Windows/macOS + Node 24.22.1에서 `npm ci`, `npm test`, `npm run build`, CLI `--version`, `--help`
+- `runtime-contract`: Ubuntu + Node 22.23.4/24.22.1에서 엄격한 engines 설치 검사와 소스·빌드·배포 형태 CLI, macOS ESM 패키징 스크립트 회귀 실행
 - `lint`: `npm run lint`로 ESLint 실행
 - `typecheck`: 운영 설정 두 개의 `npx tsc --noEmit`, `npx tsc --noEmit -p tsconfig.electron.json` 및 별도 `npm run typecheck:tests`
 - `e2e`: Chromium 설치 후 `npm run test:e2e`, 실패 시 Playwright 보고서와 결과 artifact 업로드
@@ -723,3 +723,9 @@ bash scripts/verify-worktree.sh src/core/downloaders/npm-integrity-streaming.tes
 `electron/version-startup-sharing.integration.test.ts`는 실제 handler 등록·preloader·fetcher를 연결하고 지연 transport로 두 시작 경로와 조기 Python/CUDA IPC를 겹칩니다. 종류별 호출 1회, 동일 Promise와 완료 캐시 재사용, TTL 만료, 실제 파일 캐시 읽기 공유를 확인합니다. 하드코딩/만료 캐시 fallback resolve 뒤 fetcher 재조회, 기존 IPC fallback 세션 유지, 예외 reject 뒤 pending 해제도 포함합니다. 기존 `version-fetcher.test.ts`, `version-preloader.test.ts`, `version-handlers.test.ts`를 함께 실행합니다.
 
 실제 외부 네트워크를 호출하지 않는 전후 요청 수 재현은 [Python/CUDA 버전 조회 공유](version-request-sharing.md)의 `scripts/profile-version-preload.mjs`를 사용합니다. preloader의 success를 원격 조회 성공으로 해석하거나 IPC fallback 자동 회복을 구현했다고 주장하지 않습니다.
+
+## Node2Shell 런타임 회귀
+
+`src/cli/runtime.test.ts`는 패치 하한 직전/직후와 지원하지 않는 major를 검사합니다. `runtime.integration.test.ts`는 실제 소스 CLI 프로세스에 이전 Node 버전 식별자를 주입하고, 명령 실패와 로컬 저장소 HTTP trap의 요청 0회를 확인합니다. 또 오래된 Electron 메타데이터로 개발 사전 검사를 실행해 lockfile 불일치가 시작 전에 거부되는지 검사합니다. 악성 Brotli 입력은 사용하지 않습니다.
+
+`maven-repository-connection.test.ts`는 정상 Brotli 본문을 보내는 로컬 서버에서 URL 연결 테스트가 `createBrotliDecompress`를 호출하지 않는지 확인합니다. 입력 주소 연결 확인은 본문이 필요 없으므로 `decompress: false`이며 다른 다운로드·메타데이터 요청의 보안은 패치된 런타임이 담당합니다.

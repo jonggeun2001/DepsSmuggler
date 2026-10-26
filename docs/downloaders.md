@@ -311,7 +311,7 @@ POM 파일은 모든 아티팩트에서 필수입니다. 일반 JAR를 받은 �
 
 ### 추가 Maven 저장소
 
-`testMavenRepositoryConnection(url)`은 설정/추가 화면의 연결 테스트용입니다. URL 검증 후 입력한 주소만 조회하며 저장소 목록을 순회하지 않습니다. 성공/HTTP 상태와 사용자용 오류 메시지를 반환하고, 10초 제한 및 최대 5회 리디렉션을 적용합니다. 응답 스트림은 헤더 수신 직후 닫습니다. 이 결과는 접속 확인이며 아티팩트 검색·형식 검증 결과가 아닙니다.
+`testMavenRepositoryConnection(url)`은 설정/추가 화면의 연결 테스트용입니다. URL 검증 후 입력한 주소만 조회하며 저장소 목록을 순회하지 않습니다. 성공/HTTP 상태와 사용자용 오류 메시지를 반환하고, 10초 제한 및 최대 5회 리디렉션을 적용합니다. 본문이 필요 없으므로 `decompress: false`로 자동 압축 해제를 끄고 응답 스트림은 헤더 수신 직후 닫습니다. 이 결과는 접속 확인이며 아티팩트 검색·형식 검증 결과가 아닙니다.
 
 `searchPackages(query, repositoryUrl?)`, `getVersions(name, repositoryUrl?)`는 선택한 저장소를 조회합니다. 미지정 시 Central의 기존 검색 흐름을 유지하고, 외부 저장소에서는 `groupId:artifactId` 좌표와 `maven-metadata.xml`을 사용합니다. Electron/CLI에서 이 메서드를 공유합니다.
 
