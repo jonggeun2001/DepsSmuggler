@@ -18,6 +18,7 @@ export async function testMavenRepositoryConnection(
   try {
     const response = await axios.get<Readable>(`${repositoryUrl}/`, {
       responseType: 'stream',
+      decompress: false,
       timeout: 10000,
       signal: AbortSignal.timeout(10000),
       maxRedirects: 5,

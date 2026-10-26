@@ -5,7 +5,7 @@
   "description": "폐쇄망 환경을 위한 패키지 의존성 다운로드 및 전달 애플리케이션",
   "main": "dist/electron/main.js",
   "engines": {
-    "node": "^22.13.0 || ^24.0.0"
+    "node": "^22.23.4 || ^24.22.1"
   },
   "packageManager": "npm@11.8.0",
   "scripts": {
@@ -34,7 +34,12 @@
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "lint:fix": "eslint . --ext .ts,.tsx,.js,.jsx --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json}\" \"electron/**/*.{ts,js}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json}\" \"electron/**/*.{ts,js}\""
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json}\" \"electron/**/*.{ts,js}\"",
+    "predev": "node scripts/check-runtime.cjs --electron",
+    "predev:electron": "node scripts/check-runtime.cjs --electron",
+    "prebuild": "node scripts/check-runtime.cjs --electron",
+    "prebuild:electron": "node scripts/check-runtime.cjs --electron",
+    "pretest": "node scripts/check-runtime.cjs"
   },
   "bin": {
     "depssmuggler": "./dist/src/cli/index.js"

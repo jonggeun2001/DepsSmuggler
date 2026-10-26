@@ -31,6 +31,7 @@ it('checks the normalized URL once and closes the response stream', async () => 
     'https://repo.example.com/releases/',
     expect.objectContaining({
       responseType: 'stream',
+      decompress: false,
       timeout: 10000,
       maxRedirects: 5,
       signal: expect.any(AbortSignal),
@@ -94,6 +95,29 @@ it('follows a real redirect and finishes on headers without downloading an unfin
     const result = await testMavenRepositoryConnection(`http://127.0.0.1:${address.port}/repo`);
     expect(result).toMatchObject({ success: true, status: 200 });
     expect(requests).toEqual(['/repo/', '/final/']);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it('does not invoke Brotli decompression even when a server sends Content-Encoding: br', async () => {
+  const zlib = await import('node:zlib');
+  const decompress = vi.spyOn(zlib.default, 'createBrotliDecompress');
+  const body = zlib.brotliCompressSync(Buffer.from('connection check only'));
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { 'Content-Encoding': 'br', 'Content-Length': body.length });
+    response.end(body);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  try {
+    expect(await testMavenRepositoryConnection(`http://127.0.0.1:${address.port}`)).toMatchObject({
+      success: true,
+      status: 200,
+    });
+    expect(decompress).not.toHaveBeenCalled();
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
