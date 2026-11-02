@@ -8,7 +8,7 @@ CLI 엔트리포인트는 `src/cli/index.ts`이며 Commander 기반으로 구성
 
 ## 실행
 
-`npm run cli`는 `scripts/cli.cjs`에서 `ts-node`를 등록해 `src/cli/index.ts`를 실행합니다. 빌드 산출물과 `package.json`의 `bin` 경로는 `dist/src/cli/index.js`입니다. 소스·독립 CLI는 Node 22.13 이상인 22.x 또는 24.x와 npm 11.8.0을 사용합니다. 설치된 GUI의 내장 Node와는 별개이며, CJS/ESM 경계와 최소 버전 검증은 [런타임 지원 정책](./runtime-support.md)을 참고합니다.
+`npm run cli`는 `scripts/cli.cjs`에서 `ts-node`를 등록해 `src/cli/index.ts`를 실행합니다. 빌드 산출물과 `package.json`의 `bin` 경로는 `dist/src/cli/index.js`입니다. 소스·독립 CLI는 Node 22.23.4 이상인 22.x 또는 24.22.1 이상인 24.x와 npm 11.8.0을 사용합니다. 설치된 GUI의 내장 Node와는 별개이며, CJS/ESM 경계와 최소 버전 검증은 [런타임 지원 정책](./runtime-support.md)을 참고합니다.
 
 ```bash
 # 로컬 개발 실행
@@ -22,6 +22,8 @@ npm run build
 npm install -g .
 depssmuggler --help
 ```
+
+CLI 명령 실행 전 `engines.node`를 검사하며 보안 하한에 미달하거나 지원하지 않는 major이면 네트워크 요청 전에 종료합니다. `--help`와 `--version`은 런타임 진단을 위해 사용할 수 있습니다.
 
 ## 버전 확인
 

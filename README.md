@@ -41,7 +41,7 @@
 
 ## 빠른 시작
 
-소스 실행에는 Git, **Node.js 22.13 이상인 22.x 또는 24.x**, **npm 11.8.0**이 필요합니다. 새 개발 환경에는 Node.js 24의 최신 패치를 권장하며 테스트·릴리스 CI도 Node.js 24를 사용합니다. 설치된 Electron 앱은 내장 Node를 사용하므로 별도 Node 설치가 필요하지 않습니다. 최소 버전 검증과 갱신 기준은 [런타임 지원 정책](docs/runtime-support.md)을 참고하세요.
+소스 실행에는 Git, **Node.js 22.23.4 이상인 22.x 또는 24.22.1 이상인 24.x**, **npm 11.8.0**이 필요합니다. 개발 기본 버전은 `.nvmrc`의 24.22.1이며 테스트·릴리스 CI도 패치 버전을 고정합니다. `.npmrc`가 지원 범위 밖의 의존성 설치를 거부하고, 개발·빌드 시작 시 Node 및 설치된 Electron과 lockfile의 일치 여부를 확인합니다. 설치된 Electron 앱은 내장 Node를 사용하므로 별도 Node 설치가 필요하지 않습니다. 최소 버전 검증과 갱신 기준은 [런타임 지원 정책](docs/runtime-support.md)을 참고하세요.
 
 ```bash
 git clone https://github.com/jonggeun2001/DepsSmuggler.git

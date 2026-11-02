@@ -2,6 +2,18 @@
 
 지원 중인 Node·npm·Electron 조합, 최소 버전 검증과 지원 종료 점검 주기는 [런타임 지원 정책](runtime-support.md)을 따릅니다.
 
+## 2026-10-26 Node2Shell 대응
+
+[Node.js 보안 공지](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)의 CVE-2026-111497은 공격자가 제공한 Brotli 본문을 해제할 때 발생하는 런타임 취약점입니다. Node 하한을 `^22.23.4 || ^24.22.1`로 올리고 package/lockfile, `.nvmrc`, 엄격한 npm 설치 설정과 테스트·릴리스 CI를 맞췄습니다. CLI는 명령 실행 전에 Node 범위를 검사하고, 개발·빌드 사전 검사에서는 오래된 Electron 설치가 lockfile과 다르면 `npm ci`를 안내합니다.
+
+URL 연결 테스트는 헤더만 사용하므로 `decompress: false`로 Brotli를 포함한 자동 압축 해제를 하지 않습니다. 일반 다운로드·검색·메타데이터의 압축 해제는 계속 필요하므로 이 한 요청의 보완이 패치 런타임을 대체하지는 않습니다.
+
+Electron 44.3.0은 Node 24.20.0을 표시하지만 [공식 빌드 패치](https://raw.githubusercontent.com/electron/electron/v44.3.0/patches/node/build_add_gn_build_files.patch)에서 Chromium Brotli를 링크합니다. Chromium 152.0.7977.78의 Brotli revision `cfa184a997ac19454d5a3ae97f6d600aac2445a6`은 [수정 커밋 `0ed4268`](https://github.com/google/brotli/commit/0ed4268a4401abcb4472096340477cf4af7d1a2b)을 포함합니다. 공개 v0.2.33 macOS ARM64 ZIP의 SHA-256 `be5e65d028be907db00db4d0843e1e59b59f5b1afdd822855cc43fefcd1dd911`을 GitHub 자산 digest와 대조하고 Framework 안에서 수정 식별자 `FORMAT_BLOCK_SWITCH`를 확인했습니다. Windows/Linux의 실제 파일은 직접 검사하지 않았으며 동일 공식 빌드 소스 기준입니다. 이 PR에서 Electron 버전은 변경하지 않습니다.
+
+2026-10-26의 별도 `npm audit` 결과는 전체 Critical 3 / High 8 / Moderate 9 / Low 2입니다. DOMPurify·Electron 인증서/권한·shell-quote 등 별도 advisory가 포함되며 Node2Shell 대응만으로 전체 audit가 해소됐다고 판단하지 않습니다. 해당 패키지의 버전 변경은 이번 런타임 대응 범위에 포함하지 않았습니다.
+
+검증은 패치된 Node와 npm 11.8.0으로 `scripts/verify-worktree.sh`의 런타임/CLI·Maven 연결 테스트, 실제 CLI 버전/CJS·ESM 및 CA 회귀, 운영·테스트 타입 검사와 CI를 사용합니다. [런타임 지원 정책](runtime-support.md), [회귀 테스트](testing.md#node2shell-런타임-회귀)를 참고하세요.
+
 ## 2026-09-13 갱신 · 이슈 #157
 
 앱이 사용하는 archive·HTTP·업데이트·메일 의존성과 개발/패키징 도구의 Critical/High 항목을 갱신했습니다. 모든 버전을 반입하는 의존성 해결 정책과 사용자 설정 형식은 유지합니다.

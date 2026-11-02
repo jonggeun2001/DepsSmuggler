@@ -61,4 +61,4 @@ bash scripts/verify-worktree.sh \
   src/renderer/pages/settings/RootCaSettingsSection.test.tsx
 ```
 
-실제 로컬 HTTPS 서버를 사용해 미등록 실패 → CLI 등록 → Axios/HTTPS/fetch 성공 → 해제 후 실패를 확인합니다. 기존 환경·OpenSSL CA 보존, 호스트 이름 불일치 거부, PEM/DER 및 손상 입력, IPC 취소/실패, UI 저장 결과와 재시작 안내도 검증합니다. `electron/main-lifecycle.test.ts`는 검색·버전 사전 조회와 창 로드보다 CA 적용이 먼저인지 확인합니다. CI의 Node 22.13 런타임 검사에도 CA 통합 테스트를 포함합니다.
+실제 로컬 HTTPS 서버를 사용해 미등록 실패 → CLI 등록 → Axios/HTTPS/fetch 성공 → 해제 후 실패를 확인합니다. 기존 환경·OpenSSL CA 보존, 호스트 이름 불일치 거부, PEM/DER 및 손상 입력, IPC 취소/실패, UI 저장 결과와 재시작 안내도 검증합니다. `electron/main-lifecycle.test.ts`는 검색·버전 사전 조회와 창 로드보다 CA 적용이 먼저인지 확인합니다. CI의 Node 22.23.4 런타임 검사에도 CA 통합 테스트를 포함합니다.

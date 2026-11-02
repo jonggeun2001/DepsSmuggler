@@ -15,6 +15,15 @@ import {
 } from './maven-types';
 import logger from '../../utils/logger';
 
+/** Maven properties are a map: the last declaration of a repeated key wins. */
+export function normalizePomProperties(
+  properties: Record<string, string | string[]>
+): Record<string, string> {
+  return Object.fromEntries(Object.entries(properties).map(([key, value]) => [
+    key, Array.isArray(value) ? value[value.length - 1] : value,
+  ]));
+}
+
 /**
  * POM에서 의존성 목록 추출
  *

@@ -309,6 +309,7 @@ POM 파일 파싱 및 속성 해석 유틸리티:
 | 함수 | 설명 |
 |------|------|
 | `resolveProperty(value, properties?)` | `${property}` 치환을 최대 10회 반복, 미해결 값은 유지 |
+| `normalizePomProperties(properties)` | 같은 `<properties>` 키의 반복 선언을 마지막 값으로 정규화, 일반 속성 문자열과 빈 값은 유지 |
 | `resolveVersionRange(version)` | 범위 문자열의 첫 경계 버전을 추출하는 단순화된 처리 |
 | `resolveDependencyCoordinate(dep, properties?, dependencyManagement?)` | 버전 속성/관리 맵을 적용한 좌표 또는 null |
 | `extractDependencies(pom, coordinate, isRoot?)` | 실제 `dependencies.dependency`만 배열로 반환 |
@@ -317,6 +318,8 @@ POM 파일 파싱 및 속성 해석 유틸리티:
 ---
 
 `resolveVersionRange()`는 저장소 버전 목록을 조회하거나 상·하한을 검증하지 않습니다. 예를 들어 `[1.0,2.0)`에서 `1.0`을 추출하며 Maven 전체 범위 해결을 구현한 것은 아닙니다. `dependencyManagement` 항목은 버전 관리용이고 `extractDependencies()`에서 그 목록 전체를 실제 의존성으로 확장하지 않습니다. 단, Parent POM의 일반 `<dependencies>`는 모델 상속에 따라 자식 문맥에 적용되며, BFS에서 실제로 발견한 각 버전의 원래 아티팩트와 POM·하위 closure는 충돌 승자 여부와 관계없이 수집 대상이 될 수 있습니다.
+
+원격 POM을 처음 읽거나 원본 XML 디스크 캐시에서 다시 읽을 때, 사용자가 가져온 전체 프로젝트 POM을 해석할 때 `normalizePomProperties()`를 적용합니다. 같은 속성이 여러 번 나오면 XML 파서가 만든 배열에서 마지막 선언값을 사용합니다. 예를 들어 Jetty 9.4.53.v20231009의 `testcontainers.version`은 `1.19.0` 다음 `1.16.1`로 선언되므로 Maven 3.9.11과 같이 `1.16.1`로 해석합니다. 속성 맵만 정규화하므로 일반 의존성 배열, 저장한 원본 POM 및 체크섬은 바꾸지 않습니다. 기존 원본 XML 캐시도 다시 읽을 때 정규화되므로 캐시 삭제가 필요하지 않습니다.
 
 ## Maven BOM 처리기 (`maven-bom-processor.ts`)
 
