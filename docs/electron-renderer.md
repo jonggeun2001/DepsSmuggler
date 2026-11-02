@@ -169,6 +169,8 @@ main의 `download-orchestrator`와 `download/delivery-pipeline`은 아카이브 
 
 ### 일반 패키지 흐름
 
+전체 프로젝트 POM의 파일·텍스트 입력과 원격 부모/BOM 해석은 `<properties>`의 같은 키가 반복되면 Maven처럼 마지막 선언값을 사용합니다. Jetty의 중복 `testcontainers.version`이 `1.19.0,1.16.1`이라는 잘못된 버전으로 합쳐져 의존성 확인에 실패하던 문제를 방지합니다. [검증 방법](testing.md#maven-중복-pom-속성-검증)을 참고하세요.
+
 1. `HomePage` 또는 `WizardPage`에서 패키지 타입 선택
 2. `search:*`로 패키지와 버전을 조회
 3. `CartPage`에서 항목 정리

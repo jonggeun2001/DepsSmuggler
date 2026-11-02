@@ -10,6 +10,7 @@
 - `dependencyManagement`와 BOM은 버전 관리에 사용하고, 그 목록 전체를 실제 다운로드 의존성으로 펼치지 않습니다. 부모 관리 속성은 자식 문맥에서 해석합니다. 직접 관리 선언은 자식, 부모 순으로 우선하고, 그 뒤 자식의 import BOM, 상속된 import BOM 순으로 관리 값을 채웁니다. 같은 BOM GA의 다른 버전 import는 자식 선언을 사용합니다. `MavenQueueProcessor`는 `processModel()`이 반환한 부모 상속을 포함한 일반 의존성을 탐색합니다.
 - 선택된 패키지의 모델 해석에 필요한 Parent POM과 import BOM은 전체 GAV로 중복 제거하여 `metadata.type: 'pom'`인 다운로드 항목으로 포함합니다. Parent/BOM 탐색과 그래프 평탄화는 반복 처리하며, 필수 모델의 누락이나 순환 참조는 해당 루트의 해결 실패로 보고합니다.
 - `project.parent.*`, `pom.parent.*`, `parent.*`의 좌표 속성은 모델별 직계 부모의 확정된 `groupId`·`artifactId`·`version`으로 치환합니다. import BOM은 자신의 부모 문맥을 사용합니다. Deequ → Janino → `commons-compiler:${project.parent.version}` 경로도 실제 버전의 POM으로 조회합니다.
+- POM의 `<properties>` 안에 같은 키가 여러 번 있으면 Maven과 같이 마지막 선언값을 사용합니다. 원격 조회·원본 XML 캐시 재조회·전체 프로젝트 POM 입력에 동일하게 적용하며, 원본 XML과 일반 의존성 배열은 보존합니다.
 - 하나의 BFS에서 발견된 모든 버전의 JAR 등 원래 아티팩트, POM과 하위 의존성을 수집합니다. scope·optional·exclusion·깊이 제한을 적용하고, type/classifier·scope·exclusion·최소 깊이별 방문을 기록합니다. 의존성 탐색 컨텍스트 10,000개를 넘으면 오류를 반환합니다. `conflicts`는 버전 발견 정보이며 반출 버전을 줄이지 않습니다. 프리페치 캐시와 실제 반출 목록은 별개입니다.
 - `MavenDownloader.downloadPackage()`는 `metadata.packaging` → `metadata.type` → POM의 `<packaging>` → `jar` 순서로 파일 타입을 정합니다. 메인 아티팩트와 POM, 사용 가능한 `.sha1` 파일을 내려받습니다. source/javadoc은 classifier 또는 type으로 선택하며 자동으로 모두 포함하지 않습니다.
 - 9절의 구현 권장사항과 10.4절의 축약 코드는 설계 설명입니다. 예시의 모든 타입·체크섬 알고리즘이 호출 옵션으로 노출되는 것은 아닙니다. 12–13절은 현재 구현의 크기 조회·POM 처리·요청 재사용을 설명합니다.
@@ -931,6 +932,12 @@ Parent/BOM 탐색과 그래프 평탄화는 명시적인 작업 목록을 사용
 Electron 출력의 `packages/m2repo/`에는 Maven 저장소 구조를 유지합니다. 각 일반 JAR의 부속 POM은 그 저장소 경로에 저장되고, 별도 모델 항목으로 수집한 부모/BOM은 `.pom`이 주 아티팩트이므로 최상위 `packages/`에도 `.pom` 복사본이 생성됩니다. 최상위 폴더만 보고 모든 JAR의 부속 POM이 없다고 판단하지 않아야 합니다. 자세한 경로는 [Downloaders](downloaders.md)의 Maven 출력 설명을 참고하세요.
 
 회귀 검증은 Parent/BOM의 깊은 체인·순환·중복·조회 실패와 실제 라이브러리 의존성 보존을 확인하고, HTTP 응답 fixture를 거쳐 실제 다운로더가 기록한 POM/JAR 파일을 검사합니다. 외부 Maven Central 검증은 이 fixture 검증과 구분합니다. 실행 진입점과 테스트 파일은 [테스트 문서](testing.md)의 Maven 모델 POM 검증 절에 정리합니다.
+
+#### 중복 속성으로 인한 BOM 좌표 오류
+
+`org.apache.amoro:amoro-format-mixed-spark-3.5:0.8.1-incubating`에서 `amoro-common → hadoop-client:3.4.0 → hadoop-common:3.4.0 → jetty-servlet:9.4.53.v20231009`를 따라가면 부모 `jetty-project`가 필요합니다. 이 [공개 POM](https://repo.maven.apache.org/maven2/org/eclipse/jetty/jetty-project/9.4.53.v20231009/jetty-project-9.4.53.v20231009.pom)은 `testcontainers.version`을 `1.19.0`, `1.16.1` 순서로 두 번 선언하고 이를 Testcontainers BOM import에 사용합니다.
+
+XML 파서의 중복 태그 배열을 그대로 문자열로 치환하면 존재하지 않는 `org.testcontainers:testcontainers-bom:1.19.0,1.16.1`을 조회해 필수 POM 오류가 납니다. 공통 POM 캐시와 프로젝트 입력 경계에서 속성을 정규화하여 마지막 값인 `1.16.1`만 사용합니다. Maven 3.9.11의 실제 모델 리더에서도 같은 값이 선택되는 것을 확인했습니다. 정상 BOM은 필수 모델로 계속 수집하며 조회 실패를 무시하지 않습니다. [회귀 검증](testing.md#maven-중복-pom-속성-검증)은 원격 응답 fixture, 메모리·디스크 캐시, 전이 부모/BOM 및 프로젝트 입력을 확인합니다.
 
 ### 12.4 POM-only 패키지의 packaging 타입 조회
 

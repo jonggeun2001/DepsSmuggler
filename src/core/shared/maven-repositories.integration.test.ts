@@ -148,6 +148,40 @@ it('resolves external parent/BOM/transitive POMs and downloads artifacts with ma
   expect(requests.some((url) => url.includes('unused.example.test'))).toBe(false);
 });
 
+it('resolves a transitive Jetty BOM using the last repeated property declaration', async () => {
+  addProject(external, 'app', `<dependencies><dependency>
+    <groupId>org.eclipse.jetty</groupId><artifactId>jetty-servlet</artifactId>
+    <version>9.4.53.v20231009</version>
+  </dependency></dependencies>`);
+  const jetty = (artifact: string) => `org/eclipse/jetty/${artifact}/9.4.53.v20231009/${artifact}-9.4.53.v20231009.pom`;
+  responses.set(`${external}/${jetty('jetty-servlet')}`, `<project><parent>
+    <groupId>org.eclipse.jetty</groupId><artifactId>jetty-project</artifactId>
+    <version>9.4.53.v20231009</version>
+  </parent><artifactId>jetty-servlet</artifactId></project>`);
+  responses.set(`${external}/${jetty('jetty-project')}`, `<project><properties>
+    <testcontainers.version>1.19.0</testcontainers.version>
+    <testcontainers.version>1.16.1</testcontainers.version>
+  </properties><dependencyManagement><dependencies><dependency>
+    <groupId>org.testcontainers</groupId><artifactId>testcontainers-bom</artifactId>
+    <version>\${testcontainers.version}</version><type>pom</type><scope>import</scope>
+  </dependency></dependencies></dependencyManagement></project>`);
+  const bomPath = 'org/testcontainers/testcontainers-bom/1.16.1/testcontainers-bom-1.16.1.pom';
+  responses.set(`${external}/${bomPath}`, '<project><packaging>pom</packaging></project>');
+  const resolver = new MavenResolver();
+  resolver.setCacheOptions({ cacheDir: path.join(testHome.path, 'cache') });
+
+  const result = await resolver.resolveDependencies('example:app', '1.0', { repositoryUrl: external });
+
+  expect(result.flatList).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      name: 'org.testcontainers:testcontainers-bom', version: '1.16.1',
+      metadata: expect.objectContaining({ type: 'pom' }),
+    }),
+  ]));
+  expect(requests).toContain(`${external}/${bomPath}`);
+  expect(requests.some(url => url.includes('1.19.0,1.16.1') || url.includes('1.19.0%2C1.16.1'))).toBe(false);
+});
+
 it('isolates disk POM caches for identical coordinates from different repositories', async () => {
   addProject(MAVEN_CENTRAL_URL, 'app', '<name>Central</name>');
   addProject(external, 'app', '<name>External</name>');
