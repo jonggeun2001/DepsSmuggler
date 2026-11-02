@@ -56,6 +56,14 @@ fixture는 실제 DTO와 함수 인수를 기준으로 작성하고, 부분 mock
 
 보안/의존성 유지보수 작업에서는 `npm audit --audit-level=high`와 `npm audit --omit=dev --audit-level=high`를 각각 실행하고, [보안 의존성 갱신 기록](security-dependencies.md)에 잔여 항목과 적용 버전을 남깁니다. 함께 `npm test`, `npm run test:e2e`, `npx tsc --noEmit`를 묶어 확인합니다. direct dependency를 올린 뒤 transitive 취약점이 남으면, 가능한 한 patch/minor 범위에서 lockfile 재해결이나 `overrides`로 먼저 정리합니다.
 
+### Maven 중복 POM 속성 검증
+
+```bash
+bash scripts/verify-worktree.sh src/core/shared/maven-cache.test.ts src/core/shared/maven-repositories.integration.test.ts src/core/shared/maven-project.test.ts
+```
+
+Jetty 9.4.53.v20231009에서 발견한 `testcontainers.version` 중복 선언(`1.19.0` 다음 `1.16.1`)을 실제 XML 파싱 경로에 입력합니다. 네트워크 응답·메모리 캐시·원본 XML 디스크 캐시 모두 마지막 선언값을 사용하고, 저장된 XML과 복수 의존성 배열은 보존되는지 확인합니다. 실제 resolver를 통과하는 부모/BOM fixture는 `testcontainers-bom:1.16.1`을 필수 POM 목록에 포함하고 쉼표로 합친 버전을 요청하지 않아야 합니다. 전체 프로젝트 POM 입력에서도 중복 속성으로 표현한 프로젝트 버전과 의존성 버전을 검증합니다. 이 회귀 테스트는 외부 네트워크 호출 없이 실행됩니다.
+
 ## 테스트 종류
 
 ### 실제 구현 검증과 중복 정리

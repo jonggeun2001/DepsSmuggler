@@ -14,6 +14,7 @@ import * as fs from 'fs-extra';
 import { createMemoryCache } from './cache/cache-store';
 import { createCacheStatsReader, getDirectoryStats } from './cache-stats';
 import { PomProject, PomCacheEntry, MavenCoordinate, coordinateToString } from './maven-types';
+import { normalizePomProperties } from './maven-pom-utils';
 import logger from '../../utils/logger';
 
 const diskStatsReader = createCacheStatsReader(getDirectoryStats);
@@ -149,6 +150,7 @@ async function readFromDiskCache(
     const pomContent = await fs.readFile(pomPath, 'utf-8');
     const parsed = parser.parse(pomContent);
     const pom = parsed.project as PomProject;
+    if (pom.properties) pom.properties = normalizePomProperties(pom.properties);
 
     return {
       pom,
@@ -268,6 +270,7 @@ export async function fetchPomWithCacheInfo(
         const parsed = parser.parse(pomContent);
         const pom = parsed.project as PomProject;
         if (!pom || typeof pom !== 'object') throw new Error('올바른 Maven POM이 아닙니다.');
+        if (pom.properties) pom.properties = normalizePomProperties(pom.properties);
 
         const entry: PomCacheEntry = {
           pom,

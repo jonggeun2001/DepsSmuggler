@@ -7,7 +7,7 @@ import type { PackageInfo } from '../../types';
 import { MavenBomProcessor } from './maven-bom-processor';
 import { fetchPom } from './maven-cache';
 import { DEFAULT_MAVEN_BUILD_VERSION, loadMavenLifecyclePlugins } from './maven-lifecycle';
-import { resolveProperty } from './maven-pom-utils';
+import { normalizePomProperties, resolveProperty } from './maven-pom-utils';
 import { loadMavenSurefireProviders } from './maven-surefire';
 import { collectMavenTestRuntimePackages } from './maven-test-runtime';
 import { collectMavenManagedPackages } from './maven-project-managed';
@@ -49,6 +49,7 @@ export async function collectMavenProjectPackages(
   const parsed = new XMLParser({ ignoreAttributes: false, parseTagValue: false, removeNSPrefix: true }).parse(content);
   const pom: PomProject = parsed.project;
   if (!pom || typeof pom !== 'object' || Array.isArray(pom)) throw new Error('전체 <project> POM이 필요합니다.');
+  if (pom.properties) pom.properties = normalizePomProperties(pom.properties);
   checkModelScope(pom);
   const repositoryUrl = options.repositoryUrl === undefined ? undefined : normalizeMavenRepositoryUrl(options.repositoryUrl);
   const initialProperties = { ...pom.properties };

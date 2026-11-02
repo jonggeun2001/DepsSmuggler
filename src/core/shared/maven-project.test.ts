@@ -61,6 +61,23 @@ describe('project POM package collection', () => {
     expect(fetchPom).not.toHaveBeenCalled();
   });
 
+  it('uses the last duplicate property for the submitted project coordinate and dependency', async () => {
+    const content = project(`<properties>
+      <revision>old</revision><revision>2.0</revision>
+      <api.version>1.19.0</api.version><api.version>1.16.1</api.version>
+    </properties><dependencies>
+      <dependency><groupId>lib</groupId><artifactId>api</artifactId><version>\${api.version}</version></dependency>
+      <dependency><groupId>lib</groupId><artifactId>same-version</artifactId><version>\${project.version}</version></dependency>
+    </dependencies>`).replace('<version>1</version>', '<version>${revision}</version>');
+
+    const result = await collectMavenProjectPackages(content);
+
+    expect(result).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'lib:api', version: '1.16.1' }),
+      expect.objectContaining({ name: 'lib:same-version', version: '2.0' }),
+    ]));
+  });
+
   it('merges inherited plugins and management with child overrides, retaining plugin dependencies and parent POM', async () => {
     vi.mocked(fetchPom).mockResolvedValue({
       groupId: 'org', artifactId: 'parent', version: '1',

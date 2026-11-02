@@ -131,6 +131,40 @@ describe('maven-cache', () => {
   });
 
   describe('fetchPomWithCacheInfo', () => {
+    it('중복 속성의 마지막 선언값을 네트워크·메모리·디스크에서 동일하게 사용한다', async () => {
+      const coordinate = {
+        groupId: 'org.eclipse.jetty', artifactId: 'jetty-project', version: '9.4.53.v20231009',
+      };
+      // Published Jetty POM declares these two values in this order.
+      const xml = `<project><properties>
+        <testcontainers.version>1.19.0</testcontainers.version>
+        <testcontainers.version>1.16.1</testcontainers.version>
+        <unchanged.version>4.0</unchanged.version>
+        <empty.version>old</empty.version><empty.version/>
+      </properties><dependencies>
+        <dependency><groupId>example</groupId><artifactId>first</artifactId><version>1</version></dependency>
+        <dependency><groupId>example</groupId><artifactId>second</artifactId><version>2</version></dependency>
+      </dependencies></project>`;
+      mockGet.mockResolvedValueOnce({ data: xml });
+      const options = { cacheDir: testCacheDir };
+      const network = await fetchPomWithCacheInfo(coordinate, options);
+      const memory = await fetchPomWithCacheInfo(coordinate, options);
+      clearMemoryCache();
+      const disk = await fetchPomWithCacheInfo(coordinate, options);
+
+      expect([network.fromCache, memory.fromCache, disk.fromCache]).toEqual(['network', 'memory', 'disk']);
+      for (const result of [network, memory, disk]) {
+        expect(result.pom.properties).toEqual({
+          'testcontainers.version': '1.16.1', 'unchanged.version': '4.0', 'empty.version': '',
+        });
+        expect(result.pom.dependencies?.dependency).toHaveLength(2);
+      }
+      expect(mockGet).toHaveBeenCalledTimes(1);
+      const saved = path.join(testCacheDir, 'org/eclipse/jetty/jetty-project', coordinate.version,
+        `jetty-project-${coordinate.version}.pom`);
+      expect(await fs.readFile(saved, 'utf8')).toBe(xml);
+    });
+
     it('캐시 히트 시 fromCache: memory를 반환해야 함', async () => {
       const coord: MavenCoordinate = {
         groupId: 'com.google.guava',
